@@ -4,9 +4,10 @@ export type ComplianceIntent = "transfer_destination" | "wallet_address_addition
 
 export type ComplianceProviderResult = {
   provider: ComplianceProviderId;
-  status: "ok" | "unavailable" | "error";
+  status: "ok" | "pending" | "unavailable" | "error";
   riskScore: number | null;
   riskLevel?: string;
+  providerStatus?: string;
   message?: string;
   evaluatedAt: string;
 };

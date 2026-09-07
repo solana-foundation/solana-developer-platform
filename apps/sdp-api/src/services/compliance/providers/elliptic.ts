@@ -102,58 +102,38 @@ async function createSignature(input: {
   return encodeBase64(new Uint8Array(signature));
 }
 
-function findNumericField(payload: unknown, field: string): number | null {
-  if (Array.isArray(payload)) {
-    for (const entry of payload) {
-      const nested = findNumericField(entry, field);
-      if (nested !== null) {
-        return nested;
-      }
-    }
-    return null;
+/**
+ * The canonical Elliptic verdict is the TOP-LEVEL `risk_score` of the
+ * synchronous wallet analysis — documented as nullable (null means no risk
+ * rules triggered). The old deep search took the first `risk_score` found
+ * ANYWHERE in the response, which could be a per-rule or per-exposure entry
+ * rather than the wallet's own verdict; a nested contribution read as the
+ * decision is exactly the ambiguity HOO-1012 closes. Anything but a number or
+ * an explicit null at the top level is unreadable — the caller fails closed.
+ */
+function readCanonicalRiskScore(
+  payload: Record<string, unknown>
+): { score: number | null } | "unreadable" {
+  if (!("risk_score" in payload)) {
+    return "unreadable";
   }
-  if (!payload || typeof payload !== "object") {
-    return null;
+  const value = payload.risk_score;
+  if (value === null) {
+    return { score: null };
   }
-
-  for (const [key, value] of Object.entries(payload)) {
-    if (key === field && typeof value === "number") {
-      return value;
-    }
-    const nested = findNumericField(value, field);
-    if (nested !== null) {
-      return nested;
-    }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return { score: value };
   }
-
-  return null;
+  return "unreadable";
 }
 
-function findStringField(payload: unknown, field: string): string | undefined {
-  if (Array.isArray(payload)) {
-    for (const entry of payload) {
-      const nested = findStringField(entry, field);
-      if (nested) {
-        return nested;
-      }
-    }
-    return undefined;
-  }
-  if (!payload || typeof payload !== "object") {
-    return undefined;
-  }
-
-  for (const [key, value] of Object.entries(payload)) {
-    if (key === field && typeof value === "string") {
-      return value;
-    }
-    const nested = findStringField(value, field);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return undefined;
+/** Top level only, same reasoning as the score: never a nested rule's word. */
+function readCanonicalStringField(
+  payload: Record<string, unknown>,
+  field: string
+): string | undefined {
+  const value = payload[field];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export class EllipticComplianceProvider implements ComplianceProvider {
@@ -249,15 +229,42 @@ export class EllipticComplianceProvider implements ComplianceProvider {
         };
       }
 
-      const result = (await response.json().catch(() => ({}))) as EllipticAddressScreeningResponse;
-      const riskScore = findNumericField(result, "risk_score");
-      const riskLevel = findStringField(result, "risk_level");
+      const result = (await response
+        .json()
+        .catch(() => null)) as EllipticAddressScreeningResponse | null;
+      if (result === null || typeof result !== "object" || Array.isArray(result)) {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: "Elliptic returned a response that is not a JSON object.",
+          evaluatedAt,
+        };
+      }
 
+      const read = readCanonicalRiskScore(result);
+      if (read === "unreadable") {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message:
+            "Elliptic response carried no readable top-level risk_score; refusing to interpret nested fields as the verdict.",
+          evaluatedAt,
+        };
+      }
+
+      const riskLevel = readCanonicalStringField(result, "risk_level");
+      const processStatus = readCanonicalStringField(result, "process_status");
+
+      // A null canonical score is Elliptic's documented "no risk rules
+      // triggered" — a completed verdict, not an absence of one.
       return {
         provider: this.name,
         status: "ok",
-        riskScore,
+        riskScore: read.score,
         ...(riskLevel ? { riskLevel } : {}),
+        ...(processStatus ? { providerStatus: processStatus } : {}),
         evaluatedAt,
       };
     } catch (error) {
