@@ -637,13 +637,13 @@ export const listTransferBatchesQuerySchema = z.strictObject({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const estimateOnrampSchema = z.object({
+export const estimateOnrampSchema = z.strictObject({
   assetRail: onrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
 });
 
-export const estimateOfframpSchema = z.object({
+export const estimateOfframpSchema = z.strictObject({
   assetRail: offrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,
   cryptoAmount: paymentAmountSchema,
@@ -658,7 +658,7 @@ export const rampsMemoSchema = z
     message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
   });
 
-export const createOnrampQuoteSchema = z.object({
+export const createOnrampQuoteSchema = z.strictObject({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
   destinationWallet: z.string().min(1),
@@ -739,14 +739,14 @@ const offrampQuoteBaseShape = {
 };
 
 export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
-  z.object({
+  z.strictObject({
     provider: z.literal("lightspark"),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema,
     destinationCountry: rampDestinationCountrySchema,
     providerAccountId: z.string().min(1).optional(),
   }),
-  z.object({
+  z.strictObject({
     provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema.optional(),

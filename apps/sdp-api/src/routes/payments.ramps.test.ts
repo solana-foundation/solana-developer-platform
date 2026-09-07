@@ -174,6 +174,80 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped onramp estimate request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped offramp estimate request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped offramp quote request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId: "cpty_asset_rail_validation",
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
   it("rejects an ambiguous Provider wallet ID before creating a hosted quote", async () => {
