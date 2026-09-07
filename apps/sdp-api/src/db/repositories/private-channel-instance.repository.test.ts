@@ -198,6 +198,44 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     expect(active).toBeNull();
   });
 
+  it("beginDraining is idempotent and atomically closes value-movement admission", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const created = await repo.createActive({
+      ...scope,
+      ...SANDBOX_DEFAULTS,
+      createdBy: TEST_USER.id,
+    });
+    if (!created) throw new Error("failed to seed instance");
+
+    const drained = await repo.beginDraining(scope);
+    expect(drained?.draining_at).toBeTruthy();
+
+    // Idempotent: a deletion retry keeps the original drain timestamp.
+    const again = await repo.beginDraining(scope);
+    expect(again?.draining_at).toBe(drained?.draining_at);
+
+    // The admission barrier: the guarded INSERT returns no row for a draining
+    // instance — the same statement that would create the movement refuses it,
+    // so a movement racing the delete cannot be stranded.
+    const db = getDb(env);
+    const admitted = await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           )
+           SELECT 'pcd_drain_test', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb
+            WHERE EXISTS (
+              SELECT 1 FROM private_channel_instances i
+               WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+            )
+        RETURNING id`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID, created.id, created.id)
+      .first<{ id: string }>();
+    expect(admitted).toBeNull();
+  });
+
   it("scopes reads by (organizationId, projectId): other project's row is not visible", async () => {
     await repo.createActive({
       organizationId: TEST_ORG.id,

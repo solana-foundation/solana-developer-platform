@@ -52,10 +52,19 @@ export function createPostgresPrivateChannelDepositRepository(
     async createDeposit(input: CreateDepositInput) {
       const row = await db
         .prepare(
+          // SELECT instead of VALUES so admission and the instance's drain
+          // state are decided by ONE statement: once draining_at is set (or
+          // the instance deactivated), this insert returns no row, and the
+          // deletion flow's in-flight count can only shrink (HOO-1011).
           `INSERT INTO private_channel_deposits (
                id, organization_id, project_id, instance_id, wallet_id,
                depositor, recipient, mint, amount, context
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb
+              WHERE EXISTS (
+                SELECT 1 FROM private_channel_instances i
+                 WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+              )
           RETURNING *`
         )
         .bind(
@@ -68,7 +77,8 @@ export function createPostgresPrivateChannelDepositRepository(
           input.recipient,
           input.mint,
           input.amount,
-          JSON.stringify(input.context ?? {})
+          JSON.stringify(input.context ?? {}),
+          input.instanceId
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

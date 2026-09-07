@@ -52,10 +52,18 @@ export function createPostgresPrivateChannelWithdrawalRepository(
     async createWithdrawal(input: CreateWithdrawalInput) {
       const row = await db
         .prepare(
+          // SELECT instead of VALUES: admission and the instance's drain state
+          // are decided by one statement — a draining or deactivated instance
+          // admits nothing, so deletion cannot strand a racing burn (HOO-1011).
           `INSERT INTO private_channel_withdrawals (
                id, organization_id, project_id, instance_id, wallet_id,
                owner, destination, mint, amount, context
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb
+              WHERE EXISTS (
+                SELECT 1 FROM private_channel_instances i
+                 WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+              )
           RETURNING *`
         )
         .bind(
@@ -68,7 +76,8 @@ export function createPostgresPrivateChannelWithdrawalRepository(
           input.destination,
           input.mint,
           input.amount,
-          JSON.stringify(input.context ?? {})
+          JSON.stringify(input.context ?? {}),
+          input.instanceId
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

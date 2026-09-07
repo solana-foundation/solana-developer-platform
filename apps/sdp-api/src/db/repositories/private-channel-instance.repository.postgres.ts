@@ -22,6 +22,7 @@ function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
     escrow_instance_addr: row.escrow_instance_addr as string,
     auth_url: row.auth_url as string,
     is_active: row.is_active as boolean,
+    draining_at: (row.draining_at ?? null) as string | null,
     created_by: (row.created_by ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -161,6 +162,25 @@ export function createPostgresPrivateChannelInstanceRepository(
         .prepare(
           `UPDATE private_channel_instances
               SET is_active = FALSE,
+                  updated_at = sdp_iso_now()
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND is_active = TRUE
+          RETURNING *`
+        )
+        .bind(scope.organizationId, scope.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async beginDraining(scope) {
+      // One statement, two outcomes: an admitting row flips to draining, an
+      // already-draining row keeps its original timestamp (COALESCE), so a
+      // deletion retry never resets the drain clock.
+      const row = await db
+        .prepare(
+          `UPDATE private_channel_instances
+              SET draining_at = COALESCE(draining_at, sdp_iso_now()),
                   updated_at = sdp_iso_now()
             WHERE organization_id = ?
               AND project_id = ?

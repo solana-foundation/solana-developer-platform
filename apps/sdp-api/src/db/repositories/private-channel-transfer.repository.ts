@@ -91,6 +91,8 @@ export interface PrivateChannelTransferRepository {
   updateTransfer(
     input: UpdatePrivateChannelTransferInput
   ): Promise<PrivateChannelTransferRow | null>;
+  /** In-flight transfers (pending/submitted) for the delete-drain gate. */
+  countNonTerminalByInstance(instanceId: string): Promise<number>;
   getTransferById(
     scope: PrivateChannelTransferProjectScope & { id: string }
   ): Promise<PrivateChannelTransferRow | null>;

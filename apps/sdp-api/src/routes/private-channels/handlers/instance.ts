@@ -26,6 +26,7 @@ import {
   getPrivateChannelDepositRepository,
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
+  getPrivateChannelTransferRepository,
   getPrivateChannelUserRepository,
   getPrivateChannelWithdrawalRepository,
   loadPrivateChannelProjectRpcClient,
@@ -324,25 +325,31 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
     throw notFound("Active private channel instance");
   }
 
-  // Deposits and withdrawals are financial records that survive instance deletion,
-  // but deleting an instance with IN-FLIGHT money movements would strand their
-  // reconciliation. Reject it while any are non-terminal.
-  //
-  // TODO(disconnect-drain): this count->delete is check-then-act, so a deposit or
-  // withdrawal created between the two still slips through and gets stranded. The
-  // guard is worth having (it catches the common case) but it is not a barrier. The
-  // real fix is a draining/read-only state on the instance: flip it first so no new
-  // deposits or transfers are accepted, let the in-flight set settle, then allow the
-  // delete — which also gives the operator a way to disconnect deliberately instead
-  // of retrying against a moving target.
-  const [depositsInFlight, withdrawalsInFlight] = await Promise.all([
+  // Money movements are financial records that survive instance deletion, but
+  // deleting an instance with IN-FLIGHT movements would strand their
+  // reconciliation. Deletion therefore drains first: the durable draining flag
+  // makes every later admission refuse ATOMICALLY (the admitting INSERTs are
+  // guarded on the instance row), so the in-flight set counted below can only
+  // shrink — a movement racing this delete either landed before the flag and
+  // is counted, or lands after and is refused (HOO-1011).
+  const draining = await repo.beginDraining(scope);
+  if (!draining) {
+    throw notFound("Active private channel instance");
+  }
+
+  const [depositsInFlight, withdrawalsInFlight, transfersInFlight] = await Promise.all([
     getPrivateChannelDepositRepository(c).countNonTerminalByInstance(active.id),
     getPrivateChannelWithdrawalRepository(c).countNonTerminalByInstance(active.id),
+    getPrivateChannelTransferRepository(c).countNonTerminalByInstance(active.id),
   ]);
-  if (depositsInFlight > 0 || withdrawalsInFlight > 0) {
+  if (depositsInFlight > 0 || withdrawalsInFlight > 0 || transfersInFlight > 0) {
+    // The drain stays in place on purpose: this is the deliberate-disconnect
+    // path, and reverting it would reopen admission and turn deletion back
+    // into a retry against a moving target. Retry once the in-flight set
+    // settles; the instance admits nothing new in the meantime.
     throw new AppError(
       "CONFLICT",
-      `Cannot delete this instance: ${depositsInFlight} deposit(s) and ${withdrawalsInFlight} withdrawal(s) are still in flight. Wait for them to settle or fail first.`
+      `This instance is draining for deletion: ${depositsInFlight} deposit(s), ${withdrawalsInFlight} withdrawal(s), and ${transfersInFlight} transfer(s) are still in flight. New movements are refused; retry once they settle or fail.`
     );
   }
 

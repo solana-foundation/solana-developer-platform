@@ -17,6 +17,13 @@ export interface PrivateChannelInstanceRow {
   escrow_instance_addr: string;
   auth_url: string;
   is_active: boolean;
+  /**
+   * When set, the instance is a drain-in-progress: value-movement admission
+   * refuses atomically (the admitting INSERTs are guarded on this column), so
+   * the in-flight set can only shrink and deletion cannot strand a movement
+   * admitted concurrently (HOO-1011).
+   */
+  draining_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -63,6 +70,12 @@ export interface PrivateChannelInstanceRepository {
   /** Updates the currently active row after the caller has verified the proposed connection. */
   updateActive(input: UpdateActiveInstanceInput): Promise<PrivateChannelInstanceRow | null>;
   deactivateActive(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
+  /**
+   * Flip the active instance into the durable draining state. Idempotent: an
+   * already-draining instance is returned as-is, so a deletion retry keeps the
+   * original drain timestamp instead of resetting the clock.
+   */
+  beginDraining(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
   /** FK ON DELETE CASCADE handles downstream tables. */
   deleteActive(scope: ProjectScope): Promise<boolean>;
 }

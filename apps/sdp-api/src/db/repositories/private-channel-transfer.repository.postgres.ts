@@ -50,12 +50,21 @@ export function createPostgresPrivateChannelTransferRepository(
     async createTransfer(input: CreatePrivateChannelTransferInput) {
       const row = await db
         .prepare(
+          // SELECT instead of VALUES: admission and the instance's drain state
+          // are decided by one statement — a draining or deactivated instance
+          // admits nothing, so deletion cannot strand a racing transfer
+          // (HOO-1011).
           `INSERT INTO private_channel_transfers (
                id, organization_id, project_id, instance_id, channel_id,
                sender_private_channel_user_id, recipient_private_channel_user_id,
                sender_wallet_id, recipient_verified_wallet_id,
                sender, recipient, mint, amount, status
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending'
+              WHERE EXISTS (
+                SELECT 1 FROM private_channel_instances i
+                 WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+              )
           RETURNING *`
         )
         .bind(
@@ -71,10 +80,22 @@ export function createPostgresPrivateChannelTransferRepository(
           input.sender,
           input.recipient,
           input.mint,
-          input.amount
+          input.amount,
+          input.instanceId
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
+    },
+
+    async countNonTerminalByInstance(instanceId: string) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS count FROM private_channel_transfers
+             WHERE instance_id = ? AND status IN ('pending', 'submitted')`
+        )
+        .bind(instanceId)
+        .first<{ count: number }>();
+      return row?.count ?? 0;
     },
 
     async updateTransfer(input: UpdatePrivateChannelTransferInput) {
