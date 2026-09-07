@@ -200,8 +200,16 @@ export function DvpTradesWorkspace({
           .some((value) => matchesAddressQuery(String(value), needle));
       });
 
-  const listIsEmpty = trades.length === 0;
-  const filteredToNothing = !listIsEmpty && visible.length === 0;
+  // A project whose only DvP activity is a trade somebody else set up for it
+  // has none of its own, and treating that as an empty page rendered "No trades
+  // yet" over the one thing waiting on them — with no filter control on screen
+  // to reach it by. Having nothing to do is what empty means here.
+  const listIsEmpty = trades.length === 0 && inbound.length === 0;
+  // Rows shown on the current segment, from either source. The waiting segment
+  // draws from `inbound` and leaves `visible` empty by design, so counting only
+  // `visible` declared "no trades match" over a table that had a row to render.
+  const shownCount = showingInbound ? inbound.length : visible.length;
+  const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
   const createHref = `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`;
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
@@ -247,8 +255,9 @@ export function DvpTradesWorkspace({
         ) : (
           <>
             {/* Only once there is enough to sift. A filter bar over three rows
-                is furniture. */}
-            {trades.length > 1 ? (
+                is furniture — but an inbound trade is reachable ONLY through
+                its segment, so hiding the control hides the trade with it. */}
+            {trades.length > 1 || inbound.length > 0 ? (
               /* The toolbar every other workspace uses: the shared SearchInput
                  on the right, the status choices as one segmented control on
                  the left. This was a bare Input beside a Select, and Select's

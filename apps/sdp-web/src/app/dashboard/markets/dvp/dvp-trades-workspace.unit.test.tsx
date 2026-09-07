@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import type { DvpTrade, DvpTradeLeg } from "./dvp-trade";
+import type { DvpInboundTrade } from "./dvp-trades.data";
 import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 
 function leg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
@@ -54,14 +55,66 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
 }
 
 function renderList(trades: DvpTrade[], error: string | null = null): string {
+  return renderWorkspace({ trades, error, inbound: [] });
+}
+
+function renderWorkspace({
+  trades,
+  inbound,
+  error = null,
+}: {
+  trades: DvpTrade[];
+  inbound: DvpInboundTrade[];
+  error?: string | null;
+}): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <DvpTradesWorkspace inbound={[]} error={error} trades={trades} />
+      <DvpTradesWorkspace error={error} inbound={inbound} trades={trades} />
     </I18nProvider>
   );
 }
 
+/** A trade another organization set up that names one of this project's wallets. */
+function inboundTrade(): DvpInboundTrade {
+  const leg = {
+    party: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
+    mint: "BgW9X4dThuRTWCAz9kkq51Xrth6TcwfwKmxzvLH3VeBK",
+    amount: "250000000",
+    decimals: 6,
+    symbol: "DUSD",
+    escrow: "BjmS3uaKPVzUmJ41t54Kgw8hVF7e8mrMFmj8Zgxqg5xJ",
+    observedAmount: null,
+    frozen: false,
+  };
+  return {
+    id: "dvp_inbound_probe",
+    status: "created",
+    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
+    yourSide: "b",
+    legs: { a: { ...leg, symbol: "ATD" }, b: leg },
+    expiryTimestamp: "1900000000",
+    createdAt: "2026-09-07T00:00:00.000Z",
+  };
+}
+
 describe("DvpTradesWorkspace", () => {
+  // The segment is the only thing telling a reader something is waiting on
+  // them, and it carries the count. It renders only when there IS something,
+  // so an empty project never grows a dead control.
+  it("offers a waiting segment carrying the count when trades are inbound", () => {
+    const html = renderWorkspace({
+      trades: [],
+      inbound: [inboundTrade()],
+    });
+
+    expect(html).toContain("Waiting on you");
+    expect(html).toContain("1");
+  });
+
+  it("offers no waiting segment when nothing is inbound", () => {
+    expect(renderWorkspace({ trades: [], inbound: [] })).not.toContain("Waiting on you");
+  });
+
   it("invites a first trade when the list is genuinely empty", () => {
     const html = renderList([]);
 
