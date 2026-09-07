@@ -144,8 +144,11 @@ describe("DvpCreateWorkspace", () => {
 
   // Both sides are on screen at once, because choosing one reverses the
   // direction of everything else on the form.
+  // Beside the legs, not on the role stage: the labels name the two tokens, so
+  // they belong where those tokens are on screen.
   it("offers both sides of the trade as a choice", () => {
     renderForm();
+    advanceTo("legs");
 
     expect(screen.getByText(/you deliver the asset/i)).toBeTruthy();
     expect(screen.getByText(/you deliver the cash/i)).toBeTruthy();
@@ -187,23 +190,19 @@ describe("DvpCreateWorkspace", () => {
     // The leg you act on should be the one you reach first, by eye and by tab.
     // The side is chosen two stages earlier, so this walks back to change it
     // and forward again — which also proves Back keeps what was entered.
+    // The side chooser now sits on this same stage, so flipping it and seeing
+    // the cards reorder happens in one place.
     it("puts your own leg first, whichever side you are on", () => {
       const { container } = renderForm();
       advanceTo("legs");
       const order = () =>
         Array.from(container.querySelectorAll("label")).map((node) => node.textContent ?? "");
-      const back = () => fireEvent.click(screen.getByRole("button", { name: /back/i }));
-      const next = () => fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
       expect(order().findIndex((text) => /asset you are trading/i.test(text))).toBeLessThan(
         order().findIndex((text) => /paid in/i.test(text))
       );
 
-      back();
-      back();
       fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
-      next();
-      next();
 
       expect(order().findIndex((text) => /paid in/i.test(text))).toBeLessThan(
         order().findIndex((text) => /asset you are trading/i.test(text))
@@ -212,9 +211,9 @@ describe("DvpCreateWorkspace", () => {
 
     it("does not tell you the other side pays the cash when you do", () => {
       const { container } = renderForm();
+      advanceTo("legs");
 
       fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
-      advanceTo("legs");
 
       expect(container.textContent).toContain("What you pay with");
       expect(container.textContent).not.toContain("What the other side pays with");

@@ -398,8 +398,29 @@ function RoleStep({
       </Field>
 
       <TradeKindChoice onChange={form.setTradeKind} value={form.tradeKind} />
+    </div>
+  );
+}
 
-      {agent ? null : (
+/**
+ * The two legs, and which of them is yours.
+ *
+ * The side chooser lives HERE rather than on the role stage. It names the two
+ * tokens ("You fund the ATD leg. They fund USDC."), and on the role stage those
+ * names came from each leg's default selection - a choice the reader had not
+ * been shown yet, so step one asserted a token nobody had picked. Beside the
+ * leg cards the same sentence describes what is on screen.
+ */
+function LegsStep({
+  context,
+  form,
+}: {
+  context: DvpCreateContext;
+  form: ReturnType<typeof useDvpCreateForm>;
+}) {
+  return (
+    <div className="grid gap-5">
+      {form.tradeKind === "agent" ? null : (
         <SideChoice
           assetSymbol={form.asset.symbol}
           cashSymbol={form.cash.symbol}
@@ -407,6 +428,9 @@ function RoleStep({
           value={form.sdpSide}
         />
       )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <LegCards context={context} form={form} />
+      </div>
     </div>
   );
 }
@@ -580,9 +604,7 @@ export function DvpCreateWorkspace({
   const body = [
     <RoleStep context={context} form={form} key="role" wallet={wallet} />,
     <PartiesStep form={form} key="parties" />,
-    <div className="grid gap-4 sm:grid-cols-2" key="legs">
-      <LegCards context={context} form={form} />
-    </div>,
+    <LegsStep context={context} form={form} key="legs" />,
     <TermsStep form={form} key="terms" />,
     <ReviewStep form={form} key="review" />,
   ][step];

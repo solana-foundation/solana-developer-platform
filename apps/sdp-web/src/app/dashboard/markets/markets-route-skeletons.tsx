@@ -174,33 +174,54 @@ export function DvpTradeDetailSkeleton() {
 }
 
 /** The three grouped sections the form is actually built from. */
-const DVP_CREATE_SECTION_HEIGHTS = [
-  { id: "your-side", height: "h-[236px]" },
-  { id: "legs", height: "h-[330px]" },
-  { id: "terms", height: "h-[300px]" },
-];
+/** Five dots, matching the wizard's stages. */
+const DVP_WIZARD_STEPS = ["role", "parties", "legs", "terms", "review"];
 
 export function DvpCreateSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true" className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      {/* Mirrors the real form: max-w-5xl, and a two-column split with the
-          summary panel beside it. The old one described a single narrow column
-          of seven flat fields, a layout this form has not had for a while — so
-          it handed over to something a different width AND a different shape. */}
-      <div className="mx-auto w-full max-w-5xl">
-        <SkeletonBlock className="h-10 w-full max-w-2xl" />
-        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-          <div className="grid gap-5">
-            {DVP_CREATE_SECTION_HEIGHTS.map((section) => (
-              <SkeletonBlock className={`${section.height} w-full rounded-2xl`} key={section.id} />
+    <div aria-busy="true" className="flex h-full min-h-0 w-full flex-col">
+      {/* Mirrors WizardFrame, not the old single-page form: a stepper strip, ONE
+          stage of content beside a 440px rail, and a footer bar. The previous
+          version described three stacked section cards at max-w-5xl, which is a
+          different width AND a different shape from what loads - the exact
+          handover jump its own comment was written to stop. */}
+      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
+        <div className="mx-auto flex w-full max-w-6xl items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            {DVP_WIZARD_STEPS.map((step) => (
+              <SkeletonBlock className="h-1.5 w-6 rounded-full" key={step} />
             ))}
           </div>
-          <div className="grid gap-4">
-            <SkeletonBlock className="h-[280px] w-full rounded-2xl" />
-            <SkeletonBlock className="h-10 w-full rounded-lg" />
+          <SkeletonBlock className="h-4 w-20" />
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
+        <div className="mx-auto w-full max-w-6xl pb-8">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_440px]">
+            <div className="min-w-0">
+              <SkeletonBlock className="h-8 w-64" />
+              <SkeletonBlock className="mt-2 h-4 w-full max-w-xl" />
+              {/* One stage, not the whole form. */}
+              <div className="mt-6 grid gap-5">
+                <SkeletonBlock className="h-[92px] w-full rounded-xl" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SkeletonBlock className="h-[124px] w-full rounded-2xl" />
+                  <SkeletonBlock className="h-[124px] w-full rounded-2xl" />
+                </div>
+              </div>
+            </div>
+            <SkeletonBlock className="hidden h-[260px] w-full rounded-2xl lg:block" />
           </div>
         </div>
       </div>
-    </DashboardWorkspaceOverviewPanel>
+
+      <div className="shrink-0 border-border-default border-t px-4 pt-4 pb-4 md:px-6">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
+          <SkeletonBlock className="h-10 w-24 rounded-lg" />
+          <SkeletonBlock className="h-10 w-28 rounded-lg" />
+        </div>
+      </div>
+    </div>
   );
 }
