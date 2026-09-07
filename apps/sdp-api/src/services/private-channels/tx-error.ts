@@ -140,16 +140,21 @@ const AMBIGUOUS_TRANSPORT_CODES = new Set([
 ]);
 
 /**
- * Gateway statuses that mean the send WAS forwarded upstream and the answer was
- * lost on the way back: 502 when the proxy got no usable response from the node,
- * 504 when it gave up waiting for one. Either way the node may have executed the
- * transaction, so the row's fate is unknown.
+ * Gateway statuses that leave the send's fate unknown, because the proxy may
+ * already have forwarded it upstream: 502 when it got no usable response from
+ * the node, 504 when it gave up waiting for one, 503 when it declares itself
+ * unavailable.
  *
- * 503 is deliberately absent. It is the proxy refusing before it forwards
- * anything — the same "never reached" case as a refused connection, and
- * therefore a definitive rejection.
+ * 503 belongs here even though it often means "refused before forwarding". It
+ * does not *guarantee* that: proxies also emit 503 when an upstream connection
+ * dies mid-request, and the node itself can shed an already-received request
+ * with one. We cannot tell those apart from the status alone, and the two
+ * mistakes are not symmetric — reconciling a send that never happened costs one
+ * poller pass, while failing a send that did happen invites the caller to move
+ * the same funds again under a fresh key. `@sdp/rpc`'s transient classifier
+ * (packages/sdp-rpc/src/transient.ts) already retries 503 for the same reason.
  */
-const AMBIGUOUS_HTTP_STATUSES = new Set([502, 504]);
+const AMBIGUOUS_HTTP_STATUSES = new Set([502, 503, 504]);
 
 function isAmbiguousHttpStatus(value: unknown): boolean {
   return typeof value === "number" && AMBIGUOUS_HTTP_STATUSES.has(value);
