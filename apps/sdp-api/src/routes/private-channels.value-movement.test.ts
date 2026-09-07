@@ -78,6 +78,12 @@ const API_KEY = {
   raw: "sk_test_private_channel_value",
   prefix: "sk_test_pcv",
 };
+/** Selected-scope key bound to the colleague's wallet only. */
+const SCOPED_API_KEY = {
+  id: "key_pc_value_scoped",
+  raw: "sk_test_private_channel_value_scoped",
+  prefix: "sk_test_pcvs",
+};
 
 const UNSAFE_ADDRESSES = [
   ["system", "11111111111111111111111111111111"],
@@ -107,6 +113,10 @@ function apiKeyHeaders() {
     "Content-Type": "application/json",
     "Idempotency-Key": "idem_pc_value",
   };
+}
+
+function scopedApiKeyHeaders() {
+  return { ...apiKeyHeaders(), Authorization: `Bearer ${SCOPED_API_KEY.raw}` };
 }
 
 function depositDto(overrides: Partial<PrivateChannelDeposit> = {}): PrivateChannelDeposit {
@@ -172,6 +182,12 @@ async function seedRouteState(): Promise<void> {
     expiresAt: null,
   };
   await seedCachedApiKey(env, keyHash, cachedApiKey);
+  await seedCachedApiKey(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...cachedApiKey,
+    id: SCOPED_API_KEY.id,
+    walletScope: "selected",
+    walletBindings: [{ walletId: COLLEAGUE_WALLET_ID, permissions: ["payments:write"] }],
+  });
 
   await db.batch([
     db
@@ -440,6 +456,21 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(
       (await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, headers)).status
     ).toBe(403);
+    expect(createChannelDepositMock).not.toHaveBeenCalled();
+    expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a selected-scope API key naming an enrolled wallet it is not bound to", async () => {
+    const headers = scopedApiKeyHeaders();
+
+    const deposit = await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers);
+    const withdrawal = await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers);
+
+    expect(deposit.status).toBe(403);
+    expect(withdrawal.status).toBe(403);
+    expect(JSON.stringify(await deposit.json())).toContain(
+      "not authorized for the requested wallet"
+    );
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });

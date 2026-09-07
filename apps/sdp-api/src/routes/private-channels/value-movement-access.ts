@@ -30,6 +30,7 @@ import {
 } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, walletNotFound } from "@/lib/errors";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
@@ -138,6 +139,11 @@ export async function resolveVerifiedSourceWallet(
   if (!wallet) {
     throw walletNotFound();
   }
+  // Enrolment answers whether the wallet may move value on this instance at
+  // all; the key's wallet bindings answer whether THIS credential may spend
+  // from it. Every other money route holds the second line too, and skipping
+  // it here would let a key bound to one wallet spend any enrolled wallet.
+  assertApiKeyWalletAccess(context.auth, wallet.walletId, ["payments:write"]);
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,
@@ -148,7 +154,7 @@ export async function resolveVerifiedSourceWallet(
   );
   if (!verified) {
     throw forbidden(
-      "The source custody wallet must be verified by the acting Private Channels member."
+      "The source custody wallet must be enrolled under the project's Private Channels principal."
     );
   }
 
