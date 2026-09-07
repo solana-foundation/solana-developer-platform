@@ -31,7 +31,7 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@kamino-finance/klend-sdk": "10.0.0",
+    "@kamino-finance/klend-sdk": "11.0.2",
     "@sdp/earn": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
