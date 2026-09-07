@@ -47,10 +47,12 @@ function trimWalletId(walletId: string): string {
 }
 
 function normalizeBindings(auth: ApiKeyContext) {
+  // Bindings arrive normalized from the auth middleware; an empty
+  // permissions list is an explicit deny-all and must never widen to "*".
   return auth.walletBindings.map((binding) => ({
     walletId: binding.walletId,
     custodyWalletId: binding.custodyWalletId,
-    permissions: binding.permissions.length > 0 ? binding.permissions : (["*"] as Permission[]),
+    permissions: binding.permissions,
   }));
 }
 

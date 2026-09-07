@@ -114,6 +114,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       cryptoToken,
       collectedData,
       selectedProviderAccountId,
+      selectedPayoutAccount,
       rampsMemo,
     }) => {
       const base = {
@@ -130,7 +131,10 @@ export function useOfframpWizard(props: UseRampWizardProps) {
           fiatCurrency: selectedRampPair.fiatCurrency,
         } satisfies PaymentOfframpQuoteRequest;
       }
-      const destinationCountry = collectedData.destinationCountry;
+      const destinationCountry =
+        selectedPayoutAccount !== null
+          ? selectedPayoutAccount.destinationCountry
+          : collectedData.destinationCountry;
       if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
         throw new Error(
           "Select a payout destination country in the requirements step before requesting a Lightspark quote."

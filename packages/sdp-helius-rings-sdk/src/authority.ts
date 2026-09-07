@@ -1,9 +1,14 @@
 import type { Address, Bytes32 } from "@heliuslabs/zolana";
 import { randomSalt } from "@heliuslabs/zolana/keypair";
 import type { ProofOutputUtxo } from "@heliuslabs/zolana/transaction";
-import { type AssetRegistry, encodeConfidentialSlots } from "@heliuslabs/zolana/transaction";
+import {
+  type AssetRegistry,
+  encodeConfidentialSlots,
+  LocalWalletAuthority,
+} from "@heliuslabs/zolana/transaction";
 import type {
   ApprovalRequest,
+  EncryptedCustomRingTransfer,
   EncryptedSplit,
   EncryptedTransfer,
   WalletAuthority,
@@ -62,11 +67,12 @@ export interface CustodyWalletAuthorityInput {
  * places: the owner's Ed25519 secret stays in SDP custody and signs the outer
  * transaction, while viewing and nullifier keys arrive as material.
  *
- * The SDK's `LocalWalletAuthority` cannot express that split, since every
- * `ShieldedKeypair` constructor expands both role keys from one signing secret.
- * Nothing on the spend path needs a shielded signature: ownership enters the
- * proof as `ownerProofInputHash`, and authorization is the owner's signature on
- * the Solana transaction.
+ * The SDK's `LocalWalletAuthority` accepts the same three-key material, but
+ * this authority additionally carries SDP's audit context, refuses the flows
+ * this integration never reviewed, and destroys the transaction viewing key
+ * after a confidential encryption. Nothing on the spend path needs a shielded
+ * signature: ownership enters the proof as `ownerProofInputHash`, and
+ * authorization is the owner's signature on the Solana transaction.
  */
 export class CustodyWalletAuthority implements WalletAuthority {
   readonly #material: ShieldedMaterial;
@@ -153,6 +159,25 @@ export class CustodyWalletAuthority implements WalletAuthority {
     _input: Parameters<WalletAuthority["encryptAnonymousTransfer"]>[0]
   ): Promise<EncryptedTransfer> {
     return Promise.reject(new RingsUnsupportedFlowError("transfer_anonymous"));
+  }
+
+  /**
+   * Delegated to the SDK's own implementation over this material's three keys:
+   * the ring obligations (the auditor-sealed viewing secret and the audit
+   * witness the ring's second proof consumes) need only viewing-key material,
+   * so the Ed25519 custody split is not crossed. Key lifetimes are the SDK's
+   * contract: `proveCustomRingTransfer` zeroes the audit secrets in its own
+   * `finally`.
+   */
+  encryptCustomRingTransfer(
+    input: Parameters<WalletAuthority["encryptCustomRingTransfer"]>[0]
+  ): Promise<EncryptedCustomRingTransfer> {
+    return new LocalWalletAuthority({
+      solanaPublicKey: this.#owner,
+      address: this.#material.shieldedAddress,
+      viewingKey: this.#material.viewingKey,
+      nullifierKey: this.#material.nullifierKey,
+    }).encryptCustomRingTransfer(input);
   }
 
   encryptSplit(_input: Parameters<WalletAuthority["encryptSplit"]>[0]): Promise<EncryptedSplit> {

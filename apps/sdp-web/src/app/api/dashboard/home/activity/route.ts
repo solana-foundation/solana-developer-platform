@@ -8,13 +8,14 @@ import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
 } from "@/app/dashboard/payments/payments-page.data";
+import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.activity", request);
-  const t = await getTranslations();
+  const [t, issuanceEnabled] = await Promise.all([getTranslations(), issuance()]);
 
   try {
     const apiClient = await createSdpApiClient(
@@ -24,10 +25,14 @@ export async function GET(request: Request) {
       trace.step("fetch_payment_transfers", () =>
         fetchDashboardPaymentTransfers(apiClient.request, 20)
       ),
-      trace.step("fetch_issuance_activity", () =>
-        fetchOrgIssuanceActivity(apiClient.request, t, 20)
-      ),
-      fetchPaymentsIssuedTokenSymbols(apiClient.request),
+      issuanceEnabled
+        ? trace.step("fetch_issuance_activity", () =>
+            fetchOrgIssuanceActivity(apiClient.request, t, 20)
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
+      issuanceEnabled
+        ? fetchPaymentsIssuedTokenSymbols(apiClient.request)
+        : Promise.resolve({ ok: true as const, data: [] }),
     ]);
 
     const transfersError = transfersResult.ok

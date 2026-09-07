@@ -266,7 +266,9 @@
       "onchainTransaction": "Transaction on-chain",
       "addressSearchPlaceholder": "Rechercher une adresse",
       "addressAutocompleteFailed": "Impossible de rechercher des adresses. Réessayez.",
-      "addressDetailsFailed": "Impossible de charger cette adresse. Essayez une autre recherche."
+      "addressDetailsFailed": "Impossible de charger cette adresse. Essayez une autre recherche.",
+      "payoutAccountsTitle": "Comptes de paiement enregistrés",
+      "payoutAccountsDescription": "Choisissez le compte de destination de ce paiement, ou renseignez les informations ci-dessous pour effectuer un paiement vers un nouveau compte."
     },
     "onchainSend": {
       "noAssets": "Ce Wallet n'a aucun élément disponible à envoyer.",
@@ -323,7 +325,9 @@
       "offrampProvisioningDetail": "Mise à disposition d'un paiement BVNK dédié Wallet pour cette devise.",
       "simulateDeposit": "Simuler un dépôt",
       "simulating": "Simuler...",
-      "depositSimulated": "Dépôt simulé"
+      "depositSimulated": "Dépôt simulé",
+      "agreementPendingTitle": "Confirmation de votre accord",
+      "agreementPendingDescription": "Nous enregistrons votre acceptation auprès de BVNK — cela ne prend qu'un instant."
     },
     "lightspark": {
       "verificationRequiredTitle": "Vérifiez votre identité",
@@ -641,7 +645,20 @@
       "copyAddress": "Copier l'adresse",
       "addressCopied": "Adresse copiée",
       "addAnyway": "Ajouter quand même",
-      "addAnywayTitle": "Ajouter l'adresse signalée ?"
+      "addAnywayTitle": "Ajouter l'adresse signalée ?",
+      "providerAccounts": "Comptes fournisseur",
+      "loadingProviderAccounts": "Chargement des comptes fournisseur…",
+      "noProviderAccounts": "Aucun compte fournisseur pour le moment.",
+      "providerAccountsMissing": "La réponse concernant les comptes fournisseur était vide.",
+      "providerAccountCorridor": "Corridor",
+      "providerAccountRail": "Rail",
+      "providerAccountBank": "Banque",
+      "providerAccountNumber": "Compte",
+      "providerAccountCustomer": "Client",
+      "providerAccountStatus": "Statut",
+      "copyCustomerId": "Copier l'ID client",
+      "customerIdCopied": "ID client copié",
+      "noPayoutAccounts": "Aucun compte de paiement pour le moment."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -922,7 +939,9 @@
       "openAccount": "Ouvrir le compte dans l'explorateur",
       "editPaymentDescription": "Mettez à jour les wallets, le montant et la planification du paiement.",
       "paymentUpdated": "Paiement Recurring mis à jour.",
-      "noChangesToSave": "Aucune modification à enregistrer."
+      "noChangesToSave": "Aucune modification à enregistrer.",
+      "sourceWalletUnresolved": "Wallet source indisponible",
+      "sourceWalletUnresolvedDescription": "Ce paiement Recurring n'est lié à aucun Wallet SDP précis, ses actions sont donc indisponibles."
     },
     "requests": {
       "loadFailed": "Impossible de charger les demandes de paiement",

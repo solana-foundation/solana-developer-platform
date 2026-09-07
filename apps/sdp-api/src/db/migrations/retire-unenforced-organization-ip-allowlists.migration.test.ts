@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { expect, it } from "vitest";
-import { env } from "@/test/helpers/env";
+import { adminDatabaseUrl } from "@/test/helpers/env";
 
 /**
  * Never-validated pre-enforcement allowlists must not start deciding access on
@@ -15,7 +15,7 @@ it("retires pre-enforcement allowlists without losing them", async () => {
     "postgres/0055_retire_unenforced_organization_ip_allowlists.sql"
   );
   const sql = readFileSync(migrationPath, "utf8");
-  const client = new Client({ connectionString: env.DATABASE_URL });
+  const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
 
   try {
@@ -78,7 +78,7 @@ it("is safe to run twice", async () => {
     "postgres/0055_retire_unenforced_organization_ip_allowlists.sql"
   );
   const sql = readFileSync(migrationPath, "utf8");
-  const client = new Client({ connectionString: env.DATABASE_URL });
+  const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
 
   try {

@@ -45,14 +45,15 @@ function renderColdLoad(pathname: string): string {
     <DashboardShell
       flags={{
         assetProfiles: false,
+        custody: false,
         earn: false,
         heliusRings: false,
+        issuance: false,
         markets: false,
-        organizationOnboarding: false,
         payments: true,
+        policies: false,
         privateChannels: false,
       }}
-      onboardingStatus={null}
     >
       <div>settled route content</div>
     </DashboardShell>

@@ -13,6 +13,8 @@ import {
   verifySignature,
 } from "@solana/kit";
 import {
+  createSignableMessage,
+  isMessagePartialSigner,
   isTransactionModifyingSigner,
   isTransactionPartialSigner,
   type TransactionSigner,
@@ -139,18 +141,26 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
   return true;
 }
 
+/** The test-seam signer, or the owner's custody signer with failures mapped once. */
+async function ownerSigner(
+  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner"> & {
+    signer?: TransactionSigner;
+  }
+): Promise<TransactionSigner> {
+  try {
+    return input.signer ?? (await resolveOwnerSigner(input));
+  } catch (error) {
+    throw toSignerFailure(error);
+  }
+}
+
 export async function signRingsOuterTransaction(
   input: SignRingsOuterTransactionInput
 ): Promise<string> {
   const base64 = getBase64Codec();
 
-  let signer: TransactionSigner;
+  const signer = await ownerSigner(input);
   let signed: Transaction;
-  try {
-    signer = input.signer ?? (await resolveOwnerSigner(input));
-  } catch (error) {
-    throw toSignerFailure(error);
-  }
 
   // The decoder returns an unbranded Transaction; the gateway built these
   // bytes as a complete compiled tx, which is what the signer brands assert.
@@ -178,6 +188,50 @@ export async function signRingsOuterTransaction(
   return base64.decode(getTransactionEncoder().encode(signed));
 }
 
+export interface SignRingsMessageInput {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  /** Base58 address of the key the message requires a signature from. */
+  owner: string;
+  messageBase64: string;
+  /** Test seam; production resolves the owner's custody signer. */
+  signer?: TransactionSigner;
+}
+
+/**
+ * Ed25519 over raw message bytes with the same custody signer resolution as the
+ * transaction path. Ring bring-up needs it for the auditor-key attestation,
+ * which is a signed message rather than a transaction.
+ */
+export async function signRingsMessage(input: SignRingsMessageInput): Promise<string> {
+  const base64 = getBase64Codec();
+
+  const signer = await ownerSigner(input);
+  if (!isMessagePartialSigner(signer)) {
+    throw new RingsAdapterError("signer_failed", "custody signer cannot sign raw messages", {
+      retryable: false,
+    });
+  }
+
+  try {
+    const [signatures] = await signer.signMessages([
+      createSignableMessage(new Uint8Array(base64.encode(input.messageBase64))),
+    ]);
+    const signature = signatures?.[signer.address];
+    if (!signature) {
+      throw new RingsAdapterError(
+        "signer_failed",
+        "custody signing produced no signature for the named owner",
+        { retryable: false }
+      );
+    }
+    return base64.decode(signature);
+  } catch (error) {
+    throw toSignerFailure(error);
+  }
+}
+
 /**
  * Resolves the custody wallet holding the owner's key.
  *
@@ -188,7 +242,7 @@ export async function signRingsOuterTransaction(
  * custody no longer controls fails here rather than at the chain.
  */
 async function resolveOwnerSigner(
-  input: SignRingsOuterTransactionInput
+  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
 ): Promise<TransactionSigner> {
   const wallet = await new CustodyConfigStore(
     getDb(input.env),

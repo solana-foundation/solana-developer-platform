@@ -46,6 +46,6 @@
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
-    "tsx": "4.23.5"
+    "tsx": "4.23.12"
   }
 }
