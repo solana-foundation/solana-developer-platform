@@ -57,6 +57,12 @@ const API_KEY = {
   raw: "sk_test_private_channel_transfers",
   prefix: "sk_test_pct",
 };
+/** Selected-scope key bound to the other member's wallet only. */
+const SCOPED_API_KEY = {
+  id: "key_pc_transfer_scoped",
+  raw: "sk_test_private_channel_transfer_scoped",
+  prefix: "sk_test_pcts",
+};
 
 const UNSAFE_RECIPIENTS = [
   ["system", "11111111111111111111111111111111"],
@@ -84,6 +90,10 @@ function apiKeyHeaders() {
     Authorization: `Bearer ${API_KEY.raw}`,
     "Content-Type": "application/json",
   };
+}
+
+function scopedApiKeyHeaders() {
+  return { ...apiKeyHeaders(), Authorization: `Bearer ${SCOPED_API_KEY.raw}` };
 }
 
 function transferDto(overrides: Partial<PrivateChannelTransfer> = {}): PrivateChannelTransfer {
@@ -124,6 +134,12 @@ async function seedRouteState(): Promise<void> {
     expiresAt: null,
   };
   await seedCachedApiKey(env, keyHash, cachedApiKey);
+  await seedCachedApiKey(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...cachedApiKey,
+    id: SCOPED_API_KEY.id,
+    walletScope: "selected",
+    walletBindings: [{ walletId: OTHER_USER_WALLET_ID, permissions: ["payments:write"] }],
+  });
 
   await db.batch([
     db
@@ -532,7 +548,24 @@ describe("Private Channels — transfer access and routes", () => {
     }
   );
 
-  it("requires the source custody wallet to be verified by the acting member", async () => {
+  it("refuses a selected-scope API key naming an enrolled wallet it is not bound to", async () => {
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      { ...scopedApiKeyHeaders(), "Idempotency-Key": "idem_route_transfer_scoped" }
+    );
+
+    expect(response.status).toBe(403);
+    expect(JSON.stringify(await response.json())).toContain(
+      "not authorized for the requested wallet"
+    );
+    expect(createChannelTransferMock).not.toHaveBeenCalled();
+  });
+
+  it("requires the source custody wallet to be enrolled under the principal", async () => {
     const response = await postTransfer({
       walletId: UNVERIFIED_WALLET_ID,
       recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
