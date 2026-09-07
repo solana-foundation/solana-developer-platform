@@ -12,7 +12,12 @@ import { createPostgresPrivateChannelWithdrawalRepository } from "./private-chan
 const TEST_PROJECT_ID = "prj_pcw_repo_test";
 const TEST_INSTANCE_ID = "inst_pcw_1";
 
+/** Fresh reservation per call; the idempotency test below pins the key. */
+let nextIdempotencyKey = 0;
+
 function makeInput(overrides: Partial<CreateWithdrawalInput> = {}): CreateWithdrawalInput {
+  nextIdempotencyKey += 1;
+  const key = `idem_pcw_${nextIdempotencyKey}`;
   return {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
@@ -28,6 +33,8 @@ function makeInput(overrides: Partial<CreateWithdrawalInput> = {}): CreateWithdr
       escrowInstanceAddr: "EscrowInst1111111111111111111111111111111",
       actingUserId: TEST_USER.id,
     },
+    idempotencyKey: key,
+    idempotencyFingerprint: `fp_${key}`,
     ...overrides,
   };
 }
@@ -202,5 +209,28 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
     expect(await repo.countNonTerminalByInstance("inst_A")).toBe(1);
     expect(await repo.countNonTerminalByInstance("inst_B")).toBe(1);
     void inFlight;
+  });
+
+  it("holds one withdrawal per idempotency key within a tenant", async () => {
+    const first = await repo.createWithdrawal(
+      makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+    );
+    expect(first).not.toBeNull();
+
+    // The unique index IS the reservation: a duplicate cannot insert, which is
+    // what stops a retry from broadcasting a second irreversible burn.
+    await expect(
+      repo.createWithdrawal(
+        makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+      )
+    ).rejects.toThrow();
+
+    const found = await repo.findWithdrawalByIdempotency({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      idempotencyKey: "idem_shared",
+    });
+    expect(found?.id).toBe(first?.id);
+    expect(found?.idempotency_fingerprint).toBe("fp_idem_shared");
   });
 });

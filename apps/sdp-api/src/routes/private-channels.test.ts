@@ -104,8 +104,8 @@ function successProbe() {
     gateway: {
       status: "ready" as const,
       latencyMs: 42,
-      health: { status: 200, ok: true, body: { status: "ok" } },
-      ready: { status: 200, ok: true, body: { status: "ready" } },
+      health: { status: 200, ok: true },
+      ready: { status: 200, ok: true },
     },
     rpc: {
       ok: true as const,
@@ -224,7 +224,11 @@ describe("Private Channels routes", () => {
       env
     );
     const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    // A different port is a different origin, so the update destination has to
+    // be approved explicitly — PATCH runs the same egress gate as Connect.
     const gatewayUrl = "http://34.71.147.163:9900";
+    const originalAllowlist = env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST;
+    env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = gatewayUrl;
 
     const updated = await app.request(
       "/v1/private-channels/instance",
@@ -249,6 +253,39 @@ describe("Private Channels routes", () => {
       gatewayUrl,
     });
     expect(probeConnectionMock).toHaveBeenCalledTimes(2);
+    env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = originalAllowlist;
+  });
+
+  it("PATCH /instance refuses a destination that is not on the egress allowlist, without probing", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    probeConnectionMock.mockClear();
+
+    const updated = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          instanceId: createdBody.data.instance.id,
+          gatewayUrl: "http://169.254.169.254/latest/meta-data",
+        }),
+      },
+      env
+    );
+
+    expect(updated.status).toBe(400);
+    const body = (await updated.json()) as {
+      error: { details?: { fieldErrors?: Record<string, string[]> } };
+    };
+    expect(body.error.details?.fieldErrors?.gatewayUrl?.[0]).toMatch(/approved/i);
+    expect(probeConnectionMock).not.toHaveBeenCalled();
   });
 
   it("POST /instance/disconnect flips is_active and returns the row", async () => {
@@ -370,14 +407,54 @@ describe("Private Channels routes", () => {
     expect(probeConnectionMock).not.toHaveBeenCalled();
   });
 
+  it("POST /instance refuses a gateway that is not on the egress allowlist, without probing", async () => {
+    // A schema-valid URL that resolves inside the deployment: the shape check
+    // passes and the allowlist is what stops it. Nothing is dialled, so the
+    // probe is never reached.
+    const res = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          gatewayUrl: "http://169.254.169.254/latest/meta-data",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { details?: { fieldErrors?: Record<string, string[]> } };
+    };
+    expect(body.error.details?.fieldErrors?.gatewayUrl?.[0]).toMatch(/approved/i);
+    expect(probeConnectionMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /health reports an unapproved gateway as unreachable", async () => {
+    const res = await app.request(
+      `/v1/private-channels/health?gatewayUrl=${encodeURIComponent("http://127.0.0.1:8899")}`,
+      { headers: authHeaders() },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { status: string; error?: string };
+    };
+    expect(body.data.status).toBe("unreachable");
+    expect(body.data.error).toMatch(/approved/i);
+  });
+
   it("POST /instance returns 400 when the gateway probe reports degraded", async () => {
     probeConnectionMock.mockResolvedValueOnce({
       ok: false,
       gateway: {
         status: "degraded",
         latencyMs: 88,
-        health: { status: 200, ok: true, body: { status: "ok" } },
-        ready: { status: 503, ok: false, body: { status: "degraded", reason: "upstream" } },
+        health: { status: 200, ok: true },
+        ready: { status: 503, ok: false },
         reason: "upstream",
       },
       rpc: { ok: true, latencyMs: 11, version: "1.18.4" },
@@ -407,8 +484,8 @@ describe("Private Channels routes", () => {
       gateway: {
         status: "ready",
         latencyMs: 42,
-        health: { status: 200, ok: true, body: { status: "ok" } },
-        ready: { status: 200, ok: true, body: { status: "ready" } },
+        health: { status: 200, ok: true },
+        ready: { status: 200, ok: true },
       },
       rpc: { ok: false, latencyMs: 5000, error: "Timed out after 5000 ms." },
       auth: { ok: true, latencyMs: 15 },
