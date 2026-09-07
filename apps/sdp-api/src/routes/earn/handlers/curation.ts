@@ -19,13 +19,11 @@ import type { EarnProviderId, SolanaCluster } from "@sdp/types";
  * states whether an instrument the caller CAN see exists on their cluster. A
  * hidden row is absent; an un-fundable row is present and honest about itself.
  */
-// "jupiter" excludes Jupiter Lend (BD, 2026-08-25: permissionless, no curator a
-// client's compliance team can point at). A name term rather than the preferred
-// `HIDDEN_VAULTS` address entry because no Jupiter Lend row exists on any
-// provider registry today (verified against `GET /kvaults/vaults`, 2026-08-31),
-// so there is no address to key on — and this list can exclusively REMOVE rows,
-// which is what makes a name-based rule safe here.
-export const HIDDEN_STRATEGY_TERMS = ["aave", "morpho", "jupiter"] as const;
+// Jupiter Lend used to be excluded here by name. Its dedicated provider now
+// admits only the canonical USDT market and validates both asset and receipt
+// mints, so the broad term would hide the supported row as well as unrelated
+// Kamino vaults whose free-text names mention Jupiter.
+export const HIDDEN_STRATEGY_TERMS = ["aave", "morpho"] as const;
 
 /**
  * ── CATALOGUE CURATION, PER ENVIRONMENT ─────────────────────────────────────

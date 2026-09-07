@@ -17,8 +17,11 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   executeRingsOperation,
+  type OperationResult,
+  type ProjectRing,
   type RingsOperationState,
   type RingsOperationSummary,
+  recheckRingsOperation,
   retryRingsOperation,
   voidRingsOperation,
 } from "./helius-rings.data";
@@ -26,7 +29,9 @@ import {
   formatAssetAmount,
   formatWhen,
   isSettling,
+  ringNameByProgramId,
   shortenOperationId,
+  shortenShieldedAddress,
 } from "./helius-rings.utils";
 
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
@@ -42,32 +47,43 @@ const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning"
   voided: "default",
 };
 
-type RowAction = { kind: "execute" } | { kind: "void"; signature: string } | { kind: "retry" };
+type RowAction =
+  | { kind: "execute" }
+  | { kind: "recheck" }
+  | { kind: "void"; signature: string }
+  | { kind: "retry" };
 
 /**
- * The single action this operation offers an operator, if any.
+ * What this operation offers an operator, in the order worth trying.
+ *
+ * A signed failure gets two. Rechecking asks the indexer again and can only
+ * ever complete the row, so it leads: an indexer that has fallen behind the
+ * chain is the likelier explanation than a transaction that never landed, and
+ * asking costs one read. Voiding asserts the opposite and cannot be undone.
  *
  * `retriedBy` suppresses a second retry of the same failure. A retry files a
  * new operation rather than reusing this one, so nothing about this row changes
  * to record that it was already retried, and the button would otherwise stay
  * live and file a sibling every time it was pressed.
  */
-function rowAction(
-  operation: RingsOperationSummary,
-  retriedBy: string | undefined
-): RowAction | null {
-  if (operation.state === "approval_required") return { kind: "execute" };
-  if (operation.state !== "failed") return null;
+function rowActions(operation: RingsOperationSummary, retriedBy: string | undefined): RowAction[] {
+  if (operation.state === "approval_required") return [{ kind: "execute" }];
+
+  // An operation waiting on the indexer offers a manual recheck so the
+  // operator isn't watching a spinner with no recourse.
+  if (operation.state === "indexing") return [{ kind: "recheck" }];
+
+  if (operation.state !== "failed") return [];
 
   // A signed failure is voided, never retried: a retry would re-sign an intent
   // whose first transaction may still land.
   if (operation.failureCode === "manual_reconciliation_required") {
     return operation.outerTxSignature
-      ? { kind: "void", signature: operation.outerTxSignature }
-      : null;
+      ? [{ kind: "recheck" }, { kind: "void", signature: operation.outerTxSignature }]
+      : [];
   }
-  if (retriedBy) return null;
-  return operation.retryable === true ? { kind: "retry" } : null;
+  if (retriedBy) return [];
+  return operation.retryable === true ? [{ kind: "retry" }] : [];
 }
 
 /**
@@ -85,10 +101,35 @@ function rowLineage(
   return retriedBy ? { key: "retriedAs", operationId: retriedBy } : null;
 }
 
+function runAction(
+  operationId: string,
+  action: RowAction,
+  state: RingsOperationState
+): Promise<OperationResult> {
+  switch (action.kind) {
+    case "execute":
+      return executeRingsOperation(operationId);
+    case "recheck":
+      // `indexing` rows are advanced through the execute path (which polls
+      // Photon). The dedicated recheck route only handles `failed` rows.
+      return state === "indexing"
+        ? executeRingsOperation(operationId)
+        : recheckRingsOperation(operationId);
+    case "void":
+      return voidRingsOperation(operationId, action.signature);
+    case "retry":
+      return retryRingsOperation(operationId);
+  }
+}
+
 const ACTION_LABELS = {
   execute: {
     idle: "DashboardHeliusRings.recovery.execute",
     busy: "DashboardHeliusRings.recovery.executing",
+  },
+  recheck: {
+    idle: "DashboardHeliusRings.recovery.recheck",
+    busy: "DashboardHeliusRings.recovery.rechecking",
   },
   void: {
     idle: "DashboardHeliusRings.recovery.void",
@@ -109,17 +150,25 @@ const ACTION_LABELS = {
  */
 export function ActivityCard({
   operations,
+  projectRings,
   onChanged,
   onSelect,
 }: {
   operations: RingsOperationSummary[];
+  /** Names the ring pinned on each row; unknown ids fall back to the truncated program id. */
+  projectRings: ProjectRing[];
   onChanged: () => Promise<void>;
   onSelect: (operationId: string) => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ id: string; kind: RowAction["kind"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A recheck that finds nothing leaves the row exactly as it was, so without
+  // this the button would look like it did nothing at all.
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const ringNames = useMemo(() => ringNameByProgramId(projectRings), [projectRings]);
 
   const retriedBy = useMemo(() => {
     const successors = new Map<string, string>();
@@ -130,7 +179,7 @@ export function ActivityCard({
   }, [operations]);
 
   const handleAction = useCallback(
-    async (operationId: string, action: RowAction) => {
+    async (operationId: string, action: RowAction, state: RingsOperationState) => {
       // Voiding asserts the transaction never landed, so it is the one action
       // an operator has to affirm.
       if (
@@ -140,19 +189,25 @@ export function ActivityCard({
         return;
       }
 
-      setBusyId(operationId);
+      setBusy({ id: operationId, kind: action.kind });
       setError(null);
+      setNotice(null);
       try {
-        const result =
-          action.kind === "execute"
-            ? await executeRingsOperation(operationId)
-            : action.kind === "void"
-              ? await voidRingsOperation(operationId, action.signature)
-              : await retryRingsOperation(operationId);
-        if (result.error) setError(result.error);
+        const result = await runAction(operationId, action, state);
+        if (result.error) {
+          setError(result.error);
+        } else if (action.kind === "recheck") {
+          setNotice(
+            t(
+              result.operation?.state === "completed"
+                ? "DashboardHeliusRings.recovery.recheckFound"
+                : "DashboardHeliusRings.recovery.recheckStillMissing"
+            )
+          );
+        }
         await onChanged();
       } finally {
-        setBusyId(null);
+        setBusy(null);
       }
     },
     [onChanged, t]
@@ -170,6 +225,11 @@ export function ActivityCard({
             {error}
           </Callout>
         ) : null}
+        {notice ? (
+          <Callout variant="info" live>
+            {notice}
+          </Callout>
+        ) : null}
         {operations.length === 0 ? (
           <p className="text-sm text-secondary">{t("DashboardHeliusRings.activity.empty")}</p>
         ) : (
@@ -179,6 +239,7 @@ export function ActivityCard({
                 <TableHead>{t("DashboardHeliusRings.activity.operation")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.state")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.amount")}</TableHead>
+                <TableHead>{t("DashboardHeliusRings.activity.ring")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.created")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.action")}</TableHead>
               </TableRow>
@@ -186,10 +247,9 @@ export function ActivityCard({
             <TableBody>
               {operations.map((operation) => {
                 const successor = retriedBy.get(operation.id);
-                const action = rowAction(operation, successor);
+                const actions = rowActions(operation, successor);
                 const lineage = rowLineage(operation, successor);
-                const busy = busyId === operation.id;
-                const label = action && ACTION_LABELS[action.kind][busy ? "busy" : "idle"];
+                const rowBusy = busy?.id === operation.id;
                 return (
                   <TableRow
                     key={operation.id}
@@ -220,8 +280,6 @@ export function ActivityCard({
                         <Badge variant={STATE_BADGE[operation.state]}>
                           {t(`DashboardHeliusRings.activity.state_${operation.state}`)}
                         </Badge>
-                        {/* The badge alone cannot say whether a state is a stop
-                            or a step; the spinner is what marks the row live. */}
                         {isSettling(operation.state) ? (
                           <Loader2Icon
                             className="size-3.5 animate-spin text-secondary"
@@ -233,23 +291,40 @@ export function ActivityCard({
                     <TableCell>
                       {formatAssetAmount(operation.amountRaw, operation.assetMint)}
                     </TableCell>
+                    <TableCell>
+                      {operation.ringProgramId === null
+                        ? t("DashboardHeliusRings.activity.ringDefault")
+                        : (ringNames.get(operation.ringProgramId) ??
+                          shortenShieldedAddress(operation.ringProgramId))}
+                    </TableCell>
                     <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
                     <TableCell>
-                      {action && label ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={busy}
-                          // The row opens the detail drawer, which is not what
-                          // someone aiming at the button asked for.
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleAction(operation.id, action);
-                          }}
-                        >
-                          {t(label)}
-                        </Button>
-                      ) : null}
+                      <span className="flex items-center gap-2">
+                        {actions.map((action) => (
+                          <Button
+                            key={action.kind}
+                            // Void is the irreversible one, so it never wears
+                            // the same weight as the observation beside it.
+                            variant={action.kind === "void" ? "ghost" : "secondary"}
+                            size="sm"
+                            // One request per row at a time: the actions read
+                            // and write the same operation.
+                            disabled={rowBusy}
+                            // The row opens the detail drawer, which is not
+                            // what someone aiming at the button asked for.
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleAction(operation.id, action, operation.state);
+                            }}
+                          >
+                            {t(
+                              ACTION_LABELS[action.kind][
+                                rowBusy && busy?.kind === action.kind ? "busy" : "idle"
+                              ]
+                            )}
+                          </Button>
+                        ))}
+                      </span>
                     </TableCell>
                   </TableRow>
                 );

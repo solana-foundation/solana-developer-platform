@@ -5626,7 +5626,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&cryptoToken={cryptoToken}&fiatCurrency={fiatCurrency}&destinationWallet={destinationWallet}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&cryptoToken={cryptoToken}&fiatCurrency={fiatCurrency}&destinationWallet={destinationWallet}&destinationCountry={destinationCountry}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -6278,6 +6278,13 @@
             "label": "destinationWallet",
             "description": "Destination wallet ID. Required when direction is onramp.",
             "defaultValue": "privy_wallet_123",
+            "required": false
+          },
+          {
+            "key": "destinationCountry",
+            "label": "destinationCountry",
+            "description": "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
+            "defaultValue": "US",
             "required": false
           }
         ],
@@ -7522,7 +7529,14 @@
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "bankName": "Example Bank",
                 "accountNumberLast4": "6789",
-                "paymentRails": ["ACH", "WIRE"]
+                "paymentRails": ["ACH", "WIRE"],
+                "customerLink": {
+                  "id": "counterparty_provider_account_customer",
+                  "providerCustomerReference": "Customer:0193b2c4",
+                  "status": "active",
+                  "providerStatus": "ACTIVE",
+                  "createdAt": "2025-01-01T00:00:00.000Z"
+                }
               }
             ]
           },

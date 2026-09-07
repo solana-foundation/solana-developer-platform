@@ -25,6 +25,7 @@ export const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
   rotationDeadline: null,
+  organizationStatus: "active",
 };
 
 export const TEST_REVOKED_KEY: CachedApiKey = {

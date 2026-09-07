@@ -89,16 +89,42 @@ export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
-export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
-  key: "organization-onboarding",
+export const custody = flag<boolean, DashboardFlagEntities>({
+  key: "custody",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: flagDefault("SDP_FLAG_ORGANIZATION_ONBOARDING", true),
+  defaultValue: flagDefault("CUSTODY_ENABLED", false),
   description:
-    "Require newly created organizations to choose RPC and custody providers before entering the dashboard.",
+    "Show the Custody module and Wallets workspace. Off hides every Custody and Wallets surface at once.",
   options: [
-    { value: false, label: "Skip onboarding" },
-    { value: true, label: "Require onboarding" },
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const issuance = flag<boolean, DashboardFlagEntities>({
+  key: "issuance",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("ISSUANCE_ENABLED", false),
+  description:
+    "Show the Issuance module. Off hides every Issuance surface at once, whatever the Asset Profiles flag says.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const policies = flag<boolean, DashboardFlagEntities>({
+  key: "policies",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("POLICIES_ENABLED", false),
+  description:
+    "Show the Policies module, wallet-policy workspaces, and Approvals inbox. API key authoring remains available independently.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
   ],
 });
 
@@ -120,7 +146,8 @@ export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", true),
-  description: "Show the Asset Profiles issuance wizard and per-token asset management workspace.",
+  description:
+    "Show the Asset Profiles issuance wizard and per-token asset management workspace. Requires the Issuance module flag.",
   options: [
     { value: false, label: "Legacy issuance" },
     { value: true, label: "Asset Profiles" },

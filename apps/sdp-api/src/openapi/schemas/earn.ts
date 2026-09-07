@@ -210,7 +210,9 @@ export const earnExternalWalletDepositTransactionRequest = z
     }),
     minSharesOut: earnDecimalAmountSchema.optional().openapi({
       description:
-        "Slippage floor in share units. Optional in sandbox; required for production deposits.",
+        "Slippage floor in share units. Required whenever the selected strategy's " +
+        "`depositSlippage.quoteRequired` is true, and for every production deposit. Derive it " +
+        "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
       example: "24.9",
     }),
     sourceTokenMint: earnSolanaMintSchema.optional().openapi({
@@ -305,6 +307,116 @@ export const earnExternalWalletWithdrawalPreviewRequest = z
       "nothing is persisted.",
   });
 
+const earnVaultQuoteIssueSchema = z.object({
+  code: z.string().openapi({ example: "SHARE_LOCKED" }),
+  message: z.string(),
+});
+
+export const earnVaultDepositPreviewRequest = z
+  .object({
+    strategyId: z.string().min(1).openapi({ example: "earn_strategy_example" }),
+    amount: earnDecimalAmountSchema.openapi({
+      description: "Deposit amount in the vault token's units.",
+      example: "25",
+    }),
+  })
+  .openapi({
+    description:
+      "Quote one direct vault deposit against the provider's live accounting. Read-only: " +
+      "nothing is built and nothing is persisted.",
+  });
+
+export const earnVaultDepositPreviewResponse = successResponseSchema(
+  z.object({
+    strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+    sharesOut: earnDecimalAmountSchema.openapi({
+      description:
+        "Shares the deposit would mint at the live rate. Derive `minSharesOut` from this " +
+        "value minus the chosen tolerance, quantized to `shareDecimals`.",
+      example: "24.98",
+    }),
+    shareDecimals: z.number().int().openapi({
+      description: "The share mint's decimals, which the floor must be quantized to.",
+      example: 6,
+    }),
+    blockingIssues: z.array(earnVaultQuoteIssueSchema).openapi({
+      description: "Conditions the provider reports would block this deposit; empty when none.",
+    }),
+    feeSponsored: z.boolean().openapi({
+      description:
+        "Whether SDP's treasury vault flow would use its configured paymaster on this cluster. " +
+        "Embedded Yield partners sponsor their external-wallet flow separately by passing " +
+        "`feePayer` to the transaction build.",
+    }),
+  })
+);
+
+export const earnVaultShareReconciliationResponse = successResponseSchema(
+  z.object({
+    unrecordedHoldings: z
+      .array(
+        z.object({
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z
+            .string()
+            .openapi({ example: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" }),
+          provider: z.string().openapi({ example: "kamino" }),
+          strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+          strategyName: z.string().openapi({ example: "USDC Prime Vault" }),
+          vaultAddress: z.string().openapi({
+            description: "The catalogued vault the held share mint attributes to.",
+          }),
+          shareMint: z.string(),
+          shares: z.string().openapi({
+            description: "Raw share-token amount in base units.",
+            example: "500",
+          }),
+          decimals: z.number().int().openapi({ example: 6 }),
+          uiShares: z.string().openapi({ example: "0.0005" }),
+          ambiguousAttribution: z.boolean().openapi({
+            description:
+              "True when more than one catalogued vault identity claims this share mint, so " +
+              "the attribution is the best candidate rather than the only one.",
+          }),
+        })
+      )
+      .openapi({
+        description:
+          "Share balances the custody wallet holds for catalogued vaults with no recorded " +
+          "open position behind them (for example, shares acquired by signing outside SDP).",
+      }),
+    unbackedPositions: z
+      .array(
+        z.object({
+          positionId: z.string().openapi({ example: "earn_position_example" }),
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+          provider: z.string().openapi({ example: "kamino" }),
+          vaultAddress: z.string().nullable(),
+          shareMint: z.string().nullable(),
+          label: z.string(),
+        })
+      )
+      .openapi({
+        description:
+          "Recorded open positions whose wallet holds none of their shares. Positions with an " +
+          "unsettled movement are excluded: the ledger already explains that disagreement.",
+      }),
+    unreadableWallets: z
+      .array(
+        z.object({
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+        })
+      )
+      .openapi({
+        description:
+          "Wallets whose balance read failed or ran out of the request budget. Their claims " +
+          "are unjudged in this report, never closed or marked unbacked.",
+      }),
+  })
+);
+
 export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
   z.object({
     positionId: z.string().openapi({ example: "earn_position_example" }),
@@ -318,16 +430,9 @@ export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema
       description: "The deposit token's decimals — the scale a floor must be quantized to.",
       example: 6,
     }),
-    blockingIssues: z
-      .array(
-        z.object({
-          code: z.string().openapi({ example: "SHARE_LOCKED" }),
-          message: z.string(),
-        })
-      )
-      .openapi({
-        description: "Conditions the provider reports would block this exit; empty when none.",
-      }),
+    blockingIssues: z.array(earnVaultQuoteIssueSchema).openapi({
+      description: "Conditions the provider reports would block this exit; empty when none.",
+    }),
   })
 );
 
