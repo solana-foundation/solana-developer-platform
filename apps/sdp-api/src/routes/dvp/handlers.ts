@@ -177,6 +177,8 @@ function toTradeResponse(row: DvpTradeRow, sdpWallet?: SdpWalletRef) {
       }),
     },
     sdpSide: row.sdpSide,
+    /** Whether SDP delivers a leg, or only set the trade up. */
+    tradeKind: row.tradeKind,
     /**
      * The wallet this organization's leg is funded from.
      *
@@ -226,8 +228,15 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     organizationId: auth.organizationId,
     projectId,
     sdpWalletId: body.sdpWalletId,
-    sdpSide: body.sdpSide,
-    counterparty: body.counterparty,
+    // Omitted kind is principal, so callers written before agent trades
+    // existed keep working unchanged.
+    ...(body.tradeKind === "agent"
+      ? { tradeKind: "agent" as const, partyA: body.partyA, partyB: body.partyB }
+      : {
+          tradeKind: "principal" as const,
+          sdpSide: body.sdpSide,
+          counterparty: body.counterparty,
+        }),
     mintA: body.mintA,
     tokenProgramA: body.tokenProgramA,
     mintB: body.mintB,

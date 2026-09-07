@@ -27,6 +27,19 @@ export type DvpTradeStatus =
 /** Which leg SDP holds. The other side is an arbitrary external address. */
 export type DvpTradeSide = "a" | "b";
 
+/**
+ * Whether SDP is a party to the trade or only set it up.
+ *
+ * `principal` is the original shape and the default: SDP holds one leg in a
+ * custody wallet and the counterparty is an arbitrary address.
+ *
+ * `agent` is Ilan's shape — an execution desk sets the terms and two other
+ * parties do the swaps. The program always allowed it (`CreateDvp`'s only
+ * signer is the payer), so this is SDP catching up to the program rather than
+ * anything new on chain.
+ */
+export type DvpTradeKind = "principal" | "agent";
+
 export interface DvpTradeRow {
   id: string;
   organizationId: string;
@@ -65,7 +78,18 @@ export interface DvpTradeRow {
   escrowA: string;
   escrowB: string;
 
-  sdpSide: DvpTradeSide;
+  /**
+   * Which leg SDP delivers, or NULL on an agent trade where it delivers
+   * neither. Nullable is load-bearing: reading a missing side as "b" is how a
+   * trade funds the wrong leg, so callers must branch on `tradeKind` rather
+   * than treat this as always present.
+   */
+  sdpSide: DvpTradeSide | null;
+  tradeKind: DvpTradeKind;
+  /**
+   * The custody wallet behind the trade. Signs the create and pays the fee and
+   * both escrows' rent for BOTH kinds; on an agent trade it delivers nothing.
+   */
   sdpWalletId: string;
 
   status: DvpTradeStatus;

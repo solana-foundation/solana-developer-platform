@@ -48,6 +48,8 @@ export interface DvpFundResult {
 
 /** The addresses and target for whichever leg SDP holds. */
 interface DvpSdpLeg {
+  /** Which leg it is, carried out of the null check so callers need not redo it. */
+  side: "a" | "b";
   mint: Address;
   tokenProgram: Address;
   escrow: Address;
@@ -62,8 +64,18 @@ interface DvpSdpLeg {
  * number derived the same way.
  */
 function sdpLegOf(trade: DvpTradeRow): DvpSdpLeg {
+  // Guarded, not defaulted. `sdpSide` is null on an agent trade, and reading a
+  // missing side as "b" would fund a leg SDP holds no key for and does not owe.
+  // The caller refuses agent trades before reaching here; this is the second
+  // lock on the same door.
+  if (trade.sdpSide === null) {
+    throw badRequest(
+      `DvP trade ${trade.id} has no SDP leg to fund: it was created as an agent trade, so both legs are funded by their own parties.`
+    );
+  }
   const sdpLegIsA = trade.sdpSide === "a";
   return {
+    side: trade.sdpSide,
     mint: (sdpLegIsA ? trade.mintA : trade.mintB) as Address,
     tokenProgram: (sdpLegIsA ? trade.tokenProgramA : trade.tokenProgramB) as Address,
     escrow: (sdpLegIsA ? trade.escrowA : trade.escrowB) as Address,
@@ -102,11 +114,19 @@ export async function fundDvpTradeLeg(
 ): Promise<DvpFundResult> {
   const env = c.env;
 
+  // Before the status check: an agent trade is never fundable from here at any
+  // status, and saying why beats "created and can no longer be funded".
+  if (trade.tradeKind === "agent") {
+    throw badRequest(
+      `DvP trade ${trade.id} is an agent trade. SDP holds neither leg, so each party funds its own escrow with an ordinary transfer.`
+    );
+  }
+
   if (!FUNDABLE.has(trade.status)) {
     throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be funded`);
   }
 
-  const { mint, tokenProgram, escrow, amount } = sdpLegOf(trade);
+  const { side, mint, tokenProgram, escrow, amount } = sdpLegOf(trade);
 
   const rpc = solanaRpc.createRpc(env);
 
@@ -252,5 +272,5 @@ export async function fundDvpTradeLeg(
   // why this cannot be the same column.
   await createDvpTradeRepository(env).recordLegFundingTx(trade.id, signature);
 
-  return { signature, leg: trade.sdpSide, amount: outstanding.toString() };
+  return { signature, leg: side, amount: outstanding.toString() };
 }

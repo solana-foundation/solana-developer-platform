@@ -61,15 +61,38 @@ import { validateDvpTerms } from "./validate";
 /** Seed prefix of the per-trade nonce tombstone (`NONCE_TOMBSTONE_SEED`). */
 const NONCE_TOMBSTONE_SEED = "nonce";
 
-export interface CreateDvpTradeInput {
+/** The two parties, however the caller chose to describe them. */
+export type DvpTradeParties =
+  | {
+      /** SDP delivers a leg itself. Zach's V1 shape, and the default. */
+      tradeKind: "principal";
+      /** Which leg SDP delivers. The counterparty takes the other one. */
+      sdpSide: DvpTradeSide;
+      /** The other party. An arbitrary address; we hold no key for it. */
+      counterparty: string;
+    }
+  | {
+      /**
+       * SDP sets the terms and holds neither leg. The custody wallet still
+       * signs the create and pays the fee and both escrows' rent.
+       *
+       * No `sdpSide`: naming one would claim a leg we hold no key for, and
+       * `sdpLegOf` treats any non-"a" value as "b", so a stray side is how a
+       * trade funds the wrong leg.
+       */
+      tradeKind: "agent";
+      partyA: string;
+      partyB: string;
+    };
+
+export type CreateDvpTradeInput = DvpTradeParties & {
   organizationId: string;
   projectId: string;
-  /** Custody wallet holding SDP's leg. Also the fee payer and create payer. */
+  /**
+   * Custody wallet behind the trade. Signs the create, pays the fee and pays
+   * rent for both escrows. Delivers a leg only on a principal trade.
+   */
   sdpWalletId: string;
-  /** Which leg SDP delivers. The counterparty takes the other one. */
-  sdpSide: DvpTradeSide;
-  /** The other party. An arbitrary address; we hold no key for it. */
-  counterparty: string;
   /** Asset leg mint and its token program. */
   mintA: string;
   tokenProgramA: string;
@@ -94,7 +117,7 @@ export interface CreateDvpTradeInput {
   userBSettlementDestination: string | null;
   /** Caller's Idempotency-Key, when they sent one. */
   idempotencyKey: string | null;
-}
+};
 
 /**
  * Confirms a replay is the SAME request, not merely one carrying the same key.
@@ -243,8 +266,15 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     input.sdpWalletId
   );
 
-  const userA = input.sdpSide === "a" ? signer.address : address(input.counterparty);
-  const userB = input.sdpSide === "b" ? signer.address : address(input.counterparty);
+  // On an agent trade both parties come from the payload and the signer is
+  // neither of them. On a principal trade the signer takes the side it named.
+  const [userA, userB] =
+    input.tradeKind === "agent"
+      ? [address(input.partyA), address(input.partyB)]
+      : [
+          input.sdpSide === "a" ? signer.address : address(input.counterparty),
+          input.sdpSide === "b" ? signer.address : address(input.counterparty),
+        ];
 
   // Resolved once, here, and used for the terms check, the row and the ATA
   // derivations alike. The program treats an omitted destination as the party's
@@ -401,7 +431,10 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     refString: input.refString,
     escrowA,
     escrowB,
-    sdpSide: input.sdpSide,
+    // Null on an agent trade, and the schema's CHECK ties the two together so
+    // a principal trade can never lose its side.
+    sdpSide: input.tradeKind === "agent" ? null : input.sdpSide,
+    tradeKind: input.tradeKind,
     sdpWalletId: input.sdpWalletId,
     idempotencyKey: input.idempotencyKey,
     idempotencyFingerprint: fingerprint,

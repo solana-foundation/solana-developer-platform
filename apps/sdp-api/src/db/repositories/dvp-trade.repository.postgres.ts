@@ -1,6 +1,7 @@
 import type { AppDb } from "@/db";
 import type {
   DvpTradeInsert,
+  DvpTradeKind,
   DvpTradeObservationUpdate,
   DvpTradeRepository,
   DvpTradeRow,
@@ -58,7 +59,8 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     escrowA: assertString(row.escrow_a, "escrow_a"),
     escrowB: assertString(row.escrow_b, "escrow_b"),
 
-    sdpSide: row.sdp_side as DvpTradeSide,
+    sdpSide: (row.sdp_side as DvpTradeSide | null) ?? null,
+    tradeKind: (row.trade_kind as DvpTradeKind | null) ?? "principal",
     sdpWalletId: assertString(row.sdp_wallet_id, "sdp_wallet_id"),
 
     status: row.status as DvpTradeStatus,
@@ -84,7 +86,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          decimals_a, decimals_b, symbol_a, symbol_b,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
-         escrow_a, escrow_b, sdp_side, sdp_wallet_id,
+         escrow_a, escrow_b, sdp_side, trade_kind, sdp_wallet_id,
          status, observed_at, sdp_leg_funding_signature, sdp_leg_funding_tx,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
@@ -126,7 +128,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               decimals_a, decimals_b, symbol_a, symbol_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
-              escrow_a, escrow_b, sdp_side, sdp_wallet_id,
+              escrow_a, escrow_b, sdp_side, trade_kind, sdp_wallet_id,
               idempotency_key, idempotency_fingerprint,
               create_signature, create_last_valid_block_height
             ) VALUES (
@@ -136,7 +138,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               ?, ?, ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
-              ?, ?, ?, ?,
+              ?, ?, ?, ?, ?,
               ?, ?, ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
@@ -168,6 +170,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.escrowA,
           row.escrowB,
           row.sdpSide,
+          row.tradeKind,
           row.sdpWalletId,
           row.idempotencyKey,
           row.idempotencyFingerprint,

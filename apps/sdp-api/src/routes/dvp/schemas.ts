@@ -25,13 +25,14 @@ export const dvpTradeIdParamsSchema = z.object({
   tradeId: z.string().min(1),
 });
 
-export const createDvpTradeSchema = z.object({
-  /** Custody wallet holding SDP's leg. Signs as party, create payer and fee payer. */
+/** Terms shared by both kinds of trade. Only the parties differ. */
+const dvpTradeTermsShape = {
+  /**
+   * Custody wallet behind the trade. Signs the create, pays the network fee and
+   * pays rent for both escrows. On a principal trade it also delivers a leg; on
+   * an agent trade it delivers nothing.
+   */
   sdpWalletId: z.string().min(1),
-  /** Which leg SDP delivers: "a" is the asset leg, "b" the cash leg. */
-  sdpSide: z.enum(["a", "b"]),
-  /** The other party. Any address; SDP holds no key for it and it signs nothing. */
-  counterparty: solanaAddressSchema,
 
   mintA: solanaAddressSchema,
   tokenProgramA: solanaAddressSchema,
@@ -66,7 +67,54 @@ export const createDvpTradeSchema = z.object({
    * identity on its own.
    */
   refString: z.string().max(64).nullish(),
+} as const;
+
+/**
+ * The original shape: SDP holds one leg, the counterparty is any address.
+ *
+ * Zach's V1 call (PRO-1830), and still the default.
+ */
+const createPrincipalDvpTradeSchema = z.object({
+  ...dvpTradeTermsShape,
+  /** Omitted is principal, so existing callers keep working unchanged. */
+  tradeKind: z.literal("principal").optional(),
+  /** Which leg SDP delivers. The counterparty takes the other. */
+  sdpSide: z.enum(["a", "b"]),
+  /** The other party. Any address; SDP holds no key for it and it signs nothing. */
+  counterparty: solanaAddressSchema,
 });
+
+/**
+ * Ilan's shape: SDP sets the terms and two other parties do the swaps.
+ *
+ * "you can't assume the new trade submission party is the same party that is
+ * doing one of the legs — it's actually more common for an execution agent to
+ * set up the onchain swap details then have two counter parties do the swaps."
+ *
+ * The program always allowed this: `CreateDvp`'s only signer is the payer, and
+ * both parties are plain accounts. There is deliberately no `sdpSide` here —
+ * SDP holds neither leg, and a side would name one it has no key for.
+ */
+const createAgentDvpTradeSchema = z.object({
+  ...dvpTradeTermsShape,
+  tradeKind: z.literal("agent"),
+  /** Delivers leg A. An arbitrary address; signs nothing here. */
+  partyA: solanaAddressSchema,
+  /** Delivers leg B. Likewise. */
+  partyB: solanaAddressSchema,
+});
+
+/**
+ * Discriminated so the two kinds cannot blur. A body carrying both a side and
+ * two parties is refused rather than silently resolved, because guessing which
+ * the caller meant is guessing which leg SDP is about to fund.
+ */
+export const createDvpTradeSchema = z
+  .discriminatedUnion("tradeKind", [
+    createPrincipalDvpTradeSchema.extend({ tradeKind: z.literal("principal") }),
+    createAgentDvpTradeSchema,
+  ])
+  .or(createPrincipalDvpTradeSchema);
 
 export const listDvpTradesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),

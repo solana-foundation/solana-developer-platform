@@ -68,6 +68,7 @@ function tradeInput() {
     projectId: TEST_PROJECT_ID,
     sdpWalletId: CUSTODY_WALLET_ID,
     sdpSide: "a" as const,
+    tradeKind: "principal" as const,
     counterparty: COUNTERPARTY,
     mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",

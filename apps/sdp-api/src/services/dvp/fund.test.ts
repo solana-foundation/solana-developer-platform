@@ -71,7 +71,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     refString: null,
     escrowA: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
     escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
-    sdpSide: "a",
+    sdpSide: "a" as const,
+    tradeKind: "principal" as const,
     sdpWalletId: "cwlt_leg",
     status: "created",
     observedAt: null,
@@ -335,5 +336,34 @@ describe("readDvpLegShortfall", () => {
     readEscrowState.mockResolvedValue({ amount: 4000n, frozen: false });
 
     await expect(readDvpLegShortfall(env, trade())).resolves.toBe(0n);
+  });
+});
+
+/**
+ * An agent trade has no SDP leg. Funding one from here would spend a custody
+ * wallet on a leg SDP neither holds nor owes.
+ *
+ * This is the sharpest edge in agent mode: `sdpLegOf` reads any side that is
+ * not "a" as "b", so a null side used to resolve to leg B and fund it.
+ */
+describe("agent trades have no SDP leg", () => {
+  it("refuses to fund one, and says why", async () => {
+    const agent = trade({ tradeKind: "agent" as const, sdpSide: null });
+
+    await expect(fundDvpTradeLeg(context, agent)).rejects.toThrow(/agent trade/i);
+  });
+
+  it("refuses at every fundable status, not just a closed one", async () => {
+    for (const status of ["created", "partially_funded"] as const) {
+      const agent = trade({ tradeKind: "agent" as const, sdpSide: null, status });
+
+      await expect(fundDvpTradeLeg(context, agent)).rejects.toThrow(/agent trade/i);
+    }
+  });
+
+  it("never reports a shortfall for a leg it does not hold", async () => {
+    const agent = trade({ tradeKind: "agent" as const, sdpSide: null });
+
+    await expect(readDvpLegShortfall(env, agent)).rejects.toThrow(/no SDP leg/i);
   });
 });
