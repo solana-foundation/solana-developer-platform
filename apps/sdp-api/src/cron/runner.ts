@@ -296,9 +296,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // security on dvp_trades, which fails closed when no identity is declared -
   // so a bare tick would read zero open trades, find no funding, and go on
   // reporting success while a counterparty's escrowed deposit sat unnoticed.
-  tasks.push(
-    scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation)
-  );
+  tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
 
   return {
     stop() {
