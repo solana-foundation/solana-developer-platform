@@ -291,15 +291,13 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // The DvP job checks the flag itself and returns early, so it is registered
   // unconditionally: an open trade holds a counterparty's money in escrow, and
   // must keep being observed even if the flag is turned off during an incident.
+  // Through scheduleSystemTask like every other sweep, NOT a bare schedule().
+  // Reconciliation is cross-tenant by nature and 0086 puts forced row-level
+  // security on dvp_trades, which fails closed when no identity is declared -
+  // so a bare tick would read zero open trades, find no funding, and go on
+  // reporting success while a counterparty's escrowed deposit sat unnoticed.
   tasks.push(
-    schedule(DVP_TRADES_CRON, () => {
-      if (stopping) return;
-      runDvpTradeReconciliation({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation)
   );
 
   return {
