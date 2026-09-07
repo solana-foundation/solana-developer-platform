@@ -171,11 +171,11 @@
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3",
     "yaml": "2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "26.4.0",
-    "tsx": "4.23.12",
+    "tsx": "4.23.13",
     "typescript": "6.0.3"
   }
 }
