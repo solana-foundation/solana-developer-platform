@@ -281,7 +281,14 @@ async function reconcileSubmitted(
   // will need to be wired through this call the way withdraw-confirm.ts does.
   // TODO(auth): plumb resolveMemberGatewayAuth into the cron path once we need it.
   const rpc = solanaRpc.createRpc(env, { rpcUrl: instance.gateway_url });
-  const [status] = await solanaRpc.getSignatureStatuses(rpc, [withdrawal.signature as Signature]);
+  // searchTransactionHistory for the same reason as the deposit reconciler:
+  // every path into here is already past the node's short recent-status cache,
+  // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without
+  // it an executed burn reads null and is failed, which invites the caller to
+  // burn the same balance twice.
+  const [status] = await solanaRpc.getSignatureStatuses(rpc, [withdrawal.signature as Signature], {
+    searchTransactionHistory: true,
+  });
 
   if (!status) {
     if (now - Date.parse(withdrawal.updated_at) > STUCK_AFTER_MS) {

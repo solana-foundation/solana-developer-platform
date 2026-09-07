@@ -2,6 +2,7 @@ import type { PrivateChannelInstance, PrivateChannelTransferRecipientDto } from 
 import { mapPrivateChannelInstanceRow, type PrivateChannelUserRow } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound, providerUnavailable, walletNotFound } from "@/lib/errors";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSigner } from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -104,6 +105,9 @@ export async function resolveTransferCreateContext(
   if (!wallet) {
     throw walletNotFound();
   }
+  // Same second line as the deposit/withdrawal seam: enrolment alone would let
+  // an API key bound to one wallet spend any wallet enrolled in the project.
+  assertApiKeyWalletAccess(context.auth, wallet.walletId, ["payments:write"]);
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,

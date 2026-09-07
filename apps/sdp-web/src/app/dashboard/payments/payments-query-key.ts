@@ -13,6 +13,8 @@ export const paymentsQueryKeys = {
     ["offramp-transfer-status", transferId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
+  isCounterpartyRequirementsKey: (key: unknown) =>
+    Array.isArray(key) && key[0] === "counterparty-requirements",
   counterpartyRequirements: ({
     counterpartyId,
     provider,

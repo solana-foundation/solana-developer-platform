@@ -123,7 +123,9 @@ describe("trackPendingDeposits", () => {
       organizationId: "org",
       projectId: "proj",
     });
-    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1"]);
+    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1"], {
+      searchTransactionHistory: true,
+    });
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d1", status: "confirmed", expectedStatus: "submitted" })
     );
@@ -205,6 +207,29 @@ describe("trackPendingDeposits", () => {
     );
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d7", status: "confirmed", expectedStatus: "submitted" })
+    );
+  });
+
+  /**
+   * The promotion only fires once the row is already older than the stale
+   * window, which is well past the node's short recent-status cache. Polling
+   * without searchTransactionHistory would read null for a deposit that DID
+   * execute, fail it, and let the dashboard hand out a fresh idempotency key —
+   * a second deposit of the same funds.
+   */
+  it("asks the chain's history when promoting, so an executed deposit is not failed", async () => {
+    depositRepo.listNonTerminal.mockResolvedValueOnce([
+      depositRow({ id: "d7b", status: "pending", signature: "sig7b", updated_at: STALE_ISO }),
+    ]);
+    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "finalized", err: null }]);
+
+    await trackPendingDeposits({} as Env);
+
+    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, expect.any(Array), {
+      searchTransactionHistory: true,
+    });
+    expect(depositRepo.updateDeposit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: "d7b", status: "failed" })
     );
   });
 

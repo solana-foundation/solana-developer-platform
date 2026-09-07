@@ -1,5 +1,5 @@
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound, unauthorized } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -51,16 +51,14 @@ export async function createPrivateChannelDeposit(
       userId: context.auth.userId,
     });
 
-    const userId = context.actor.user_id;
-    if (!userId) {
-      throw unauthorized("Private Channel deposits require a user session.");
-    }
-
+    // Attribution, not authorization. `actor.user_id` is null on every principal
+    // created since 0073, so requiring it here 401'd deposits on any project
+    // newer than that change; the caller's own id is recorded when there is one.
     const deposit = await createChannelDeposit(c.env, {
       instance: context.instance,
       organizationId: context.auth.organizationId,
       projectId: context.projectId,
-      userId,
+      userId: context.auth.userId ?? null,
       wallet: context.wallet,
       amount: body.amount,
       mint: body.mint,

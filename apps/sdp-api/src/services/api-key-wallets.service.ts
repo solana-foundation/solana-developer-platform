@@ -30,7 +30,10 @@ interface CustodyWalletCandidateRow {
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
-  if (!permissions || permissions.length === 0) {
+  // Only an ABSENT permissions list means "unrestricted". An explicitly empty
+  // array is an intent to grant nothing and must never widen to the wildcard
+  // default — that would turn an attempt to restrict a key into full access.
+  if (permissions == null) {
     return [...DEFAULT_API_KEY_WALLET_PERMISSIONS];
   }
 
@@ -274,9 +277,17 @@ export async function cloneApiKeyWalletBindings(
 }
 
 function safeParsePermissions(raw: unknown): Permission[] | null {
-  const parsed = parsePostgresJsonOr<unknown>(raw, null);
-  if (!Array.isArray(parsed)) {
+  // Only a genuinely ABSENT value (SQL NULL) may map to null — the
+  // historical unrestricted default. A value that exists but cannot be
+  // parsed as an array fails CLOSED: conflating corrupt data with absence
+  // would widen a broken permissions row into full wallet access.
+  if (raw == null) {
     return null;
+  }
+
+  const parsed = parsePostgresJsonOr<unknown>(raw, undefined);
+  if (!Array.isArray(parsed)) {
+    return [];
   }
 
   return parsed.filter((entry): entry is Permission => typeof entry === "string");

@@ -2,6 +2,7 @@ import { createSign, generateKeyPairSync } from "node:crypto";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -269,25 +270,34 @@ describe("MuralWebhookProcessor.process", () => {
     expect(await transferStatus("xfr_mural_complete_set_match")).toBe("completed");
   });
 
-  it("refuses an organization reference associated with multiple tenants", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO counterparties (
-           id, organization_id, project_id, entity_type, display_name,
-           status, created_by, provider_data
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
-      )
-      .bind(
-        "cp_mural_ambiguous_tenant",
-        organizationId,
-        projectId,
-        "business",
-        "Other Mural Buyer",
-        "active",
-        userId,
-        { mural: { organization: { id: muralOrganizationId } } }
-      )
-      .run();
+  it("refuses a second counterparty claiming the same organization reference", async () => {
+    // The two-claimant state this webhook's exactly-one guard used to detect
+    // at read time can no longer be created: the effective-key unique index
+    // from 0078_counterparty_provider_lookup_integrity rejects a second
+    // active claim whether it arrives denormalized or only in provider_data
+    // JSON. The read-time guard remains as defense in depth; here the
+    // database refuses the write and the webhook keeps resolving the sole
+    // legitimate holder.
+    await expect(
+      getDb(env)
+        .prepare(
+          `INSERT INTO counterparties (
+             id, organization_id, project_id, entity_type, display_name,
+             status, created_by, provider_data
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
+        )
+        .bind(
+          "cp_mural_ambiguous_tenant",
+          organizationId,
+          projectId,
+          "business",
+          "Other Mural Buyer",
+          "active",
+          userId,
+          { mural: { organization: { id: muralOrganizationId } } }
+        )
+        .run()
+    ).rejects.toSatisfy(isPostgresUniqueViolation);
     await seedTransfer("xfr_mural_ambiguous_tenant");
 
     await processor.process(appContext, "sandbox", {
@@ -298,6 +308,6 @@ describe("MuralWebhookProcessor.process", () => {
       deliveryId: "delivery_mural_ambiguous_tenant",
     });
 
-    expect(await transferStatus("xfr_mural_ambiguous_tenant")).toBe("awaiting_payment");
+    expect(await transferStatus("xfr_mural_ambiguous_tenant")).toBe("completed");
   });
 });

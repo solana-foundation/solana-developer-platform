@@ -134,7 +134,7 @@ describe("database client connection management", () => {
     const client = pgMock.pools[0]?.connectedClients[0];
     expect(pgMock.pools[0]?.connectedClients).toHaveLength(1);
     expect(client?.queries.map(([query]) => query)).toEqual([
-      "BEGIN",
+      expect.objectContaining({ text: "BEGIN" }),
       expect.objectContaining({ text: "UPDATE wallets SET updated_at = sdp_datetime_now()" }),
       expect.objectContaining({ text: "SELECT 1" }),
       "COMMIT",
@@ -155,7 +155,7 @@ describe("database client connection management", () => {
 
     const client = pgMock.pools[0]?.connectedClients[0];
     expect(client?.queries.map(([query]) => query)).toEqual([
-      "BEGIN",
+      expect.objectContaining({ text: "BEGIN" }),
       expect.objectContaining({ text: "UPDATE wallets SET updated_at = sdp_datetime_now()" }),
       "ROLLBACK",
     ]);
@@ -187,7 +187,7 @@ describe("database client connection management", () => {
     const client = pgMock.pools[0]?.connectedClients[0];
     expect(client?.queries.map(([query]) => query)).toEqual([
       expect.objectContaining({ text: "SELECT pg_advisory_lock(hashtext($1))" }),
-      "BEGIN",
+      expect.objectContaining({ text: "BEGIN" }),
       expect.objectContaining({ text: "INSERT INTO audit_logs (id) VALUES ($1)" }),
       "COMMIT",
       expect.objectContaining({ text: "SELECT pg_advisory_unlock(hashtext($1))" }),
@@ -229,7 +229,7 @@ describe("database client connection management", () => {
     const client = pgMock.pools[0]?.connectedClients[0];
     expect(client?.queries.map(([query]) => query)).toEqual([
       expect.objectContaining({ text: "SELECT pg_advisory_lock(hashtext($1))" }),
-      "BEGIN",
+      expect.objectContaining({ text: "BEGIN" }),
       expect.objectContaining({ text: "INSERT INTO audit_logs (id) VALUES ($1)" }),
       "COMMIT",
       "ROLLBACK",
@@ -291,7 +291,7 @@ describe("database client connection management", () => {
 
     const client = pgMock.pools[0]?.connectedClients[0];
     expect(client?.queries.map(([query]) => query)).toEqual([
-      "BEGIN",
+      expect.objectContaining({ text: "BEGIN" }),
       expect.objectContaining({ text: "UPDATE wallets SET updated_at = sdp_datetime_now()" }),
       "ROLLBACK",
     ]);

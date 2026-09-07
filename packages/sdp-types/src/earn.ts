@@ -163,6 +163,7 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
   // renders their metadata.
   kamino: "Kamino",
+  jupiter: "Jupiter",
   aave_v3: "Aave V3",
   gustb: "Superstate USTB",
   guscc: "Superstate USCC",

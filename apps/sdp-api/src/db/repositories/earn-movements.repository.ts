@@ -331,6 +331,19 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
+  /**
+   * The COMPLETE set of claims `listVaultPositions` would serve (same
+   * visibility predicate, unpaged — a reconciliation over a page would clear
+   * discrepancies it never looked at), each with whether any of its movements
+   * is still unsettled. Read-only input to share reconciliation (PRO-1741);
+   * empty wallet scope answers empty rather than throwing, because "this key
+   * sees no wallets" is a legitimate reconciliation answer.
+   */
+  listVaultClaimsForReconciliation(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    custodyWalletIds: readonly string[];
+  }): Promise<Array<EarnPositionRow & { has_unsettled_movements: boolean }>>;
   /** External-wallet vault claims, exact-project scoped, newest first. */
   listExternalWalletPositions(params: {
     organizationId: string;
@@ -766,6 +779,39 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   };
 }
 
+/**
+ * What makes a custody vault claim VISIBLE to the org: the exact predicate
+ * behind `GET /vault-positions` (activated, open or re-entered, live movement
+ * evidence, wallet-scoped). `listVaultClaimsForReconciliation` shares it by
+ * construction, because the reconciliation report's meaning is "relative to
+ * what the positions read serves": a claim matched by a broader predicate
+ * would mark a holding recorded while `/vault-positions` still hides it, and
+ * the Treasury would understate with reconciliation reporting all clear.
+ *
+ * Binds, in order: organization_id, environment, custody wallet id array.
+ */
+const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
+               AND environment = ?
+               AND kind = 'vault_direct'
+               AND activated_at IS NOT NULL
+               AND (
+                 closed_at IS NULL
+                 OR EXISTS (
+                   SELECT 1
+                   FROM earn_movements reentry
+                   WHERE reentry.position_id = earn_positions.id
+                     AND reentry.direction = 'deposit'
+                     AND reentry.status IN ('requested', 'submitted')
+                 )
+               )
+               AND custody_wallet_id = ANY (?::text[])
+               AND EXISTS (
+                 SELECT 1
+                 FROM earn_movements movement
+                 WHERE movement.position_id = earn_positions.id
+                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+               )`;
+
 export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsRepository {
   return {
     async getMovementById(params) {
@@ -927,27 +973,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const result = await db
         .prepare(
           `SELECT * FROM earn_positions
-             WHERE organization_id = ?
-               AND environment = ?
-               AND kind = 'vault_direct'
-               AND activated_at IS NOT NULL
-               AND (
-                 closed_at IS NULL
-                 OR EXISTS (
-                   SELECT 1
-                   FROM earn_movements reentry
-                   WHERE reentry.position_id = earn_positions.id
-                     AND reentry.direction = 'deposit'
-                     AND reentry.status IN ('requested', 'submitted')
-                 )
-               )
-               AND custody_wallet_id = ANY (?::text[])
-               AND EXISTS (
-                 SELECT 1
-                 FROM earn_movements movement
-                 WHERE movement.position_id = earn_positions.id
-                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-               )
+             WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
              LIMIT ?`
@@ -962,6 +988,33 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<EarnPositionRow>();
       const rows = result.results ?? [];
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+    },
+
+    async listVaultClaimsForReconciliation(params) {
+      if (params.custodyWalletIds.length === 0) {
+        return [];
+      }
+      // `has_unsettled_movements` uses the vault ledger's NON-TERMINAL set
+      // (finalized|failed are the only terminal statuses). A claim with an
+      // in-flight movement is excluded from zero-share reporting by the
+      // service: the ledger already explains why chain and record disagree,
+      // and the every-minute sweep will settle it either way.
+      const result = await db
+        .prepare(
+          `SELECT *,
+                  EXISTS (
+                    SELECT 1
+                    FROM earn_movements unsettled
+                    WHERE unsettled.position_id = earn_positions.id
+                      AND unsettled.status IN ('requested', 'submitted', 'confirmed')
+                  ) AS has_unsettled_movements
+             FROM earn_positions
+             WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
+             ORDER BY created_at DESC, id DESC`
+        )
+        .bind(params.organizationId, params.environment, params.custodyWalletIds)
+        .all<EarnPositionRow & { has_unsettled_movements: boolean }>();
+      return result.results ?? [];
     },
 
     async listExternalWalletPositions(params) {

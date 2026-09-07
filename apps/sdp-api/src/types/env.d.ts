@@ -229,6 +229,12 @@ export interface Env {
   // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
   PRIVATE_CHANNELS_ENABLED?: string;
 
+  // Comma-separated origins (`scheme://host[:port]`) a Private Channels gateway
+  // or auth URL may point at. Projects supply those URLs, so this is the list
+  // that decides where a probe is allowed to go; the public sandbox is approved
+  // without configuring anything. See services/private-channels/egress.ts.
+  PRIVATE_CHANNEL_EGRESS_ALLOWLIST?: string;
+
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
 
@@ -237,6 +243,10 @@ export interface Env {
   HELIUS_RINGS_RPC_URL?: string;
   HELIUS_RINGS_INDEXER_URL?: string;
   HELIUS_RINGS_PROVER_URL?: string;
+
+  // Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up
+  // needs it; absent, submitting a ring program id fails with config_error.
+  HELIUS_RINGS_RING_RPC_URL?: string;
 
   // Permits plain-http Rings upstreams; opt-in per environment because over
   // plaintext an indexer response reveals which notes an identity owns.

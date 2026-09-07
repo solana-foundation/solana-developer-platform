@@ -698,6 +698,13 @@ export const FIELDS: EnvField[] = [
     help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
   },
   {
+    key: "PRIVATE_CHANNEL_EGRESS_ALLOWLIST",
+    section: "advanced",
+    kind: "text",
+    label: "Private Channels egress allowlist",
+    help: "Comma-separated origins (https://host[:port]) a project's Private Channels gateway or auth URL may point at. Projects supply those URLs, so anything not listed here is refused before SDP connects. The public sandbox is approved without configuring anything; a plaintext or loopback entry is honoured as written, so add one only for a destination you mean to approve.",
+  },
+  {
     key: "HELIUS_RINGS_ENABLED",
     section: "advanced",
     kind: "select",
@@ -729,6 +736,13 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Helius Rings prover URL",
     help: "Proving service the Rings SDK calls. Required once Rings is enabled.",
+  },
+  {
+    key: "HELIUS_RINGS_RING_RPC_URL",
+    section: "advanced",
+    kind: "url",
+    label: "Helius Rings ring RPC URL",
+    help: "Helius ring RPC that mints custom-ring auditor keys. Only needed to bring up a project's custom ring.",
   },
   {
     key: "HELIUS_RINGS_ALLOW_INSECURE_HTTP",

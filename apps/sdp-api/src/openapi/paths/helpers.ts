@@ -13,11 +13,6 @@ export const projectScopeHeaders = z.object({
   "x-project-id": projectScopeHeaderSchema.optional(),
 });
 
-/** Required project selection for session-only operations. */
-export const sessionProjectScopeHeaders = z.object({
-  "x-project-id": projectScopeHeaderSchema,
-});
-
 export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
   "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
 });
@@ -29,11 +24,6 @@ export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
  * the API 400s on.
  */
 export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.extend({
-  "Idempotency-Key": idempotencyKeyHeaderSchema,
-});
-
-/** The session-only variant, for the Private Channels value-movement routes. */
-export const sessionProjectScopeWithRequiredIdempotencyHeaders = sessionProjectScopeHeaders.extend({
   "Idempotency-Key": idempotencyKeyHeaderSchema,
 });
 

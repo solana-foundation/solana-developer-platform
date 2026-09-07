@@ -59,7 +59,7 @@ describe("Private Channel transfer OpenAPI", () => {
     }
   });
 
-  it("documents session-only access for recipient discovery and transfer creation", () => {
+  it("documents API-key and session access for recipient discovery and transfer creation", () => {
     const document = createOpenApiDocument();
     const recipients =
       document.paths?.["/v1/private-channels/channels/{channelId}/transfer-recipients"]?.get;
@@ -73,10 +73,13 @@ describe("Private Channel transfer OpenAPI", () => {
       "x-project-id"
     );
 
-    expect(recipients?.security).toEqual([{ sessionCookie: [] }]);
-    expect(create?.security).toEqual([{ sessionCookie: [] }]);
-    expect(recipientProject).toMatchObject({ in: "header", required: true });
-    expect(createProject).toMatchObject({ in: "header", required: true });
+    expect(recipients?.security).toEqual([{ apiKeyAuth: [] }, { sessionCookie: [] }]);
+    expect(create?.security).toEqual([{ apiKeyAuth: [] }, { sessionCookie: [] }]);
+    // Optional: an API key fixes the project itself and the header is ignored.
+    expect(recipientProject).toMatchObject({ in: "header" });
+    expect(recipientProject).not.toMatchObject({ required: true });
+    expect(createProject).toMatchObject({ in: "header" });
+    expect(createProject).not.toMatchObject({ required: true });
     expect(document.paths?.["/v1/private-channels/transfers"]?.get?.security).toEqual([
       { apiKeyAuth: [] },
     ]);

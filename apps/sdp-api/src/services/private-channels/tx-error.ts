@@ -140,14 +140,35 @@ const AMBIGUOUS_TRANSPORT_CODES = new Set([
 ]);
 
 /**
+ * Gateway statuses that leave the send's fate unknown, because the proxy may
+ * already have forwarded it upstream: 502 when it got no usable response from
+ * the node, 504 when it gave up waiting for one, 503 when it declares itself
+ * unavailable.
+ *
+ * 503 belongs here even though it often means "refused before forwarding". It
+ * does not *guarantee* that: proxies also emit 503 when an upstream connection
+ * dies mid-request, and the node itself can shed an already-received request
+ * with one. We cannot tell those apart from the status alone, and the two
+ * mistakes are not symmetric — reconciling a send that never happened costs one
+ * poller pass, while failing a send that did happen invites the caller to move
+ * the same funds again under a fresh key. `@sdp/rpc`'s transient classifier
+ * (packages/sdp-rpc/src/transient.ts) already retries 503 for the same reason.
+ */
+const AMBIGUOUS_HTTP_STATUSES = new Set([502, 503, 504]);
+
+function isAmbiguousHttpStatus(value: unknown): boolean {
+  return typeof value === "number" && AMBIGUOUS_HTTP_STATUSES.has(value);
+}
+
+/**
  * Whether a submission error leaves the transaction's fate unknown: the
- * connection died or timed out AFTER the request may have gone out, so the
- * node may have executed it. A JSON-RPC error response, a refused connection,
- * or a DNS failure is NOT ambiguous — the node either answered or was never
- * reached — and stays a definitive rejection. Callers that persisted the
- * signature before the send must reconcile an ambiguous outcome against the
- * chain instead of marking the row failed, which would invite a duplicate
- * under a fresh idempotency key.
+ * connection died, timed out, or was answered by a gateway that had already
+ * forwarded it, so the node may have executed it. A JSON-RPC error response, a
+ * refused connection, or a DNS failure is NOT ambiguous — the node either
+ * answered or was never reached — and stays a definitive rejection. Callers
+ * that persisted the signature before the send must reconcile an ambiguous
+ * outcome against the chain instead of marking the row failed, which would
+ * invite a duplicate under a fresh idempotency key.
  */
 export function isAmbiguousSubmissionOutcome(error: unknown): boolean {
   let current: unknown = error;
@@ -158,8 +179,24 @@ export function isAmbiguousSubmissionOutcome(error: unknown): boolean {
       message?: unknown;
       cause?: unknown;
       details?: unknown;
+      statusCode?: unknown;
+      status?: unknown;
+      context?: unknown;
     };
     if (record.name === "AbortError" || record.name === "TimeoutError") return true;
+    // A forwarded-but-unanswered gateway response. `context.statusCode` is where
+    // @solana/kit puts it on SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR; the bare
+    // fields cover plain fetch/undici wrappers.
+    if (isAmbiguousHttpStatus(record.statusCode) || isAmbiguousHttpStatus(record.status)) {
+      return true;
+    }
+    if (
+      typeof record.context === "object" &&
+      record.context !== null &&
+      isAmbiguousHttpStatus((record.context as { statusCode?: unknown }).statusCode)
+    ) {
+      return true;
+    }
     if (
       typeof record.details === "object" &&
       record.details !== null &&
