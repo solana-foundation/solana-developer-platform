@@ -84,6 +84,63 @@ export async function observeDvpTradeNow(
   }
 }
 
+/**
+ * The same reading, returned instead of recorded.
+ *
+ * For a party looking at a trade another organization created. They need the
+ * live escrow balances more than anyone — "has my transfer landed" is the only
+ * question they have — and they cannot be given them by the recording path:
+ * writing the observation is an UPDATE on somebody else's row, which the 0089
+ * policy refuses because it grants SELECT and nothing more.
+ *
+ * Reading without writing sidesteps that entirely rather than widening the
+ * policy or borrowing the system identity to write across a tenant boundary.
+ * The row still gets its recorded observation from the reconciler, on behalf of
+ * the organization that owns it.
+ *
+ * Returns the trade unchanged when the chain cannot be read, which is the same
+ * answer the recording path gives: a reading that failed is not a balance of
+ * zero, and must not be shown as one.
+ */
+export async function observeDvpTradeWithoutRecording(
+  env: Env,
+  trade: DvpTradeRow
+): Promise<DvpTradeRow> {
+  if (!OPEN_STATUSES.has(trade.status)) {
+    return trade;
+  }
+  try {
+    const rpc = createRpc(env);
+    const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+    const observation = await readDvpTradeObservation(
+      rpc,
+      trade.swapDvp as Address,
+      {
+        a: { escrow: trade.escrowA as Address, tokenProgram: trade.tokenProgramA as Address },
+        b: { escrow: trade.escrowB as Address, tokenProgram: trade.tokenProgramB as Address },
+      },
+      blockHeight
+    );
+    const derived = deriveDvpTradeState(observation, trade, Date.now());
+
+    return {
+      ...trade,
+      status: derived.status,
+      escrowAAmount: observation.legA.exists ? observation.legA.amount.toString() : null,
+      escrowBAmount: observation.legB.exists ? observation.legB.amount.toString() : null,
+      escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
+      escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
+      observedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    getLogger().warn(
+      { error, tradeId: trade.id },
+      "dvp: could not read the trade for a party; showing the stored reading"
+    );
+    return trade;
+  }
+}
+
 /** Statuses that can still change on chain without anyone telling us. */
 const OPEN_STATUSES: ReadonlySet<string> = new Set([
   "created",

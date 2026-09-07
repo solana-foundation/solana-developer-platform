@@ -19,7 +19,11 @@ import { fundDvpTradeLegAsParty } from "@/services/dvp/fund-as-party";
 import { resolveFundableLeg } from "@/services/dvp/fund-authorization";
 import { listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
-import { observeDvpTradeIfStale, observeDvpTradeNow } from "@/services/dvp/observe-now";
+import {
+  observeDvpTradeIfStale,
+  observeDvpTradeNow,
+  observeDvpTradeWithoutRecording,
+} from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import {
   estimateSettlementCostLamports,
@@ -564,7 +568,9 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
     throw notFound("DvP trade not found");
   }
 
-  const observed = await observeDvpTradeIfStale(c.env, trade);
+  // Read, not recorded. Persisting it would be an UPDATE on another
+  // organization's row, which 0089 refuses by design.
+  const observed = await observeDvpTradeWithoutRecording(c.env, trade);
 
   return success(c, {
     trade: {
