@@ -31,7 +31,7 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
-import { DvpInboundPanel } from "./dvp-inbound-panel";
+import { InboundRows } from "./dvp-inbound-rows";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
@@ -121,6 +121,12 @@ function LegCell({
  */
 const STATUS_FILTERS = {
   all: null,
+  // Not a status the trade has: these belong to another organization and are
+  // filtered by who they name, not by where they are in their lifecycle. It
+  // shares the control because it answers the same question a reader is asking
+  // of it — "which of these do I need to look at" — and a second control beside
+  // the first would ask them to learn two.
+  waiting: [],
   open: ["created", "partially_funded", "creating"],
   ready: ["funded"],
   closed: ["settled", "cancelled", "rejected", "closed_unknown", "create_failed", "expired"],
@@ -136,6 +142,7 @@ type StatusFilter = keyof typeof STATUS_FILTERS;
  */
 const STATUS_FILTER_LABELS = {
   all: "DashboardMarkets.dvp.filterAll",
+  waiting: "DashboardMarkets.dvp.filterWaiting",
   open: "DashboardMarkets.dvp.filterOpen",
   ready: "DashboardMarkets.dvp.filterReady",
   closed: "DashboardMarkets.dvp.filterClosed",
@@ -160,33 +167,38 @@ export function DvpTradesWorkspace({
   // Filtered here rather than in the URL: the list arrives already capped by
   // `listByProject`, so everything being filtered is on the page — a round trip
   // per keystroke would be slower and no more correct.
+  // The waiting segment lists trades belonging to other organizations, so the
+  // project's own list is not filtered down to nothing — it is replaced.
+  const showingInbound = status === "waiting";
   const needle = query.trim().toLowerCase();
-  const visible = trades.filter((trade) => {
-    const allowed = STATUS_FILTERS[status];
-    if (allowed && !allowed.includes(trade.status as never)) {
-      return false;
-    }
-    if (!needle) {
-      return true;
-    }
-    // What somebody has to hand when hunting for one trade: the counterparty
-    // they agreed it with, a symbol, or an address off an explorer.
-    return [
-      trade.id,
-      trade.swapDvp,
-      trade.legs.a.symbol,
-      trade.legs.b.symbol,
-      trade.legs.a.mint,
-      trade.legs.b.mint,
-      // Both parties, always. Searching only "the other side" found nothing on
-      // an agent trade, where neither party is us and either one is what
-      // somebody would paste in.
-      trade.legs.a.party,
-      trade.legs.b.party,
-    ]
-      .filter(Boolean)
-      .some((value) => matchesAddressQuery(String(value), needle));
-  });
+  const visible = showingInbound
+    ? []
+    : trades.filter((trade) => {
+        const allowed = STATUS_FILTERS[status];
+        if (allowed && !allowed.includes(trade.status as never)) {
+          return false;
+        }
+        if (!needle) {
+          return true;
+        }
+        // What somebody has to hand when hunting for one trade: the counterparty
+        // they agreed it with, a symbol, or an address off an explorer.
+        return [
+          trade.id,
+          trade.swapDvp,
+          trade.legs.a.symbol,
+          trade.legs.b.symbol,
+          trade.legs.a.mint,
+          trade.legs.b.mint,
+          // Both parties, always. Searching only "the other side" found nothing on
+          // an agent trade, where neither party is us and either one is what
+          // somebody would paste in.
+          trade.legs.a.party,
+          trade.legs.b.party,
+        ]
+          .filter(Boolean)
+          .some((value) => matchesAddressQuery(String(value), needle));
+      });
 
   const listIsEmpty = trades.length === 0;
   const filteredToNothing = !listIsEmpty && visible.length === 0;
@@ -210,11 +222,6 @@ export function DvpTradesWorkspace({
             </Button>
           )}
         </div>
-
-        {/* Before the list, and before the error: a trade waiting on this
-            project is the only item on the page with an expiry running against
-            it, and it is not affected by the list having failed to load. */}
-        <DvpInboundPanel trades={inbound} />
 
         {/* An error and a table of nothing say different things, and showing
             both says the list is empty when the truth is that it could not be
@@ -258,9 +265,18 @@ export function DvpTradesWorkspace({
                 <div className="overflow-x-auto [scrollbar-width:none]">
                   <SegmentedControl
                     aria-label={t("DashboardMarkets.dvp.filterStatusLabel")}
-                    items={STATUS_FILTER_ORDER.map((option) => ({
+                    // The count rides on the label. A trade waiting on this
+                    // project is the one thing here with a deadline against it,
+                    // and a number on the control says so without a banner
+                    // above the table that is empty most days.
+                    items={STATUS_FILTER_ORDER.filter(
+                      (option) => option !== "waiting" || inbound.length > 0
+                    ).map((option) => ({
                       value: option,
-                      label: t(STATUS_FILTER_LABELS[option]),
+                      label:
+                        option === "waiting"
+                          ? `${t(STATUS_FILTER_LABELS[option])} · ${inbound.length}`
+                          : t(STATUS_FILTER_LABELS[option]),
                     }))}
                     // Re-clicking the active segment can emit an empty value
                     // from the underlying toggle group, and a status filter
@@ -317,12 +333,25 @@ export function DvpTradesWorkspace({
                           where we hold a leg with trades set up for two other
                           parties, and the second kind has no counterparty
                           because we are not one of the sides. */}
-                      <TableHead>{t("DashboardMarkets.dvp.columnParties")}</TableHead>
-                      <TableHead>{t("DashboardMarkets.dvp.columnCreated")}</TableHead>
+                      <TableHead>
+                        {t(
+                          showingInbound
+                            ? "DashboardMarkets.dvp.inboundColumnFund"
+                            : "DashboardMarkets.dvp.columnParties"
+                        )}
+                      </TableHead>
+                      <TableHead>
+                        {t(
+                          showingInbound
+                            ? "DashboardMarkets.dvp.inboundColumnExpires"
+                            : "DashboardMarkets.dvp.columnCreated"
+                        )}
+                      </TableHead>
                       <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {showingInbound ? <InboundRows trades={inbound} /> : null}
                     {visible.map((trade) => {
                       // Who to show in the parties column. On a trade we are a
                       // party to that is the other side; on one we only set up
