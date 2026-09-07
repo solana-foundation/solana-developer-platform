@@ -32,6 +32,18 @@ export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
 export type DvpTradeKind = "principal" | "agent";
 
 /**
+ * Whether the reader is a party to a trade somebody ELSE created.
+ *
+ * Distinct from `isDvpAgentTrade`, and the distinction is the whole of the
+ * party view: an agent trade viewed by its author has no leg of theirs, while
+ * the same trade viewed by a named party has exactly one — and only the second
+ * of those may fund it, and neither may be offered the other's actions.
+ */
+export function isDvpPartyView(trade: { yourSide?: "a" | "b" }): boolean {
+  return trade.yourSide === "a" || trade.yourSide === "b";
+}
+
+/**
  * Whether this organization holds a leg of the trade.
  *
  * Derived from the side rather than the kind, so a row written before
@@ -135,6 +147,17 @@ export interface DvpTrade {
    * Absent on trades recorded before the kind existed, which are all principal.
    */
   tradeKind?: DvpTradeKind;
+  /**
+   * Set only when the reader is a PARTY to a trade somebody else created.
+   *
+   * The three questions this page answers are different for them: they hold a
+   * leg (so "you hold neither" is false), they are not the settlement authority
+   * (so settling and cancelling are not theirs to offer), and the leg they can
+   * act on is this one rather than `sdpSide`, which describes the author.
+   *
+   * Absent on every trade this organization created, whichever kind it is.
+   */
+  yourSide?: "a" | "b";
   /**
    * Which leg this organization delivers, or null when it delivers neither.
    *

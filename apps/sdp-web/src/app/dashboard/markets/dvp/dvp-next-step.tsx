@@ -17,7 +17,7 @@ import { ClockIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { type DvpTrade, isDvpAgentTrade } from "./dvp-trade";
+import { type DvpTrade, isDvpAgentTrade, isDvpPartyView } from "./dvp-trade";
 
 type Tone = "info" | "waiting" | "attention";
 
@@ -53,6 +53,50 @@ function Panel({ children, tone, title }: { children: ReactNode; tone: Tone; tit
       </div>
     </section>
   );
+}
+
+/**
+ * Whose move it is for a party reading a trade somebody else created.
+ *
+ * Only two answers are ever theirs: fund your leg, or wait. Settling belongs to
+ * the organization that set the trade up, so even a fully funded trade asks
+ * nothing of them.
+ */
+function partyNextStep(
+  trade: DvpTrade,
+  t: ReturnType<typeof useTranslations>
+): { tone: Tone; title: string; body: string } | null {
+  const yours = trade.yourSide === "a" ? trade.legs.a : trade.legs.b;
+
+  switch (trade.status) {
+    case "created":
+    case "partially_funded":
+      return yours.funding?.funded
+        ? {
+            tone: "waiting",
+            title: t("DashboardMarkets.dvp.nextPartyAwaitTitle"),
+            body: t("DashboardMarkets.dvp.nextPartyAwaitBody"),
+          }
+        : {
+            tone: "info",
+            title: t("DashboardMarkets.dvp.nextPartyFundTitle"),
+            body: t("DashboardMarkets.dvp.nextPartyFundBody"),
+          };
+    case "funded":
+      return {
+        tone: "waiting",
+        title: t("DashboardMarkets.dvp.nextPartySettleTitle"),
+        body: t("DashboardMarkets.dvp.nextPartySettleBody"),
+      };
+    case "expired":
+      return {
+        tone: "attention",
+        title: t("DashboardMarkets.dvp.nextExpiredTitle"),
+        body: t("DashboardMarkets.dvp.nextExpiredBody"),
+      };
+    default:
+      return null;
+  }
 }
 
 /**
@@ -119,6 +163,14 @@ function nextStep(
   trade: DvpTrade,
   t: ReturnType<typeof useTranslations>
 ): { tone: Tone; title: string; body: string } | null {
+  // A party reading somebody else's trade holds exactly one leg and cannot
+  // close the trade. Checked BEFORE the agent branch: the same trade is an
+  // agent trade to its author and a leg you owe to the party named on it, and
+  // telling the party they hold neither leg is simply false.
+  if (isDvpPartyView(trade)) {
+    return partyNextStep(trade, t);
+  }
+
   // On an agent trade there is no "ours" and no "theirs", so the question this
   // panel answers changes: not whose move it is between us and a counterparty,
   // but how many of the two parties have paid.

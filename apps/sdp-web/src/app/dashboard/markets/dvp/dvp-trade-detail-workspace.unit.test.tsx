@@ -195,6 +195,77 @@ describe("DvpTradeDetailWorkspace", () => {
     });
   });
 
+  /**
+   * A PARTY reading a trade another organization created.
+   *
+   * The same row is an agent trade to its author and a leg you owe to the party
+   * named on it, and the page has to answer differently for each. It answered
+   * as the author: "you hold neither leg" to somebody holding one, and Settle
+   * and Cancel to somebody who is not the settlement authority.
+   */
+  describe("viewed by a party, not the author", () => {
+    const asParty = () => trade({ tradeKind: "agent", sdpSide: null, yourSide: "b" });
+
+    it("does not tell a party they hold neither leg", () => {
+      expect(renderDetail(asParty())).not.toContain("You hold neither leg");
+    });
+
+    // Settling belongs to the settlement authority. A party's click could only
+    // ever come back "trade not found".
+    it("offers neither settle nor cancel", () => {
+      const funded = {
+        observedAmount: "1000",
+        funded: true,
+        surplus: null,
+        frozen: false,
+      };
+      const html = renderDetail(
+        trade({
+          tradeKind: "agent",
+          sdpSide: null,
+          yourSide: "b",
+          status: "funded",
+          legs: { a: leg(ESCROW_A, { funding: funded }), b: leg(ESCROW_B, { funding: funded }) },
+        })
+      );
+
+      expect(html).not.toContain("Delivers each leg to the other party");
+      expect(html).not.toContain("Refunds each leg to whoever deposited it");
+    });
+
+    it("says whose the trade is and what is not theirs to do", () => {
+      expect(renderDetail(asParty())).toContain("not the settlement authority");
+    });
+
+    // Their leg, not the author's. Offering the wrong one would point a real
+    // transfer at the counterparty's escrow.
+    it("offers funding on the leg the party holds", () => {
+      const html = renderDetail(asParty());
+      const fundAt = html.indexOf("Fund this leg");
+
+      expect(fundAt).toBeGreaterThan(-1);
+      expect(fundAt).toBeGreaterThan(html.indexOf(ESCROW_B));
+    });
+
+    it("withdraws it once their own leg is funded", () => {
+      const html = renderDetail(
+        trade({
+          tradeKind: "agent",
+          sdpSide: null,
+          yourSide: "b",
+          legs: {
+            a: leg(ESCROW_A),
+            b: leg(ESCROW_B, {
+              funding: { observedAmount: "1000", funded: true, surplus: null, frozen: false },
+            }),
+          },
+        })
+      );
+
+      expect(html).not.toContain("Fund this leg");
+    });
+  });
+
   // Funding again would over-fund the escrow, and settlement refunds a surplus,
   // which on a transfer-hook mint can revert the settlement.
   it("withdraws the funding action once your leg is funded", () => {

@@ -31,6 +31,7 @@ import {
   formatLegAmount,
   frozenLegs,
   isDvpAgentTrade,
+  isDvpPartyView,
   isDvpTradeClosed,
   legFundingRatio,
   overFundedLegs,
@@ -633,6 +634,11 @@ function LegCards({
   const sdpSide = sdpLegSideOf(trade);
   const agent = sdpSide === null;
 
+  // Which card carries the action. The author funds the leg it holds; a party
+  // reading somebody else's trade funds the leg NAMING them, which on an agent
+  // trade is a leg this function would otherwise give no action to at all.
+  const actionSide = trade.yourSide ?? sdpSide;
+
   // On an agent trade both legs belong to other parties, so neither card can be
   // captioned "held by this organization" and neither carries a fund action.
   const holderA = agent
@@ -648,7 +654,7 @@ function LegCards({
 
   const cardA = (
     <LegCard
-      action={!agent && sdpSide === "a" ? action : undefined}
+      action={actionSide === "a" ? action : undefined}
       closed={closed}
       holder={holderA}
       key="a"
@@ -658,7 +664,7 @@ function LegCards({
   );
   const cardB = (
     <LegCard
-      action={!agent && sdpSide === "b" ? action : undefined}
+      action={actionSide === "b" ? action : undefined}
       closed={closed}
       holder={holderB}
       key="b"
@@ -709,11 +715,16 @@ export function DvpTradeDetailWorkspace({
   // trade has two counterparties and we are neither, so it has no "other side".
   const counterparty =
     sdpSide === null ? null : sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party;
+  // A party reading somebody else's trade funds THEIR leg, through the party
+  // endpoint, with their own wallet policy governing it. `sdpSide` describes
+  // the author and says nothing about them.
+  const partyView = isDvpPartyView(trade);
+  const fundableLeg = partyView ? (trade.yourSide === "a" ? trade.legs.a : trade.legs.b) : sdpLeg;
   const canFund =
-    sdpLeg !== null &&
+    fundableLeg !== null &&
     (trade.status === "created" || trade.status === "partially_funded") &&
-    !sdpLeg.funding?.funded &&
-    !sdpLeg.funding?.frozen;
+    !fundableLeg.funding?.funded &&
+    !fundableLeg.funding?.frozen;
 
   const fundAction = canFund ? (
     <div className="flex flex-col gap-2">
@@ -723,7 +734,7 @@ export function DvpTradeDetailWorkspace({
       <Button
         className="self-start"
         disabled={pending !== null}
-        onClick={() => act("fund")}
+        onClick={() => act(partyView ? "fund-as-party" : "fund")}
         type="button"
       >
         {t("DashboardMarkets.dvp.actionFund")}
@@ -767,7 +778,17 @@ export function DvpTradeDetailWorkspace({
           </Callout>
         ) : null}
 
-        <DvpCloseActions onAct={act} pending={pending} trade={trade} />
+        {/* Only the settlement authority can settle or cancel, and a party
+            reading somebody else's trade is not it. Offering the buttons put
+            two irreversible-looking actions in front of somebody whose click
+            could only ever come back "trade not found". */}
+        {partyView ? (
+          <p className="text-tertiary text-xs leading-relaxed">
+            {t("DashboardMarkets.dvp.partyHoldsLeg")}
+          </p>
+        ) : (
+          <DvpCloseActions onAct={act} pending={pending} trade={trade} />
+        )}
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
