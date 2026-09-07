@@ -40,6 +40,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelDepositRow {
     settlement_ref: (row.settlement_ref ?? null) as string | null,
     failure_reason: (row.failure_reason ?? null) as string | null,
     context: readContext(row.context),
+    idempotency_key: (row.idempotency_key ?? null) as string | null,
+    idempotency_fingerprint: (row.idempotency_fingerprint ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -58,9 +60,10 @@ export function createPostgresPrivateChannelDepositRepository(
           // deletion flow's in-flight count can only shrink (HOO-1011).
           `INSERT INTO private_channel_deposits (
                id, organization_id, project_id, instance_id, wallet_id,
-               depositor, recipient, mint, amount, context
+               depositor, recipient, mint, amount, context,
+               idempotency_key, idempotency_fingerprint
              )
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?
               WHERE EXISTS (
                 SELECT 1 FROM private_channel_instances i
                  WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
@@ -78,8 +81,21 @@ export function createPostgresPrivateChannelDepositRepository(
           input.mint,
           input.amount,
           JSON.stringify(input.context ?? {}),
+          input.idempotencyKey,
+          input.idempotencyFingerprint,
           input.instanceId
         )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async findDepositByIdempotency(scope: DepositProjectScope & { idempotencyKey: string }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_deposits
+             WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(scope.organizationId, scope.projectId, scope.idempotencyKey)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
@@ -98,6 +114,7 @@ export function createPostgresPrivateChannelDepositRepository(
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND (?::text IS NULL OR status = ?)
+              AND (?::boolean IS NOT TRUE OR signature IS NULL)
           RETURNING *`
         )
         .bind(
@@ -107,7 +124,8 @@ export function createPostgresPrivateChannelDepositRepository(
           input.failureReason ?? null,
           input.id,
           input.expectedStatus ?? null,
-          input.expectedStatus ?? null
+          input.expectedStatus ?? null,
+          input.expectedSignatureAbsent ?? false
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

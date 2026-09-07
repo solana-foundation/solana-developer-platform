@@ -4,16 +4,20 @@ import { z } from "zod";
 
 /**
  * Browser-side durability for a value-moving IDEMPOTENCY KEY, per request
- * fingerprint — the machinery behind `earn-vault-deposit-tracking.ts` and
- * `earn-vault-withdraw-tracking.ts`, extracted because the two flows share
- * every rule and two copies of a double-spend guard is how one drifts.
+ * fingerprint — the machinery behind every dashboard money flow whose API route
+ * requires a key: the Earn vault deposit and exit
+ * (`markets/earn/earn-vault-{deposit,withdraw}-tracking.ts`) and Private
+ * Channels deposit, withdrawal and member transfer
+ * (`integrations/private-channels/value-movement-tracking.ts`). It lives here
+ * rather than beside any one of them because they share every rule, and two
+ * copies of a double-spend guard is how one drifts.
  *
- * The vault money routes sign and RECORD a transaction before broadcasting it,
- * so between the click and the chain there is a window where SDP holds signed
- * bytes whose fate nobody knows yet. A retry inside that window must carry the
- * SAME key, or the chain will happily accept the same transfer twice — there
- * is no provider-side dedupe behind these routes. A React ref cannot do that
- * job: it dies with the modal and with the tab's page load.
+ * These routes sign and RECORD a transaction before broadcasting it, so between
+ * the click and the chain there is a window where SDP holds signed bytes whose
+ * fate nobody knows yet. A retry inside that window must carry the SAME key, or
+ * the chain will happily accept the same transfer twice — there is no
+ * provider-side dedupe behind these routes. A React ref cannot do that job: it
+ * dies with the modal and with the tab's page load.
  *
  * Each store holds ONLY keys. Which movements are in flight lives on the
  * server (`GET /v1/earn/vault-deposits` / `/vault-withdrawals`), which is
