@@ -12,7 +12,12 @@
 import type { SolanaCluster } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { cashOptionsFor } from "./dvp-cash-options";
-import type { DvpCreateContext, DvpCreateOption, DvpWalletBalance } from "./dvp-create.data";
+import type {
+  DvpCreateContext,
+  DvpCreateOption,
+  DvpCreateWallet,
+  DvpWalletBalance,
+} from "./dvp-create.data";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpDestinations, useDvpDestinations } from "./use-dvp-destinations";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
@@ -61,6 +66,69 @@ interface DvpCreateFormFields {
  */
 export interface DvpCreateForm extends DvpCreateFormFields, DvpDestinations {}
 
+/**
+ * Whether the form describes a trade that can be created.
+ *
+ * Pure and outside the hook: it is a dozen independent conditions, and holding
+ * them inline made the hook's control flow mostly this one expression.
+ */
+function canCreateTrade(input: {
+  asset: DvpLeg;
+  cash: DvpLeg;
+  walletId: string;
+  counterparty: string;
+  counterpartyLooksWrong: boolean;
+  counterpartyIsOwnLegWallet: boolean;
+  destinationLooksWrong: boolean;
+}): boolean {
+  const { asset, cash } = input;
+  // Never while a leg's scale is still being read. The amount would be encoded
+  // by whatever decimals happen to be around, which during a lookup is either
+  // the previous mint's or none at all.
+  const legsResolved = Boolean(
+    !asset.pendingLookup && !cash.pendingLookup && asset.mint && cash.mint
+  );
+  // No base units means no scale, so there is no quantity to send. Never a
+  // rounded fallback.
+  const amountsResolved = Boolean(asset.baseUnits && cash.baseUnits);
+  // A malformed destination is refused by the API anyway; blocking here saves
+  // a round trip that costs a custody-provider call.
+  const partiesUsable = Boolean(
+    input.walletId &&
+      input.counterparty &&
+      !input.counterpartyLooksWrong &&
+      !input.counterpartyIsOwnLegWallet &&
+      !input.destinationLooksWrong
+  );
+
+  return legsResolved && amountsResolved && partiesUsable;
+}
+
+/**
+ * What the selected wallet holds of the leg SDP delivers.
+ *
+ * A wallet holding none of the mint has NO entry in `balances`. That is a
+ * balance of zero, not an unknown — rendering it as unknown would drop the row
+ * and the over-balance guard with it, so switching to a wallet that cannot
+ * deliver the leg would silently look fine. Zero is only knowable once the
+ * wallet and the mint's scale are both settled; before that there is genuinely
+ * nothing to claim, and this returns null.
+ */
+function resolveSdpBalance(wallet: DvpCreateWallet | null, leg: DvpLeg): DvpWalletBalance | null {
+  const decimals = leg.token?.decimals ?? leg.pasted.mint?.decimals ?? null;
+  if (!(wallet && leg.mint) || decimals === null) {
+    return null;
+  }
+  return (
+    wallet.balances.find((balance) => balance.mint === leg.mint) ?? {
+      mint: leg.mint,
+      amount: "0",
+      decimals,
+      symbol: null,
+    }
+  );
+}
+
 export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
   const asset = useDvpLeg(context.tokens);
@@ -99,24 +167,15 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     trimmedCounterparty.length > 0 &&
     trimmedCounterparty === context.wallets.find((candidate) => candidate.id === walletId)?.address;
 
-  const ready = Boolean(
-    // Never while a leg's scale is still being read. The amount would be
-    // encoded by whatever decimals happen to be around, which during a lookup
-    // is either the previous mint's or none at all.
-    !asset.pendingLookup &&
-      !cash.pendingLookup &&
-      walletId &&
-      trimmedCounterparty &&
-      !counterpartyLooksWrong &&
-      !counterpartyIsOwnLegWallet &&
-      // A malformed destination is refused by the API anyway; blocking here
-      // saves a round trip that costs a custody-provider call.
-      !destinations.anyLooksWrong &&
-      asset.mint &&
-      cash.mint &&
-      asset.baseUnits &&
-      cash.baseUnits
-  );
+  const ready = canCreateTrade({
+    asset,
+    cash,
+    walletId,
+    counterparty: trimmedCounterparty,
+    counterpartyLooksWrong,
+    counterpartyIsOwnLegWallet,
+    destinationLooksWrong: destinations.anyLooksWrong,
+  });
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -143,24 +202,10 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   // The balance belongs to the leg SDP actually delivers — that is the only one
   // spent from this wallet. Showing it on the counterparty's leg would claim we
   // hold what they owe.
-  const selectedWallet = context.wallets.find((wallet) => wallet.id === walletId) ?? null;
-  const sdpLeg = sdpSide === "a" ? asset : cash;
-  const sdpDecimals = sdpLeg.token?.decimals ?? sdpLeg.pasted.mint?.decimals ?? null;
-  // A wallet holding none of the mint has NO entry in `balances`. That is a
-  // balance of zero, not an unknown — and rendering it as unknown would drop the
-  // row and the over-balance guard with it, so switching to a wallet that cannot
-  // deliver the leg would silently look fine. Zero is only knowable once the
-  // wallet and the mint's scale are both settled; before that there is genuinely
-  // nothing to claim.
-  const sdpBalance =
-    selectedWallet && sdpLeg.mint && sdpDecimals !== null
-      ? (selectedWallet.balances.find((balance) => balance.mint === sdpLeg.mint) ?? {
-          mint: sdpLeg.mint,
-          amount: "0",
-          decimals: sdpDecimals,
-          symbol: null,
-        })
-      : null;
+  const sdpBalance = resolveSdpBalance(
+    context.wallets.find((wallet) => wallet.id === walletId) ?? null,
+    sdpSide === "a" ? asset : cash
+  );
 
   return {
     asset,
