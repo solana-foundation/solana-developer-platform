@@ -7156,6 +7156,99 @@ describe("Issuance Routes", () => {
           getSignatureStatusesSpy.mockRestore();
         }
       });
+
+      // HOO-1013: a PATCH landing in the read→claim window changes
+      // deployment-sensitive fields; the handler must verify and record against
+      // the freshly-claimed row, not the stale pre-claim read. Here the initial
+      // read sees a freezable token, but the claim returns the row after a PATCH
+      // set it non-freezable — the deploy's mint init carries no freeze
+      // authority, so verifying against the stale (freezable) snapshot would
+      // wrongly 400. The claim snapshot must win.
+      it("verifies and records against the claimed snapshot, not the pre-claim read", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_stale_snapshot",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          isFreezable: true,
+          requiresAllowlist: false,
+        });
+
+        // Model the concurrent PATCH: the real row is claimed (flipped to
+        // `deploying` so the guarded commit can land), and the claim returns a
+        // snapshot whose isFreezable was changed after the handler's first read.
+        const beginTokenDeploySpy = vi
+          .spyOn(TokenService.prototype, "beginTokenDeploy")
+          .mockImplementationOnce(async (id) => {
+            await getDb(env)
+              .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+              .bind(id)
+              .run();
+            return { ...token, status: "deploying", isFreezable: false } as never;
+          });
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                // No freeze authority — matches the CLAIMED (non-freezable) row.
+                freezeAuthority: null,
+              },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5staleSnapshotSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const after = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(after?.status).toBe("active");
+          expect(after?.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          // Recorded from the claimed (non-freezable) snapshot.
+          expect(after?.freezeAuthority).toBeNull();
+        } finally {
+          beginTokenDeploySpy.mockRestore();
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
     });
 
     describe("GET /v1/issuance/tokens/:tokenId/metadata.json", () => {

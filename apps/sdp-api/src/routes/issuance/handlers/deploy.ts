@@ -704,6 +704,13 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   // Take the same atomic pending→deploying claim the custodial path takes, so
   // exactly one caller reaches the commit; setTokenDeployed additionally
   // refuses any write to a row that isn't claimed or already has a mint.
+  // The claim returns the row as frozen at claim time. Every
+  // deployment-sensitive read below (signing wallet, freezability, ACL,
+  // template) must come from THIS snapshot, not the pre-claim `token` read: a
+  // PATCH landing in the read→claim window could otherwise have changed those
+  // fields, making authority verification or ABL derivation operate on stale
+  // values (HOO-1013). The custodial path already deploys from its claim result
+  // for the same reason.
   const claimed = await tokenService.beginTokenDeploy(tokenId);
   if (!claimed) {
     throw new AppError("CONFLICT", "Token deployment is already in progress");
@@ -751,9 +758,9 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // Use the signing wallet prepareDeploy resolved and persisted, NOT the request
     // body. A body value that diverged from prepare's would derive a different
     // custody address and silently record the wrong mint/metadata authorities —
-    // and, for ABL tokens, the wrong list PDA. token.signingWalletId is the source
-    // of truth; resolve it again only to re-assert the key still has access.
-    const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    // and, for ABL tokens, the wrong list PDA. claimed.signingWalletId is the
+    // source of truth; resolve it again only to re-assert the key still has access.
+    const signingWalletId = resolveApiKeySigningWalletId(auth, claimed.signingWalletId, [
       "tokens:write",
     ]);
 
@@ -767,7 +774,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       signingWalletId
     );
     const custodyAddress = signer.address;
-    const freezeAuthority = token.isFreezable ? custodyAddress : null;
+    const freezeAuthority = claimed.isFreezable ? custodyAddress : null;
 
     if (
       mintInitialization.info?.mintAuthority !== custodyAddress ||
@@ -783,7 +790,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // is only seeded on-chain when ACL is enabled and the mint is freezable —
     // mirror the `enableSrfc37` condition the create path uses (mosaic/service.ts).
     const listAddress =
-      shouldEnableOnChainAcl(token) && freezeAuthority !== null
+      shouldEnableOnChainAcl(claimed) && freezeAuthority !== null
         ? await deriveAblListAddress(custodyAddress, mint)
         : undefined;
 
@@ -796,7 +803,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
         mintAddress: mint,
         signature,
         slot: verified.status.slot.toString(),
-        template: token.template,
+        template: claimed.template,
         ablListAddress: listAddress ?? null,
       },
     });
@@ -818,7 +825,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       tokenService,
       organizationId: auth.organizationId,
       initiatedByKeyId: auth.id,
-      token,
+      token: claimed,
       tokenId,
       mint,
       custodyAddress,
