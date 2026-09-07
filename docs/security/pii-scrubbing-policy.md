@@ -78,8 +78,7 @@ is not done until it appears here with a test.
 | Sink | Enforcement point |
 | --- | --- |
 | API logs (pino) | `hooks.logMethod` in `apps/sdp-api/src/runtime/logger.ts` — every argument, including the message |
-| API Sentry: errors, transactions, spans, logs, metrics, breadcrumbs | `sentryScrubbingHooks` spread into `getSentryOptions` (`apps/sdp-api/src/runtime/observability.ts`) |
-| API Sentry capture payload | `scrubError` in `captureUnexpectedError` (`apps/sdp-api/src/app.ts`) |
+| API unexpected-error capture | `scrubError` in `captureUnexpectedError` (`apps/sdp-api/src/app.ts`) — the API has no Sentry since #1602 (error tracking is web-only); the capture lands in the pino stream, which the log hook scrubs again |
 | Audit ledger metadata | `scrubAuditMetadata` in `AuditService.persist` — before the row is hashed |
 | Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
 | Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
@@ -106,7 +105,6 @@ webhook body passes through it before anything else reads the payload:
 
 | Setting | Value |
 | --- | --- |
-| `tracesSampleRate` (API) | 0.1 in production, 1 otherwise; overridable via `SENTRY_TRACES_SAMPLE_RATE`, clamped to `[0, 1]` |
 | `tracesSampleRate` (web) | 0.1 in production, 1 otherwise |
 | `replaysSessionSampleRate` | 0.1 |
 | `replaysOnErrorSampleRate` | 1.0 |
@@ -124,13 +122,16 @@ are walked only for the traces that are actually sampled.
   Run service. Retention is the bucket's configured period; access is IAM on the project.
 - **Audit ledger** — retention is indefinite by design and age never authorizes deletion;
   see `docs/ops/audit-ledger.md`. This is why metadata scrubbing happens *before* the row is
-  hashed: what the chain commits to is exactly what a reviewer can read back, forever.
+  hashed: what the chain commits to is exactly what a reviewer can read back, forever. The
+  same permanence applies to the walker's depth bound — metadata nested past 16 levels is
+  committed as `[Truncated]` and cannot be recovered later, which is deliberate: nothing
+  legitimate nests that deep, and an unbounded walk on this path is a stack overflow.
 
 ### Required Sentry console settings
 
 These cannot be expressed in code. They are the second layer behind the hooks:
 
-- [ ] Server-side data scrubbing enabled for both projects.
+- [ ] Server-side data scrubbing enabled for the web project (the API sends nothing to Sentry since #1602).
 - [ ] "Prevent Storing of IP Addresses" enabled.
 - [ ] Additional sensitive fields configured to mirror this denylist.
 - [ ] Project access limited to the engineers who need it; reviewed alongside retention.
