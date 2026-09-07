@@ -66,8 +66,7 @@ export type DvpSwapProgramError =
   | typeof DVP_SWAP_PROGRAM_ERROR__ZERO_AMOUNT;
 
 let dvpSwapProgramErrorMessages:
-  | Record<DvpSwapProgramError, string>
-  | undefined;
+  Record<DvpSwapProgramError, string> | undefined;
 if (process.env["NODE_ENV"] !== "production") {
   dvpSwapProgramErrorMessages = {
     [DVP_SWAP_PROGRAM_ERROR__BLOCKED_MINT_EXTENSION]: `Mint carries an unsupported Token-2022 extension`,
