@@ -115,6 +115,7 @@ export const createTokenWithAssetProfileSchema = createTokenSchema
 export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAssetProfileSchema>;
 
 export const updateTokenSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   name: z.string().min(1).max(100).optional(),
   // Symbol and decimals define the mint; the handler rejects them after deploy.
   // Same constraints as createTokenSchema.

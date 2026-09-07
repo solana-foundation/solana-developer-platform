@@ -13,6 +13,7 @@ import {
   Boxes,
   Briefcase,
   CheckCheck,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock,
@@ -41,6 +42,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -69,6 +71,78 @@ import {
 } from "./setting-combos";
 
 type SettingSelection = AdvancedSettingsDraft[string];
+
+const SIMPLE_CONTROL_LABELS: Partial<Record<SettingKey, MessageKey>> = {
+  pauseTransfers: "DashboardIssuance.simplified.pauseCapability",
+  freezeAccounts: "DashboardIssuance.simplified.freezeBalances",
+  permanentDelegate: "DashboardIssuance.simplified.recoveryAuthority",
+};
+
+function partitionControlEntries(entries: GroupedSetting[], simplified: boolean) {
+  if (!simplified) return { primaryEntries: entries, advancedEntries: [], includedEntries: [] };
+  return {
+    primaryEntries: entries.filter(
+      (entry) => entry.key in SIMPLE_CONTROL_LABELS && entry.availability !== "locked"
+    ),
+    includedEntries: entries.filter(
+      (entry) => entry.key in SIMPLE_CONTROL_LABELS && entry.availability === "locked"
+    ),
+    advancedEntries: entries.filter((entry) => !(entry.key in SIMPLE_CONTROL_LABELS)),
+  };
+}
+
+function IncludedControls({
+  entries,
+  category,
+}: {
+  entries: GroupedSetting[];
+  category: AssetCategory | null;
+}) {
+  const t = useTranslations();
+  if (!entries.length) return null;
+  return (
+    <div className="py-3">
+      <h4 className="text-sm font-medium text-primary">
+        {t(
+          category === "stablecoin"
+            ? "DashboardIssuance.simplified.includedStablecoin"
+            : "DashboardIssuance.simplified.includedControls"
+        )}
+      </h4>
+      <ul className="mt-2 space-y-2 text-sm text-secondary">
+        {entries.map((entry) => (
+          <li key={entry.key}>
+            {t((SIMPLE_CONTROL_LABELS[entry.key] ?? entry.setting.labelKey) as MessageKey)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ControlTimingNote({ compact, readOnly }: { compact: boolean; readOnly: boolean }) {
+  const t = useTranslations();
+  const key = compact
+    ? "DashboardIssuance.simplified.fixedAfterDeployment"
+    : readOnly
+      ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
+      : "DashboardIssuance.config.settingsPermanentSubtitle";
+  return <p className="mt-0.5 text-xs text-tertiary">{t(key)}</p>;
+}
+
+function controlPresentation(
+  entries: GroupedSetting[],
+  settings: AdvancedSettingsDraft,
+  simplified: boolean,
+  technical: boolean
+) {
+  const combinedFreeze = getCombinedFreezeState(entries, settings);
+  const showCombinedFreeze = !simplified && !technical && combinedFreeze.entries.length > 0;
+  const rows = showCombinedFreeze
+    ? entries.filter((entry) => !isFreezePairKey(entry.key))
+    : entries;
+  return { combinedFreeze, showCombinedFreeze, ...partitionControlEntries(rows, simplified) };
+}
 
 const COMBO_ICONS: Record<string, LucideIcon> = {
   regulatedStablecoin: ShieldCheck,
@@ -142,6 +216,8 @@ function accessDescriptionKey(mode: AccessControlMode | ""): MessageKey {
 }
 
 interface AdvancedSettingsEditorProps {
+  /** Compact token-details controls, with no off-chain policies or outer card. */
+  controlsOnly?: boolean;
   category: AssetCategory | null;
   type: string | null;
   settings: AdvancedSettingsDraft;
@@ -260,6 +336,7 @@ function IconTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean })
 }
 
 function SettingShell({
+  compact = false,
   icon,
   checked,
   disabled,
@@ -273,6 +350,7 @@ function SettingShell({
   description,
   children,
 }: {
+  compact?: boolean;
   icon: LucideIcon;
   checked: boolean;
   disabled?: boolean;
@@ -294,7 +372,8 @@ function SettingShell({
   // with no associated control is invalid). Padding sits on the row so the whole
   // surface is clickable.
   const rowClassName = cn(
-    "flex min-w-0 flex-1 items-center gap-3 p-3",
+    "flex min-w-0 flex-1 items-center gap-3",
+    compact ? "px-4 py-4" : "p-3",
     disabled || locked ? "cursor-default" : "cursor-pointer",
     dimmed && "opacity-55"
   );
@@ -304,7 +383,9 @@ function SettingShell({
         <span className="text-sm font-medium text-primary">{label}</span>
         {badges}
       </span>
-      <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
+      {description ? (
+        <span className="mt-0.5 block text-xs text-tertiary">{description}</span>
+      ) : null}
       {actions ? <span className="mt-2 flex flex-wrap items-center gap-2.5">{actions}</span> : null}
     </span>
   );
@@ -313,19 +394,22 @@ function SettingShell({
     <div
       className={cn(
         "flex flex-col rounded-xl border bg-surface-raised transition-colors",
-        checked ? "border-primary" : "border-border-default"
+        checked && !compact ? "border-primary" : "border-border-default"
       )}
     >
       <div className="flex items-center">
         {locked ? (
           <div className={rowClassName}>
             <span
-              className="flex h-4 w-4 shrink-0 items-center justify-center text-tertiary"
+              className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center text-tertiary",
+                compact && "order-last"
+              )}
               title={t("DashboardIssuance.config.settingLockedHint")}
             >
               <Lock className="h-3.5 w-3.5" aria-hidden />
             </span>
-            <IconTile icon={icon} active={checked} />
+            {!compact ? <IconTile icon={icon} active={checked} /> : null}
             {rowText}
           </div>
         ) : (
@@ -335,9 +419,12 @@ function SettingShell({
               checked={checked}
               disabled={disabled}
               onChange={(event) => onToggle(event.currentTarget.checked)}
-              className="h-4 w-4 shrink-0 accent-primary disabled:opacity-60"
+              className={cn(
+                "h-4 w-4 shrink-0 accent-primary disabled:opacity-60",
+                compact && "order-last"
+              )}
             />
-            <IconTile icon={icon} active={checked} />
+            {!compact ? <IconTile icon={icon} active={checked} /> : null}
             {rowText}
           </label>
         )}
@@ -349,6 +436,7 @@ function SettingShell({
 }
 
 export function AdvancedSettingsEditor({
+  controlsOnly = false,
   category,
   type,
   settings,
@@ -417,11 +505,9 @@ export function AdvancedSettingsEditor({
     onSettingsChange(next);
   };
 
-  const combinedFreeze = getCombinedFreezeState(visiblePermanent, settings);
-  const showCombinedFreeze = !showTechnical && combinedFreeze.entries.length > 0;
-  const rowEntries = showCombinedFreeze
-    ? visiblePermanent.filter((entry) => !isFreezePairKey(entry.key))
-    : visiblePermanent;
+  const { combinedFreeze, showCombinedFreeze, primaryEntries, advancedEntries, includedEntries } =
+    controlPresentation(visiblePermanent, settings, controlsOnly, showTechnical);
+  const editorDisabled = disabled || settingsReadOnly;
 
   const setParam = (key: string, paramKey: string, paramValue: string) => {
     const current = settings[key] ?? {};
@@ -451,31 +537,33 @@ export function AdvancedSettingsEditor({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border-default bg-surface-raised p-5",
+        !controlsOnly && "rounded-2xl border border-border-default bg-surface-raised p-5",
         // Query container for the container-responsive inner grids.
         containerResponsive && "@container"
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
-          <p className="text-base font-medium text-primary">
-            {t("DashboardIssuance.config.advancedSettingsTitle")}
-          </p>
+      {!controlsOnly ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0">
+            <p className="text-base font-medium text-primary">
+              {t("DashboardIssuance.config.advancedSettingsTitle")}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-pressed={showTechnical}
+            onClick={() => setShowTechnical((value) => !value)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-fill-subtle"
+          >
+            {showTechnical ? (
+              <Wrench className="h-3.5 w-3.5" />
+            ) : (
+              <Briefcase className="h-3.5 w-3.5" />
+            )}
+            {t("DashboardIssuance.config.showTechnicalDetail")}
+          </button>
         </div>
-        <button
-          type="button"
-          aria-pressed={showTechnical}
-          onClick={() => setShowTechnical((value) => !value)}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-fill-subtle"
-        >
-          {showTechnical ? (
-            <Wrench className="h-3.5 w-3.5" />
-          ) : (
-            <Briefcase className="h-3.5 w-3.5" />
-          )}
-          {t("DashboardIssuance.config.showTechnicalDetail")}
-        </button>
-      </div>
+      ) : null}
 
       {/* Add-on bundles — creation-only, and hidden once on-chain settings are locked. */}
       {showScenarios && !settingsReadOnly && combos.length > 0 ? (
@@ -522,25 +610,22 @@ export function AdvancedSettingsEditor({
       ) : null}
 
       {/* Permanent · on-chain, set at creation --------------------------- */}
-      <section className="mt-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-          {t(
-            showTechnical
-              ? "DashboardIssuance.config.settingsOnchainTitle"
-              : "DashboardIssuance.config.settingsPermanentTitle"
-          )}
-        </p>
-        <p className="mt-0.5 text-xs text-tertiary">
-          {t(
-            settingsReadOnly
-              ? "DashboardIssuance.config.settingsPermanentLockedSubtitle"
-              : "DashboardIssuance.config.settingsPermanentSubtitle"
-          )}
-        </p>
+      <section className={controlsOnly ? undefined : "mt-6"}>
+        {!controlsOnly ? (
+          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+            {t(
+              showTechnical
+                ? "DashboardIssuance.config.settingsOnchainTitle"
+                : "DashboardIssuance.config.settingsPermanentTitle"
+            )}
+          </p>
+        ) : null}
+        <ControlTimingNote compact={controlsOnly} readOnly={settingsReadOnly} />
 
         <div className="mt-3 grid gap-2.5">
           {onAccessControlChange ? (
             <AccessControlRow
+              compact={controlsOnly}
               mode={accessControl ?? ""}
               onChange={onAccessControlChange}
               disabled={disabled || accessControlReadOnly}
@@ -558,14 +643,16 @@ export function AdvancedSettingsEditor({
               }
             />
           ) : null}
-          {rowEntries.map((entry) => (
+          <IncludedControls entries={includedEntries} category={category} />
+          {primaryEntries.map((entry) => (
             <PermanentRow
               key={entry.key}
+              hideRecommendation={controlsOnly}
               entry={entry}
               selection={settings[entry.key]}
               showTechnical={showTechnical}
               showErrors={showErrors}
-              disabled={disabled || settingsReadOnly}
+              disabled={editorDisabled}
               readOnly={settingsReadOnly}
               conflictWith={conflictBlocker(entry.key)}
               containerResponsive={containerResponsive}
@@ -573,57 +660,86 @@ export function AdvancedSettingsEditor({
               onParam={setParam}
             />
           ))}
+          {advancedEntries.length ? (
+            <details className="group mt-2 border-t border-border-subtle pt-4" open={showErrors}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-secondary [&::-webkit-details-marker]:hidden">
+                {t("DashboardIssuance.simplified.advancedControls")}
+                <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="mt-4 grid gap-2.5">
+                {advancedEntries.map((entry) => (
+                  <PermanentRow
+                    key={entry.key}
+                    hideRecommendation
+                    hideExtraDescription
+                    entry={entry}
+                    selection={settings[entry.key]}
+                    showTechnical={false}
+                    showErrors={showErrors}
+                    disabled={editorDisabled}
+                    readOnly={settingsReadOnly}
+                    conflictWith={conflictBlocker(entry.key)}
+                    containerResponsive={containerResponsive}
+                    onToggle={(enabled) => setEnabled(entry, enabled)}
+                    onParam={setParam}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
       </section>
 
       {/* Ongoing · off-chain, changeable anytime ------------------------- */}
-      <section className="mt-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
-          {t(
-            showTechnical
-              ? "DashboardIssuance.config.settingsOffchainTitle"
-              : "DashboardIssuance.config.settingsOngoingTitle"
-          )}
-        </p>
-        <p className="mt-0.5 text-xs text-tertiary">
-          {t(
-            allowCapacityConfig
-              ? "DashboardIssuance.config.settingsOngoingSubtitle"
-              : "DashboardIssuance.config.settingsOngoingSubtitleDraft"
-          )}
-        </p>
-        <div
-          className={cn(
-            "mt-3 grid gap-2.5",
-            // Two up only when there's room (container width vs. viewport).
-            containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
-          )}
-        >
-          {CAPACITY_KEYS.map((key) => {
-            const selection = capacities[key];
-            const configurable = capacityHasConfig(key);
-            return (
-              <CapacityRow
-                key={key}
-                capKey={key}
-                checked={selection.enabled}
-                disabled={disabled}
-                showTechnical={showTechnical}
-                configurable={configurable}
-                allowConfig={allowCapacityConfig}
-                summary={configurable ? summarizeCapacityConfig(key, selection.config, t) : null}
-                onToggle={(checked) =>
-                  onCapacitiesChange({
-                    ...capacities,
-                    [key]: { ...selection, enabled: checked },
-                  })
-                }
-                onConfigure={() => setConfiguringCapacity(key)}
-              />
-            );
-          })}
-        </div>
-      </section>
+      {!controlsOnly ? (
+        <section className="mt-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-secondary">
+            {t(
+              showTechnical
+                ? "DashboardIssuance.config.settingsOffchainTitle"
+                : "DashboardIssuance.config.settingsOngoingTitle"
+            )}
+          </p>
+          <p className="mt-0.5 text-xs text-tertiary">
+            {t(
+              allowCapacityConfig
+                ? "DashboardIssuance.config.settingsOngoingSubtitle"
+                : "DashboardIssuance.config.settingsOngoingSubtitleDraft"
+            )}
+          </p>
+          <div
+            className={cn(
+              "mt-3 grid gap-2.5",
+              // Two up only when there's room (container width vs. viewport).
+              containerResponsive ? "@2xl:grid-cols-2" : "sm:grid-cols-2"
+            )}
+          >
+            {CAPACITY_KEYS.map((key) => {
+              const selection = capacities[key];
+              const configurable = capacityHasConfig(key);
+              return (
+                <CapacityRow
+                  key={key}
+                  capKey={key}
+                  checked={selection.enabled}
+                  disabled={disabled}
+                  showTechnical={showTechnical}
+                  configurable={configurable}
+                  allowConfig={allowCapacityConfig}
+                  summary={configurable ? summarizeCapacityConfig(key, selection.config, t) : null}
+                  onToggle={(checked) =>
+                    onCapacitiesChange({
+                      ...capacities,
+                      [key]: { ...selection, enabled: checked },
+                    })
+                  }
+                  onConfigure={() => setConfiguringCapacity(key)}
+                />
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <CapacityConfigModal
         capKey={configuringCapacity}
@@ -646,12 +762,14 @@ export function AdvancedSettingsEditor({
 
 // 3-way mode (allowlist/blocklist/disabled) rendered as segmented control.
 function AccessControlRow({
+  compact = false,
   mode,
   onChange,
   disabled,
   showTechnical,
   docsHref,
 }: {
+  compact?: boolean;
   mode: AccessControlMode | "";
   onChange: (mode: AccessControlMode | "") => void;
   disabled?: boolean;
@@ -661,18 +779,46 @@ function AccessControlRow({
   const t = useTranslations();
   // "Gated" = a holder restriction is in effect (allowlist or blocklist).
   const gated = mode === "allowlist" || mode === "blocklist";
+  if (compact) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardIssuance.simplified.recipients")}
+        </p>
+        <Select
+          ariaLabel={t("DashboardIssuance.simplified.recipients")}
+          value={mode}
+          disabled={disabled}
+          onValueChange={(value) => onChange(value as AccessControlMode)}
+        >
+          <SelectItem value="disabled">{t("DashboardIssuance.simplified.anyRecipient")}</SelectItem>
+          <SelectItem value="allowlist">
+            {t("DashboardIssuance.simplified.approvedRecipients")}
+          </SelectItem>
+          <SelectItem value="blocklist">
+            {t("DashboardIssuance.simplified.blockedRecipients")}
+          </SelectItem>
+        </Select>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
         "rounded-xl border bg-surface-raised p-3 transition-colors",
-        gated ? "border-primary" : "border-border-default"
+        gated && !compact ? "border-primary" : "border-border-default",
+        compact && "p-4"
       )}
     >
       <div className={cn("flex items-start gap-3", disabled && "opacity-55")}>
-        <IconTile icon={ShieldCheck} active={gated} />
+        {!compact ? <IconTile icon={ShieldCheck} active={gated} /> : null}
         <div className="min-w-0 flex-1">
           <span className="text-sm font-medium text-primary">
-            {t("DashboardIssuance.compliance.accessControl")}
+            {t(
+              compact
+                ? "DashboardIssuance.simplified.recipients"
+                : "DashboardIssuance.compliance.accessControl"
+            )}
           </span>
           <span className="mt-0.5 block text-xs text-tertiary">
             {t(accessDescriptionKey(mode))}
@@ -689,7 +835,15 @@ function AccessControlRow({
         selectedClassName="bg-primary text-on-primary"
         options={ACCESS_CONTROL_OPTIONS.map((option) => ({
           value: option.value,
-          label: t(option.labelKey),
+          label: compact
+            ? t(
+                option.value === "allowlist"
+                  ? "DashboardIssuance.simplified.approvedRecipients"
+                  : option.value === "blocklist"
+                    ? "DashboardIssuance.simplified.blockedRecipients"
+                    : "DashboardIssuance.simplified.anyRecipient"
+              )
+            : t(option.labelKey),
         }))}
       />
       {docsHref ? (
@@ -746,6 +900,8 @@ function CombinedFreezeRow({
 }
 
 function PermanentRow({
+  hideRecommendation = false,
+  hideExtraDescription = false,
   entry,
   selection,
   showTechnical,
@@ -757,6 +913,8 @@ function PermanentRow({
   onToggle,
   onParam,
 }: {
+  hideRecommendation?: boolean;
+  hideExtraDescription?: boolean;
   entry: GroupedSetting;
   selection: SettingSelection | undefined;
   showTechnical?: boolean;
@@ -777,9 +935,13 @@ function PermanentRow({
   // Required always locks; a read-only setting locks only when it's actually on.
   const locked = isLocked || Boolean(readOnly && checked);
   const params = setting.params ?? [];
+  const labelKey = hideRecommendation
+    ? (SIMPLE_CONTROL_LABELS[key] ?? setting.labelKey)
+    : setting.labelKey;
 
   return (
     <SettingShell
+      compact={hideRecommendation}
       icon={SETTING_ICONS[key] ?? KeyRound}
       checked={checked}
       disabled={disabled || isLocked || blocked}
@@ -792,13 +954,13 @@ function PermanentRow({
       label={
         showTechnical && setting.extensions.length > 0
           ? extensionTitle(setting.extensions)
-          : t(setting.labelKey as MessageKey)
+          : t(labelKey as MessageKey)
       }
-      description={t(setting.descriptionKey as MessageKey)}
+      description={hideExtraDescription ? "" : t(setting.descriptionKey as MessageKey)}
       badges={
         isLocked ? (
           <Pill>{t("DashboardIssuance.config.settingRequired")}</Pill>
-        ) : availability === "recommended" ? (
+        ) : availability === "recommended" && !hideRecommendation ? (
           <Pill>{t("DashboardIssuance.config.settingRecommended")}</Pill>
         ) : null
       }

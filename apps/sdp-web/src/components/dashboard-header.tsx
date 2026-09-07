@@ -26,6 +26,7 @@ type DashboardPageConfig = {
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
+  hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
     label: string;
@@ -36,6 +37,7 @@ type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
   hideTitle?: boolean;
+  hideTitleOnMobile?: boolean;
   title: string;
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
@@ -103,10 +105,12 @@ export function CenteredDashboardTopBar({
   leadingContent,
   title,
   trailingContent,
+  hideTitleOnMobile = false,
 }: {
   leadingContent: ReactNode;
   title: string;
   trailingContent: ReactNode;
+  hideTitleOnMobile?: boolean;
 }) {
   return (
     <div
@@ -114,7 +118,12 @@ export function CenteredDashboardTopBar({
       data-dashboard-centered-topbar
     >
       <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
-      <div className="col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+      <div
+        className={cn(
+          "col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1",
+          hideTitleOnMobile && "max-sm:sr-only"
+        )}
+      >
         <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {title}
         </h1>
@@ -171,6 +180,7 @@ export function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
   hideTitle,
+  hideTitleOnMobile,
   title,
   titlePosition,
   topBarLeadingContent,
@@ -191,6 +201,7 @@ export function DashboardTopBar({
     return (
       <CenteredDashboardTopBar
         title={title}
+        hideTitleOnMobile={hideTitleOnMobile}
         leadingContent={
           <>
             <SidebarToggle
@@ -558,12 +569,15 @@ function getIssuanceRoutePageConfig(
   // on → the create flow's centered title + capped column; off → the legacy
   // left-aligned, full-width layout, untouched.
   if (assetProfilesEnabled) {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.assetManagement"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-7xl",
-    });
+    return {
+      ...actionPageConfig({
+        title: t("Shared.dashboardShell.assetManagement"),
+        backHref: "/dashboard/issuance",
+        backLabel: t("Shared.dashboardShell.backToOverview"),
+        contentWidthClass: "max-w-7xl",
+      }),
+      hideTitleOnMobile: true,
+    };
   }
   return {
     title: t("Shared.dashboardShell.issuance"),

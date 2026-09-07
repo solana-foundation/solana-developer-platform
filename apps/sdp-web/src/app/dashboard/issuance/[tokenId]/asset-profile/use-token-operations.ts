@@ -1224,6 +1224,13 @@ export function useTokenOperations({
     effectiveFreezeDisabledReason,
     complianceActionDisabledReasons,
     fundManagementDisabledReasons,
+    // Incomplete form values must not prevent reopening an operation.
+    operationAvailability: {
+      mint: effectiveMintDisabledReason,
+      burn: effectiveBurnDisabledReason,
+      seize: effectiveSeizeDisabledReason,
+      "force-burn": effectiveForceBurnDisabledReason,
+    },
     // wallets + supporting data
     authorityWallets,
     authorityWalletsError,

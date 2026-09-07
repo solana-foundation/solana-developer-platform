@@ -210,6 +210,15 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     throw conflict("Token deployment is in progress; retry after it completes");
   }
 
+  if (body.signingWalletId !== undefined) {
+    if (existing.mintAddress || existing.status !== "pending") {
+      throw badRequest("signingWalletId cannot be changed after deployment");
+    }
+    const walletId = resolveApiKeySigningWalletId(auth, body.signingWalletId, ["tokens:write"]);
+    if (!walletId) throw badRequest("A signing wallet is required");
+    await createOrgSigner(c.env, orgId, projectId, walletId);
+  }
+
   // Access-control enforcement is baked into the mint at deploy; the flag only
   // makes sense to change while the token is still an undeployed draft.
   if (
