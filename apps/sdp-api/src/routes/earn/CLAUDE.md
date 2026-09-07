@@ -981,6 +981,25 @@ the old cluster-agnostic read silently built against whichever chain the single
 URL happened to serve — and a mismatch does not error, because Kamino's mainnet
 kvault program id also resolves on devnet with no accounts under it.
 
+## Metered quotas
+
+The Earn reads that fan out to a PAID upstream carry `meteredQuota`: the
+provider's API on a program read (`GET /programs` is 2N round trips per page
+against the shared provider account), Solana RPC on a live-hydrated one. Two
+counters, `earn-provider-read` (programs list/detail/deposits, the deposit
+quote) and `earn-chain-read` (vault positions, share reconciliation, the
+per-owner external-wallet reads).
+
+**No money-OUT route and no EXIT quote carries one, and that is load-bearing.**
+`meteredQuota` fails closed — a counter-store outage answers 503 — and a 5xx on
+a customer's way out of a position is exactly the failure ADR 0002 exit safety
+rules out. A refused read costs a caller a retry; a refused exit traps funds.
+So withdrawals, vault withdrawals, the external-wallet submits and builds, and
+every preview an exit derives its floor from stay unmetered. Money-IN carries
+no such rule, which is why the deposit quote is metered and the exit quote is
+not. Pinned by the "metered quotas" describe in `../earn-program.test.ts`,
+whose second test exhausts both counters and asserts the payout still lands.
+
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):

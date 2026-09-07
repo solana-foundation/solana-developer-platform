@@ -46,7 +46,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_earn_program",
@@ -2569,5 +2569,68 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
       heldBody.error.details.walletOperationId
     );
     expect(executed).toMatchObject({ status: "completed", execution_error: null });
+  });
+});
+
+/**
+ * The provider account is shared platform-wide and a program read is a live
+ * fan-out against it — a `GET /programs` page is two provider round trips per
+ * row — so an unmetered caller spends SDP's money at whatever rate it likes.
+ *
+ * The exclusion matters as much as the quota: `meteredQuota` fails closed, and
+ * a 5xx on the way OUT of a position is the failure ADR 0002 exit safety rules
+ * out, so no money-out route and no exit quote carries one.
+ */
+describe("Earn program — metered quotas", () => {
+  it("429s a program read once the actor's quota is exhausted", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    const getWallet = stubProgramReads();
+    await seedRateLimit(
+      env,
+      `metered:earn-provider-read:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+      60
+    );
+
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+
+    expect(res.status).toBe(429);
+    expect((await res.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: "RATE_LIMITED" },
+    });
+    // Refused before the money was spent, which is the whole point.
+    expect(getWallet).not.toHaveBeenCalled();
+  });
+
+  it("never lets an exhausted quota stand between a caller and its money", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    const preview = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal")
+      .mockResolvedValue({ withdrawableUsd: "100.00" } as never);
+
+    // Both Earn quotas exhausted for this actor AND the whole organization.
+    for (const quota of ["earn-provider-read", "earn-chain-read"]) {
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 1000);
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
+    }
+
+    const liquidity = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
+      token: "usdc",
+    });
+    expect(liquidity.status).toBe(200);
+    expect(preview).toHaveBeenCalledTimes(1);
+
+    const withdrawal = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+      requestId: "2e8b1f47-5c93-4a2d-8e16-9d4f0a7b3c25",
+      amountUsd: "25.50",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+    });
+    expect(withdrawal.status).toBe(201);
+    expect(createWithdrawal).toHaveBeenCalledTimes(1);
   });
 });
