@@ -2,6 +2,7 @@
 // The added config here will be used whenever a users loads a page in their browser.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
+import { sentryScrubbingHooks } from "@sdp/redaction";
 import * as Sentry from "@sentry/nextjs";
 
 const sentryDsn =
@@ -28,10 +29,9 @@ if (sentryDsn) {
         colorScheme: initialFeedbackTheme,
         showName: false,
         showEmail: false,
-        useSentryUser: {
-          name: "name",
-          email: "email",
-        },
+        // No `useSentryUser` mapping: the Sentry user record is the Clerk user
+        // id and nothing else (see sentry-user-context.tsx), so there is no
+        // name or email to reuse. A report is traced back through that id.
         formTitle: "Share feedback",
         submitButtonLabel: "Send feedback",
         messagePlaceholder: "Describe what you expected and what happened instead.",
@@ -55,6 +55,11 @@ if (sentryDsn) {
     // Enable sending user PII (Personally Identifiable Information)
     // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
     sendDefaultPii: false,
+
+    // The scrubbing boundary — see the note in sentry.server.config.ts. It runs
+    // in the browser too, so a counterparty name that reached a component prop
+    // never leaves the tab.
+    ...sentryScrubbingHooks,
   });
 }
 
