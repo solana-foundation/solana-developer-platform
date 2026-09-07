@@ -83,18 +83,63 @@ function makeAdapterFlakySend(failures: number, failure: () => Error): KoraAdapt
 }
 
 describe("KoraAdapter transient-failure handling", () => {
-  it("retries signAndSend through a connection-level failure", async () => {
-    const adapter = makeAdapterFlakySend(2, () => new TypeError("fetch failed"));
+  it("retries signAndSend when Kora proves the blockhash was not submitted", async () => {
+    const adapter = makeAdapterFlakySend(2, () => new Error("Blockhash not found"));
     const signature = await adapter.signAndSend(new Uint8Array([1]));
     assert.equal(signature, "sig111");
   });
 
-  it("gives up after exhausting retries on connection-level failures", async () => {
-    const adapter = makeAdapterFlakySend(3, () => new TypeError("fetch failed"));
+  it("does not retry a connection failure with an ambiguous submission outcome", async () => {
+    let attempts = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => {
+        attempts += 1;
+        throw new TypeError("fetch failed");
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+    });
+
     await assert.rejects(
       adapter.signAndSend(new Uint8Array([1])),
       (error: unknown) => error instanceof FeePaymentError && error.message.includes("fetch failed")
     );
+    assert.equal(attempts, 1);
+  });
+
+  it("does not overlap a signAndSend request after its local timeout", async () => {
+    let attempts = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: () => {
+        attempts += 1;
+        return new Promise(() => {});
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+      timeoutMs: 20,
+    });
+
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array([1])),
+      (error: unknown) => error instanceof FeePaymentError && error.message.includes("timed out")
+    );
+    assert.equal(attempts, 1);
   });
 
   it("fails a hung call at the configured timeout instead of hanging", async () => {

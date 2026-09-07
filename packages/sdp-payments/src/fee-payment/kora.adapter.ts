@@ -172,10 +172,10 @@ export class KoraAdapter implements FeePaymentPort {
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const base64Tx = encodeBase64(transaction);
 
-    // Retry on transient failures:
-    //  - "Blockhash not found": Kora's RPC may lag behind on blockhash propagation.
-    //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
-    //    HTTP gateway errors that resolve on the next attempt.
+    // Only retry failures that prove the transaction was not submitted. A Kora
+    // timeout or transport failure has an ambiguous outcome because the SDK's
+    // underlying request cannot be aborted. Retrying it here can overlap the
+    // first request and turn a successful submission into "already processed".
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -412,26 +412,10 @@ function extractRpcErrorCode(error: unknown): number | undefined {
 function isRetryableSignAndSendError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
-  return (
-    // Kora's RPC may lag behind on blockhash propagation
-    message.includes("blockhash not found") ||
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    // Transient HTTP gateway errors from the underlying RPC (e.g. Helius devnet)
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("bad gateway") ||
-    message.includes("service unavailable") ||
-    // Connection-level failures while a Kora instance is being replaced.
-    // Retrying is idempotent even when the first attempt may have reached
-    // Kora: the transaction bytes are fixed, ed25519 signing is
-    // deterministic, so a duplicate submit carries the same signature and
-    // the cluster deduplicates it.
-    message.includes("fetch failed") ||
-    message.includes("econnrefused") ||
-    message.includes("econnreset") ||
-    message.includes("socket hang up")
-  );
+  // Kora could not submit when its RPC rejected the recent blockhash, so this
+  // response is safe to retry. Timeouts, 5xx responses, and disconnected
+  // sockets are deliberately excluded because the transaction may have landed.
+  return message.includes("blockhash not found");
 }
 
 function isRetryableGetFeePayerError(error: unknown): boolean {
@@ -467,8 +451,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 // The Kora SDK performs a bare fetch with no abort hook, so a hung connection
 // would otherwise hold the caller until the platform request timeout. Race
-// every call against a deadline; the timeout message is classified as
-// retryable by the transient-error checks above.
+// every call against a deadline. Sign-and-send timeouts are not retried because
+// this deadline cannot cancel the request and its submission outcome is unknown.
 function withCallTimeouts(client: KoraClientTransport, timeoutMs: number): KoraClientTransport {
   return {
     getPayerSigner: () => withTimeout(client.getPayerSigner(), timeoutMs, "getPayerSigner"),
