@@ -16,6 +16,7 @@ import {
 import { createDvpTrade } from "@/services/dvp/create";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import { fundDvpTradeLegAsParty } from "@/services/dvp/fund-as-party";
+import { resolveFundableLeg } from "@/services/dvp/fund-authorization";
 import { listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import { observeDvpTradeIfStale, observeDvpTradeNow } from "@/services/dvp/observe-now";
@@ -502,8 +503,13 @@ export const getTrade = async (c: AppContext) => {
     },
     tradeId
   );
+  // Not ours, but possibly ours to READ: a party named on a trade another
+  // organization created can see it (0089), and discovery puts a link to this
+  // page in front of them. Without this fallback that link is a 404 — the
+  // product tells somebody a trade is waiting on them and then denies it
+  // exists.
   if (!trade) {
-    throw notFound("DvP trade not found");
+    return respondWithPartyTrade(c, tradeId);
   }
 
   // The sweep runs once a minute. That is the right cadence for a background
@@ -523,6 +529,56 @@ export const getTrade = async (c: AppContext) => {
     },
   });
 };
+
+/**
+ * The same page, for a party who is not the trade's author.
+ *
+ * Answers in the SHAPE the detail page already reads, with everything belonging
+ * to the creating organization withheld — rather than a second response the UI
+ * would need a second branch for. What is withheld is what
+ * `routes/dvp/inbound-response.ts` withholds and for the same reason: the terms
+ * are on chain and theirs to read, the wallet, the reference and the settlement
+ * readiness are ours.
+ *
+ * A 404 when they are not a party, matching the read above: an id they have no
+ * claim on must be indistinguishable from one that does not exist.
+ */
+async function respondWithPartyTrade(c: AppContext, tradeId: string) {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const trade = await createDvpTradeRepository(c.env).getByIdAsParty(tradeId);
+  // The 0089 policy already refuses a trade naming nobody here, so a row coming
+  // back means a wallet of theirs is on it. Resolving WHICH leg is still needed
+  // and still theirs to be told.
+  if (!trade) {
+    throw notFound("DvP trade not found");
+  }
+
+  const fundable = await resolveFundableLeg(c.env, trade, {
+    organizationId: auth.organizationId,
+    projectId,
+    auth,
+  });
+  if (!fundable) {
+    throw notFound("DvP trade not found");
+  }
+
+  const observed = await observeDvpTradeIfStale(c.env, trade);
+
+  return success(c, {
+    trade: {
+      ...toTradeResponse(observed, undefined),
+      // Theirs, not ours. `toTradeResponse` speaks to the creating org and
+      // carries these; a party gets the trade without them.
+      sdpWallet: null,
+      refString: null,
+      settlementReadiness: null,
+      /** Which leg is the reader's, so the page can say so. */
+      yourSide: fundable.side,
+    },
+  });
+}
 
 /**
  * Inspects a mint so the create form can take a human amount for it.
