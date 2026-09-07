@@ -111,6 +111,24 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       });
     });
 
+    it("pins the resolved ring on the row and defaults it to NULL", async () => {
+      const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+      const bound = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:ring-bound", ringProgramId: RING_PROGRAM })
+      );
+      const unbound = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:ring-default" }));
+
+      expect(bound.operation.ring_program_id).toBe(RING_PROGRAM);
+      expect(unbound.operation.ring_program_id).toBeNull();
+
+      // The ring is pinned at reserve; a replay must not re-point it.
+      const replay = await repo.reserveIntent(
+        shieldIntent({ intentKey: "sha256:ring-bound", ringProgramId: null })
+      );
+      expect(replay.reserved).toBe(false);
+      expect(replay.operation.ring_program_id).toBe(RING_PROGRAM);
+    });
+
     it("returns the existing operation on a replay instead of opening a second one", async () => {
       const first = await repo.reserveIntent(shieldIntent());
       // Same intent key, different everything else: a replay must be decided by

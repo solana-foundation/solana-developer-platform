@@ -1240,6 +1240,9 @@ async function main(): Promise<void> {
 
   const client = new pg.Client({ connectionString: databaseUrl });
   await client.connect();
+  // Demo seeding crosses tenant boundaries; forced row-level security
+  // (migration 0079) also binds non-superuser owners.
+  await client.query("SELECT set_config('app.tenant_isolation_identity', 'system', false)");
 
   try {
     const scope = await resolveScope(client, readFlag("project"));

@@ -159,7 +159,7 @@ describe("resolveVaultDirectClient", () => {
   it("resolves an executing client for every provider that can move money", () => {
     const createRpc = vi.spyOn(solanaRpc, "createRpc");
 
-    for (const provider of ["kamino", "veda"]) {
+    for (const provider of ["kamino", "veda", "jupiter_lend"]) {
       const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
       expect(client, provider).not.toBeNull();
       expect(client?.provider, provider).toBe(provider);

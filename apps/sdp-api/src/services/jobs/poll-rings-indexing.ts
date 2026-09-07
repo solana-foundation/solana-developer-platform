@@ -3,8 +3,8 @@
  *
  * Each tick runs four passes:
  *  1. Signed bytes whose blockhash has expired — they either landed or never
- *     will, so Photon is asked once and anything unconfirmed becomes
- *     `manual_reconciliation_required`.
+ *     will, so Photon is asked once and, when it has nothing, the chain is
+ *     asked before anything becomes `manual_reconciliation_required`.
  *  2. Signed failures (e.g. `submit_failed`) whose blockhash has expired —
  *     Photon is asked once, then the failure code is upgraded so an operator
  *     can void the wallet's blocked slot.
@@ -23,7 +23,11 @@ import {
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
-import { readRingsBlockHeight } from "@/services/helius-rings/rpc-adapter";
+import {
+  type RingsSignatureOutcome,
+  readRingsBlockHeight,
+  readRingsSignatureStatus,
+} from "@/services/helius-rings/rpc-adapter";
 import type { Env } from "@/types/env";
 
 /** An operation may sit in `indexing` this long before it times out. */
@@ -54,6 +58,33 @@ function resumeIsDestructive(operation: HeliusRingsOperationRow): boolean {
   return operation.state === "proving" || operation.state === "ready_to_sign";
 }
 
+type SignatureStatusReader = (input: {
+  env: Env;
+  signature: string;
+}) => Promise<RingsSignatureOutcome | null>;
+
+/**
+ * Whether the chain's answer forbids failing a row Photon has stayed silent on.
+ *
+ * Photon's silence is not evidence. The indexer can sit hours behind the chain,
+ * and a shield records only a floor for its expiry, so a row reaches these
+ * passes while its transaction may still be valid or already final. Failing on
+ * that alone declares a settled payment lost and parks the wallet awaiting a
+ * void. A transaction the chain confirms is spared, and so is one the chain
+ * could not be asked about — only an RPC that answered and had nothing is
+ * grounds to give up.
+ */
+async function chainForbidsFailure(
+  operation: HeliusRingsOperationRow,
+  readStatus: SignatureStatusReader,
+  env: Env
+): Promise<boolean> {
+  if (operation.outer_tx_signature === null) return false;
+
+  const outcome = await readStatus({ env, signature: operation.outer_tx_signature });
+  return outcome === "landed" || outcome === null;
+}
+
 type OperationRepository = ReturnType<typeof createHeliusRingsOperationRepository>;
 type Logger = ReturnType<typeof getLogger>;
 type ServiceFor = (tenant: { organizationId: string; projectId: string }) => HeliusRingsService;
@@ -64,6 +95,8 @@ export interface PollRingsIndexingDependencies {
   now?: () => Date;
   /** Test seam for the expiry pass's view of the chain. */
   readBlockHeight?: (input: { env: Env }) => Promise<string | null>;
+  /** Test seam for the lookup that spares a transaction the chain confirms. */
+  readSignatureStatus?: SignatureStatusReader;
 }
 
 export function isRingsIndexingPollEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): boolean {
@@ -90,16 +123,27 @@ export async function pollRingsIndexing(
   const repository = createHeliusRingsOperationRepository(env);
   const logger = getLogger();
 
+  const readSignatureStatus = dependencies.readSignatureStatus ?? readRingsSignatureStatus;
+
   const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({ env });
   if (blockHeight === null) {
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
   } else {
-    await escalateExpiredSubmissions(repository, serviceFor, logger, blockHeight);
+    await escalateExpiredSubmissions(repository, serviceFor, logger, blockHeight, {
+      env,
+      readSignatureStatus,
+    });
     await escalateExpiredSignedFailures(repository, serviceFor, logger, blockHeight);
   }
 
   await completeIndexedFailures(repository, serviceFor, logger);
-  await advanceInFlight(repository, serviceFor, logger, now());
+  await advanceInFlight(repository, serviceFor, logger, now(), { env, readSignatureStatus });
+}
+
+/** What the two passes that can give up on a signature need to consult the chain. */
+interface ChainCheck {
+  env: Env;
+  readSignatureStatus: SignatureStatusReader;
 }
 
 /**
@@ -107,18 +151,21 @@ export async function pollRingsIndexing(
  *
  * Photon is asked first, because the recorded expiry is exact only for a spend:
  * a shield takes its blockhash from the SDK's own builder, so its stored height
- * is a lower bound and the row may be expired only on paper.
+ * is a lower bound and the row may be expired only on paper. The chain settles
+ * what Photon's silence cannot, so a transaction that landed is never failed
+ * here however far behind the indexer has fallen.
  *
- * Anything still unconfirmed is unresolvable from here and never retryable. A
- * deposit cannot spend a note twice, but it can execute twice, and an owner who
- * asked to shield one amount and had two leave their public balance has lost
- * the difference.
+ * A signature the chain cannot account for is unresolvable from here and never
+ * retryable. A deposit cannot spend a note twice, but it can execute twice, and
+ * an owner who asked to shield one amount and had two leave their public
+ * balance has lost the difference.
  */
 async function escalateExpiredSubmissions(
   repository: OperationRepository,
   serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
   logger: Logger,
-  blockHeight: string
+  blockHeight: string,
+  chain: ChainCheck
 ): Promise<void> {
   const expired = await repository.listExpiredSubmissions({ blockHeight, limit: MAX_PER_RUN });
 
@@ -126,6 +173,7 @@ async function escalateExpiredSubmissions(
     try {
       const settled = await serviceFor(operation).executeOperation(operation.id);
       if (settled.state === "completed") continue;
+      if (await chainForbidsFailure(operation, chain.readSignatureStatus, chain.env)) continue;
 
       await repository.failOperation({
         organizationId: operation.organization_id,
@@ -133,7 +181,7 @@ async function escalateExpiredSubmissions(
         id: operation.id,
         expectedState: operation.state as "submitted" | "indexing",
         code: "manual_reconciliation_required",
-        message: `signed transaction ${operation.outer_tx_signature} expired without being indexed; reconcile it on chain before starting another`,
+        message: `signed transaction ${operation.outer_tx_signature} expired and neither the indexer nor the chain has any record of it; reconcile it on chain before starting another`,
         retryable: false,
       });
     } catch (error) {
@@ -205,7 +253,8 @@ async function advanceInFlight(
   repository: OperationRepository,
   serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
   logger: Logger,
-  now: Date
+  now: Date,
+  chain: ChainCheck
 ): Promise<void> {
   const inFlight = await repository.listInFlightOperations({
     staleBefore: now.toISOString(),
@@ -228,6 +277,7 @@ async function advanceInFlight(
       if (settled.state === "completed") continue;
 
       if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
+        if (await chainForbidsFailure(operation, chain.readSignatureStatus, chain.env)) continue;
         await failIndexingTimeout(repository, operation);
       }
     } catch (error) {
@@ -238,10 +288,11 @@ async function advanceInFlight(
 }
 
 /**
- * The backstop for an operation Photon has never answered about.
+ * The backstop for an operation neither Photon nor the chain answers about.
  *
- * Signed bytes are never retryable here: nothing established whether they
- * landed, so the honest state is that a human has to look. `indexing_timeout`
+ * Signed bytes are never retryable here: the caller has already ruled out a
+ * transaction the chain confirms, so reaching this point means nothing
+ * established whether they landed and a human has to look. `indexing_timeout`
  * survives only for a row with no bytes behind it, which the pipeline no longer
  * produces but older rows may still be sitting in.
  */
@@ -258,8 +309,8 @@ async function failIndexingTimeout(
     expectedState: "indexing",
     code: unresolvable ? "manual_reconciliation_required" : "indexing_timeout",
     message: unresolvable
-      ? `Photon did not index ${operation.outer_tx_signature} within the budget; reconcile it on chain before starting another`
-      : "Photon did not index the transaction within the budget",
+      ? `the indexer has no record of ${operation.outer_tx_signature} within the budget, and neither does the chain; reconcile it on chain before starting another`
+      : "the indexer did not record the transaction within the budget",
     retryable: !unresolvable,
   });
 }
