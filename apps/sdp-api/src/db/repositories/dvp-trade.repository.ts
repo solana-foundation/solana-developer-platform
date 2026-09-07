@@ -33,7 +33,7 @@ export type DvpTradeSide = "a" | "b";
  * `principal` is the original shape and the default: SDP holds one leg in a
  * custody wallet and the counterparty is an arbitrary address.
  *
- * `agent` is Ilan's shape — an execution desk sets the terms and two other
+ * `agent` is the execution-desk shape — one party sets the terms and two other
  * parties do the swaps. The program always allowed it (`CreateDvp`'s only
  * signer is the payer), so this is SDP catching up to the program rather than
  * anything new on chain.

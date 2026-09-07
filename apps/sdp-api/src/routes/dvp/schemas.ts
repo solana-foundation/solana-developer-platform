@@ -72,7 +72,7 @@ const dvpTradeTermsShape = {
 /**
  * The original shape: SDP holds one leg, the counterparty is any address.
  *
- * Zach's V1 call (PRO-1830), and still the default.
+ * The V1 shape (PRO-1830), and still the default.
  */
 const createPrincipalDvpTradeSchema = z.object({
   ...dvpTradeTermsShape,
@@ -85,11 +85,12 @@ const createPrincipalDvpTradeSchema = z.object({
 });
 
 /**
- * Ilan's shape: SDP sets the terms and two other parties do the swaps.
+ * The execution-desk shape: SDP sets the terms and two other parties do the
+ * swaps.
  *
- * "you can't assume the new trade submission party is the same party that is
- * doing one of the legs — it's actually more common for an execution agent to
- * set up the onchain swap details then have two counter parties do the swaps."
+ * The party that submits a trade is not necessarily a party to it. An execution
+ * agent setting up the on-chain swap details and having two counterparties do
+ * the swaps is the more common arrangement, and nothing here ruled it out.
  *
  * The program always allowed this: `CreateDvp`'s only signer is the payer, and
  * both parties are plain accounts. There is deliberately no `sdpSide` here —

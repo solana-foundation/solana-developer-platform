@@ -1,8 +1,8 @@
 -- Trades where SDP sets the terms and holds neither leg (PRO-1853).
 --
--- Ilan: "you can't assume the new trade submission party is the same party that
--- is doing one of the legs — it's actually more common for an execution agent to
--- set up the onchain swap details then have two counter parties do the swaps."
+-- The party that submits a trade is not necessarily a party to it. An execution
+-- agent setting up the on-chain swap details and having two counterparties do
+-- the swaps is the more common arrangement.
 --
 -- The program never required otherwise. `CreateDvp`'s only signer is the payer;
 -- `user_a`, `user_b` and `settlement_authority` are plain non-signer accounts,
@@ -10,8 +10,8 @@
 -- assumption was ours, and it lived in this table: `sdp_side NOT NULL` said SDP
 -- always holds one of the two legs.
 --
--- This does NOT replace that shape. Zach scoped V1 as "maybe one side can be sdp
--- wallet" (PRO-1830) and principal trades stay exactly as they are, and stay the
+-- This does NOT replace that shape. V1 was scoped around SDP optionally holding
+-- one side (PRO-1830); principal trades stay exactly as they are, and stay the
 -- default. Agent trades are a second kind alongside.
 --
 -- `sdp_wallet_id` stays NOT NULL for both kinds. On an agent trade that wallet

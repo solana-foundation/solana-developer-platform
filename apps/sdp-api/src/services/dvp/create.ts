@@ -64,7 +64,7 @@ const NONCE_TOMBSTONE_SEED = "nonce";
 /** The two parties, however the caller chose to describe them. */
 export type DvpTradeParties =
   | {
-      /** SDP delivers a leg itself. Zach's V1 shape, and the default. */
+      /** SDP delivers a leg itself. The V1 shape, and the default. */
       tradeKind: "principal";
       /** Which leg SDP delivers. The counterparty takes the other one. */
       sdpSide: DvpTradeSide;

@@ -6,9 +6,9 @@
  * Two shapes, and which one is chosen changes what the rest of the form means.
  *
  * `principal` is the original: one of your custody wallets delivers a leg and
- * the other side is any address. `agent` is Ilan's shape — you set the terms
- * and two other parties do the swaps, so your wallet signs and pays but
- * delivers nothing.
+ * the other side is any address. `agent` is the execution-desk shape — you set
+ * the terms and two other parties do the swaps, so your wallet signs and pays
+ * but delivers nothing.
  *
  * Its own hook for the same reason the destinations have one: this is a
  * self-contained cluster of state with its own validity rules, and folding it

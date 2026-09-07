@@ -315,10 +315,10 @@ export function AmountField({
 /**
  * Whether this organization is a party to the trade, or only setting it up.
  *
- * Ilan: "it's actually more common for an execution agent to set up the onchain
- * swap details then have two counter parties do the swaps." The program always
- * allowed it — CreateDvp's only signer is the payer — so this exposes a shape
- * that was already there rather than adding one.
+ * An execution agent setting up the on-chain swap details and having two
+ * counterparties do the swaps is the more common arrangement, and the program
+ * always allowed it — CreateDvp's only signer is the payer — so this exposes a
+ * shape that was already there rather than adding one.
  *
  * Same card grammar as the side chooser directly below it, because the two
  * questions are asked one after the other and reading as one control is the
