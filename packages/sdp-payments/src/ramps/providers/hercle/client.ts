@@ -188,6 +188,17 @@ export interface HercleRegisterPayoutAccountRequest {
   accountHolder: string;
 }
 
+/**
+ * The business's acceptance of Hercle's terms, attested by SDP on its behalf (TS-KYC-01 D14). Hercle refuses to
+ * open an account without both mandatory consents, exactly as its own sign-up does; `acceptedAt` is when the
+ * business ticked the boxes in the collect step.
+ */
+export interface HercleConsents {
+  termsAndConditions: true;
+  privacyPolicy: true;
+  acceptedAt: string;
+}
+
 export interface HercleCreateAccountRequest {
   companyName: string;
   registrationNumber?: string;
@@ -196,6 +207,7 @@ export interface HercleCreateAccountRequest {
   fundingMode: string;
   accountLabel?: string;
   externalReference: string;
+  consents: HercleConsents;
 }
 
 export class HercleRampClient implements RampProvider {

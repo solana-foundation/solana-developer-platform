@@ -7,8 +7,10 @@ import {
   HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
   HERCLE_PAYOUT_BIC_FIELD_KEY,
   HERCLE_PAYOUT_IBAN_FIELD_KEY,
+  HERCLE_PRIVACY_CONSENT_FIELD_KEY,
   HERCLE_REGISTRATION_COUNTRY_FIELD_KEY,
   HERCLE_REGISTRATION_NUMBER_FIELD_KEY,
+  HERCLE_TERMS_CONSENT_FIELD_KEY,
   hercleJurisdictionForCountry,
   herclePayoutAccountFields,
 } from "@sdp/payments/ramps/providers/hercle/counterparty";
@@ -168,6 +170,16 @@ export async function advanceHercleCounterparty(
       );
     }
 
+    // Hercle opens no account for a business that has not accepted its terms and privacy policy; the collect
+    // step carries both as consent fields and SDP attests them on the business's behalf (TS-KYC-01 D14).
+    const termsAccepted = collectedData?.[HERCLE_TERMS_CONSENT_FIELD_KEY] === "true";
+    const privacyAccepted = collectedData?.[HERCLE_PRIVACY_CONSENT_FIELD_KEY] === "true";
+    if (!termsAccepted || !privacyAccepted) {
+      throw badRequest(
+        "The business must accept Hercle's Terms & Conditions and Privacy Policy to provision a Hercle account."
+      );
+    }
+
     const jurisdiction = hercleJurisdictionForCountry(countryCode);
     if (jurisdiction === undefined) {
       return unsupportedCounterparty(
@@ -187,6 +199,11 @@ export async function advanceHercleCounterparty(
         fundingMode: "Funded",
         accountLabel: counterparty.display_name,
         externalReference: counterparty.id,
+        consents: {
+          termsAndConditions: true,
+          privacyPolicy: true,
+          acceptedAt: new Date().toISOString(),
+        },
       },
       // Content-addressed: a retried POST replays the same Hercle account instead of duplicating it.
       `sdp-account-${counterparty.id}`

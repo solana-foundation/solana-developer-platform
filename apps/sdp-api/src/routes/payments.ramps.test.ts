@@ -1218,6 +1218,9 @@ describe("Payments routes — ramps", () => {
     payoutIban: "CH93 0076 2011 6238 5295 7",
     payoutBic: "UBSWCHZH80A",
     payoutAccountHolder: "Acme Ltd",
+    // The business accepts Hercle's terms and privacy policy where it hands over its details (TS-KYC-01 D14).
+    acceptHercleTerms: "true",
+    acceptHerclePrivacy: "true",
   };
 
   async function advanceHercle(counterpartyId: string): Promise<Response> {
@@ -1291,6 +1294,14 @@ describe("Payments routes — ramps", () => {
       `/partner/v1/accounts/${accountId}/payout-account`,
       `/partner/v1/accounts/${accountId}/verifications`,
     ]);
+    // Hercle opens no account without the attested consents; SDP passes them straight through, stamped
+    // with the moment the business submitted them.
+    const [, createInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(createInit.body as string).consents).toEqual({
+      termsAndConditions: true,
+      privacyPolicy: true,
+      acceptedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
     const [, payoutInit] = fetchSpy.mock.calls[1] as [string, RequestInit];
     expect(JSON.parse(payoutInit.body as string)).toEqual({
       currency: "EUR",

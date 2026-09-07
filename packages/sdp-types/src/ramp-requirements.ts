@@ -49,6 +49,19 @@ export type RequirementField =
       required: boolean;
       /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
       fields: RequirementField[];
+    }
+  | {
+      /**
+       * An affirmative acceptance of a provider document (terms of service, privacy policy), collected as
+       * the literal `"true"`. The label is the sentence up to the document's name and `documentLabel`
+       * completes it as a link to `documentUrl`, so the person reads what they accept where they accept it.
+       */
+      kind: "consent";
+      key: string;
+      label: string;
+      required: boolean;
+      documentUrl: string;
+      documentLabel?: string;
     };
 
 export type RequirementFieldKind = RequirementField["kind"];

@@ -8,8 +8,12 @@ import {
   HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
   HERCLE_PAYOUT_BIC_FIELD_KEY,
   HERCLE_PAYOUT_IBAN_FIELD_KEY,
+  HERCLE_PRIVACY_CONSENT_FIELD_KEY,
+  HERCLE_PRIVACY_POLICY_URL,
   HERCLE_REGISTRATION_COUNTRY_FIELD_KEY,
   HERCLE_REGISTRATION_NUMBER_FIELD_KEY,
+  HERCLE_TERMS_CONSENT_FIELD_KEY,
+  HERCLE_TERMS_URL,
   hercleCounterpartyRequirements,
   hercleJurisdictionForCountry,
 } from "./counterparty";
@@ -97,6 +101,25 @@ describe("hercleCounterpartyRequirements", () => {
     assert.ok(countryCodes.includes("CH"));
     assert.ok(countryCodes.includes("DE"));
     assert.ok(!countryCodes.includes("US"));
+  });
+
+  it("collects the acceptance of Hercle's terms and privacy policy with the KYB inputs", () => {
+    // Hercle opens no account for a business that has not accepted both (TS-KYC-01 D14), so the
+    // collect step carries them as required consents linking the documents being accepted.
+    const requirements = hercleCounterpartyRequirements(businessCounterparty(), options());
+    if (requirements.status !== "collect") {
+      assert.fail("expected collect");
+    }
+    const consents = requirements.fields.filter((field) => field.kind === "consent");
+    assert.deepEqual(
+      consents.map((field) => [field.key, field.required, field.kind === "consent" ? field.documentUrl : null]),
+      [
+        [HERCLE_TERMS_CONSENT_FIELD_KEY, true, HERCLE_TERMS_URL],
+        [HERCLE_PRIVACY_CONSENT_FIELD_KEY, true, HERCLE_PRIVACY_POLICY_URL],
+      ]
+    );
+    assert.equal(HERCLE_TERMS_URL, "https://hercle.com/terms/");
+    assert.equal(HERCLE_PRIVACY_POLICY_URL, "https://hercle.com/privacy/");
   });
 
   it("defers to the handler once the customer link exists", () => {

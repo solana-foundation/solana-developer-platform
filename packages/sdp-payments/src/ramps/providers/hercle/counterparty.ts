@@ -1,6 +1,6 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
-import { readyCounterparty } from "../../requirements";
+import { consentField, readyCounterparty } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 
 /**
@@ -91,6 +91,11 @@ export const HERCLE_ADDRESS_POSTAL_CODE_FIELD_KEY = "registeredAddressPostalCode
 export const HERCLE_PAYOUT_IBAN_FIELD_KEY = "payoutIban";
 export const HERCLE_PAYOUT_BIC_FIELD_KEY = "payoutBic";
 export const HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY = "payoutAccountHolder";
+export const HERCLE_TERMS_CONSENT_FIELD_KEY = "acceptHercleTerms";
+export const HERCLE_PRIVACY_CONSENT_FIELD_KEY = "acceptHerclePrivacy";
+
+export const HERCLE_TERMS_URL = "https://hercle.com/terms/";
+export const HERCLE_PRIVACY_POLICY_URL = "https://hercle.com/privacy/";
 
 /**
  * KYB inputs Hercle requires to open the sub-account. The country doubles as the
@@ -146,6 +151,32 @@ export function hercleOnboardingFields(): RequirementField[] {
       placeholder: "8001",
     },
     ...herclePayoutAccountFields(),
+    ...hercleConsentFields(),
+  ];
+}
+
+/**
+ * The business becomes a Hercle client when the account opens, and Hercle refuses to open one that has not
+ * accepted its terms and privacy policy — the same two boxes its own sign-up form makes mandatory. Collected
+ * here so the acceptance is given where the business already hands Hercle its details, and passed straight
+ * to Hercle as an attestation; SDP stores nothing (TS-KYC-01 D14).
+ */
+export function hercleConsentFields(): RequirementField[] {
+  return [
+    consentField({
+      key: HERCLE_TERMS_CONSENT_FIELD_KEY,
+      label: "I declare that I have read and accepted Hercle's",
+      documentLabel: "Terms & Conditions",
+      documentUrl: HERCLE_TERMS_URL,
+      required: true,
+    }),
+    consentField({
+      key: HERCLE_PRIVACY_CONSENT_FIELD_KEY,
+      label: "I declare that I have read, agreed and accepted Hercle's",
+      documentLabel: "Privacy Policy",
+      documentUrl: HERCLE_PRIVACY_POLICY_URL,
+      required: true,
+    }),
   ];
 }
 
