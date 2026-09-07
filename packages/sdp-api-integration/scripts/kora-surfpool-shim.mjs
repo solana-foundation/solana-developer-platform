@@ -19,10 +19,13 @@ const sendTransactionTimeoutMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
   10
 );
-// Long enough that a slow CI box does not start resubmitting a transaction the
-// validator simply has not caught up on yet.
+// Bounded by the CALLER's timeout, not by how long a validator might take:
+// `KoraFeePayment` gives signAndSendTransaction 10s (DEFAULT_TIMEOUT_MS in
+// kora.adapter.ts), so a shim that waits longer than that guarantees the very
+// timeout-and-retry it is trying to avoid. This wait plus the resubmission
+// below has to stay comfortably under it.
 const sendTransactionStatusWaitMs = Number.parseInt(
-  process.env.KORA_SHIM_SEND_STATUS_WAIT_MS ?? "15000",
+  process.env.KORA_SHIM_SEND_STATUS_WAIT_MS ?? "3000",
   10
 );
 const sendTransactionStatusPollMs = 250;
