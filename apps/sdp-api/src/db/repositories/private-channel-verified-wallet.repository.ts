@@ -89,6 +89,15 @@ export interface PrivateChannelVerifiedWalletRepository {
     userId: string,
     instanceId: string
   ): Promise<PrivateChannelVerifiedWalletRow[]>;
+  /**
+   * Any member's verification of `pubkey` on `instanceId`, newest first, or
+   * null. Answers "can this address ever spend a channel balance" — which is
+   * what a deposit recipient has to satisfy — without naming a member.
+   */
+  findAnyByInstanceAndPubkey(
+    instanceId: string,
+    pubkey: string
+  ): Promise<PrivateChannelVerifiedWalletRow | null>;
 }
 
 export function mapPrivateChannelVerifiedWalletRow(
