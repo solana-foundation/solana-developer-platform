@@ -1173,7 +1173,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBe(false);
   });
 
-  it("keeps vault deposits disabled in production", () => {
+  it("keeps sandbox-only vault deposits disabled when another provider is open in production", () => {
     mocks.environment = "production";
     renderWorkspace();
 
@@ -1185,7 +1185,8 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
-    expect(screen.getByLabelText(/intentionally closed in production/)).toBeTruthy();
+    expect(within(row).getByText("Sandbox only")).toBeTruthy();
+    expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
 
   it("fails closed when a persisted program provider has no Solana withdrawal lane", () => {

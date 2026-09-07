@@ -120,13 +120,6 @@ export async function createEarnVaultDepositPreview(
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
 
-  if (!isVaultDirectDepositEnabled(environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Vault deposits are not available in production yet, so there is nothing to quote."
-    );
-  }
-
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
     throw notFound("Earn strategy");
@@ -142,6 +135,13 @@ export async function createEarnVaultDepositPreview(
     );
   }
   const provider = strategy.provider;
+
+  if (!isVaultDirectDepositEnabled(environment, provider)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `Vault deposits for ${provider} are not available from a ${environment} project.`
+    );
+  }
 
   assertEarnProviderSurfaced(provider);
   await assertProviderAvailable(
@@ -320,52 +320,35 @@ export async function extractEarnVaultDepositPolicyCandidate(
     includeAllProviders: true,
   });
 
-  // ENVIRONMENT CAPABILITY, before anything else and before any lookup.
-  //
-  // The exit path exists now (PRO-1702) and deliberately takes no such gate.
-  // What keeps production deposits closed is PRO-1703: the Active tab does not
-  // surface vault positions yet, so a mainnet position would sit outside the
-  // customer's primary portfolio view. Entitlement cannot express this — it is
-  // org-scoped, not environment-scoped — which is exactly why an entitled org
-  // would otherwise reach mainnet early. The dashboard hides the affordance
-  // from the same constant, so the button and the route agree by construction.
-  if (!isVaultDirectDepositEnabled(environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Vault deposits are not available in production yet: vault positions are not surfaced " +
-        "on the Active tab, so a position opened here would sit outside the portfolio view."
-    );
-  }
-
-  // SLIPPAGE FLOOR, required wherever real money moves.
-  //
-  // Kamino's pinned SDK selects the LEGACY deposit instruction when no
-  // `minSharesOut` is given — there is no implicit floor, so a vault-state
-  // change between signing and inclusion can mint materially fewer shares than
-  // the caller reviewed. The dashboard derives one from a live quote with a
-  // displayed tolerance (`POST /vault-deposit-previews`) and refuses to submit
-  // a floor whose quote has aged past its TTL (PRO-1691) — but API callers
-  // predate the floor, so requiring it unconditionally today would still break
-  // working flows.
-  //
-  // This is scoped to production deliberately, and it is NOT dead code: the
-  // environment gate above closes production for a different reason (no exit
-  // path), and whoever lifts that gate must not silently also ship
-  // unprotected deposits. This check is what makes the floor a prerequisite of
-  // that change rather than something to remember.
-  if (environment === "production" && body.minSharesOut === undefined) {
-    throw badRequest(
-      "minSharesOut is required for a production vault deposit: without a floor the pinned " +
-        "Kamino SDK builds the legacy deposit instruction, which accepts any number of shares."
-    );
-  }
-
   // Resolve the strategy first: the caller names a catalogue row, never a raw
   // vault address. That keeps the deposit target inside what SDP catalogues and
   // means the admission gates the sync applied still bound this path.
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
     throw notFound("Earn strategy");
+  }
+  if (!isEarnProviderId(strategy.provider)) {
+    throw providerNotConfigured(
+      `Earn provider ${strategy.provider} is not available in this deployment`
+    );
+  }
+
+  // Jupiter is mainnet-only, while today's Kamino and Veda launch posture
+  // remains sandbox-only. Keep that distinction provider-scoped.
+  if (!isVaultDirectDepositEnabled(environment, strategy.provider)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `Vault deposits for ${strategy.provider} are not available from a ${environment} project.`
+    );
+  }
+
+  // Every production deposit carries a caller-chosen share floor. The
+  // dashboard derives it from a live quote and rejects stale quotes by TTL
+  // (PRO-1691); the provider builder enforces the exact value on-chain.
+  if (environment === "production" && body.minSharesOut === undefined) {
+    throw badRequest(
+      "minSharesOut is required for this production vault deposit because the provider supports a share floor."
+    );
   }
 
   const tokenMint = strategy.deposit_mints[0];

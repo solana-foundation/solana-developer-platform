@@ -15,8 +15,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
+import {
+  privateChannelTransferIdempotencyKeyStore,
+  privateChannelTransferRequestFingerprint,
+} from "../value-movement-tracking";
 import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
 import { createTransferAction, fetchTransferRecipientsAction } from "./actions";
 import { TransferProgress } from "./transfer-progress";
@@ -338,15 +343,30 @@ function TransferFormState({
     submitting.current = true;
     updateState({ error: null });
 
+    // One key per REQUEST, not per press — see the deposit form. Re-pressing
+    // submit after a timeout replays the original transfer; changing the
+    // channel, wallet, recipient, token or amount is a different transfer and
+    // mints a new key.
+    const requestPayload = {
+      channelId,
+      walletId,
+      recipientVerifiedWalletId,
+      amount: amount.trim(),
+      mint: selectedToken?.mint,
+    };
+    const fingerprint = privateChannelTransferRequestFingerprint(requestPayload);
+    const idempotencyKey = privateChannelTransferIdempotencyKeyStore.claim(fingerprint);
+
     startTransition(async () => {
       try {
-        const result = await createTransferAction({
-          channelId,
-          walletId,
-          recipientVerifiedWalletId,
-          amount: amount.trim(),
-          mint: validation.token.mint,
-        });
+        const result = await createTransferAction({ ...requestPayload, idempotencyKey });
+        applyIdempotencyKeyOutcome(
+          privateChannelTransferIdempotencyKeyStore,
+          fingerprint,
+          result.ok
+            ? { ok: true, status: 200, data: { kind: "transfer" } }
+            : { ok: false, status: result.kind === "server" ? result.status : 400 }
+        );
         if (result.ok) {
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });
           if (result.transfer.status === "failed") {

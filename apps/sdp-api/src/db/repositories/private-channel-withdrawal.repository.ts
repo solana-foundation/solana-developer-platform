@@ -27,6 +27,10 @@ export interface PrivateChannelWithdrawalRow {
   failure_reason: string | null;
   /** Read-only audit snapshot; the oracle never reads it. */
   context: PrivateChannelTransferContext;
+  /** The caller's `Idempotency-Key`; the tenant-scoped reservation this row claimed. */
+  idempotency_key: string | null;
+  /** Fingerprint of the request that claimed the key. Null only on pre-header history. */
+  idempotency_fingerprint: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +49,13 @@ export interface CreateWithdrawalInput extends WithdrawalProjectScope {
   amount: string;
   /** Audit snapshot at intent time; oracle never reads it. */
   context: PrivateChannelTransferContext;
+  /**
+   * The reservation. Both fields travel together — the schema rejects one
+   * without the other — because a key with no fingerprint could only ever be
+   * replayed blind.
+   */
+  idempotencyKey: string;
+  idempotencyFingerprint: string;
 }
 
 export interface UpdateWithdrawalInput {
@@ -61,6 +72,13 @@ export interface UpdateWithdrawalInput {
    * still in this status. Prevents concurrent pollers from regressing state.
    */
   expectedStatus?: PrivateChannelTransferStatus;
+  /**
+   * Additionally require that no signature has been persisted yet. Guards the
+   * fail path of abandoned-reservation recovery: a decision made from a
+   * signatureless snapshot must not land on a row a live request signed in the
+   * meantime.
+   */
+  expectedSignatureAbsent?: boolean;
 }
 
 export interface PrivateChannelWithdrawalRepositoryContext {
@@ -70,6 +88,14 @@ export interface PrivateChannelWithdrawalRepositoryContext {
 export interface PrivateChannelWithdrawalRepository {
   createWithdrawal(input: CreateWithdrawalInput): Promise<PrivateChannelWithdrawalRow | null>;
   updateWithdrawal(input: UpdateWithdrawalInput): Promise<PrivateChannelWithdrawalRow | null>;
+  /**
+   * The row that already claimed `idempotencyKey` in this tenant, or null.
+   * Scoped to (organization, project) to match the unique index, so one
+   * tenant's key can neither collide with nor probe for another's.
+   */
+  findWithdrawalByIdempotency(
+    scope: WithdrawalProjectScope & { idempotencyKey: string }
+  ): Promise<PrivateChannelWithdrawalRow | null>;
   getWithdrawalById(
     scope: WithdrawalProjectScope & { id: string }
   ): Promise<PrivateChannelWithdrawalRow | null>;
