@@ -1,9 +1,29 @@
+import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
-import { env } from "@/test/helpers/env";
+import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
+
+/**
+ * Privileged tampering must be simulated as a genuine superuser: the runtime
+ * role the suite normally connects through is bound by the ledger's forced
+ * row-level security (no UPDATE/DELETE policy exists), so its tampering
+ * statements would be silently filtered to zero rows instead of shortening
+ * the chain — which is the control working, not the scenario under test.
+ */
+async function tamperAsSuperuser(statements: readonly string[]): Promise<void> {
+  const client = new pg.Client({ connectionString: adminDatabaseUrl });
+  await client.connect();
+  try {
+    for (const statement of statements) {
+      await client.query(statement);
+    }
+  } finally {
+    await client.end();
+  }
+}
 
 class MemoryCheckpointStore implements KVStore {
   private value: string | null = null;
@@ -198,17 +218,17 @@ describe("tamper-evident audit ledger", () => {
     ).rejects.toMatchObject({ name: "AuditPersistenceError" });
 
     try {
-      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
-      await db.execute(
-        "ALTER TABLE audit_ledger_anchors DISABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
-      );
-      await db.execute("DELETE FROM audit_ledger_anchors WHERE ledger_sequence = 2");
-      await db.execute("DELETE FROM audit_logs WHERE ledger_sequence = 2");
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation",
+        "ALTER TABLE audit_ledger_anchors DISABLE TRIGGER audit_ledger_anchors_reject_row_mutation",
+        "DELETE FROM audit_ledger_anchors WHERE ledger_sequence = 2",
+        "DELETE FROM audit_logs WHERE ledger_sequence = 2",
+      ]);
     } finally {
-      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
-      await db.execute(
-        "ALTER TABLE audit_ledger_anchors ENABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
-      );
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation",
+        "ALTER TABLE audit_ledger_anchors ENABLE TRIGGER audit_ledger_anchors_reject_row_mutation",
+      ]);
     }
 
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({
@@ -282,12 +302,16 @@ describe("tamper-evident audit ledger", () => {
     });
 
     try {
-      // Testcontainers uses a disposable superuser. This simulates the exact
-      // privileged maintenance failure the verifier must detect.
-      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
-      await db.execute("UPDATE audit_logs SET metadata = '{\"tampered\":true}'");
+      // A disposable superuser connection simulates the exact privileged
+      // maintenance failure the verifier must detect.
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation",
+        "UPDATE audit_logs SET metadata = '{\"tampered\":true}'",
+      ]);
     } finally {
-      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation",
+      ]);
     }
 
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({
@@ -310,10 +334,14 @@ describe("tamper-evident audit ledger", () => {
     });
 
     try {
-      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
-      await db.execute("DELETE FROM audit_logs WHERE ledger_sequence = 2");
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation",
+        "DELETE FROM audit_logs WHERE ledger_sequence = 2",
+      ]);
     } finally {
-      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation",
+      ]);
     }
 
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({
@@ -357,17 +385,17 @@ describe("tamper-evident audit ledger", () => {
     });
 
     try {
-      await db.execute("ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation");
-      await db.execute(
-        "ALTER TABLE audit_ledger_anchors DISABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
-      );
-      await db.execute("DELETE FROM audit_logs WHERE ledger_sequence = 2");
-      await db.execute("DELETE FROM audit_ledger_anchors WHERE ledger_sequence = 2");
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_reject_row_mutation",
+        "ALTER TABLE audit_ledger_anchors DISABLE TRIGGER audit_ledger_anchors_reject_row_mutation",
+        "DELETE FROM audit_logs WHERE ledger_sequence = 2",
+        "DELETE FROM audit_ledger_anchors WHERE ledger_sequence = 2",
+      ]);
     } finally {
-      await db.execute("ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation");
-      await db.execute(
-        "ALTER TABLE audit_ledger_anchors ENABLE TRIGGER audit_ledger_anchors_reject_row_mutation"
-      );
+      await tamperAsSuperuser([
+        "ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_reject_row_mutation",
+        "ALTER TABLE audit_ledger_anchors ENABLE TRIGGER audit_ledger_anchors_reject_row_mutation",
+      ]);
     }
 
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({

@@ -7,7 +7,6 @@ import {
   CopyIcon,
   LockIcon,
   type LucideIcon,
-  PlusIcon,
   Settings2Icon,
 } from "lucide-react";
 import { useState } from "react";
@@ -82,7 +81,7 @@ export function WorkspaceSwitcher({
   const { userMemberships, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
-  const { openOrganizationProfile, openCreateOrganization } = useClerk();
+  const { openOrganizationProfile } = useClerk();
   const { projects, selectedProjectId, selectProject, isProjectSwitching } =
     useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
@@ -126,11 +125,6 @@ export function WorkspaceSwitcher({
           <DropdownMenuLabel className="flex items-center justify-between text-xs font-medium normal-case tracking-normal text-secondary">
             <span>{t("Shared.SharedComponents.organizations")}</span>
             <span className="flex items-center gap-0.5">
-              <OrganizationHeaderAction
-                label={t("Shared.SharedComponents.createOrganization")}
-                icon={PlusIcon}
-                onSelect={() => openCreateOrganization()}
-              />
               {activeOrg ? (
                 <OrganizationHeaderAction
                   label={t("Shared.SharedComponents.manageOrganization")}

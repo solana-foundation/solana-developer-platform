@@ -68,6 +68,42 @@ describe("connectPrivateChannelAction", () => {
     });
   });
 
+  it("surfaces egress-allowlist refusals as per-field errors, not a generic message", async () => {
+    // The API's 400 envelope for a refused destination carries fieldErrors —
+    // the operator must see WHICH URL was refused on its own form field.
+    fetchMock.mockRejectedValue(
+      new Error(
+        `SDP API request failed (400): ${JSON.stringify({
+          error: {
+            message: "Invalid connection details",
+            details: {
+              fieldErrors: {
+                gatewayUrl: [
+                  "gatewayUrl (http://10.0.0.9:8899) is not on this deployment's approved Private Channels egress allowlist.",
+                ],
+                authUrl: [
+                  "authUrl (https://evil.test) is not on this deployment's approved Private Channels egress allowlist.",
+                ],
+              },
+            },
+          },
+        })}`
+      )
+    );
+    const { chainRpcUrl: _legacyChainRpcUrl, ...input } = SANDBOX_DEFAULTS;
+
+    const result = await connectPrivateChannelAction(input);
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "validation",
+      fieldErrors: {
+        gatewayUrl: expect.stringContaining("approved Private Channels egress allowlist"),
+        authUrl: expect.stringContaining("approved Private Channels egress allowlist"),
+      },
+    });
+  });
+
   it("sends a verified update to the active instance", async () => {
     fetchMock.mockResolvedValue({ instance: { ...existingInstance, isActive: true } });
     const { chainRpcUrl: _legacyChainRpcUrl, ...input } = SANDBOX_DEFAULTS;

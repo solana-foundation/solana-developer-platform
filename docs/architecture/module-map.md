@@ -14,7 +14,7 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/types` |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
@@ -22,6 +22,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | None |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/types` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/policy` | Wallet-operation policy engine: rule evaluation and enforcement orchestration. | `@sdp/solana`, `@sdp/types` |
@@ -38,7 +39,7 @@ This map is generated from the module-boundary check. It records the permitted w
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/types`
 - `@sdp/earn` -> `@sdp/types`
@@ -46,6 +47,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/helius-rings` -> None
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
 - `@sdp/payments` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/policy` -> `@sdp/solana`, `@sdp/types`
