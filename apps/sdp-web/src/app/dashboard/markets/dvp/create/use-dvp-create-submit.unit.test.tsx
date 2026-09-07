@@ -46,6 +46,9 @@ function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
     sdpSide: "a",
     tokenProgramA: T22,
     tokenProgramB: T22,
+    // Empty is the ordinary trade: each party is paid at its own address.
+    userASettlementDestination: "",
+    userBSettlementDestination: "",
     walletId: "cwlt_leg",
     ...overrides,
   };
@@ -92,6 +95,18 @@ describe("useDvpCreateSubmit idempotency key", () => {
       ["the asset token program", { tokenProgramA: LEGACY }],
       ["the cash token program", { tokenProgramB: LEGACY }],
       ["the reference", { refString: "invoice-42" }],
+      // Where the proceeds go is a term of the trade. Same wallet, same
+      // amounts, same counterparty, different payee is a DIFFERENT trade, and
+      // the API fingerprints it as one — so a key that ignored these would send
+      // the second request into a mismatched replay and get it refused.
+      [
+        "where the asset side is paid",
+        { userASettlementDestination: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" },
+      ],
+      [
+        "where the cash side is paid",
+        { userBSettlementDestination: "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh" },
+      ],
     ])("%s", async (_label, overrides) => {
       expect(await keyFor(overrides)).not.toBe(await base);
     });

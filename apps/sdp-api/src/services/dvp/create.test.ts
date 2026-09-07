@@ -78,6 +78,10 @@ function tradeInput() {
     expiryTimestamp: BigInt(Math.floor(Date.now() / 1000) + 3600),
     earliestSettlementTimestamp: null,
     refString: null,
+    // Null is the ordinary trade: the program records each party's own address.
+    // Custom destinations are covered in their own cases below.
+    userASettlementDestination: null,
+    userBSettlementDestination: null,
     idempotencyKey: null,
   };
 }

@@ -240,6 +240,12 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
       ? BigInt(body.earliestSettlementTimestamp)
       : null,
     refString: body.refString ?? null,
+    // Null means "the party's own address", which is what the program records
+    // for an omitted destination. Not defaulted here: create resolves it once,
+    // and the fingerprint needs to tell an omitted destination from one the
+    // caller named that happens to equal the party.
+    userASettlementDestination: body.userASettlementDestination ?? null,
+    userBSettlementDestination: body.userBSettlementDestination ?? null,
     // Optional. Its only job is to make a retry after an ambiguous broadcast
     // return the original trade rather than create a second one.
     idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,

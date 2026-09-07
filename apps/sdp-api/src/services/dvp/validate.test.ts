@@ -15,6 +15,10 @@ function terms(overrides: Partial<DvpTradeTerms> = {}): DvpTradeTerms {
     expiryTimestamp: BigInt(NOW + 3600),
     earliestSettlementTimestamp: null,
     refString: null,
+    // Already resolved by the time terms are checked: create substitutes each
+    // party's own address for an omitted destination, mirroring the program.
+    userASettlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+    userBSettlementDestination: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
     ...overrides,
   };
 }
@@ -79,6 +83,30 @@ describe("validateDvpTerms", () => {
     const t = terms({ settlementAuthority: terms().userA });
 
     expect(validateDvpTerms(t, NOW)).toContain("settlementAuthority must not be userA or userB");
+  });
+
+  // Not a program rule. The program has no opinion about who the settlement
+  // authority belongs to; here it is always SDP's, and it is the key that signs
+  // the delivery. Pointing a party's proceeds at it means the tokens move from
+  // escrow into SDP's own account instead of to the party.
+  it.each([["userASettlementDestination"], ["userBSettlementDestination"]])(
+    "rejects %s pointing at the settlement authority",
+    (field) => {
+      const t = terms({ [field]: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY" });
+
+      expect(validateDvpTerms(t, NOW)).toContain(`${field} must not be the settlementAuthority`);
+    }
+  );
+
+  // The whole point of the feature: delivering somewhere other than the address
+  // that funded the leg is legitimate and must stay accepted.
+  it("accepts destinations that differ from their parties", () => {
+    const t = terms({
+      userASettlementDestination: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
+      userBSettlementDestination: "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh",
+    });
+
+    expect(validateDvpTerms(t, NOW)).toEqual([]);
   });
 
   // Program error 15. Stored zero-padded into a fixed 64-byte field.

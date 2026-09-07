@@ -60,6 +60,12 @@ function createIdempotencyKey(request: DvpCreateRequest): string {
     request.amountB,
     request.expiry,
     request.refString,
+    // Must stay in step with the server fingerprint, which gained these at the
+    // same time. Two trades identical but for where the proceeds go are
+    // different trades; leaving these out would give them one key and get the
+    // second refused as a mismatched replay.
+    request.userASettlementDestination,
+    request.userBSettlementDestination,
   ]);
 
   let hash = FNV_OFFSET;
@@ -81,6 +87,12 @@ export interface DvpCreateRequest {
   /** Each listed mint carries its own program; a pasted one is assumed T22. */
   tokenProgramA: string | null;
   tokenProgramB: string | null;
+  /**
+   * Where each party's proceeds go. Empty means the party's own address, which
+   * is what the program records for an omitted destination.
+   */
+  userASettlementDestination: string;
+  userBSettlementDestination: string;
   walletId: string;
 }
 
@@ -127,6 +139,15 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
             Math.floor(new Date(`${request.expiry}T23:59:59Z`).getTime() / 1000)
           ),
           ...(request.refString ? { refString: request.refString } : {}),
+          // Omitted rather than sent empty. The API reads absent as "the
+          // party's own address"; an empty string would fail the address
+          // pattern and 400 an otherwise ordinary trade.
+          ...(request.userASettlementDestination
+            ? { userASettlementDestination: request.userASettlementDestination }
+            : {}),
+          ...(request.userBSettlementDestination
+            ? { userBSettlementDestination: request.userBSettlementDestination }
+            : {}),
         }),
       });
 

@@ -51,6 +51,7 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import { dvpCreateFingerprint } from "./fingerprint";
+import { describeDvpDestinationProblem, findDvpDestinationProblem } from "./inspect-destination";
 import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
@@ -80,6 +81,17 @@ export interface CreateDvpTradeInput {
   expiryTimestamp: bigint;
   earliestSettlementTimestamp: bigint | null;
   refString: string | null;
+  /**
+   * Where each party's proceeds go, when that is not the party itself.
+   *
+   * Null means the party's own address, which is what the program records for
+   * an omitted destination. Kept nullable all the way to the instruction rather
+   * than resolved at the edge, so "the caller asked for the default" and "the
+   * caller asked for this address, which happens to be the party" stay
+   * distinguishable in the fingerprint.
+   */
+  userASettlementDestination: string | null;
+  userBSettlementDestination: string | null;
   /** Caller's Idempotency-Key, when they sent one. */
   idempotencyKey: string | null;
 }
@@ -234,6 +246,40 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   const userA = input.sdpSide === "a" ? signer.address : address(input.counterparty);
   const userB = input.sdpSide === "b" ? signer.address : address(input.counterparty);
 
+  // Resolved once, here, and used for the terms check, the row and the ATA
+  // derivations alike. The program treats an omitted destination as the party's
+  // own address, so mirroring that now means nothing downstream has to branch
+  // on null — `settle-preflight` can derive an ATA from a column that is always
+  // populated.
+  const destinationA = input.userASettlementDestination
+    ? address(input.userASettlementDestination)
+    : userA;
+  const destinationB = input.userBSettlementDestination
+    ? address(input.userBSettlementDestination)
+    : userB;
+
+  // Only the ones the caller actually named. A destination equal to its party
+  // is the default and has already been proven usable by the party existing;
+  // re-reading it would cost two account fetches on every ordinary trade.
+  //
+  // Checked here rather than left to settle because settle moves BOTH legs at
+  // once: a destination that cannot own a token account does not fail one side,
+  // it strands a trade both parties have already funded.
+  const namedDestinations = [
+    { field: "userASettlementDestination", value: input.userASettlementDestination },
+    { field: "userBSettlementDestination", value: input.userBSettlementDestination },
+  ].filter((entry) => entry.value !== null);
+  const destinationProblems = await Promise.all(
+    namedDestinations.map(async (entry) => {
+      const problem = await findDvpDestinationProblem(rpc, address(entry.value as string));
+      return problem ? describeDvpDestinationProblem(entry.field) : null;
+    })
+  );
+  const namedDestinationProblems = destinationProblems.filter((problem) => problem !== null);
+  if (namedDestinationProblems.length > 0) {
+    throw badRequest(namedDestinationProblems.join("; "));
+  }
+
   // Front-run the program's own checks so a bad payload is a 400 naming the
   // field rather than a round trip returning `custom program error: 0x5`.
   const problems = validateDvpTerms(
@@ -248,6 +294,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
       expiryTimestamp: input.expiryTimestamp,
       earliestSettlementTimestamp: input.earliestSettlementTimestamp,
       refString: input.refString,
+      userASettlementDestination: destinationA,
+      userBSettlementDestination: destinationB,
     },
     Math.floor(Date.now() / 1000)
   );
@@ -291,11 +339,15 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     expiryTimestamp: input.expiryTimestamp,
     nonce,
     refString: input.refString,
-    // Omitted destinations are recorded as the party's own address by the
-    // program, so leaving these null means "proceeds go to the counterparty",
-    // which is the default every flow in PRO-1830 wants.
-    userASettlementDestination: null,
-    userBSettlementDestination: null,
+    // Null when the caller named none, which the program records as the party's
+    // own address — the default every flow in PRO-1830 wants. An execution desk
+    // settling into an account other than the one it funded from passes them.
+    userASettlementDestination: input.userASettlementDestination
+      ? address(input.userASettlementDestination)
+      : null,
+    userBSettlementDestination: input.userBSettlementDestination
+      ? address(input.userBSettlementDestination)
+      : null,
     earliestSettlementTimestamp:
       input.earliestSettlementTimestamp === null ? none() : some(input.earliestSettlementTimestamp),
   });
@@ -344,8 +396,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     earliestSettlementTimestamp: input.earliestSettlementTimestamp?.toString() ?? null,
     // The program stores an omitted destination as the party's own address, so
     // mirror that rather than storing null and having to branch on read.
-    userASettlementDestination: userA,
-    userBSettlementDestination: userB,
+    userASettlementDestination: destinationA,
+    userBSettlementDestination: destinationB,
     refString: input.refString,
     escrowA,
     escrowB,

@@ -45,6 +45,22 @@ export const createDvpTradeSchema = z.object({
   earliestSettlementTimestamp: i64StringSchema.nullish(),
 
   /**
+   * Where each party's proceeds are delivered, when that is not the party.
+   *
+   * An execution desk routinely settles into an account other than the one it
+   * funded from, and the program has always supported it — `CreateDvp` takes
+   * both destinations as arguments and records the party's own address when
+   * they are omitted. Everything downstream already reads them; only create
+   * was dropping them on the floor.
+   *
+   * Omit for the ordinary trade. A destination that differs from its party is
+   * exactly the shape a forged trade takes, so surfaces that show a trade to a
+   * counterparty must say when these are set rather than render them quietly.
+   */
+  userASettlementDestination: solanaAddressSchema.nullish(),
+  userBSettlementDestination: solanaAddressSchema.nullish(),
+
+  /**
    * Opaque client reference, at most 64 bytes. Unauthenticated: anyone's forged
    * create can carry the same value, so it is a correlation hint and never an
    * identity on its own.

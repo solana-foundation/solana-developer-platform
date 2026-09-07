@@ -177,6 +177,74 @@ function LegCards({
   );
 }
 
+/**
+ * Delivering somewhere other than the address that funded the leg.
+ *
+ * Collapsed, because the ordinary trade pays each party back at its own
+ * address and two more address fields in the open would imply otherwise. An
+ * execution desk routinely settles into a different account, and the program
+ * has always taken both destinations — SDP was the only part dropping them.
+ *
+ * Kept in Terms rather than beside the legs on purpose. This is an agreement
+ * about where value ends up, not a property of the token being moved, and it is
+ * the same class of thing as who the counterparty is and when the trade lapses.
+ */
+function SettlementDestinations({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+  const t = useTranslations();
+  const rows = [
+    {
+      id: "dvp-destination-a",
+      label: t("DashboardMarkets.dvp.fieldDestinationA"),
+      value: form.destinationA,
+      onChange: form.setDestinationA,
+      invalid: form.destinationALooksWrong,
+    },
+    {
+      id: "dvp-destination-b",
+      label: t("DashboardMarkets.dvp.fieldDestinationB"),
+      value: form.destinationB,
+      onChange: form.setDestinationB,
+      invalid: form.destinationBLooksWrong,
+    },
+  ];
+
+  return (
+    <details className="group rounded-xl border border-border-subtle">
+      <summary className="cursor-pointer list-none px-4 py-3 text-primary text-sm marker:hidden">
+        {t("DashboardMarkets.dvp.groupDestinations")}
+        <span className="mt-0.5 block font-normal text-tertiary text-xs">
+          {t("DashboardMarkets.dvp.groupDestinationsHint")}
+        </span>
+      </summary>
+      <div className="grid gap-4 border-border-subtle border-t px-4 py-4 sm:grid-cols-2">
+        {rows.map((row) => (
+          <Field
+            hint={
+              row.invalid
+                ? t("DashboardMarkets.dvp.fieldCounterpartyInvalid")
+                : t("DashboardMarkets.dvp.fieldDestinationHint")
+            }
+            htmlFor={row.id}
+            key={row.id}
+            label={row.label}
+            tone={row.invalid ? "danger" : "muted"}
+          >
+            <Input
+              aria-invalid={row.invalid}
+              className="text-xs"
+              id={row.id}
+              onChange={(event) => row.onChange(event.target.value)}
+              placeholder={PLACEHOLDER_COUNTERPARTY}
+              spellCheck={false}
+              value={row.value}
+            />
+          </Field>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export function DvpCreateWorkspace({
   cluster,
   context,
@@ -306,6 +374,8 @@ export function DvpCreateWorkspace({
 
                 <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
               </div>
+
+              <SettlementDestinations form={form} />
             </Section>
           </div>
 

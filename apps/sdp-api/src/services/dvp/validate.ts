@@ -29,6 +29,12 @@ export interface DvpTradeTerms {
   expiryTimestamp: bigint;
   earliestSettlementTimestamp: bigint | null;
   refString: string | null;
+  /**
+   * Resolved delivery destinations — the party's own address when the caller
+   * named none, mirroring what the program stores for an omitted one.
+   */
+  userASettlementDestination: string;
+  userBSettlementDestination: string;
 }
 
 /**
@@ -51,6 +57,17 @@ export function validateDvpTerms(terms: DvpTradeTerms, nowSeconds: number): stri
   }
   if (terms.settlementAuthority === terms.userA || terms.settlementAuthority === terms.userB) {
     problems.push("settlementAuthority must not be userA or userB");
+  }
+  // The settlement authority signs the transaction that performs the delivery.
+  // Naming it as a destination points a party's proceeds at the key that moves
+  // them, which is not a trade — it is the tokens never reaching the party at
+  // all. Not a rule the program enforces, because the program has no opinion
+  // about who the authority belongs to; here it always belongs to SDP.
+  if (terms.userASettlementDestination === terms.settlementAuthority) {
+    problems.push("userASettlementDestination must not be the settlementAuthority");
+  }
+  if (terms.userBSettlementDestination === terms.settlementAuthority) {
+    problems.push("userBSettlementDestination must not be the settlementAuthority");
   }
   if (terms.amountA <= 0n) {
     problems.push("amountA must be greater than 0");

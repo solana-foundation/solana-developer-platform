@@ -68,7 +68,8 @@ const dvpTradeLegSchema = z
         "Address to fund this leg. There is no funding instruction: a party funds by sending an ordinary TransferChecked of exactly `amount` to this address. Send exactly the amount — settlement refunds any surplus to the depositor, and on a transfer-hook mint that refund can revert the whole settlement.",
     }),
     settlementDestination: z.string().openapi({
-      description: "Address the counter-leg proceeds are delivered to at settlement.",
+      description:
+        "Address the counter-leg proceeds are delivered to at settlement. Defaults to `party` and may be set to a different address at create, which is ordinary for an execution desk settling into an account other than the one it funded from. Verify it before funding: creating a trade is permissionless and the terms are not bound by the trade's address, so a forged trade naming you can point its proceeds anywhere.",
     }),
     funding: z
       .object({
