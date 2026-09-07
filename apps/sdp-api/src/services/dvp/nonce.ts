@@ -20,12 +20,8 @@ export const MAX_U64 = 2n ** 64n - 1n;
 
 /** A cryptographically random u64, as a bigint. */
 export function randomDvpNonce(): bigint {
-  // Big-endian assembly of 8 random bytes. Every bit is random, so the value is
+  // Big-endian read of 8 random bytes. Every bit is random, so the value is
   // uniform across the whole u64 range rather than clustered in the low bits the
   // way a Math.random()-derived integer would be.
-  let nonce = 0n;
-  for (const byte of randomBytes(8)) {
-    nonce = (nonce << 8n) | BigInt(byte);
-  }
-  return nonce;
+  return randomBytes(8).readBigUInt64BE();
 }

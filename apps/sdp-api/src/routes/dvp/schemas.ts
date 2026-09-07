@@ -1,9 +1,18 @@
+import { isAddress } from "@sdp/solana/address";
 import { z } from "zod";
 
-/** A base58 Solana address. Length range covers 32-byte keys in base58. */
+/**
+ * A base58 Solana address.
+ *
+ * Decoded, not pattern-matched. The character class and length range admit
+ * strings that are not 32 bytes once decoded, and those got through here only
+ * to throw inside kit's `address()` further in — a 500 for what is plainly a
+ * bad request. `isAddress` is what the rest of the API validates with
+ * (`routes/payments/schemas.ts:32`).
+ */
 const solanaAddressSchema = z
   .string()
-  .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, "must be a base58 Solana address");
+  .refine((value) => isAddress(value), "must be a base58 Solana address");
 
 /**
  * A u64 as a decimal string.
@@ -18,8 +27,22 @@ const u64StringSchema = z
   .regex(/^\d+$/, "must be a non-negative integer string")
   .refine((value) => BigInt(value) <= 2n ** 64n - 1n, "must fit in a u64");
 
-/** An i64 seconds timestamp as a decimal string, same reasoning. */
-const i64StringSchema = z.string().regex(/^-?\d+$/, "must be an integer string");
+/**
+ * An i64 seconds timestamp as a decimal string, same reasoning.
+ *
+ * Range-checked like the u64 above. Only the after-expiry rule reads these, so
+ * a wildly out-of-range value passed zod, passed `validateDvpTerms`, and died
+ * in the codec as a 500 rather than being refused at the boundary.
+ */
+const I64_MIN = -(2n ** 63n);
+const I64_MAX = 2n ** 63n - 1n;
+const i64StringSchema = z
+  .string()
+  .regex(/^-?\d+$/, "must be an integer string")
+  .refine((value) => {
+    const parsed = BigInt(value);
+    return parsed >= I64_MIN && parsed <= I64_MAX;
+  }, "must fit in an i64");
 
 export const dvpTradeIdParamsSchema = z.object({
   tradeId: z.string().min(1),

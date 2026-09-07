@@ -39,21 +39,27 @@ dvp.use("*", requireDvpFeature);
 dvp.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 dvp.use("*", projectContextMiddleware());
 
+// Every route below pairs `wallets:read` with its own scope, the way Payments
+// does (`routes/payments/index.ts:131`). These routes all resolve a custody
+// wallet, and the per-wallet ownership assertion is a documented no-op for a
+// key with no wallet bindings — so for exactly the keys that assertion cannot
+// govern, the router permission is the only gate they have to meet.
+
 // Creating a trade is permissionless on chain and costs rent, so it is a write.
 // It also does NOT commit either party: only the payer signs, and the trade is a
 // proposal until somebody funds an escrow.
 dvp.post(
   "/trades",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "wallets:read"),
   validateBody(createDvpTradeSchema),
   createTrade
 );
 // Reading a mint so the form can convert an amount. Read-only, and public
 // chain state about an address the caller already holds — but still behind
 // `payments:read` so it does not become an unauthenticated RPC proxy.
-dvp.get("/mints/:mint", requirePermissions("payments:read"), inspectMint);
-dvp.get("/trades", requirePermissions("payments:read"), listTrades);
-dvp.get("/trades/:tradeId", requirePermissions("payments:read"), getTrade);
+dvp.get("/mints/:mint", requirePermissions("wallets:read", "payments:read"), inspectMint);
+dvp.get("/trades", requirePermissions("wallets:read", "payments:read"), listTrades);
+dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"), getTrade);
 
 // Settle and cancel are the only two actions the settlement authority can take,
 // and both are irreversible: settle delivers both legs and closes the trade,
@@ -67,19 +73,19 @@ dvp.get("/trades/:tradeId", requirePermissions("payments:read"), getTrade);
 // move it was a hand-written Payments transfer to the escrow address.
 dvp.post(
   "/trades/:tradeId/fund",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "wallets:read"),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "fund") }),
   fundTrade
 );
 dvp.post(
   "/trades/:tradeId/settle",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "wallets:read"),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle") }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
-  requirePermissions("payments:write"),
+  requirePermissions("payments:write", "wallets:read"),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "cancel") }),
   cancelTrade
 );
