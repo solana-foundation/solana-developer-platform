@@ -481,37 +481,9 @@ function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) 
   const frozen = frozenLegs(trade);
   const overFunded = overFundedLegs(trade);
   const readiness = trade.settlementReadiness;
-  // A leg paying out somewhere other than the address that funds it.
-  // Legitimate and ordinary for an execution desk, and simultaneously the exact
-  // shape of a forged trade: create is permissionless and the economic terms
-  // are not bound by the trade's address, so anyone can publish a trade naming
-  // you with the proceeds pointed at themselves. Rendering the redirect
-  // silently is what would make that work.
-  const redirected = [trade.legs.a, trade.legs.b].filter(
-    (leg) => leg.settlementDestination !== leg.party
-  );
 
   return (
     <>
-      {redirected.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.destinationDiffersTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {t("DashboardMarkets.dvp.destinationDiffersBody")}
-              <span className="mt-2 block">
-                {redirected.map((leg) => (
-                  <span className="block text-xs" key={leg.settlementDestination}>
-                    {t("DashboardMarkets.dvp.destinationDiffersLeg", {
-                      address: leg.settlementDestination,
-                    })}
-                  </span>
-                ))}
-              </span>
-            </span>
-          </span>
-        </Callout>
-      ) : null}
 
       {frozen.length > 0 ? (
         <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
