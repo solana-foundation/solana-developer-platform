@@ -51,27 +51,40 @@ export interface PastedMintState {
   notFound: boolean;
 }
 
+/**
+ * One completed lookup, tagged with the address it answers for.
+ *
+ * The tag is the whole safety property. An answer is only ever read back when
+ * its address still matches what is typed, so a result for a previous mint is
+ * unreadable rather than merely stale.
+ */
+interface PastedMintLookup {
+  address: string;
+  mint: PastedMint | null;
+  notFound: boolean;
+}
+
 export function usePastedMint(address: string): PastedMintState {
-  const [state, setState] = useState<PastedMintState>({
-    mint: null,
-    address: "",
-    loading: false,
-    notFound: false,
-  });
+  // ONLY the completed lookup is state. Everything the caller sees is worked
+  // out below from this plus the current address.
+  //
+  // The previous version stored the whole exposed shape and invalidated it from
+  // inside the effect. That left a window exactly one render wide: between the
+  // address changing and the effect running, state still described the OLD
+  // mint while claiming the NEW address, and anything reading decimals in that
+  // render scaled the amount by the wrong token. Deriving during render closes
+  // the window by construction — there is no moment at which the two disagree.
+  const [lookup, setLookup] = useState<PastedMintLookup | null>(null);
+
+  const trimmed = address.trim();
+  const tooShort = trimmed.length < MIN_ADDRESS_LENGTH;
+  const answered = lookup !== null && lookup.address === trimmed;
 
   useEffect(() => {
-    const trimmed = address.trim();
-    if (trimmed.length < MIN_ADDRESS_LENGTH) {
-      setState({ mint: null, address: trimmed, loading: false, notFound: false });
+    const wanted = address.trim();
+    if (wanted.length < MIN_ADDRESS_LENGTH) {
       return;
     }
-
-    // Invalidated HERE, not inside the debounce. The old answer describes a
-    // different mint the instant the address changes, and leaving it in place
-    // for the debounce window left the amount being scaled by the previous
-    // mint's decimals. Debouncing is about not spamming the request; it was
-    // never a reason to keep answering with the wrong token.
-    setState({ mint: null, address: trimmed, loading: true, notFound: false });
 
     // Aborted on every change, so a slow lookup for an address that has since
     // been edited can never land after a newer one and overwrite it.
@@ -79,34 +92,24 @@ export function usePastedMint(address: string): PastedMintState {
     const timer = setTimeout(async () => {
       try {
         const response = await fetch(
-          `/api/dashboard/markets/dvp/mints/${encodeURIComponent(trimmed)}`,
+          `/api/dashboard/markets/dvp/mints/${encodeURIComponent(wanted)}`,
           { signal: controller.signal }
         );
         if (!response.ok) {
           // A 404 is the ordinary answer for a mistyped address, not an error
-          // worth shouting about. Anything else is also non-fatal here: the
-          // field falls back to base units, which is what it did before.
-          setState({
-            mint: null,
-            address: trimmed,
-            loading: false,
-            notFound: response.status === 404,
-          });
+          // worth shouting about. Anything else is also non-fatal: without a
+          // scale the leg simply has no base units and submit stays blocked.
+          setLookup({ address: wanted, mint: null, notFound: response.status === 404 });
           return;
         }
         const body = (await response.json()) as { data?: { mint?: PastedMint } };
-        const mint = body.data?.mint;
-        setState({
-          mint: mint ?? null,
-          address: trimmed,
-          loading: false,
-          notFound: !mint,
-        });
+        const mint = body.data?.mint ?? null;
+        setLookup({ address: wanted, mint, notFound: mint === null });
       } catch (error) {
         if ((error as Error)?.name === "AbortError") {
           return;
         }
-        setState({ mint: null, address: trimmed, loading: false, notFound: false });
+        setLookup({ address: wanted, mint: null, notFound: false });
       }
     }, DEBOUNCE_MS);
 
@@ -116,5 +119,12 @@ export function usePastedMint(address: string): PastedMintState {
     };
   }, [address]);
 
-  return state;
+  return {
+    // Never the previous mint's metadata: an unanswered address reads as null.
+    mint: answered ? lookup.mint : null,
+    address: trimmed,
+    // True from the very render the address changes, not one render later.
+    loading: !tooShort && !answered,
+    notFound: answered ? lookup.notFound : false,
+  };
 }

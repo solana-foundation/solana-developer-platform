@@ -469,6 +469,85 @@ function TradeSummary({
   );
 }
 
+/**
+ * Everything wrong with a trade that is worth saying before somebody acts.
+ *
+ * Its own component because these are three independent conditions that share
+ * only a position on the page, and holding them inline meant the workspace's
+ * control flow was mostly this. Each decides for itself whether it applies.
+ */
+function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) {
+  const t = useTranslations();
+  const frozen = frozenLegs(trade);
+  const overFunded = overFundedLegs(trade);
+  const readiness = trade.settlementReadiness;
+  // A leg paying out somewhere other than the address that funds it.
+  // Legitimate and ordinary for an execution desk, and simultaneously the exact
+  // shape of a forged trade: create is permissionless and the economic terms
+  // are not bound by the trade's address, so anyone can publish a trade naming
+  // you with the proceeds pointed at themselves. Rendering the redirect
+  // silently is what would make that work.
+  const redirected = [trade.legs.a, trade.legs.b].filter(
+    (leg) => leg.settlementDestination !== leg.party
+  );
+
+  return (
+    <>
+      {redirected.length > 0 ? (
+        <Callout title={t("DashboardMarkets.dvp.destinationDiffersTitle")} variant="warning">
+          <span className="inline-flex items-start gap-2">
+            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {t("DashboardMarkets.dvp.destinationDiffersBody")}
+              <span className="mt-2 block">
+                {redirected.map((leg) => (
+                  <span className="block text-xs" key={leg.settlementDestination}>
+                    {t("DashboardMarkets.dvp.destinationDiffersLeg", {
+                      address: leg.settlementDestination,
+                    })}
+                  </span>
+                ))}
+              </span>
+            </span>
+          </span>
+        </Callout>
+      ) : null}
+
+      {frozen.length > 0 ? (
+        <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
+          <span className="inline-flex items-start gap-2">
+            <SnowflakeIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+            {t("DashboardMarkets.dvp.frozenDescription")}
+          </span>
+        </Callout>
+      ) : null}
+
+      {overFunded.length > 0 ? (
+        <Callout title={t("DashboardMarkets.dvp.surplusTitle")} variant="warning">
+          <span className="inline-flex items-start gap-2">
+            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+            {t("DashboardMarkets.dvp.surplusDescription")}
+          </span>
+        </Callout>
+      ) : null}
+
+      {/* Before the button, not after the failure. The authority is minted
+          empty and pays the fee and the account rent for every close, so the
+          first settle in a project failed in simulation with an error that
+          named neither the account nor the amount. Shown only while the trade
+          can still be closed — on a settled one it is history. */}
+      {!closed && readiness && !readiness.funded ? (
+        <Callout live title={t("DashboardMarkets.dvp.authorityUnfundedTitle")} variant="warning">
+          {t("DashboardMarkets.dvp.authorityUnfundedBody", {
+            address: readiness.address,
+            sol: formatLamports(BigInt(readiness.required) - BigInt(readiness.balance)),
+          })}
+        </Callout>
+      ) : null}
+    </>
+  );
+}
+
 export function DvpTradeDetailWorkspace({
   trade,
   cluster,
@@ -485,17 +564,6 @@ export function DvpTradeDetailWorkspace({
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
 
-  const overFunded = overFundedLegs(trade);
-  const frozen = frozenLegs(trade);
-  // A leg paying out somewhere other than the address that funds it. Legitimate
-  // and ordinary for an execution desk, and simultaneously the exact shape of a
-  // forged trade: create is permissionless and the economic terms are not bound
-  // by the trade's address, so anyone can publish a trade naming you with the
-  // proceeds pointed at themselves. Rendering the redirect silently is what
-  // would make that work, so it is called out rather than merely displayed.
-  const redirectedLegs = [trade.legs.a, trade.legs.b].filter(
-    (leg) => leg.settlementDestination !== leg.party
-  );
   const sdpLegIsA = trade.sdpSide === "a";
 
   // Only SDP's own leg is fundable from here. The counterparty funds theirs
@@ -537,60 +605,7 @@ export function DvpTradeDetailWorkspace({
             it does not say what to do about it. */}
         <DvpNextStep trade={trade} />
 
-        {redirectedLegs.length > 0 ? (
-          <Callout title={t("DashboardMarkets.dvp.destinationDiffersTitle")} variant="warning">
-            <span className="inline-flex items-start gap-2">
-              <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                {t("DashboardMarkets.dvp.destinationDiffersBody")}
-                <span className="mt-2 block">
-                  {redirectedLegs.map((leg) => (
-                    <span className="block text-xs" key={leg.settlementDestination}>
-                      {t("DashboardMarkets.dvp.destinationDiffersLeg", {
-                        address: leg.settlementDestination,
-                      })}
-                    </span>
-                  ))}
-                </span>
-              </span>
-            </span>
-          </Callout>
-        ) : null}
-
-        {frozen.length > 0 ? (
-          <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
-            <span className="inline-flex items-start gap-2">
-              <SnowflakeIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-              {t("DashboardMarkets.dvp.frozenDescription")}
-            </span>
-          </Callout>
-        ) : null}
-
-        {overFunded.length > 0 ? (
-          <Callout title={t("DashboardMarkets.dvp.surplusTitle")} variant="warning">
-            <span className="inline-flex items-start gap-2">
-              <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-              {t("DashboardMarkets.dvp.surplusDescription")}
-            </span>
-          </Callout>
-        ) : null}
-
-        {/* Before the button, not after the failure. The authority is minted
-            empty and pays the fee and the account rent for every close, so the
-            first settle in a project failed in simulation with an error that
-            named neither the account nor the amount. Shown only while the trade
-            can still be closed — on a settled one it is history. */}
-        {!tradeClosed && trade.settlementReadiness && !trade.settlementReadiness.funded ? (
-          <Callout live title={t("DashboardMarkets.dvp.authorityUnfundedTitle")} variant="warning">
-            {t("DashboardMarkets.dvp.authorityUnfundedBody", {
-              address: trade.settlementReadiness.address,
-              sol: formatLamports(
-                BigInt(trade.settlementReadiness.required) -
-                  BigInt(trade.settlementReadiness.balance)
-              ),
-            })}
-          </Callout>
-        ) : null}
+        <TradeWarnings closed={tradeClosed} trade={trade} />
 
         <ExchangeBand closed={tradeClosed} trade={trade} />
 
