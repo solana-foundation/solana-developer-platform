@@ -13,7 +13,9 @@
 
 import { createRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
+import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
+import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { deriveDvpTradeState } from "@/services/dvp/observe";
@@ -61,6 +63,19 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   // height it provably cannot, and a claim held beyond that made the leg
   // permanently unfundable with a hand-edit as the only way out.
   try {
+    // Both mechanisms. The columns on the trade hold the creating org's claim;
+    // `dvp_leg_funding_claims` holds a party's, on a trade another org created.
+    // A sweep that knew only about the first would leave the second's legs
+    // unfundable forever, which is the bug this whole block exists to prevent.
+    const releasedByParties = await createPostgresDvpLegFundingClaimRepository(
+      getDb(env)
+    ).releaseExpired(blockHeight);
+    if (releasedByParties > 0) {
+      getLogger().info(
+        { released: releasedByParties, blockHeight: blockHeight.toString() },
+        "dvp reconcile: released party funding claims whose transaction can no longer land"
+      );
+    }
     const released = await repository.releaseExpiredFundingClaims(blockHeight);
     if (released > 0) {
       getLogger().info(

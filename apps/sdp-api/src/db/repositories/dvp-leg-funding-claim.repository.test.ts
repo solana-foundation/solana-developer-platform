@@ -205,6 +205,49 @@ describe("DvpLegFundingClaimRepository", () => {
   });
 
   /**
+   * Without this the leg is unfundable forever. A claim is deliberately KEPT
+   * through an ambiguous broadcast failure, so something has to release it once
+   * the signed transaction provably cannot land — the columns on `dvp_trades`
+   * are swept for exactly this reason and this table was not, at first.
+   */
+  describe("releasing claims that can no longer land", () => {
+    it("frees a leg whose claim is past its last-valid height", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_dead"), expiryHeight: "500" })
+      );
+
+      const released = await repo.releaseExpired(900n);
+      expect(released).toBe(1);
+
+      const retried = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim(claimInput(PARTY_A_ORG, "a", "sig_after_sweep"))
+      );
+      expect(retried).toBe(true);
+    });
+
+    // Inside its window the transfer may still land, and releasing early is how
+    // an escrow gets funded twice.
+    it("leaves a claim alone while its transaction could still be accepted", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_live"), expiryHeight: "5000" })
+      );
+
+      expect(await repo.releaseExpired(900n)).toBe(0);
+    });
+
+    // A broadcast claim is a receipt. Sweeping it would invite a second
+    // transfer on top of one that already went out.
+    it("never releases a claim whose transfer was broadcast", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_sent"), expiryHeight: "100" });
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+      });
+
+      expect(await repo.releaseExpired(900n)).toBe(0);
+    });
+  });
+
+  /**
    * The row belongs to the funder, so ordinary tenant isolation applies and
    * nothing about this table crosses an organization. That is what lets the
    * cross-org read in 0089 stay read-only.

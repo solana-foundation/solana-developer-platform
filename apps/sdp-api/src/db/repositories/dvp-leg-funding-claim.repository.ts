@@ -52,6 +52,20 @@ export interface DvpLegFundingClaimRepository {
   recordFundingTx(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
   /** Every claim on a trade, for rendering who has paid and who has not. */
   listForTrade(tradeId: string): Promise<DvpLegFundingClaim[]>;
+  /**
+   * Releases claims whose signed transaction can no longer be accepted.
+   *
+   * A claim is deliberately KEPT through an ambiguous broadcast failure,
+   * because the transfer may still land and releasing it would invite a second
+   * one on top. Past the last-valid height it provably cannot land, and a claim
+   * held beyond that makes the leg permanently unfundable with a hand-edit as
+   * the only way out — which is what the columns on `dvp_trades` are swept for,
+   * and what this table needs for exactly the same reason.
+   *
+   * Never touches a claim that was broadcast: `funding_tx` set means the row is
+   * a receipt rather than a lock.
+   */
+  releaseExpired(blockHeight: bigint): Promise<number>;
 }
 
 export function createPostgresDvpLegFundingClaimRepository(
@@ -104,6 +118,19 @@ export function createPostgresDvpLegFundingClaimRepository(
         )
         .bind(signature, tradeId, side, signature)
         .run();
+    },
+
+    async releaseExpired(blockHeight) {
+      const result = await db
+        .prepare(
+          `DELETE FROM dvp_leg_funding_claims
+            WHERE funding_tx IS NULL
+              AND CAST(expiry_height AS NUMERIC) < ?
+            RETURNING trade_id`
+        )
+        .bind(blockHeight.toString())
+        .all<{ trade_id: string }>();
+      return result.results.length;
     },
 
     async listForTrade(tradeId) {
