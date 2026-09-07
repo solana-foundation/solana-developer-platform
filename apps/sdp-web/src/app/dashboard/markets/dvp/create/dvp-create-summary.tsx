@@ -49,6 +49,7 @@ export function DvpCreateSummary({
   counterparty,
   ready,
   sdpSide,
+  agent,
 }: {
   amountA: string;
   amountB: string;
@@ -59,6 +60,8 @@ export function DvpCreateSummary({
   counterparty: string;
   ready: boolean;
   sdpSide: "a" | "b";
+  /** On an agent trade there is no leg of yours to deliver or receive. */
+  agent: boolean;
 }) {
   const t = useTranslations();
   const asset = {
@@ -76,11 +79,13 @@ export function DvpCreateSummary({
 
   const steps = [
     t("DashboardMarkets.dvp.stepEscrows"),
-    t("DashboardMarkets.dvp.stepFund", {
-      counterparty: counterparty
-        ? shortenAddress(counterparty)
-        : t("DashboardMarkets.dvp.theirSide"),
-    }),
+    agent
+      ? t("DashboardMarkets.dvp.stepFundAgent")
+      : t("DashboardMarkets.dvp.stepFund", {
+          counterparty: counterparty
+            ? shortenAddress(counterparty)
+            : t("DashboardMarkets.dvp.theirSide"),
+        }),
     t("DashboardMarkets.dvp.stepSettle"),
   ];
 
@@ -106,7 +111,11 @@ export function DvpCreateSummary({
         </div>
       ) : (
         <p className="mt-2 text-tertiary text-xs leading-relaxed">
-          {t("DashboardMarkets.dvp.summaryIncomplete")}
+          {t(
+            agent
+              ? "DashboardMarkets.dvp.summaryIncompleteAgent"
+              : "DashboardMarkets.dvp.summaryIncomplete"
+          )}
         </p>
       )}
 

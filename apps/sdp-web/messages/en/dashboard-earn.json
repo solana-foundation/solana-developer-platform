@@ -427,7 +427,16 @@
       "legPartyADelivers": "First party delivers",
       "legPartyBDelivers": "Second party delivers",
       "legAgentHolder": "Neither leg is yours",
-      "kindAgentBadge": "Set up for two other parties"
+      "kindAgentBadge": "Set up for two other parties",
+      "groupYourSideAgent": "Your role",
+      "groupYourSideHintAgent": "Which wallet pays for this trade, and whether you are a party to it.",
+      "fieldWalletHintAgent": "Signs the trade and pays the fees and the escrow rent. It delivers nothing.",
+      "fieldWalletHintWithAddressAgent": "{address}. Signs the trade and pays the fees and the escrow rent. It delivers nothing.",
+      "groupTermsAgent": "Parties and terms",
+      "groupTermsHintAgent": "Who the two sides are, and how long they have to fund.",
+      "createDescriptionAgent": "Both legs settle together or neither does. You set the terms and publish an escrow address for each side; each party funds its own with an ordinary transfer.",
+      "stepFundAgent": "Each party funds its own escrow with an ordinary transfer. You fund nothing.",
+      "summaryIncompleteAgent": "Fill in both legs and both parties to see the trade."
     }
   },
   "DashboardEarn": {

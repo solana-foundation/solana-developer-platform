@@ -31,6 +31,9 @@ import { useDvpCreateForm } from "./use-dvp-create-form";
 const PLACEHOLDER_ASSET_MINT = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1";
 const PLACEHOLDER_CASH_MINT = "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE";
 const PLACEHOLDER_COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+/** A second, visibly different address: two fields sharing one placeholder
+ * reads as a value that has already been filled in twice. */
+const PLACEHOLDER_PARTY_B = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 
 /**
  * A titled group of fields.
@@ -313,6 +316,7 @@ function TradeParties({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
       value: form.partyA,
       onChange: form.setPartyA,
       invalid: form.partyALooksWrong,
+      placeholder: PLACEHOLDER_COUNTERPARTY,
     },
     {
       id: "dvp-party-b",
@@ -320,6 +324,7 @@ function TradeParties({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
       value: form.partyB,
       onChange: form.setPartyB,
       invalid: form.partyBLooksWrong,
+      placeholder: PLACEHOLDER_PARTY_B,
     },
   ];
 
@@ -343,7 +348,7 @@ function TradeParties({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
               className="text-xs"
               id={row.id}
               onChange={(event) => row.onChange(event.target.value)}
-              placeholder={PLACEHOLDER_COUNTERPARTY}
+              placeholder={row.placeholder}
               required
               spellCheck={false}
               value={row.value}
@@ -380,7 +385,11 @@ export function DvpCreateWorkspace({
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <form className="mx-auto w-full max-w-5xl" onSubmit={form.submit}>
         <p className="max-w-2xl text-secondary text-sm leading-relaxed">
-          {t("DashboardMarkets.dvp.createDescription")}
+          {t(
+            form.tradeKind === "agent"
+              ? "DashboardMarkets.dvp.createDescriptionAgent"
+              : "DashboardMarkets.dvp.createDescription"
+          )}
         </p>
 
         {context.error ? (
@@ -401,16 +410,31 @@ export function DvpCreateWorkspace({
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
           <div className="grid gap-5">
             <Section
-              description={t("DashboardMarkets.dvp.groupYourSideHint")}
-              title={t("DashboardMarkets.dvp.groupYourSide")}
+              description={t(
+                form.tradeKind === "agent"
+                  ? "DashboardMarkets.dvp.groupYourSideHintAgent"
+                  : "DashboardMarkets.dvp.groupYourSideHint"
+              )}
+              title={t(
+                form.tradeKind === "agent"
+                  ? "DashboardMarkets.dvp.groupYourSideAgent"
+                  : "DashboardMarkets.dvp.groupYourSide"
+              )}
             >
               <Field
                 hint={
                   wallet
-                    ? t("DashboardMarkets.dvp.fieldWalletHintWithAddress", {
-                        address: shortenAddress(wallet.address),
-                      })
-                    : t("DashboardMarkets.dvp.fieldWalletHint")
+                    ? t(
+                        form.tradeKind === "agent"
+                          ? "DashboardMarkets.dvp.fieldWalletHintWithAddressAgent"
+                          : "DashboardMarkets.dvp.fieldWalletHintWithAddress",
+                        { address: shortenAddress(wallet.address) }
+                      )
+                    : t(
+                        form.tradeKind === "agent"
+                          ? "DashboardMarkets.dvp.fieldWalletHintAgent"
+                          : "DashboardMarkets.dvp.fieldWalletHint"
+                      )
                 }
                 label={t("DashboardMarkets.dvp.fieldWallet")}
               >
@@ -449,8 +473,16 @@ export function DvpCreateWorkspace({
             </Section>
 
             <Section
-              description={t("DashboardMarkets.dvp.groupTermsHint")}
-              title={t("DashboardMarkets.dvp.groupTerms")}
+              description={t(
+                form.tradeKind === "agent"
+                  ? "DashboardMarkets.dvp.groupTermsHintAgent"
+                  : "DashboardMarkets.dvp.groupTermsHint"
+              )}
+              title={t(
+                form.tradeKind === "agent"
+                  ? "DashboardMarkets.dvp.groupTermsAgent"
+                  : "DashboardMarkets.dvp.groupTerms"
+              )}
             >
               <TradeParties form={form} />
 
@@ -479,6 +511,7 @@ export function DvpCreateWorkspace({
 
           <div className="grid gap-4 lg:sticky lg:top-6">
             <DvpCreateSummary
+              agent={form.tradeKind === "agent"}
               amountA={form.asset.amount}
               amountB={form.cash.amount}
               assetMint={form.asset.token?.mint ?? null}

@@ -182,6 +182,59 @@ async function findNonceTombstone(swapDvp: Address): Promise<Address> {
 }
 
 /**
+ * The two party addresses, from whichever shape the caller described.
+ *
+ * On an agent trade both come from the payload and the signer is neither of
+ * them. On a principal trade the signer takes the side it named and the
+ * counterparty takes the other.
+ */
+function resolveTradeParties(input: CreateDvpTradeInput, signer: Address): [Address, Address] {
+  if (input.tradeKind === "agent") {
+    return [address(input.partyA), address(input.partyB)];
+  }
+  return [
+    input.sdpSide === "a" ? signer : address(input.counterparty),
+    input.sdpSide === "b" ? signer : address(input.counterparty),
+  ];
+}
+
+/**
+ * Refuses a settlement destination that cannot own the account it will be paid
+ * into.
+ *
+ * Only the ones the caller actually NAMED. A destination equal to its party is
+ * the default and has already been proven usable by the party existing, so
+ * re-reading it would cost two account fetches on every ordinary trade.
+ *
+ * Checked before the trade is signed rather than left to settle, because settle
+ * moves BOTH legs at once: a destination that cannot own a token account does
+ * not fail one side, it strands a trade both parties have already funded.
+ */
+async function assertNamedDestinationsUsable(
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  input: Pick<CreateDvpTradeInput, "userASettlementDestination" | "userBSettlementDestination">
+): Promise<void> {
+  const named = [
+    { field: "userASettlementDestination", value: input.userASettlementDestination },
+    { field: "userBSettlementDestination", value: input.userBSettlementDestination },
+  ].flatMap((entry) => (entry.value === null ? [] : [{ ...entry, value: entry.value }]));
+
+  const problems = (
+    await Promise.all(
+      named.map(async (entry) =>
+        (await findDvpDestinationProblem(rpc, address(entry.value)))
+          ? describeDvpDestinationProblem(entry.field)
+          : null
+      )
+    )
+  ).filter((problem) => problem !== null);
+
+  if (problems.length > 0) {
+    throw badRequest(problems.join("; "));
+  }
+}
+
+/**
  * Creates a DvP trade on chain and records it.
  *
  * @param env - API process environment.
@@ -266,15 +319,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     input.sdpWalletId
   );
 
-  // On an agent trade both parties come from the payload and the signer is
-  // neither of them. On a principal trade the signer takes the side it named.
-  const [userA, userB] =
-    input.tradeKind === "agent"
-      ? [address(input.partyA), address(input.partyB)]
-      : [
-          input.sdpSide === "a" ? signer.address : address(input.counterparty),
-          input.sdpSide === "b" ? signer.address : address(input.counterparty),
-        ];
+  const [userA, userB] = resolveTradeParties(input, signer.address);
 
   // Resolved once, here, and used for the terms check, the row and the ATA
   // derivations alike. The program treats an omitted destination as the party's
@@ -288,27 +333,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     ? address(input.userBSettlementDestination)
     : userB;
 
-  // Only the ones the caller actually named. A destination equal to its party
-  // is the default and has already been proven usable by the party existing;
-  // re-reading it would cost two account fetches on every ordinary trade.
-  //
-  // Checked here rather than left to settle because settle moves BOTH legs at
-  // once: a destination that cannot own a token account does not fail one side,
-  // it strands a trade both parties have already funded.
-  const namedDestinations = [
-    { field: "userASettlementDestination", value: input.userASettlementDestination },
-    { field: "userBSettlementDestination", value: input.userBSettlementDestination },
-  ].filter((entry) => entry.value !== null);
-  const destinationProblems = await Promise.all(
-    namedDestinations.map(async (entry) => {
-      const problem = await findDvpDestinationProblem(rpc, address(entry.value as string));
-      return problem ? describeDvpDestinationProblem(entry.field) : null;
-    })
-  );
-  const namedDestinationProblems = destinationProblems.filter((problem) => problem !== null);
-  if (namedDestinationProblems.length > 0) {
-    throw badRequest(namedDestinationProblems.join("; "));
-  }
+  await assertNamedDestinationsUsable(rpc, input);
 
   // Front-run the program's own checks so a bad payload is a 400 naming the
   // field rather than a round trip returning `custom program error: 0x5`.
