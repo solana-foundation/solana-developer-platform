@@ -338,9 +338,9 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
   }
 
   const [depositsInFlight, withdrawalsInFlight, transfersInFlight] = await Promise.all([
-    getPrivateChannelDepositRepository(c).countNonTerminalByInstance(active.id),
-    getPrivateChannelWithdrawalRepository(c).countNonTerminalByInstance(active.id),
-    getPrivateChannelTransferRepository(c).countNonTerminalByInstance(active.id),
+    getPrivateChannelDepositRepository(c).countNonTerminalByInstance(draining.id),
+    getPrivateChannelWithdrawalRepository(c).countNonTerminalByInstance(draining.id),
+    getPrivateChannelTransferRepository(c).countNonTerminalByInstance(draining.id),
   ]);
   if (depositsInFlight > 0 || withdrawalsInFlight > 0 || transfersInFlight > 0) {
     // The drain stays in place on purpose: this is the deliberate-disconnect
