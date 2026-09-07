@@ -6,6 +6,7 @@ import {
   getBase58Codec,
   getBase64Codec,
   getBase64EncodedWireTransaction,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   partiallySignTransaction,
 } from "@solana/kit";
@@ -18,7 +19,12 @@ const sendTransactionTimeoutMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
   10
 );
-const sendTransactionStatusWaitMs = 3_000;
+// Long enough that a slow CI box does not start resubmitting a transaction the
+// validator simply has not caught up on yet.
+const sendTransactionStatusWaitMs = Number.parseInt(
+  process.env.KORA_SHIM_SEND_STATUS_WAIT_MS ?? "15000",
+  10
+);
 const sendTransactionStatusPollMs = 250;
 const resubmissionTimeoutMs = 3_000;
 const privateKey = process.env.SIGNER_PRIVATE_KEY;
@@ -127,6 +133,28 @@ async function handleRpc(method, params) {
   }
 }
 
+/**
+ * A duplicate submit is a SUCCESS, because that is what the cluster this shim
+ * stands in for does with one.
+ *
+ * `KoraFeePayment.signAndSend` retries on a timeout and re-sends identical
+ * bytes; ed25519 signing is deterministic, so the retry carries the same
+ * signature. Solana deduplicates that and answers with the signature, which is
+ * the property the retry is documented to rely on. Surfpool instead answers
+ * "This transaction has already been processed", so without this the caller is
+ * told its payout failed while the transaction is on chain.
+ */
+function isAlreadyProcessed(error) {
+  return error instanceof Error && error.message.includes("already been processed");
+}
+
+/** The signature of a signed transaction: its first signer's, i.e. the txid. */
+function signatureOf(signedTransaction) {
+  return getSignatureFromTransaction(
+    getTransactionDecoder().decode(base64.encode(signedTransaction))
+  );
+}
+
 async function sendTransactionWithRetry(signedTransaction) {
   const params = [
     signedTransaction,
@@ -136,9 +164,17 @@ async function sendTransactionWithRetry(signedTransaction) {
       preflightCommitment: "confirmed",
     },
   ];
-  const signature = await solanaRpc("sendTransaction", params, {
-    timeoutMs: sendTransactionTimeoutMs,
-  });
+  let signature;
+  try {
+    signature = await solanaRpc("sendTransaction", params, {
+      timeoutMs: sendTransactionTimeoutMs,
+    });
+  } catch (error) {
+    if (!isAlreadyProcessed(error)) {
+      throw error;
+    }
+    return signatureOf(signedTransaction);
+  }
 
   if (await waitForTransactionStatus(signature)) {
     return signature;
@@ -155,6 +191,9 @@ async function sendTransactionWithRetry(signedTransaction) {
       throw new Error("Resubmitted transaction returned a different signature");
     }
   } catch (error) {
+    if (isAlreadyProcessed(error)) {
+      return signature;
+    }
     console.warn("Transaction resubmission did not complete; continuing confirmation.", error);
   }
 
