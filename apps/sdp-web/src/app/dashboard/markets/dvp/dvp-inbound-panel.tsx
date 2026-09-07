@@ -71,15 +71,18 @@ function InboundFundAction({ frozen, tradeId }: { frozen: boolean; tradeId: stri
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(tradeId);
 
   return (
-    <span className="relative z-10 grid gap-1">
+    // `items-start` rather than a grid: a grid stretches its children, which
+    // rendered this as a full-width primary button across the whole column and
+    // read as a banner rather than a row action.
+    <span className="relative z-10 flex flex-col items-start gap-1">
       <Button
-        className="w-fit"
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
         disabled={frozen || pending !== null || awaitingApproval}
         onClick={() => act("fund-as-party")}
         size="sm"
         type="button"
+        variant="secondary"
       >
         {pending === "fund-as-party"
           ? t("DashboardMarkets.dvp.inboundFunding")
