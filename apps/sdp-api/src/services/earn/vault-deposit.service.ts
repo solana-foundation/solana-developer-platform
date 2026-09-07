@@ -35,7 +35,7 @@ import {
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
-import { refusedBuildMessage } from "./vault-refusals";
+import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 
 /**
@@ -285,9 +285,7 @@ export async function depositIntoVault(
       );
     } catch (error) {
       getLogger().error({ error }, "vault deposit: build failed before signing");
-      const refusal = refusedBuildMessage(error);
-      if (refusal) throw badRequest(refusal);
-      throw error;
+      rethrowVaultProviderFailure(error);
     }
 
     if (plan.cluster !== cluster) {

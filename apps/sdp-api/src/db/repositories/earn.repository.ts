@@ -258,6 +258,18 @@ export interface EarnRepository {
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
   /**
+   * Every catalogued strategy that mints a share token on the given cluster,
+   * for share-mint → vault attribution (PRO-1741). The WHOLE stored inventory
+   * on purpose: no status filter and no curation, because a held share of a
+   * paused or hidden vault still identifies real money. Cluster-scoped so a
+   * sandbox environment's browse-only mainnet mirror (PRO-1742) can never
+   * claim a balance read from the environment's own cluster.
+   */
+  listShareMintedStrategies(params: {
+    environment: SdpEnvironment;
+    hostCluster: SolanaCluster;
+  }): Promise<EarnStrategyRow[]>;
+  /**
    * DELETE every `active` strategy for (provider, environment) — optionally
    * narrowed to one cluster's sub-shelf — that the provider no longer lists.
    * Returns the deleted provider references so the caller can log exactly what

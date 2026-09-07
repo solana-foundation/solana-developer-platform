@@ -15,10 +15,12 @@ import {
   ShieldCheckIcon,
   TrendingUpIcon,
   UsersIcon,
+  VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
 import type { useTranslations } from "@/i18n/provider";
 import {
+  DASHBOARD_INTEGRATIONS_SUBNAV_HREFS,
   DASHBOARD_MARKETS_SUBNAV_HREFS,
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
@@ -55,6 +57,7 @@ export type NavSection = {
  * current route lives under `pathPrefix`.
  */
 export const DASHBOARD_SUBNAV_GROUPS = {
+  integrations: { pathPrefix: "/dashboard/integrations" },
   payments: { pathPrefix: "/dashboard/payments" },
   markets: { pathPrefix: "/dashboard/markets" },
 } as const;
@@ -156,19 +159,80 @@ export function getMarketsActions(
   ];
 }
 
+/**
+ * The catalog remains one page; each child selects the same category that was
+ * previously exposed in the page header. Families disappear with the module
+ * that owns them, so unavailable providers are never discoverable here.
+ */
+export function getIntegrationActions(
+  t: ReturnType<typeof useTranslations>,
+  options: Pick<
+    Parameters<typeof getNavSections>[1],
+    "custodyEnabled" | "paymentsEnabled" | "policiesEnabled" | "privateChannelsEnabled"
+  >
+): SubNavItem[] {
+  return [
+    ...(options.custodyEnabled
+      ? [
+          {
+            label: t("Shared.integrations.custodyTitle"),
+            href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.custody,
+            icon: WalletIcon,
+          },
+        ]
+      : []),
+    {
+      label: t("Shared.integrations.rpcTitle"),
+      href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.rpc,
+      icon: CircleDotDashedIcon,
+    },
+    ...(options.paymentsEnabled
+      ? [
+          {
+            label: t("Shared.integrations.rampsTitle"),
+            href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.ramps,
+            icon: ArrowLeftRightIcon,
+          },
+        ]
+      : []),
+    ...(options.policiesEnabled
+      ? [
+          {
+            label: t("Shared.integrations.complianceTitle"),
+            href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.compliance,
+            icon: ShieldCheckIcon,
+          },
+        ]
+      : []),
+    ...(options.privateChannelsEnabled
+      ? [
+          {
+            label: t("Shared.integrations.privacyTitle"),
+            href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.privacy,
+            icon: VenetianMaskIcon,
+          },
+        ]
+      : []),
+  ];
+}
+
 export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
+    custodyEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
+    issuanceEnabled: boolean;
     marketsEnabled: boolean;
     paymentsEnabled: boolean;
     pendingApprovalCount: number | null;
+    policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled);
+  const integrationActions = getIntegrationActions(t, options);
 
   return [
     {
@@ -179,21 +243,29 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.home,
           icon: LayoutDashboardIcon,
         },
-        {
-          label: t("Shared.dashboardShell.wallets"),
-          href: DASHBOARD_SIDE_NAV_HREFS.wallets,
-          icon: WalletIcon,
-        },
+        ...(options.custodyEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.wallets"),
+                href: DASHBOARD_SIDE_NAV_HREFS.wallets,
+                icon: WalletIcon,
+              },
+            ]
+          : []),
       ],
     },
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        {
-          label: t("Shared.dashboardShell.issuance"),
-          href: DASHBOARD_SIDE_NAV_HREFS.issuance,
-          icon: CoinsIcon,
-        },
+        ...(options.issuanceEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.issuance"),
+                href: DASHBOARD_SIDE_NAV_HREFS.issuance,
+                icon: CoinsIcon,
+              },
+            ]
+          : []),
         ...(options.paymentsEnabled
           ? [
               {
@@ -230,17 +302,23 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        {
-          label: t("Shared.dashboardShell.policies"),
-          href: DASHBOARD_SIDE_NAV_HREFS.policies,
-          icon: ShieldCheckIcon,
-        },
+        ...(options.policiesEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.policies"),
+                href: DASHBOARD_SIDE_NAV_HREFS.policies,
+                icon: ShieldCheckIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
           icon: BlocksIcon,
+          children: integrationActions,
+          subnavKey: "integrations" as const,
         },
-        ...(options.canReadApprovals
+        ...(options.policiesEnabled && options.canReadApprovals
           ? [
               {
                 label: t("Shared.dashboardShell.approvals"),

@@ -731,6 +731,13 @@ export const FIELDS: EnvField[] = [
     help: "Proving service the Rings SDK calls. Required once Rings is enabled.",
   },
   {
+    key: "HELIUS_RINGS_RING_RPC_URL",
+    section: "advanced",
+    kind: "url",
+    label: "Helius Rings ring RPC URL",
+    help: "Helius ring RPC that mints custom-ring auditor keys. Only needed to bring up a project's custom ring.",
+  },
+  {
     key: "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
     section: "advanced",
     kind: "select",

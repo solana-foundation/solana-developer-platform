@@ -26,6 +26,9 @@ import {
   earnExternalWalletWithdrawalTransactionResponse,
   earnStrategiesResponse,
   earnStrategyResponse,
+  earnVaultDepositPreviewRequest,
+  earnVaultDepositPreviewResponse,
+  earnVaultShareReconciliationResponse,
 } from "../schemas/earn";
 import {
   errorResponses,
@@ -44,12 +47,17 @@ const earnPublicSecurity: Array<Record<string, string[]>> = [{ apiKeyAuth: [] }]
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
+  registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
+  // Treasury-facing, so the internal document only: partners hold no custody
+  // wallets for this read to reconcile.
+  registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
 }
 
 /** The partner-facing surface: the strategy catalogue plus the caller-signed money routes. */
 export function registerPublicEarnPaths(registry: OpenAPIRegistry) {
   registerEarnStrategyPaths(registry, earnPublicSecurity);
+  registerEarnDepositPreviewPath(registry, earnPublicSecurity);
   registerEarnExternalWalletPaths(registry, earnPublicSecurity);
 }
 
@@ -105,6 +113,69 @@ function registerEarnStrategyPaths(
         content: jsonContent(earnStrategyResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+}
+
+function registerEarnDepositPreviewPath(
+  registry: OpenAPIRegistry,
+  security: Array<Record<string, string[]>>
+) {
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/vault-deposit-previews",
+    tags: ["Earn"],
+    summary: "Preview a direct vault deposit",
+    operationId: "createEarnVaultDepositPreview",
+    description:
+      "Quotes how many shares a direct vault deposit would mint from the provider's live " +
+      "accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then " +
+      "derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no " +
+      "idempotency key, and 501 when the provider cannot quote deposits.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(earnVaultDepositPreviewRequest),
+      },
+    },
+    responses: {
+      200: {
+        description: "Live deposit quote",
+        content: jsonContent(earnVaultDepositPreviewResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+    },
+  });
+}
+
+function registerEarnVaultShareReconciliationPath(
+  registry: OpenAPIRegistry,
+  security: Array<Record<string, string[]>>
+) {
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/vault-share-reconciliation",
+    tags: ["Earn"],
+    summary: "Reconcile custody vault shares against recorded positions",
+    operationId: "getEarnVaultShareReconciliation",
+    description:
+      "Report-only comparison of each scoped custody wallet's on-chain share balances against " +
+      "the recorded claim set, both directions: share balances of catalogued vaults with no " +
+      "recorded position (for example, shares acquired by signing outside SDP), and recorded " +
+      "open positions whose wallet holds none of their shares. Writes nothing. Takes the same " +
+      "wallet-binding scope as the positions read and no provider gate.",
+    security,
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Reconciliation report",
+        content: jsonContent(earnVaultShareReconciliationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 429, 500, 503]),
     },
   });
 }

@@ -37,7 +37,10 @@ function makeConnection(
     activatedAt: "2026-08-10T09:05:00.000Z",
     lastCheck: { status: "success", at: "2026-08-10T09:05:00.000Z", failureCode: null },
     pendingWalletLabel: null,
-    providerCredential: { id: `cred-${overrides.id}`, label: "Ops Privy app", status: "active" },
+    label: "Ops Privy app",
+    isDefault: false,
+    isRuntimeExecutionAllowed: true,
+    defaultCustodyWalletId: `wallet-${overrides.id}`,
     ...overrides,
   };
 }
@@ -90,17 +93,23 @@ const connectionWallet: CustodyWalletSummary = {
 };
 
 describe("connections list", () => {
-  it("renders one row per connection without collapsing same-provider connections", () => {
+  it("renders one row per exact connection without collapsing duplicate labels", () => {
     const html = renderList({
       result: makeResult([
-        makeConnection({ id: "conn-active" }),
-        makeConnection({ id: "conn-second", status: "pending", activatedAt: null }),
+        makeConnection({ id: "conn-active", label: "Shared Privy app" }),
+        makeConnection({
+          id: "conn-second",
+          label: "Shared Privy app",
+          status: "pending",
+          activatedAt: null,
+        }),
       ]),
     });
 
     expect(html.match(/data-connection-id=/g)).toHaveLength(2);
     expect(html).toContain('data-connection-id="conn-active"');
     expect(html).toContain('data-connection-id="conn-second"');
+    expect(html.match(/Shared Privy app/g)).toHaveLength(2);
     expect(html).toContain("Active");
     expect(html).toContain("Pending");
   });

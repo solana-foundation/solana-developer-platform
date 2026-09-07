@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   formatDisplayAmount,
@@ -70,6 +71,8 @@ export function RecurringPaymentsWorkspace({
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
   const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -363,7 +366,7 @@ export function RecurringPaymentsWorkspace({
                           )}
                         </TableCell>
                         <TableCell className="hidden text-sm text-secondary lg:table-cell">
-                          {wallet ? (
+                          {wallet && custodyEnabled ? (
                             <EntityLink
                               href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
                               onClick={(event) => event.stopPropagation()}
