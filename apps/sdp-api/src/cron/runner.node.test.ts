@@ -179,10 +179,10 @@ describe("startCron", () => {
   // in every count below too — including the ones where asset profiles is off.
   //
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 12 tasks. What a
+  // proof-of-life no-ops, so every configuration schedules all 13 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 12;
+  const ALL_TASKS = 13;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -483,7 +483,7 @@ describe("startCron", () => {
     // Indexed rather than `.at(-1)`: this asserts the vault-movement task
     // specifically, and taking whatever happens to be registered last silently
     // retargets the assertion the moment another task is appended.
-    const tick = scheduleMock.mock.calls[10][1] as () => void;
+    const tick = scheduleMock.mock.calls[11][1] as () => void;
     tick();
     expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
       env,
