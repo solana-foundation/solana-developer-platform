@@ -15,6 +15,7 @@ const CONFIG: RingsGatewayConfig = {
 };
 
 const SYNC_INPUT = { walletId: "hrw_1", owner: "addr" };
+const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
 
 describe("createRingsGateway", () => {
   it("reports health instead of throwing when every upstream is unreachable", async () => {
@@ -54,6 +55,76 @@ describe("createRingsGateway", () => {
       message: "the Rings gateway configuration is invalid",
     });
     expect((error as Error).message).not.toContain(configuredTree);
+  });
+
+  it("refuses ring bring-up when the ring RPC is not configured", async () => {
+    const error = await createRingsGateway(CONFIG)
+      .provisionRing({ ringProgramId: RING_PROGRAM })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({
+      code: "config_error",
+      message: "ring bring-up needs a ring RPC URL",
+    });
+  });
+
+  it("refuses ring bring-up when the message signer is not configured", async () => {
+    const error = await createRingsGateway({ ...CONFIG, ringRpcUrl: "https://ring-rpc.example" })
+      .provisionRing({ ringProgramId: RING_PROGRAM })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({
+      code: "config_error",
+      message: "ring bring-up needs a custody message signer",
+    });
+  });
+
+  it("refuses a plain-http ring RPC unless insecure http is explicitly allowed", async () => {
+    const error = await createRingsGateway({
+      ...CONFIG,
+      ringRpcUrl: "http://ring-rpc.example",
+      signMessage: async () => "sig",
+      allowInsecureHttp: false,
+    })
+      .provisionRing({ ringProgramId: RING_PROGRAM })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    // In plaintext the auditor-key response could be swapped in transit.
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "config_error" });
+    expect((error as Error).message).toContain("https");
+  });
+
+  it("classifies an unparseable ring RPC URL without exposing its value", async () => {
+    const ringRpcUrl = "not-a-valid-url";
+    const error = await createRingsGateway({
+      ...CONFIG,
+      ringRpcUrl,
+      signMessage: async () => "sig",
+    })
+      .provisionRing({ ringProgramId: RING_PROGRAM })
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({
+      code: "config_error",
+      message: "the configured ring RPC URL is not a valid URL",
+    });
+    expect((error as Error).message).not.toContain(ringRpcUrl);
   });
 
   it("refuses unsupported operation types at build time", async () => {

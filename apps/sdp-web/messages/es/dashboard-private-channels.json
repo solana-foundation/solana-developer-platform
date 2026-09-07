@@ -22,7 +22,8 @@
       "channelBalance": "Saldo del canal:",
       "amountRequired": "Ingresa un monto de USDC.",
       "amountInvalid": "Ingresa un monto de USDC mayor que cero con hasta 6 decimales.",
-      "amountWithUnit": "{amount} USDC"
+      "amountWithUnit": "{amount} USDC",
+      "noEnabledTokens": "Esta instancia de Private Channels no habilita un Token compatible."
     },
     "overview": {
       "title": "Resumen",
@@ -88,7 +89,13 @@
       "verifySuccess": "Wallet {key} verificada.",
       "revokeSuccess": "Verificación de {key} revocada.",
       "channelBalanceTooltip": "Saldo del canal para el mint {mint}",
-      "channelBalanceAmount": "{amount} {symbol}"
+      "channelBalanceAmount": "{amount} {symbol}",
+      "empty": "Aún no hay Wallets inscritas.",
+      "enroll": "Inscribir Wallet",
+      "enrolling": "Inscribiendo…",
+      "enrollDescription": "Elige una Wallet de custodia para usar con Private Channels.",
+      "walletLabel": "Wallet",
+      "walletPlaceholder": "Selecciona una Wallet"
     },
     "channels": {
       "title": "Canales",
@@ -417,7 +424,13 @@
       "gatewayNotReady": "El Gateway respondió pero no está listo",
       "connectionTestFailed": "No se pudieron alcanzar algunos endpoints. Revisa los detalles de conexión resaltados e inténtalo de nuevo.",
       "connectionRequestFailed": "No pudimos probar la conexión. Revisa los detalles de conexión e inténtalo de nuevo.",
-      "projectRpcTestFailed": "El RPC del proyecto no pudo verificar el despliegue del escrow. Corrige la integración del RPC del proyecto o las direcciones de despliegue e inténtalo de nuevo."
+      "projectRpcTestFailed": "El RPC del proyecto no pudo verificar el despliegue del escrow. Corrige la integración del RPC del proyecto o las direcciones de despliegue e inténtalo de nuevo.",
+      "setupStepLabel": "Conexión",
+      "setupStepProgress": "Paso 1 de 1",
+      "update": "Guardar cambios",
+      "updating": "Guardando…",
+      "updateSuccess": "Conexión actualizada.",
+      "connectionTestSuccess": "La conexión funciona."
     },
     "playground": {
       "productName": "Private Channels",
@@ -430,6 +443,49 @@
       "getWithdrawal": "Obtener retiro",
       "getChannel": "Obtener canal",
       "channelDescriptionPlaceholder": "Pagos salientes de operaciones"
+    },
+    "directory": {
+      "setupChannel": "Agregar canal",
+      "createChannel": "Crear canal",
+      "createDescription": "Crea un canal separado cuando este proyecto necesite su propio acceso a Wallet o actividad de pagos.",
+      "createStepLabel": "Detalles",
+      "createStepProgress": "Paso 1 de 1",
+      "createDetailsTitle": "Detalles del canal",
+      "createConnectionTitle": "Usa la conexión existente",
+      "channelName": "Nombre del canal",
+      "channelDescription": "Descripción (opcional)",
+      "channelsTitle": "Canales",
+      "channelsDescription": "Elige un canal para administrar sus Wallets y Tokens.",
+      "empty": "Aún no hay canales privados.",
+      "channelColumn": "Canal",
+      "instanceColumn": "Instancia",
+      "walletsColumn": "Wallets",
+      "tokensColumn": "Tokens",
+      "statusColumn": "Estado",
+      "openColumn": "Abrir",
+      "walletCount": "{count} inscritas",
+      "noTokens": "No se permiten Tokens",
+      "tokensUnavailable": "Configuración de Tokens no disponible",
+      "connected": "Conectado",
+      "openChannel": "Abrir {channel}"
+    },
+    "channelDetail": {
+      "description": "Administra las Wallets y los Tokens que pueden usar este canal privado.",
+      "actions": "Acciones",
+      "manageConnection": "Administrar conexión",
+      "enrollWallet": "Inscribir Wallet",
+      "enrollNeedsConnection": "Conecta la instancia primero.",
+      "enrollWalletsUnavailable": "Wallets no disponibles.",
+      "enrollAllWalletsAdded": "Todas las Wallets inscritas.",
+      "disconnectInstance": "Desconectar instancia",
+      "deleteConnection": "Eliminar conexión",
+      "tokensTitle": "Tokens permitidos en este canal",
+      "tokensDescription": "Solo estos Tokens pueden usarse para pagos privados en {channel}.",
+      "tokensEmpty": "No hay Tokens disponibles de esta instancia conectada.",
+      "tokensLoadError": "No se pudieron cargar los ajustes de Tokens. Actualiza la página para intentarlo de nuevo.",
+      "tokenNetwork": "{network}",
+      "mintLabel": "Mint",
+      "decimalsLabel": "Decimales"
     }
   }
 }

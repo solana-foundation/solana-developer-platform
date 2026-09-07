@@ -108,49 +108,73 @@ function requirementGroupCopy(
 }
 
 /**
- * Renders the payout account the selected corridor resolved to, read-only.
+ * Renders every saved payout account as an explicit choice — nothing is
+ * preselected. Picking a row routes the payout to that account; picking the
+ * selected row again clears the choice so the new-account form re-enables.
  *
- * @param account - Resolved corridor account from the payout tree.
+ * @param accounts - Active saved accounts across all destination countries.
+ * @param selectedProviderAccountId - The explicitly picked account, if any.
+ * @param onSelect - Callback with the picked account, or null when cleared.
  * @param title - Translated card title.
  * @param description - Translated card description.
- * @returns The resolved payout account card.
+ * @returns The saved payout account picker card.
  */
-function ResolvedPayoutAccountCard({
-  account,
+function PayoutAccountsCard({
+  accounts,
+  selectedProviderAccountId,
+  onSelect,
   title,
   description,
 }: {
-  account: PayoutRequirementAccount;
+  accounts: PayoutRequirementAccount[];
+  selectedProviderAccountId: string | null;
+  onSelect: (account: PayoutRequirementAccount | null) => void;
   title: string;
   description: string;
 }) {
-  const flag = regionFlagEmoji(account.destinationCountry);
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="flex w-full items-center gap-3 rounded-lg border border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] px-4 py-3">
-          {flag !== null ? (
-            <span className="shrink-0 text-xl" aria-hidden="true">
-              {flag}
-            </span>
-          ) : null}
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-primary">
-              {account.bankName !== undefined ? account.bankName : account.id}
-            </span>
-            <span className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-              {account.accountNumberLast4 !== undefined ? (
-                <span>•••• {account.accountNumberLast4}</span>
+      <CardContent className="space-y-3">
+        {accounts.map((account) => {
+          const isSelected = account.id === selectedProviderAccountId;
+          const flag = regionFlagEmoji(account.destinationCountry);
+          return (
+            <button
+              key={account.id}
+              type="button"
+              aria-pressed={isSelected}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                isSelected
+                  ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)]"
+                  : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
+              )}
+              onClick={() => onSelect(isSelected ? null : account)}
+            >
+              {flag !== null ? (
+                <span className="shrink-0 text-xl" aria-hidden="true">
+                  {flag}
+                </span>
               ) : null}
-              {account.paymentRail !== null ? <Badge>{account.paymentRail}</Badge> : null}
-            </span>
-          </span>
-          <CheckIcon className="size-5 shrink-0 text-primary" />
-        </div>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-primary">
+                  {account.bankName !== undefined ? account.bankName : account.id}
+                </span>
+                <span className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                  {account.accountNumberLast4 !== undefined ? (
+                    <span>•••• {account.accountNumberLast4}</span>
+                  ) : null}
+                  {account.paymentRail !== null ? <Badge>{account.paymentRail}</Badge> : null}
+                </span>
+              </span>
+              {isSelected ? <CheckIcon className="size-5 shrink-0 text-primary" /> : null}
+            </button>
+          );
+        })}
       </CardContent>
     </Card>
   );
@@ -166,8 +190,12 @@ type RequirementsFieldsProps = {
   fields: RequirementField[];
   values: CollectedFieldData;
   onChange: (key: string, value: string) => void;
-  /** Payout account the selected corridor resolved to; rendered read-only. */
-  resolvedAccount?: PayoutRequirementAccount | null;
+  /** Saved payout accounts the user can pick instead of collecting new details; offramp only. */
+  payoutAccountPicker?: {
+    accounts: PayoutRequirementAccount[];
+    selectedProviderAccountId: string | null;
+    onSelect: (account: PayoutRequirementAccount | null) => void;
+  };
 };
 
 /**
@@ -524,7 +552,7 @@ function AddressRequirementField({
  * @param fields - Fields currently required by the provider and local selections.
  * @param values - Collected values keyed by requirement field.
  * @param onChange - Callback for updating a collected value.
- * @param resolvedAccount - Payout account the selected corridor resolved to, if any.
+ * @param payoutAccountPicker - Saved-account choices; a picked account greys out the collection form.
  * @returns The requirement field group.
  */
 export function RequirementsFields({
@@ -532,60 +560,70 @@ export function RequirementsFields({
   fields,
   values,
   onChange,
-  resolvedAccount,
+  payoutAccountPicker,
 }: RequirementsFieldsProps) {
   const t = useTranslations();
   const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
+  const pickerVisible =
+    payoutAccountPicker !== undefined && payoutAccountPicker.accounts.length > 0;
+  const accountPicked = pickerVisible && payoutAccountPicker.selectedProviderAccountId !== null;
   return (
     <div className="space-y-6">
-      {requirementFieldRuns(fields).map((run) => {
-        const first = run.fields[0];
-        if (first.kind === "address") {
-          return (
-            <AddressRequirementField
-              key={first.key}
-              field={first}
-              values={values}
-              onChange={onChange}
-            />
-          );
-        }
-        const inputs = run.fields.map((field) => {
-          const current = values[field.key];
-          return (
-            <RequirementFieldInput
-              key={field.key}
-              field={field}
-              value={current === undefined ? "" : current}
-              onChange={(value) => onChange(field.key, value)}
-            />
-          );
-        });
-        if (run.group === null || providerCopy === undefined) {
-          return (
-            <div key={first.key} className="space-y-6">
-              {inputs}
-            </div>
-          );
-        }
-        const copy = requirementGroupCopy(providerCopy, run.group);
-        return (
-          <Card key={first.key}>
-            <CardHeader>
-              <CardTitle>{t(copy.title)}</CardTitle>
-              <CardDescription>{t(copy.description)}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">{inputs}</CardContent>
-          </Card>
-        );
-      })}
-      {resolvedAccount !== undefined && resolvedAccount !== null ? (
-        <ResolvedPayoutAccountCard
-          account={resolvedAccount}
-          title={t("DashboardPayments.ramps.payoutAccountResolvedTitle")}
-          description={t("DashboardPayments.ramps.payoutAccountResolvedDescription")}
+      {pickerVisible ? (
+        <PayoutAccountsCard
+          accounts={payoutAccountPicker.accounts}
+          selectedProviderAccountId={payoutAccountPicker.selectedProviderAccountId}
+          onSelect={payoutAccountPicker.onSelect}
+          title={t("DashboardPayments.ramps.payoutAccountsTitle")}
+          description={t("DashboardPayments.ramps.payoutAccountsDescription")}
         />
       ) : null}
+      <fieldset
+        disabled={accountPicked}
+        className={cn("min-w-0 space-y-6", accountPicked && "opacity-50")}
+      >
+        {requirementFieldRuns(fields).map((run) => {
+          const first = run.fields[0];
+          if (first.kind === "address") {
+            return (
+              <AddressRequirementField
+                key={first.key}
+                field={first}
+                values={values}
+                onChange={onChange}
+              />
+            );
+          }
+          const inputs = run.fields.map((field) => {
+            const current = values[field.key];
+            return (
+              <RequirementFieldInput
+                key={field.key}
+                field={field}
+                value={current === undefined ? "" : current}
+                onChange={(value) => onChange(field.key, value)}
+              />
+            );
+          });
+          if (run.group === null || providerCopy === undefined) {
+            return (
+              <div key={first.key} className="space-y-6">
+                {inputs}
+              </div>
+            );
+          }
+          const copy = requirementGroupCopy(providerCopy, run.group);
+          return (
+            <Card key={first.key}>
+              <CardHeader>
+                <CardTitle>{t(copy.title)}</CardTitle>
+                <CardDescription>{t(copy.description)}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">{inputs}</CardContent>
+            </Card>
+          );
+        })}
+      </fieldset>
     </div>
   );
 }

@@ -30,6 +30,7 @@ import {
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
+import { issuance, policies } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -208,11 +209,8 @@ export default async function WalletDetailPage({
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const [t, { userId, orgId, orgRole }, { walletId }] = await Promise.all([
-    getTranslations(),
-    auth(),
-    params,
-  ]);
+  const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled, policiesEnabled] =
+    await Promise.all([getTranslations(), auth(), params, issuance(), policies()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -228,11 +226,13 @@ export default async function WalletDetailPage({
     resolvedWalletId,
     t("DashboardCustody.trackedBalancesUnavailable")
   );
-  const walletPolicyPromise = getWalletPolicy(
-    apiClient.request,
-    resolvedWalletId,
-    t("DashboardCustody.walletControlsUnavailable")
-  );
+  const walletPolicyPromise = policiesEnabled
+    ? getWalletPolicy(
+        apiClient.request,
+        resolvedWalletId,
+        t("DashboardCustody.walletControlsUnavailable")
+      )
+    : null;
   const ownedTokensByMintPromise = getOwnedTokenRoutes(apiClient.request);
   const wallet = await walletPromise;
 
@@ -338,19 +338,22 @@ export default async function WalletDetailPage({
         </Suspense>
       </div>
 
-      <Suspense fallback={<WalletControlsSkeleton />}>
-        <WalletControlsPanel
-          walletId={resolvedWalletId}
-          policyPromise={walletPolicyPromise}
-          ownedTokensByMintPromise={ownedTokensByMintPromise}
-          t={t}
-        />
-      </Suspense>
+      {walletPolicyPromise ? (
+        <Suspense fallback={<WalletControlsSkeleton />}>
+          <WalletControlsPanel
+            walletId={resolvedWalletId}
+            policyPromise={walletPolicyPromise}
+            ownedTokensByMintPromise={ownedTokensByMintPromise}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
       <Suspense fallback={<WalletBalancesSkeleton />}>
         <WalletBalancesSection
           balancesPromise={trackedBalancesPromise}
           ownedTokensByMintPromise={ownedTokensByMintPromise}
+          issuanceEnabled={issuanceEnabled}
           t={t}
         />
       </Suspense>
@@ -463,10 +466,12 @@ export async function WalletBalanceSummary({
 export async function WalletBalancesSection({
   balancesPromise,
   ownedTokensByMintPromise,
+  issuanceEnabled,
   t,
 }: {
   balancesPromise: Promise<WalletTrackedBalancesResult>;
   ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
+  issuanceEnabled: boolean;
   t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
   const [trackedBalancesResult, ownedTokensByMint] = await Promise.all([
@@ -496,7 +501,7 @@ export async function WalletBalancesSection({
                 label={ownedToken?.name ?? balance.token}
                 value={formatDisplayAmount(balance.uiAmount, balance.token)}
                 mint={balance.mint}
-                href={ownedToken ? `/dashboard/issuance/${ownedToken.id}` : null}
+                href={issuanceEnabled && ownedToken ? `/dashboard/issuance/${ownedToken.id}` : null}
               />
             );
           })}

@@ -1,5 +1,4 @@
-import { SdpKaminoError } from "@sdp/kamino";
-import { SdpVedaError } from "@sdp/veda";
+import { badRequest, providerUnavailable } from "@/lib/errors";
 
 /**
  * Build failures whose reason belongs in front of the CALLER, not in a 500.
@@ -17,7 +16,7 @@ import { SdpVedaError } from "@sdp/veda";
  *   from the provider's compliance service, which SDP does not implement. A
  *   definite, explainable refusal rather than an internal fault.
  *
- * Matched on the shared `code` shape rather than per provider, so a new
+ * Matched on the shared `code` shape rather than provider classes, so a new
  * vault-direct provider inherits the mapping by using the same vocabulary.
  * Anything else keeps bubbling: an unrecognised build failure is SDP's problem
  * to look at, and telling a customer their request was wrong would be a guess.
@@ -33,7 +32,26 @@ const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
   "COMPLIANCE_APPROVAL_REQUIRED",
 ]);
 
-export function refusedBuildMessage(error: unknown): string | null {
-  if (!(error instanceof SdpKaminoError || error instanceof SdpVedaError)) return null;
-  return REFUSED_BUILD_CODES.has(error.code) ? error.message : null;
+function providerError(error: unknown): { code: string; message: string } | null {
+  if (!(error instanceof Error) || !("code" in error) || typeof error.code !== "string") {
+    return null;
+  }
+  return { code: error.code, message: error.message };
+}
+
+/**
+ * Convert the provider-neutral vault error vocabulary into the public API
+ * contract. Provider refusals are caller-fixable 400s. An unreadable vault is
+ * an infrastructure failure, including RPC outages and rate limits, so it is
+ * a retryable 503 with no provider or RPC internals exposed to the caller.
+ */
+export function rethrowVaultProviderFailure(error: unknown): never {
+  const failure = providerError(error);
+  if (failure && REFUSED_BUILD_CODES.has(failure.code)) {
+    throw badRequest(failure.message);
+  }
+  if (failure?.code === "VAULT_UNREADABLE") {
+    throw providerUnavailable("Earn provider is temporarily unavailable. Try again.");
+  }
+  throw error;
 }
