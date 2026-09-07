@@ -16,6 +16,7 @@ import type {
   ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { z } from "zod";
 import { getDb, runWithSystemDatabaseIdentity } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { EarnProviderWalletRow } from "@/db/repositories";
@@ -34,13 +35,17 @@ import {
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
   applyEarnWithdrawalObservationToRow,
 } from "@/services/earn-withdrawal-ledger.service";
+import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
+import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   assertEarnProviderConfigured,
   assertEarnProviderSurfaced,
@@ -58,6 +63,7 @@ import {
   type earnProgramWithdrawalPreviewSchema,
   earnProgramWithdrawalsListQuerySchema,
 } from "../schemas";
+import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
 export type {
@@ -270,7 +276,13 @@ function resolveCallerIdempotencyKey(
   consequence: string
 ): string | undefined {
   const headerKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
-  if (requestId && headerKey) {
+  // An approval executor replays the stored body — `requestId` included — and
+  // sends a header it minted itself when the original request carried none
+  // (`walletOperationExecutionRequest`). That is not the ambiguity this refusal
+  // guards against: the caller's own key is the one in the body, and refusing
+  // the pair here would make every approved body-keyed withdrawal 400 at
+  // execution time — money held by policy that could never be paid.
+  if (requestId && headerKey && !approvedWalletOperationId(c)) {
     throw badRequest(
       `Send requestId or the ${IDEMPOTENCY_KEY_HEADER} header, not both: SDP cannot tell which one your retry keeps stable, and following the wrong one would ${consequence}.`
     );
@@ -606,6 +618,20 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * A program is an ACCOUNT at the provider, not an SDP custody wallet, so there
+ * is no `custody_wallets` row for a selected-scope key to be bound against and
+ * `assertApiKeyWalletAccess` has nothing to assert. Program payouts are
+ * organization-level by design (the link row's `project_id` records
+ * provisioning only), so a wallet-scoped key — a key whose whole point is that
+ * it may spend from ONE named wallet — is refused outright rather than silently
+ * treated as unbound: an unasserted binding is how a key bound to a low-value
+ * wallet reached the organization's whole provider balance (HOO-1559).
+ */
+function assertProgramKeyIsNotWalletScoped(c: AppContext, action: string): void {
+  assertApiKeyNotWalletScoped(getAuth(c), action);
+}
+
 export const previewEarnProgramWithdrawal = async (
   c: ValidatedBodyContext<typeof earnProgramWithdrawalPreviewSchema>
 ) => {
@@ -615,6 +641,8 @@ export const previewEarnProgramWithdrawal = async (
 
   // Money-out path: credentials only, never the entitlement gate.
   assertEarnProviderConfigured(c.env, client.provider, testMode);
+
+  assertProgramKeyIsNotWalletScoped(c, "read Earn program withdrawal liquidity");
 
   const preview = await client.previewPortfolioWithdrawal(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
@@ -704,9 +732,35 @@ async function persistWithdrawalObservation(
   }
 }
 
-export const createEarnProgramWithdrawal = async (
+/** Everything the policy gate resolved, handed to the handler behind it. */
+export interface EarnProgramWithdrawalResolved {
+  row: EarnProviderWalletRow;
+  client: EarnPortfolioWalletProvider;
+  auth: ReturnType<typeof getAuth>;
+  requestId: string;
+  idempotencyFingerprint: string;
+}
+
+/**
+ * Resolve the program, its credentials and the caller's key, then state the
+ * withdrawal as a policy candidate.
+ *
+ * The gate order the route documents is preserved exactly — capability (501)
+ * and credentials (503) before the wallet-scope refusal (403), and key
+ * resolution LAST (400), so an unreachable call never answers "missing
+ * idempotency key".
+ *
+ * `custodyWalletId` is null because a program is a provider account and SDP
+ * signs nothing here; the operation is therefore governed by the API key's own
+ * control profile (deny rules, amount/asset/destination limits, approval
+ * requirements) rather than by a wallet policy. `walletId` names the provider
+ * wallet the money leaves, which is what a destination or amount rule has to
+ * be read against.
+ */
+export async function extractEarnProgramWithdrawalPolicyCandidate(
   c: ValidatedBodyContext<typeof earnProgramWithdrawalCreateSchema>
-) => {
+): Promise<PolicyGateExtraction> {
+  const rawPayload: Record<string, unknown> = await c.req.json();
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = c.req.valid("json");
   const { row, client, testMode } = await requireProgramContext(c, programId);
@@ -714,17 +768,133 @@ export const createEarnProgramWithdrawal = async (
   // Money-out path: credentials only, never the entitlement gate.
   assertEarnProviderConfigured(c.env, client.provider, testMode);
 
+  assertProgramKeyIsNotWalletScoped(c, "withdraw from Earn programs");
+
   const auth = getAuth(c);
   const requestId = resolveWithdrawalRequestId(c, body.requestId, row.provider_wallet_ref);
   // The fingerprint normalizes the amount exactly as the provider wire does
   // (clients send a JSON number), so SDP's conflict judgment can never be
   // stricter than the provider request it guards — '100' and '100.00' replay.
-  const fingerprint = buildEarnWithdrawalFingerprint({
+  const idempotencyFingerprint = buildEarnWithdrawalFingerprint({
     providerWalletRef: row.provider_wallet_ref,
     amountUsd: body.amountUsd,
     token: body.token,
     destinationAddress: body.destinationAddress,
   });
+
+  const resolved: EarnProgramWithdrawalResolved = {
+    row,
+    client,
+    auth,
+    requestId,
+    idempotencyFingerprint,
+  };
+
+  // A retry is not a new intent, so it must not open a second governed
+  // operation — one caller key would otherwise mint an approval per attempt.
+  // The decision lives HERE rather than in the gate's `findIdempotentKeyReplay`
+  // hook because that hook only runs for callers using the `Idempotency-Key`
+  // header, and this route equally accepts the key as body `requestId`.
+  //
+  // A null candidate leaves the request ungoverned, which is exactly right for
+  // a replay: the payout it replays was governed when it was created. The
+  // handler behind the gate then serves the replay, or re-drives a ref-less
+  // intent whose provider call never landed, as it always has.
+  //
+  // An approval executor is deliberately exempt: its whole job is to run the
+  // payout the original request was held for.
+  if (!approvedWalletOperationId(c)) {
+    const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
+    const priorIntent = await resolveIdempotencyReplay(
+      () =>
+        ledger.findCustodialMovementByRequestId({
+          organizationId: auth.organizationId,
+          providerWalletId: row.id,
+          requestId,
+        }),
+      idempotencyFingerprint
+    );
+    if (priorIntent) {
+      return {
+        candidate: null,
+        legs: [],
+        body,
+        resolved,
+        rawPayload: { ...rawPayload, idempotencyFingerprint },
+        idempotencyKey: requestId,
+      };
+    }
+
+    // No movement exists, so a key that already produced an operation is one
+    // policy is still holding (or refused) — answer with THAT operation rather
+    // than starting a second approval.
+    await throwOnPriorEarnPolicyOperation(c, {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId ?? null,
+      idempotencyKey: requestId,
+      idempotencyFingerprint,
+      operationNoun: "program withdrawal",
+    });
+  }
+
+  return {
+    candidate: {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId ?? null,
+      custodyWalletId: null,
+      walletId: row.provider_wallet_ref,
+      apiKeyId: auth.apiKeyId ?? null,
+      actor: walletOperationActorFromAuth(auth),
+      source: "earn_program_withdrawal",
+      operationFamily: "program",
+      operationType: "earn_program_withdrawal",
+      asset: body.token,
+      amount: body.amountUsd,
+      destination: body.destinationAddress,
+      context: {
+        provider: client.provider,
+        programId: row.id,
+        environment: resolveSdpEnvironment(c),
+      },
+      providerExtensions: {},
+    },
+    legs: [],
+    body,
+    resolved,
+    rawPayload: { ...rawPayload, idempotencyFingerprint },
+    idempotencyKey: requestId,
+  };
+}
+
+/**
+ * True replay of an accepted withdrawal: answer with the provider's live state
+ * and let the observation refresh the ledger. 200, not 201 — nothing was
+ * created by this request.
+ */
+async function serveEarnProgramWithdrawalReplay(
+  c: AppContext,
+  resolved: EarnProgramWithdrawalResolved,
+  ledger: EarnMovementsRepository,
+  intent: EarnMovementRow,
+  providerReference: string
+) {
+  const withdrawal = await resolved.client.getPortfolioWithdrawal(earnRuntime(c), {
+    providerWalletRef: resolved.row.provider_wallet_ref,
+    withdrawalRef: providerReference,
+  });
+  await persistWithdrawalObservation(ledger, intent, withdrawal);
+  const response: EarnProgramWithdrawalResponse = { withdrawal };
+  return success(c, response, 200);
+}
+
+export const createEarnProgramWithdrawal = async (
+  c: ValidatedBodyContext<typeof earnProgramWithdrawalCreateSchema>
+) => {
+  const { body, resolved } = getPolicyGateContext<
+    z.infer<typeof earnProgramWithdrawalCreateSchema>,
+    EarnProgramWithdrawalResolved
+  >(c);
+  const { row, client, auth, requestId, idempotencyFingerprint: fingerprint } = resolved;
 
   const ledger = createPostgresEarnMovementsRepository(getDb(c.env));
   const findIntentRow = () =>
@@ -737,24 +907,19 @@ export const createEarnProgramWithdrawal = async (
   // SDP-side replay resolution BEFORE any provider call: the same key with a
   // different payload 409s here (the provider enforces the identical rule —
   // an idempotency key names one intent); a matching payload resolves to the
-  // existing intent row.
-  // True replay of an accepted withdrawal: answer with the provider's live
-  // state and let the observation refresh the ledger. 200, not 201 — nothing
-  // was created by this request.
-  const serveReplay = async (intent: EarnMovementRow, providerReference: string) => {
-    const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
-      providerWalletRef: row.provider_wallet_ref,
-      withdrawalRef: providerReference,
-    });
-    await persistWithdrawalObservation(ledger, intent, withdrawal);
-    const response: EarnProgramWithdrawalResponse = { withdrawal };
-    return success(c, response, 200);
-  };
-
+  // existing intent row. The gate's replay hook already answered the ordinary
+  // retry; this remains for the approval executor, which reaches the handler
+  // with the hook deliberately skipped.
   let intentRow = await resolveIdempotencyReplay(findIntentRow, fingerprint);
 
   if (intentRow?.provider_reference) {
-    return serveReplay(intentRow, intentRow.provider_reference);
+    return serveEarnProgramWithdrawalReplay(
+      c,
+      resolved,
+      ledger,
+      intentRow,
+      intentRow.provider_reference
+    );
   }
 
   if (!intentRow) {
@@ -797,7 +962,13 @@ export const createEarnProgramWithdrawal = async (
     // the provider and stamped the ref while we waited on the re-resolve —
     // that is a replay too, not a second create.
     if (intentRow.provider_reference) {
-      return serveReplay(intentRow, intentRow.provider_reference);
+      return serveEarnProgramWithdrawalReplay(
+        c,
+        resolved,
+        ledger,
+        intentRow,
+        intentRow.provider_reference
+      );
     }
   }
 

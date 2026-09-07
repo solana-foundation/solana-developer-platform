@@ -3,6 +3,7 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
+  "earn_program_withdrawal",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "issuance_burn_execute",

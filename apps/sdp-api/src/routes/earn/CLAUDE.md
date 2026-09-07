@@ -336,6 +336,45 @@ other's balance.
     rather than surfacing the provider's message.
 - **`POST /programs/:programId/withdrawals` — live provider call + SDP ledger
   write.**
+  **POLICY-GATED, and it refuses a wallet-scoped key** (HOO-1559). It pays a
+  caller-supplied `destinationAddress` out of the organization's provider
+  account, and `earn:write` used to be the whole gate — no binding assertion,
+  no policy — so a selected-scope key bound to one low-value wallet could drain
+  the program to any address while the org's deny rules, amount/asset limits,
+  destination controls and approval requirements never ran.
+  A program is a provider ACCOUNT, not a custody wallet, so there is nothing
+  for `assertApiKeyWalletAccess` to name: a wallet-scoped key is refused
+  outright (`assertApiKeyNotWalletScoped`) rather than silently treated as
+  unbound. The same refusal is on `withdrawal-preview`, which discloses live
+  lane liquidity through the identical chain.
+  The policy envelope is `program` / `earn_program_withdrawal` with
+  `custodyWalletId: null` and the PROVIDER WALLET as `walletId`, so the
+  governing profile is the API KEY'S own control profile — the wallet policy
+  half falls back to implicit allow, because there is no custody wallet to
+  carry one. `tenantOwnsWalletTarget` (policy repository) admits an
+  `earn_provider_wallets` row owned by the organization as a target for exactly
+  this case. Its `allowEarnProgramTarget` flag is set ONLY for
+  `earn_program_withdrawal` — keying it on "names no custody wallet" instead
+  would be a widening, because other families can leave `custodyWalletId` null
+  (issuance mint among them) and would gain a second way to prove ownership of
+  a target they do not custody.
+  **The approval path needs an exemption from the "requestId or
+  `Idempotency-Key`, not both" refusal.** The approval executor replays the
+  STORED BODY — `requestId` included — and adds a header it minted itself when
+  the original request carried none (`walletOperationExecutionRequest`). Without
+  the exemption every approved body-keyed withdrawal 400s at execution: money
+  held by policy that could never be paid. The vault routes reject body
+  `requestId` outright, so they never meet it, and that asymmetry is why this
+  needs its own test — `earn-program.test.ts` drives the real executor through
+  `recoverApprovedWalletOperations`.
+  **Replay resolution lives in the EXTRACTOR, not in the gate's
+  `findIdempotentKeyReplay` hook**: that hook only runs for callers using the
+  `Idempotency-Key` header, and this route equally accepts the key as body
+  `requestId`, so a body-keyed retry would have opened a second governed
+  operation — an approval per attempt. A retry therefore extracts a NULL
+  candidate (a replay is not a new intent; it was governed when created) and
+  the handler serves it. A key that produced an operation policy is still
+  holding answers with THAT operation.
   Needs a retry-stable idempotency key and refuses a request carrying none:
   EXACTLY one of `requestId` (UUIDv4) or the `Idempotency-Key` header — both
   and neither are 400s, because no precedence rule can tell which of two

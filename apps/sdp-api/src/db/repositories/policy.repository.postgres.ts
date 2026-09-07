@@ -1031,7 +1031,13 @@ async function tenantOwnsWalletTarget(
   db: DatabaseExecutor,
   scope: TenantScope,
   walletId: string,
-  custodyWalletId?: string | null
+  custodyWalletId: string | null | undefined,
+  /**
+   * Whether an Earn program link row may stand in for the custody wallet this
+   * target otherwise has to be. True ONLY for the one operation type that has
+   * no custody wallet by construction; see the fallback below.
+   */
+  allowEarnProgramTarget = false
 ): Promise<boolean> {
   const hasCustodyWalletId = custodyWalletId !== undefined && custodyWalletId !== null;
   const custodyPredicate = hasCustodyWalletId ? "AND w.id = ?" : "";
@@ -1064,7 +1070,29 @@ async function tenantOwnsWalletTarget(
       scope.projectId
     )
     .first<{ id: string }>();
-  return Boolean(row);
+  if (row) return true;
+
+  // An Earn program is a provider ACCOUNT, not a custody wallet, so it has no
+  // `custody_wallets` row to prove ownership through — which is why its payouts
+  // could not be recorded as governed operations at all (HOO-1559). It is
+  // admitted as a target in its own right, by the same rule and not a weaker
+  // one: the link row must belong to this organization.
+  //
+  // Admission is pinned to the ONE operation type that has no custody wallet by
+  // construction. Keying it on "names no custody wallet" instead would be a
+  // widening: any family that can leave `custodyWalletId` null — issuance mint
+  // among them — would gain a second way to prove ownership of a target it does
+  // not custody, just by naming a provider wallet ref.
+  if (hasCustodyWalletId || !allowEarnProgramTarget) return false;
+  const program = await db
+    .prepare(
+      `SELECT id FROM earn_provider_wallets
+        WHERE provider_wallet_ref = ? AND organization_id = ?
+        LIMIT 1`
+    )
+    .bind(walletId, scope.organizationId)
+    .first<{ id: string }>();
+  return Boolean(program);
 }
 
 async function tenantOwnsPolicyRevision(
@@ -1946,7 +1974,15 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
 
     async createWalletOperation(input: CreateWalletOperationInput) {
       assertTenantClaim(scope, input, "PolicyRepository.createWalletOperation");
-      if (!(await tenantOwnsWalletTarget(db, scope, input.walletId, input.custodyWalletId))) {
+      if (
+        !(await tenantOwnsWalletTarget(
+          db,
+          scope,
+          input.walletId,
+          input.custodyWalletId,
+          input.operationType === "earn_program_withdrawal"
+        ))
+      ) {
         return null;
       }
       if (input.apiKeyId && !(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {

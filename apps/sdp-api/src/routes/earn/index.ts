@@ -22,6 +22,7 @@ import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgram,
   createEarnProgramWithdrawal,
+  extractEarnProgramWithdrawalPolicyCandidate,
   getEarnProgram,
   getEarnProgramWithdrawal,
   listEarnProgramDeposits,
@@ -323,10 +324,18 @@ earn.post(
   validateBody(earnProgramWithdrawalPreviewSchema),
   previewEarnProgramWithdrawal
 );
+// The custodial payout. `earn:write` alone used to be the whole gate: the
+// route pays a caller-supplied `destinationAddress` out of the organization's
+// provider account, so without a policy gate an org's deny rules, amount and
+// asset limits, destination controls and approval requirements never ran
+// (HOO-1559). A program has no custody wallet, so the governing profile is the
+// API key's own; the extractor also refuses a wallet-scoped key, which has no
+// wallet here to be bound against.
 earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
   validateBody(earnProgramWithdrawalCreateSchema),
+  policyGate({ extract: extractEarnProgramWithdrawalPolicyCandidate }),
   createEarnProgramWithdrawal
 );
 earn.get(
