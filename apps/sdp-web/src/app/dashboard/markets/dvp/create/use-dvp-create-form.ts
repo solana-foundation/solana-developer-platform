@@ -14,6 +14,7 @@ import { useMemo, useState } from "react";
 import { cashOptionsFor } from "./dvp-cash-options";
 import type { DvpCreateContext, DvpCreateOption, DvpWalletBalance } from "./dvp-create.data";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
+import { type DvpDestinations, useDvpDestinations } from "./use-dvp-destinations";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
 
 export { CUSTOM } from "./use-dvp-leg";
@@ -26,7 +27,8 @@ function defaultExpiry(): string {
   return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-export interface DvpCreateForm {
+/** Everything the form owns directly, before the destinations are mixed in. */
+interface DvpCreateFormFields {
   asset: DvpLeg;
   /** The wallet's balance of the asset mint, when SDP delivers that leg. */
   assetBalance: DvpWalletBalance | null;
@@ -51,21 +53,13 @@ export interface DvpCreateForm {
   submit: (event: React.FormEvent) => void;
   submitting: boolean;
   walletId: string;
-  /**
-   * Where each party's proceeds go, when that is not the party.
-   *
-   * Empty is the ordinary trade and means the party's own address. Held as
-   * typed rather than resolved so the form can tell "left blank" from "typed
-   * the party's address", which the idempotency key depends on.
-   */
-  destinationA: string;
-  destinationB: string;
-  setDestinationA: (next: string) => void;
-  setDestinationB: (next: string) => void;
-  /** A named destination that is not a base58 address, per side. */
-  destinationALooksWrong: boolean;
-  destinationBLooksWrong: boolean;
 }
+
+/**
+ * The whole form: the fields above plus the optional settlement destinations,
+ * which own their own state in `useDvpDestinations`.
+ */
+export interface DvpCreateForm extends DvpCreateFormFields, DvpDestinations {}
 
 export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
@@ -80,17 +74,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   // render, so calling it here would build a Date on every keystroke.
   const [expiry, setExpiry] = useState(defaultExpiry);
   const [refString, setRefString] = useState("");
-  const [destinationA, setDestinationA] = useState("");
-  const [destinationB, setDestinationB] = useState("");
-
-  const trimmedDestinationA = destinationA.trim();
-  const trimmedDestinationB = destinationB.trim();
-  // Same reasoning as the counterparty check: only judge once something is
-  // typed. Blank is the default, not a mistake.
-  const destinationALooksWrong =
-    trimmedDestinationA.length > 0 && !BASE58_ADDRESS.test(trimmedDestinationA);
-  const destinationBLooksWrong =
-    trimmedDestinationB.length > 0 && !BASE58_ADDRESS.test(trimmedDestinationB);
+  const destinations = useDvpDestinations();
 
   const trimmedCounterparty = counterparty.trim();
   // Only once there is enough typed to judge. Complaining at the first
@@ -127,8 +111,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
       !counterpartyIsOwnLegWallet &&
       // A malformed destination is refused by the API anyway; blocking here
       // saves a round trip that costs a custody-provider call.
-      !destinationALooksWrong &&
-      !destinationBLooksWrong &&
+      !destinations.anyLooksWrong &&
       asset.mint &&
       cash.mint &&
       asset.baseUnits &&
@@ -151,8 +134,8 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
       sdpSide,
       tokenProgramA: asset.token?.tokenProgram ?? null,
       tokenProgramB: cash.token?.tokenProgram ?? null,
-      userASettlementDestination: trimmedDestinationA,
-      userBSettlementDestination: trimmedDestinationB,
+      userASettlementDestination: destinations.trimmedDestinationA,
+      userBSettlementDestination: destinations.trimmedDestinationB,
       walletId,
     });
   }
@@ -201,11 +184,6 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     submit,
     submitting,
     walletId,
-    destinationA,
-    destinationB,
-    setDestinationA,
-    setDestinationB,
-    destinationALooksWrong,
-    destinationBLooksWrong,
+    ...destinations,
   };
 }
