@@ -90,14 +90,36 @@ export type VaultQuoteState<T> =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "unavailable" }
-  | { kind: "quoted"; key: string; preview: T };
+  | { kind: "quoted"; key: string; preview: T; quotedAt: number };
 
 export const VAULT_QUOTE_DEBOUNCE_MS = 400;
 
 /**
+ * How long a quote may back a floor. A rate is a moving observation, not a
+ * fact: past this age the hook re-quotes on its own, and the deposit submit
+ * refuses to send a floor derived from anything older without re-quoting
+ * first (PRO-1691). Timers throttle in background tabs, which is exactly why
+ * the submit-time check exists alongside the auto-refresh.
+ */
+export const VAULT_QUOTE_TTL_MS = 30_000;
+
+/** True when a quote is older than the TTL — too old to derive a floor from. */
+export function isExpiredQuote<T>(quote: VaultQuoteState<T>): boolean {
+  return quote.kind === "quoted" && Date.now() - quote.quotedAt > VAULT_QUOTE_TTL_MS;
+}
+
+/**
  * The live quote a floor is derived from. Debounced behind typing, aborted on
  * change and unmount, and re-fetched when `refreshKey` bumps — a blown floor
- * retries against a FRESH rate, never the one that just refused.
+ * retries against a FRESH rate, never the one that just refused. A quote that
+ * ages past `VAULT_QUOTE_TTL_MS` re-fetches on its own.
+ *
+ * A re-fetch of a key we already hold a quote for is SILENT: the standing
+ * quote stays on screen and swaps in place when the fresh one lands — no
+ * loading flicker, no layout shift, no disarmed confirm. Only a NEW key drops
+ * to `loading`, debounced behind typing. A silent re-fetch that fails still
+ * lands on `unavailable`: an expired quote must never keep arming the action
+ * just because its replacement could not be read.
  *
  * `key` is the serialized quote input; `null` means "nothing to quote" (no
  * floor policy, or the input is not valid yet) and resolves to `idle` without
@@ -113,42 +135,61 @@ export function useDebouncedVaultQuote<T>(
   refreshKey: number
 ): VaultQuoteState<T> {
   const [state, setState] = useState<VaultQuoteState<T>>({ kind: "idle" });
+  // Bumped when the standing quote ages past the TTL; a dependency of the
+  // fetch effect, so expiry re-runs it without any caller involvement.
+  const [expiryEpoch, setExpiryEpoch] = useState(0);
   const fetchRef = useRef(fetchQuote);
-  // The latest-fetcher write lives in an effect, never in render: React can
+  const stateRef = useRef(state);
+  // The latest-value writes live in an effect, never in render: React can
   // replay or discard render work, and a mutation there leaks from UI that
-  // never commits.
+  // never commits. Declared before the fetch effect so both refs are current
+  // by the time it runs.
   useEffect(() => {
     fetchRef.current = fetchQuote;
+    stateRef.current = state;
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is deliberately unused in the body — bumping it re-runs the quote after a blown floor.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey and expiryEpoch are deliberately unused in the body — bumping either re-runs the quote (after a blown floor, or past the TTL).
   useEffect(() => {
     if (key === null) {
       setState({ kind: "idle" });
       return;
     }
+    // Already holding a quote for THIS key means this run is a refresh, not a
+    // new question: keep it on screen and skip the typing debounce.
+    const silent = stateRef.current.kind === "quoted" && stateRef.current.key === key;
     const controller = new AbortController();
-    setState({ kind: "loading" });
-    const timer = setTimeout(() => {
-      fetchRef.current(controller.signal).then(
-        (result) => {
-          if (controller.signal.aborted) return;
-          setState(
-            result.kind === "quoted"
-              ? { kind: "quoted", key, preview: result.preview }
-              : { kind: "unavailable" }
-          );
-        },
-        () => {
-          if (!controller.signal.aborted) setState({ kind: "unavailable" });
-        }
-      );
-    }, VAULT_QUOTE_DEBOUNCE_MS);
+    if (!silent) setState({ kind: "loading" });
+    const timer = setTimeout(
+      () => {
+        fetchRef.current(controller.signal).then(
+          (result) => {
+            if (controller.signal.aborted) return;
+            setState(
+              result.kind === "quoted"
+                ? { kind: "quoted", key, preview: result.preview, quotedAt: Date.now() }
+                : { kind: "unavailable" }
+            );
+          },
+          () => {
+            if (!controller.signal.aborted) setState({ kind: "unavailable" });
+          }
+        );
+      },
+      silent ? 0 : VAULT_QUOTE_DEBOUNCE_MS
+    );
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [key, refreshKey]);
+  }, [key, refreshKey, expiryEpoch]);
+
+  useEffect(() => {
+    if (state.kind !== "quoted") return;
+    const remaining = state.quotedAt + VAULT_QUOTE_TTL_MS - Date.now();
+    const timer = setTimeout(() => setExpiryEpoch((epoch) => epoch + 1), Math.max(remaining, 0));
+    return () => clearTimeout(timer);
+  }, [state]);
 
   return state;
 }

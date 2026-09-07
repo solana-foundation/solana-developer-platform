@@ -28,7 +28,11 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
 import { resolveHomeHeroState } from "./home-first-run";
-import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
+import {
+  filterHomeActivityRowsByFlags,
+  type HomeActivityExplorerRef,
+  type HomeActivityRow,
+} from "./home-page.data";
 import { HomeQuickActions } from "./home-quick-actions";
 import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
@@ -580,7 +584,10 @@ export function HomeWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
-  const { dashboardAccess } = useDashboardWorkspace();
+  const { dashboardAccess, flags } = useDashboardWorkspace();
+  const custodyEnabled = flags.custody;
+  const issuanceEnabled = flags.issuance;
+  const policiesEnabled = flags.policies;
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
     () => fetchHomeActivity(),
@@ -595,9 +602,8 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
-  // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
-  // so a freshly onboarded organization already has one and fell through to the
-  // populated hero holding nothing.
+  // Not `wallets.length === 0`: organizations may already have one provisioned
+  // wallet and still need an explicit next step rather than an empty balance hero.
   // `totalBalanceError` is set only when the aggregate request itself failed
   // on an organization that has wallets. That is the only failure the response
   // exposes today: the API converts per-wallet read failures into zero rows on
@@ -621,7 +627,9 @@ export function HomeWorkspace({
       ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
       : t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
-  const activityRows = activitySnapshot?.activityRows ?? [];
+  const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
+    issuance: issuanceEnabled,
+  });
   const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
   const issuedTokensByMint = Object.fromEntries(
     issuedTokens.map((token) => [token.mintAddress, token])
@@ -641,10 +649,16 @@ export function HomeWorkspace({
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
-        {heroState.kind === "first_run" ? (
-          <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
-        ) : heroState.kind === "provisioned_empty" ? (
-          <HomeQuickActions capabilities={dashboardAccess.capabilities} />
+        {heroState.kind === "first_run" && custodyEnabled ? (
+          <FirstRunPanel
+            canCreateWallet={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
+          />
+        ) : heroState.kind !== "populated" ? (
+          <HomeQuickActions
+            capabilities={dashboardAccess.capabilities}
+            custodyEnabled={custodyEnabled}
+            policiesEnabled={policiesEnabled}
+          />
         ) : (
           <BalanceHero
             totalBalance={totalBalance}
@@ -659,7 +673,7 @@ export function HomeWorkspace({
             issuedTokensByMint={issuedTokensByMint}
             locale={locale}
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
-            canManageCustody={dashboardAccess.capabilities.canManageCustody}
+            canManageCustody={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
           />
         )}
       </SectionEntry>

@@ -34,7 +34,8 @@
       "channelBalance": "Số dư kênh:",
       "amountRequired": "Nhập số lượng USDC.",
       "amountInvalid": "Nhập số USDC lớn hơn 0, tối đa 6 chữ số thập phân.",
-      "amountWithUnit": "{amount} USDC"
+      "amountWithUnit": "{amount} USDC",
+      "noEnabledTokens": "Private Channels instance này không bật Token nào được hỗ trợ."
     },
     "overview": {
       "title": "Tổng quan",
@@ -100,7 +101,13 @@
       "verifySuccess": "Đã xác minh Wallet {key}.",
       "revokeSuccess": "Đã thu hồi xác minh cho {key}.",
       "channelBalanceTooltip": "Số dư kênh cho mint {mint}",
-      "channelBalanceAmount": "{amount} {symbol}"
+      "channelBalanceAmount": "{amount} {symbol}",
+      "empty": "Chưa có wallet nào được đăng ký.",
+      "enroll": "Đăng ký wallet",
+      "enrolling": "Đang đăng ký…",
+      "enrollDescription": "Chọn Wallet lưu ký để dùng với Private Channels.",
+      "walletLabel": "Wallet",
+      "walletPlaceholder": "Chọn wallet"
     },
     "channels": {
       "title": "Kênh",
@@ -429,7 +436,56 @@
       "gatewayNotReady": "Gateway đã phản hồi nhưng chưa sẵn sàng",
       "connectionTestFailed": "Một số endpoint không kết nối được. Kiểm tra chi tiết kết nối được tô sáng và thử lại.",
       "connectionRequestFailed": "Không thể kiểm tra kết nối. Kiểm tra chi tiết kết nối và thử lại.",
-      "projectRpcTestFailed": "RPC của dự án không thể xác minh lần deployment escrow. Hãy sửa tích hợp RPC hoặc địa chỉ deployment của dự án rồi thử lại."
+      "projectRpcTestFailed": "RPC của dự án không thể xác minh lần deployment escrow. Hãy sửa tích hợp RPC hoặc địa chỉ deployment của dự án rồi thử lại.",
+      "setupStepLabel": "Kết nối",
+      "setupStepProgress": "Bước 1/1",
+      "update": "Lưu thay đổi",
+      "updating": "Đang lưu…",
+      "updateSuccess": "Đã cập nhật kết nối.",
+      "connectionTestSuccess": "Kết nối hoạt động."
+    },
+    "directory": {
+      "setupChannel": "Thêm channel",
+      "createChannel": "Tạo channel",
+      "createDescription": "Tạo channel riêng khi dự án này cần quyền truy cập wallet hoặc hoạt động thanh toán riêng.",
+      "createStepLabel": "Chi tiết",
+      "createStepProgress": "Bước 1/1",
+      "createDetailsTitle": "Chi tiết channel",
+      "createConnectionTitle": "Dùng kết nối hiện có",
+      "channelName": "Tên channel",
+      "channelDescription": "Mô tả (tùy chọn)",
+      "channelsTitle": "Channels",
+      "channelsDescription": "Chọn channel để quản lý wallets và tokens.",
+      "empty": "Chưa có private channels.",
+      "channelColumn": "Kênh",
+      "instanceColumn": "Instance",
+      "walletsColumn": "Wallets",
+      "tokensColumn": "Tokens",
+      "statusColumn": "Trạng thái",
+      "openColumn": "Mở",
+      "walletCount": "{count} đã enroll",
+      "noTokens": "Không có Token được phép",
+      "tokensUnavailable": "Cài đặt Token không khả dụng",
+      "connected": "Đã kết nối",
+      "openChannel": "Mở {channel}"
+    },
+    "channelDetail": {
+      "description": "Quản lý các Wallet và Token được dùng cho private channel này.",
+      "actions": "Thao tác",
+      "manageConnection": "Quản lý kết nối",
+      "enrollWallet": "Enroll Wallet",
+      "enrollNeedsConnection": "Kết nối instance trước.",
+      "enrollWalletsUnavailable": "Không có Wallet khả dụng.",
+      "enrollAllWalletsAdded": "Đã enroll tất cả Wallet.",
+      "disconnectInstance": "Ngắt kết nối instance",
+      "deleteConnection": "Xóa kết nối",
+      "tokensTitle": "Token được phép trong kênh này",
+      "tokensDescription": "Chỉ những Token này được dùng cho thanh toán private trong {channel}.",
+      "tokensEmpty": "Không có Token khả dụng từ instance đã kết nối này.",
+      "tokensLoadError": "Không tải được cài đặt Token. Làm mới trang để thử lại.",
+      "tokenNetwork": "{network}",
+      "mintLabel": "Mint",
+      "decimalsLabel": "Decimals"
     }
   }
 }
