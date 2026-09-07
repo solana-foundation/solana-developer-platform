@@ -125,12 +125,6 @@ export const privateChannelProbeBodySchema = z
       "Probe request body. When deployment addresses are supplied, the selected project's configured RPC verifies them automatically.",
   });
 
-const gatewayProbeResponseSchema = z.object({
-  status: z.number(),
-  ok: z.boolean(),
-  body: z.unknown().optional(),
-});
-
 export const privateChannelOverviewSchema = z
   .object({
     gateway: z.object({
@@ -166,28 +160,7 @@ export const privateChannelOverviewSchema = z
 export const privateChannelProbeResultSchema = z
   .object({
     ok: z.boolean(),
-    gateway: z.discriminatedUnion("status", [
-      z.object({
-        status: z.literal("ready"),
-        latencyMs: z.number(),
-        health: gatewayProbeResponseSchema,
-        ready: gatewayProbeResponseSchema,
-      }),
-      z.object({
-        status: z.literal("degraded"),
-        latencyMs: z.number(),
-        health: gatewayProbeResponseSchema,
-        ready: gatewayProbeResponseSchema,
-        reason: z.string(),
-      }),
-      z.object({
-        status: z.literal("unreachable"),
-        latencyMs: z.number(),
-        error: z.string(),
-        health: gatewayProbeResponseSchema.optional(),
-        ready: gatewayProbeResponseSchema.optional(),
-      }),
-    ]),
+    gateway: privateChannelHealthSchema,
     rpc: z.discriminatedUnion("ok", [
       z.object({ ok: z.literal(true), latencyMs: z.number(), version: z.string() }),
       z.object({ ok: z.literal(false), latencyMs: z.number(), error: z.string() }),
@@ -197,7 +170,10 @@ export const privateChannelProbeResultSchema = z
       z.object({ ok: z.literal(false), latencyMs: z.number(), error: z.string() }),
     ]),
   })
-  .openapi({ description: "Full connect-time probe result (gateway + chain RPC + auth)." });
+  .openapi({
+    description:
+      "Full connect-time probe result (gateway + chain RPC + auth). One status per endpoint plus latency and a short reason; upstream response bodies are never relayed.",
+  });
 
 export const privateChannelSchema = z
   .object({

@@ -30,7 +30,7 @@ describe("Private Channel transfer OpenAPI", () => {
     );
   });
 
-  it("documents the opaque recipient request without an idempotency header", () => {
+  it("documents the opaque recipient request behind a REQUIRED idempotency header", () => {
     const document = createOpenApiDocument();
     const operation = document.paths?.["/v1/private-channels/channels/{channelId}/transfers"]?.post;
     const idempotencyKey = parameterNamed(
@@ -39,7 +39,11 @@ describe("Private Channel transfer OpenAPI", () => {
     );
     const serializedBody = JSON.stringify(operation?.requestBody);
 
-    expect(idempotencyKey).toBeUndefined();
+    // Marking it optional here would let a generated client omit a header the
+    // runtime 400s on — the route signs and broadcasts, so the reservation is
+    // not something a caller may skip.
+    expect(idempotencyKey).toMatchObject({ in: "header", required: true });
+    expect(operation?.responses).toHaveProperty("409");
     expect(serializedBody).toContain('"walletId"');
     expect(serializedBody).toContain('"recipientVerifiedWalletId"');
     expect(serializedBody).toContain('"amount"');
@@ -55,7 +59,7 @@ describe("Private Channel transfer OpenAPI", () => {
     }
   });
 
-  it("documents session-only access for recipient discovery and transfer creation", () => {
+  it("documents API-key and session access for recipient discovery and transfer creation", () => {
     const document = createOpenApiDocument();
     const recipients =
       document.paths?.["/v1/private-channels/channels/{channelId}/transfer-recipients"]?.get;
@@ -69,10 +73,13 @@ describe("Private Channel transfer OpenAPI", () => {
       "x-project-id"
     );
 
-    expect(recipients?.security).toEqual([{ sessionCookie: [] }]);
-    expect(create?.security).toEqual([{ sessionCookie: [] }]);
-    expect(recipientProject).toMatchObject({ in: "header", required: true });
-    expect(createProject).toMatchObject({ in: "header", required: true });
+    expect(recipients?.security).toEqual([{ apiKeyAuth: [] }, { sessionCookie: [] }]);
+    expect(create?.security).toEqual([{ apiKeyAuth: [] }, { sessionCookie: [] }]);
+    // Optional: an API key fixes the project itself and the header is ignored.
+    expect(recipientProject).toMatchObject({ in: "header" });
+    expect(recipientProject).not.toMatchObject({ required: true });
+    expect(createProject).toMatchObject({ in: "header" });
+    expect(createProject).not.toMatchObject({ required: true });
     expect(document.paths?.["/v1/private-channels/transfers"]?.get?.security).toEqual([
       { apiKeyAuth: [] },
     ]);
