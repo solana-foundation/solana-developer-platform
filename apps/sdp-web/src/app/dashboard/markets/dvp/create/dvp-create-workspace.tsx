@@ -104,13 +104,22 @@ function LegCards({
         choice={form.asset.choice}
         custom={form.asset.custom}
         emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
+        // On an agent trade `sdpSide` is still "a" because the side chooser is
+        // hidden, not because you deliver leg A. Reading it here captioned the
+        // first party's leg "Asset you are trading" and "One of your issued
+        // tokens", directly under a heading that correctly said "First party
+        // delivers". Hiding a control does not neutralise the state behind it.
         hint={t(
-          form.sdpSide === "a"
-            ? "DashboardMarkets.dvp.fieldAssetMintHint"
-            : "DashboardMarkets.dvp.fieldAssetMintHintTheirs"
+          agent
+            ? "DashboardMarkets.dvp.fieldAssetMintHintAgent"
+            : form.sdpSide === "a"
+              ? "DashboardMarkets.dvp.fieldAssetMintHint"
+              : "DashboardMarkets.dvp.fieldAssetMintHintTheirs"
         )}
         id="dvp-asset-mint"
-        label={t("DashboardMarkets.dvp.fieldAssetMint")}
+        label={t(
+          agent ? "DashboardMarkets.dvp.fieldAssetMintAgent" : "DashboardMarkets.dvp.fieldAssetMint"
+        )}
         onChoiceChange={form.asset.setChoice}
         onCustomChange={form.asset.setCustom}
         options={context.tokens}
@@ -124,7 +133,9 @@ function LegCards({
             : null
         }
         id="dvp-amount-a"
-        label={t("DashboardMarkets.dvp.fieldAmountA")}
+        label={t(
+          agent ? "DashboardMarkets.dvp.fieldAmountAAgent" : "DashboardMarkets.dvp.fieldAmountA"
+        )}
         onChange={form.asset.setAmount}
         symbol={form.asset.symbol}
         value={form.asset.amount}
@@ -139,12 +150,16 @@ function LegCards({
         choice={form.cash.choice}
         custom={form.cash.custom}
         hint={t(
-          form.sdpSide === "b"
-            ? "DashboardMarkets.dvp.fieldCashMintHintMine"
-            : "DashboardMarkets.dvp.fieldCashMintHint"
+          agent
+            ? "DashboardMarkets.dvp.fieldCashMintHintAgent"
+            : form.sdpSide === "b"
+              ? "DashboardMarkets.dvp.fieldCashMintHintMine"
+              : "DashboardMarkets.dvp.fieldCashMintHint"
         )}
         id="dvp-cash-mint"
-        label={t("DashboardMarkets.dvp.fieldCashMint")}
+        label={t(
+          agent ? "DashboardMarkets.dvp.fieldCashMintAgent" : "DashboardMarkets.dvp.fieldCashMint"
+        )}
         onChoiceChange={form.cash.setChoice}
         onCustomChange={form.cash.setCustom}
         options={form.cashOptions}
@@ -158,7 +173,9 @@ function LegCards({
             : null
         }
         id="dvp-amount-b"
-        label={t("DashboardMarkets.dvp.fieldAmountB")}
+        label={t(
+          agent ? "DashboardMarkets.dvp.fieldAmountBAgent" : "DashboardMarkets.dvp.fieldAmountB"
+        )}
         onChange={form.cash.setAmount}
         symbol={form.cash.symbol}
         value={form.cash.amount}

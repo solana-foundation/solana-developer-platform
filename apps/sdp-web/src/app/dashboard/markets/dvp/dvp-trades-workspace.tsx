@@ -38,6 +38,7 @@ import {
   type DvpTradeStatus,
   formatLegAmount,
   frozenLegs,
+  isDvpAgentTrade,
   isDvpTradeClosed,
   matchesAddressQuery,
   overFundedLegs,
@@ -173,7 +174,11 @@ export function DvpTradesWorkspace({
       trade.legs.b.symbol,
       trade.legs.a.mint,
       trade.legs.b.mint,
-      trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party,
+      // Both parties, always. Searching only "the other side" found nothing on
+      // an agent trade, where neither party is us and either one is what
+      // somebody would paste in.
+      trade.legs.a.party,
+      trade.legs.b.party,
     ]
       .filter(Boolean)
       .some((value) => matchesAddressQuery(String(value), needle));
@@ -299,15 +304,23 @@ export function DvpTradesWorkspace({
                       <TableHead>{t("DashboardMarkets.dvp.columnStatus")}</TableHead>
                       <TableHead>{t("DashboardMarkets.dvp.columnAsset")}</TableHead>
                       <TableHead>{t("DashboardMarkets.dvp.columnCash")}</TableHead>
-                      <TableHead>{t("DashboardMarkets.dvp.columnCounterparty")}</TableHead>
+                      {/* "Parties", not "Counterparty": the list mixes trades
+                          where we hold a leg with trades set up for two other
+                          parties, and the second kind has no counterparty
+                          because we are not one of the sides. */}
+                      <TableHead>{t("DashboardMarkets.dvp.columnParties")}</TableHead>
                       <TableHead>{t("DashboardMarkets.dvp.columnCreated")}</TableHead>
                       <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {visible.map((trade) => {
-                      const counterparty =
-                        trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party;
+                      // Who to show in the parties column. On a trade we are a
+                      // party to that is the other side; on one we only set up
+                      // it is both, because neither of them is us.
+                      const parties = isDvpAgentTrade(trade)
+                        ? [trade.legs.a.party, trade.legs.b.party]
+                        : [trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party];
                       // Marked on the row rather than announced in a banner: a
                       // warning that does not say WHICH trade sends an operator
                       // through every row to find it.
@@ -361,13 +374,14 @@ export function DvpTradesWorkspace({
                                 into a wallet, an explorer or a message back to
                                 the other side, which is most of what anyone
                                 wants this column for. */}
-                            <span className="inline-flex items-center gap-1">
-                              <span className="sr-only">{counterparty}</span>
-                              <span aria-hidden>{shortenAddress(counterparty)}</span>
-                              <WalletAddressCopyButton
-                                address={counterparty}
-                                tooltip={counterparty}
-                              />
+                            <span className="grid gap-0.5">
+                              {parties.map((party) => (
+                                <span className="inline-flex items-center gap-1" key={party}>
+                                  <span className="sr-only">{party}</span>
+                                  <span aria-hidden>{shortenAddress(party)}</span>
+                                  <WalletAddressCopyButton address={party} tooltip={party} />
+                                </span>
+                              ))}
                             </span>
                           </TableCell>
                           <TableCell className="text-secondary text-sm">

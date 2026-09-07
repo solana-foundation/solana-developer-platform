@@ -96,6 +96,88 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(html.indexOf("Fund this leg")).toBeGreaterThan(html.indexOf(ESCROW_B));
   });
 
+  /**
+   * Agent trades: this organization set the terms and holds neither leg.
+   *
+   * This page had no notion of the kind at all, so an agent trade fell through
+   * every `sdpSide === "a"` check into the else branch, presented leg B as
+   * ours, and offered to fund it. The API refuses that (`services/dvp/fund.ts`
+   * rejects the kind, and `sdpLegOf` throws on a null side), so the button led
+   * nowhere — but it contradicted the one thing an agent trade means, on the
+   * screen a viewer looks at longest.
+   */
+  describe("agent trades", () => {
+    const agent = () => trade({ tradeKind: "agent", sdpSide: null });
+
+    it("offers no funding action, because neither leg is ours to fund", () => {
+      expect(renderDetail(agent())).not.toContain("Fund this leg");
+    });
+
+    it("still publishes both escrow addresses, which are the whole integration", () => {
+      const html = renderDetail(agent());
+
+      expect(html).toContain(ESCROW_A);
+      expect(html).toContain(ESCROW_B);
+    });
+
+    it("captions the legs by party rather than claiming one is held here", () => {
+      const html = renderDetail(agent());
+
+      expect(html).toContain("First party");
+      expect(html).toContain("Second party");
+      expect(html).not.toContain("Held by this organization");
+    });
+
+    it("does not say you deliver or receive anything", () => {
+      const html = renderDetail(agent());
+
+      expect(html).not.toContain("You deliver");
+      expect(html).not.toContain("You receive");
+    });
+
+    // A trade between two other parties has no "the counterparty": naming one
+    // of them as ours would put a false fact on the page.
+    it("names both parties instead of a single counterparty", () => {
+      const html = renderDetail(
+        trade({
+          tradeKind: "agent",
+          sdpSide: null,
+          legs: {
+            a: leg(ESCROW_A, { party: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" }),
+            b: leg(ESCROW_B, { party: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk" }),
+          },
+        })
+      );
+
+      expect(html).toContain("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
+      expect(html).toContain("C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk");
+    });
+
+    // The kind is what the API sends; the null side is what it means. A row
+    // written before the column existed carries neither, and is principal.
+    it("treats a null side as an agent trade even without the kind", () => {
+      expect(renderDetail(trade({ sdpSide: null }))).not.toContain("Fund this leg");
+    });
+
+    // Settling is the one thing an agent DOES do, so it must not be removed
+    // along with the funding affordance.
+    it("keeps the close actions, which are the agent's whole job", () => {
+      const funded = {
+        a: leg(ESCROW_A, {
+          funding: { observedAmount: "1000", funded: true, surplus: null, frozen: false },
+        }),
+        b: leg(ESCROW_B, {
+          funding: { observedAmount: "1000", funded: true, surplus: null, frozen: false },
+        }),
+      };
+      const html = renderDetail(
+        trade({ tradeKind: "agent", sdpSide: null, status: "funded", legs: funded })
+      );
+
+      expect(html).toContain("Settle");
+    });
+  });
+
   // Funding again would over-fund the escrow, and settlement refunds a surplus,
   // which on a transfer-hook mint can revert the settlement.
   it("withdraws the funding action once your leg is funded", () => {

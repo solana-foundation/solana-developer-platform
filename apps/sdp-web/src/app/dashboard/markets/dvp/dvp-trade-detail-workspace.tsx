@@ -33,6 +33,7 @@ import {
   isDvpTradeClosed,
   legFundingRatio,
   overFundedLegs,
+  sdpLegSideOf,
 } from "./dvp-trade";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -164,16 +165,25 @@ function legStatus(
  */
 function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
   const t = useTranslations();
-  const sdpLegIsA = trade.sdpSide === "a";
-  const given = sdpLegIsA ? trade.legs.a : trade.legs.b;
-  const taken = sdpLegIsA ? trade.legs.b : trade.legs.a;
+  const sdpSide = sdpLegSideOf(trade);
+  const agent = sdpSide === null;
+
+  // On an agent trade nobody here delivers or receives anything, so the band
+  // reads as the swap between the two parties instead of as your own position.
+  // Left is always the first party's leg then, because "you" has no referent.
+  const given = agent || sdpSide === "a" ? trade.legs.a : trade.legs.b;
+  const taken = agent || sdpSide === "a" ? trade.legs.b : trade.legs.a;
+  const givenLabel = agent
+    ? t("DashboardMarkets.dvp.summaryPartyADelivers")
+    : t(closed ? "DashboardMarkets.dvp.youDelivered" : "DashboardMarkets.dvp.youDeliver");
+  const takenLabel = agent
+    ? t("DashboardMarkets.dvp.summaryPartyBDelivers")
+    : t(closed ? "DashboardMarkets.dvp.youReceived" : "DashboardMarkets.dvp.youReceive");
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
       <span className="flex items-center gap-2">
-        <span className="text-tertiary text-xs">
-          {closed ? t("DashboardMarkets.dvp.youDelivered") : t("DashboardMarkets.dvp.youDeliver")}
-        </span>
+        <span className="text-tertiary text-xs">{givenLabel}</span>
         <span className="font-medium text-primary text-sm tabular-nums">
           {formatLegAmount(given.amount, given.decimals)}
           {given.symbol ? ` ${given.symbol}` : ""}
@@ -181,9 +191,7 @@ function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
       </span>
       <ArrowLeftRightIcon aria-hidden className="h-4 w-4 shrink-0 text-tertiary" />
       <span className="flex items-center gap-2">
-        <span className="text-tertiary text-xs">
-          {closed ? t("DashboardMarkets.dvp.youReceived") : t("DashboardMarkets.dvp.youReceive")}
-        </span>
+        <span className="text-tertiary text-xs">{takenLabel}</span>
         <span className="font-medium text-primary text-sm tabular-nums">
           {formatLegAmount(taken.amount, taken.decimals)}
           {taken.symbol ? ` ${taken.symbol}` : ""}
@@ -314,7 +322,8 @@ function TradeSummary({
   trade,
 }: {
   cluster: SolanaCluster;
-  counterparty: string;
+  /** Null on an agent trade, which has two counterparties and neither is us. */
+  counterparty: string | null;
   trade: DvpTrade;
 }) {
   const t = useTranslations();
@@ -415,27 +424,59 @@ function TradeSummary({
           confirm they are looking at the same trade, so it is copyable in
           full like the rest. */}
       <dl className="mt-3 border-border-subtle border-t pt-3">
-        <div>
-          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.counterpartyLabel")}</dt>
-          <dd className="mt-0.5">
-            <CopyableAddress
-              address={counterparty}
-              label={t("DashboardMarkets.dvp.counterpartyLabel")}
-            />
-          </dd>
-          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-            {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
-            <a
-              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-              href={explorerAddressUrl(counterparty, cluster)}
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              {t("DashboardMarkets.dvp.viewOnExplorer")}
-              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-            </a>
-          </p>
-        </div>
+        {counterparty === null ? (
+          // Two parties, neither of them us, so there is no single "the other
+          // side" to name. Both are listed instead, in the order they were
+          // entered, which is the order the legs are captioned in.
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                ["DashboardMarkets.dvp.legPartyA", trade.legs.a.party],
+                ["DashboardMarkets.dvp.legPartyB", trade.legs.b.party],
+              ] as const
+            ).map(([key, party]) => (
+              <div key={key}>
+                <dt className="text-tertiary text-xs">{t(key)}</dt>
+                <dd className="mt-0.5">
+                  <CopyableAddress address={party} label={t(key)} />
+                </dd>
+                <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+                  <a
+                    className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+                    href={explorerAddressUrl(party, cluster)}
+                    rel="noreferrer noopener"
+                    target="_blank"
+                  >
+                    {t("DashboardMarkets.dvp.viewOnExplorer")}
+                    <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+                  </a>
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>
+            <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.counterpartyLabel")}</dt>
+            <dd className="mt-0.5">
+              <CopyableAddress
+                address={counterparty}
+                label={t("DashboardMarkets.dvp.counterpartyLabel")}
+              />
+            </dd>
+            <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+              {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
+              <a
+                className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+                href={explorerAddressUrl(counterparty, cluster)}
+                rel="noreferrer noopener"
+                target="_blank"
+              >
+                {t("DashboardMarkets.dvp.viewOnExplorer")}
+                <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+              </a>
+            </p>
+          </div>
+        )}
       </dl>
 
       {/* Every transaction this trade produced, in the order it happened.
@@ -567,15 +608,27 @@ function LegCards({
   trade: DvpTrade;
 }) {
   const t = useTranslations();
-  const sdpLegIsA = trade.sdpSide === "a";
+  const sdpSide = sdpLegSideOf(trade);
+  const agent = sdpSide === null;
+
+  // On an agent trade both legs belong to other parties, so neither card can be
+  // captioned "held by this organization" and neither carries a fund action.
+  const holderA = agent
+    ? t("DashboardMarkets.dvp.legPartyA")
+    : sdpSide === "a"
+      ? t("DashboardMarkets.dvp.legSdp")
+      : t("DashboardMarkets.dvp.legCounterparty");
+  const holderB = agent
+    ? t("DashboardMarkets.dvp.legPartyB")
+    : sdpSide === "a"
+      ? t("DashboardMarkets.dvp.legCounterparty")
+      : t("DashboardMarkets.dvp.legSdp");
 
   const cardA = (
     <LegCard
-      action={sdpLegIsA ? action : undefined}
+      action={!agent && sdpSide === "a" ? action : undefined}
       closed={closed}
-      holder={
-        sdpLegIsA ? t("DashboardMarkets.dvp.legSdp") : t("DashboardMarkets.dvp.legCounterparty")
-      }
+      holder={holderA}
       key="a"
       leg={trade.legs.a}
       title={t("DashboardMarkets.dvp.legA")}
@@ -583,11 +636,9 @@ function LegCards({
   );
   const cardB = (
     <LegCard
-      action={sdpLegIsA ? undefined : action}
+      action={!agent && sdpSide === "b" ? action : undefined}
       closed={closed}
-      holder={
-        sdpLegIsA ? t("DashboardMarkets.dvp.legCounterparty") : t("DashboardMarkets.dvp.legSdp")
-      }
+      holder={holderB}
       key="b"
       leg={trade.legs.b}
       title={t("DashboardMarkets.dvp.legB")}
@@ -597,7 +648,10 @@ function LegCards({
   // Your leg first, whichever it is. The exchange band above already reads as
   // what you give then what you get, so fixed A-then-B order made the band and
   // the cards under it run opposite ways on a trade where SDP holds leg B.
-  return sdpLegIsA ? [cardA, cardB] : [cardB, cardA];
+  //
+  // An agent trade has no leg of yours to lead with, so it keeps the trade's
+  // own A-then-B order, which is the order the parties were named in.
+  return agent || sdpSide === "a" ? [cardA, cardB] : [cardB, cardA];
 }
 
 export function DvpTradeDetailWorkspace({
@@ -616,15 +670,25 @@ export function DvpTradeDetailWorkspace({
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
 
-  const sdpLegIsA = trade.sdpSide === "a";
+  // Null on an agent trade, where this organization delivers neither leg.
+  const sdpSide = sdpLegSideOf(trade);
 
   // Only SDP's own leg is fundable from here. The counterparty funds theirs
   // with an ordinary transfer to the escrow — making that a button would mean
   // spending their wallet, which is the whole thing a DvP trade prevents.
-  const sdpLeg = sdpLegIsA ? trade.legs.a : trade.legs.b;
-  // The other side's address, which is whichever leg is not ours.
-  const counterparty = sdpLegIsA ? trade.legs.b.party : trade.legs.a.party;
+  //
+  // On an agent trade there is no own leg, so there is nothing to fund from
+  // here at all. This read used to be `sdpSide === "a" ? a : b`, which answered
+  // "b" for a trade with no SDP leg and offered to fund a leg we hold no key
+  // for. The API refuses it (`services/dvp/fund.ts:119`), so the button led
+  // nowhere, but it contradicted the one thing an agent trade means.
+  const sdpLeg = sdpSide === null ? null : sdpSide === "a" ? trade.legs.a : trade.legs.b;
+  // The other side's address, which is whichever leg is not ours. An agent
+  // trade has two counterparties and we are neither, so it has no "other side".
+  const counterparty =
+    sdpSide === null ? null : sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party;
   const canFund =
+    sdpLeg !== null &&
     (trade.status === "created" || trade.status === "partially_funded") &&
     !sdpLeg.funding?.funded &&
     !sdpLeg.funding?.frozen;

@@ -108,8 +108,13 @@ export const dvpTradeSchema = z
       description: "The only key that can settle, cancel or reject this trade.",
     }),
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
-    sdpSide: z.enum(["a", "b"]).openapi({
-      description: "Which leg the SDP custody wallet delivers. The other side is external.",
+    tradeKind: z.enum(["principal", "agent"]).openapi({
+      description:
+        "Whether this organization is a party to the trade. `principal`: a custody wallet delivers one leg. `agent`: the terms were set for two other parties and this organization delivers neither leg, though its wallet signs the create and pays the escrow rent.",
+    }),
+    sdpSide: z.enum(["a", "b"]).nullable().openapi({
+      description:
+        "Which leg the SDP custody wallet delivers, or null on an agent trade where it delivers neither. Always present on a principal trade.",
     }),
     nonce: z.string().openapi({
       description:

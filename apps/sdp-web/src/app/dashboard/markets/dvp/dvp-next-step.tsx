@@ -17,7 +17,7 @@ import { ClockIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import type { DvpTrade } from "./dvp-trade";
+import { type DvpTrade, isDvpAgentTrade } from "./dvp-trade";
 
 type Tone = "info" | "waiting" | "attention";
 
@@ -55,13 +55,82 @@ function Panel({ children, tone, title }: { children: ReactNode; tone: Tone; tit
   );
 }
 
+/**
+ * Whose move it is on a trade this organization is not a party to.
+ *
+ * Nothing here is ever this operator's move until both escrows are funded: the
+ * two parties pay their own, and settling is the only thing an agent does. The
+ * principal version of this panel asks "do we still owe a leg", which on an
+ * agent trade has no answer, and answered it "yes" anyway.
+ */
+function agentNextStep(
+  trade: DvpTrade,
+  t: ReturnType<typeof useTranslations>
+): { tone: Tone; title: string; body: string } | null {
+  switch (trade.status) {
+    case "creating":
+      return {
+        tone: "waiting",
+        title: t("DashboardMarkets.dvp.nextCreatingTitle"),
+        body: t("DashboardMarkets.dvp.nextCreatingBody"),
+      };
+    case "created":
+    case "partially_funded": {
+      const paid = [trade.legs.a, trade.legs.b].filter((leg) => leg.funding?.funded).length;
+      return {
+        tone: "waiting",
+        title: t(
+          paid === 1
+            ? "DashboardMarkets.dvp.nextAgentOneLeftTitle"
+            : "DashboardMarkets.dvp.nextAgentFundTitle"
+        ),
+        body: t(
+          paid === 1
+            ? "DashboardMarkets.dvp.nextAgentOneLeftBody"
+            : "DashboardMarkets.dvp.nextAgentFundBody"
+        ),
+      };
+    }
+    case "funded":
+      return {
+        tone: "info",
+        title: t("DashboardMarkets.dvp.nextAgentSettleTitle"),
+        body: t("DashboardMarkets.dvp.nextAgentSettleBody"),
+      };
+    case "expired":
+      return {
+        tone: "attention",
+        title: t("DashboardMarkets.dvp.nextExpiredTitle"),
+        body: t("DashboardMarkets.dvp.nextExpiredBody"),
+      };
+    case "create_failed":
+      return {
+        tone: "attention",
+        title: t("DashboardMarkets.dvp.nextCreateFailedTitle"),
+        body: t("DashboardMarkets.dvp.nextCreateFailedBody"),
+      };
+    default:
+      return null;
+  }
+}
+
 /** Whose move it is, in one sentence, for the state the trade is actually in. */
 function nextStep(
   trade: DvpTrade,
   t: ReturnType<typeof useTranslations>
 ): { tone: Tone; title: string; body: string } | null {
-  const sdpLeg = trade.sdpSide === "a" ? trade.legs.a : trade.legs.b;
-  const otherLeg = trade.sdpSide === "a" ? trade.legs.b : trade.legs.a;
+  // On an agent trade there is no "ours" and no "theirs", so the question this
+  // panel answers changes: not whose move it is between us and a counterparty,
+  // but how many of the two parties have paid.
+  if (isDvpAgentTrade(trade)) {
+    return agentNextStep(trade, t);
+  }
+
+  // Guarded above, so a side exists here. Compared explicitly against "b"
+  // rather than falling through an "a" check, because that else branch is what
+  // silently claimed leg B on a trade with no SDP leg at all.
+  const sdpLeg = trade.sdpSide === "b" ? trade.legs.b : trade.legs.a;
+  const otherLeg = trade.sdpSide === "b" ? trade.legs.a : trade.legs.b;
 
   // Frozen and over-funded escrows have their own callouts on this page, so
   // they are deliberately not repeated here. This panel answers one question

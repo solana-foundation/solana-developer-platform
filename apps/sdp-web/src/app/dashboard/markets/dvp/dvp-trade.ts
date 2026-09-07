@@ -22,6 +22,45 @@ export const DVP_TRADE_STATUSES = [
 export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
 
 /**
+ * Whether this organization is a party to the trade, or only set it up.
+ *
+ * `principal` is the original shape and the default: one custody wallet
+ * delivers a leg. `agent` means the terms were set for two other parties and
+ * this organization holds neither leg — its wallet signed the create and paid
+ * the escrow rent, and delivers nothing.
+ */
+export type DvpTradeKind = "principal" | "agent";
+
+/**
+ * Whether this organization holds a leg of the trade.
+ *
+ * Derived from the side rather than the kind, so a row written before
+ * `tradeKind` existed still answers correctly: those are all principal and all
+ * carry a side.
+ */
+export function isDvpAgentTrade(trade: {
+  tradeKind?: DvpTradeKind;
+  sdpSide: "a" | "b" | null;
+}): boolean {
+  return trade.tradeKind === "agent" || trade.sdpSide === null;
+}
+
+/**
+ * The leg this organization delivers, or null when it delivers neither.
+ *
+ * The one place the dashboard is allowed to read `sdpSide`. A bare
+ * `trade.sdpSide === "a"` answers `false` for BOTH "SDP holds leg B" and "SDP
+ * holds no leg", and every surface that made that comparison then went on to
+ * present leg B as ours and offer to fund it.
+ */
+export function sdpLegSideOf(trade: {
+  tradeKind?: DvpTradeKind;
+  sdpSide: "a" | "b" | null;
+}): "a" | "b" | null {
+  return isDvpAgentTrade(trade) ? null : trade.sdpSide;
+}
+
+/**
  * Statuses where the trade is over and its escrows no longer exist on chain.
  *
  * Worth a named set rather than a check at each call site, because the escrow
@@ -90,7 +129,22 @@ export interface DvpTrade {
   swapDvp: string;
   settlementAuthority: string;
   legs: { a: DvpTradeLeg; b: DvpTradeLeg };
-  sdpSide: "a" | "b";
+  /**
+   * Whether this organization is a party to the trade or only set it up.
+   *
+   * Absent on trades recorded before the kind existed, which are all principal.
+   */
+  tradeKind?: DvpTradeKind;
+  /**
+   * Which leg this organization delivers, or null when it delivers neither.
+   *
+   * Nullable because an agent trade has no SDP leg, and the API sends null for
+   * one. This said `"a" | "b"` while the wire could carry null, so every
+   * `sdpSide === "a"` in the dashboard silently took its else branch on an agent
+   * trade and presented leg B as ours — the same defect `sdpLegOf` is guarded
+   * against on the API side. Read it through `sdpLegSideOf`, never directly.
+   */
+  sdpSide: "a" | "b" | null;
   nonce: string;
   expiryTimestamp: string;
   earliestSettlementTimestamp: string | null;

@@ -173,6 +173,62 @@ describe("buildDvpTradeActionPolicyCandidate", () => {
     });
   });
 
+  /**
+   * An agent trade has no SDP leg, and `sdpSide` is null on one.
+   *
+   * `trade.sdpSide === "a"` answers false for that as surely as it does for
+   * "SDP holds leg B", so the candidate was built out of leg B and told policy
+   * this organization was moving tokens it holds no key for. Settle and cancel
+   * both reach here (`routes/dvp/index.ts:77,83`); only funding is refused
+   * earlier, so this was live on the settle path.
+   */
+  describe("agent trades", () => {
+    const agentTrade = () => trade({ tradeKind: "agent" as const, sdpSide: null });
+
+    it.each(["settle", "cancel"] as const)(
+      "does not present leg B as SDP's own leg on %s",
+      (action) => {
+        const { candidate } = buildDvpTradeActionPolicyCandidate(
+          context,
+          agentTrade(),
+          settlement,
+          action
+        );
+
+        // Leg A's asset and amount, chosen, rather than leg B's by fallthrough.
+        expect(candidate.amount).toBe("1000");
+        expect(candidate.context).toMatchObject({ dvpSdpSide: null, dvpTradeKind: "agent" });
+      }
+    );
+
+    // Both legs move on settle and both are refunded on cancel, so neither may
+    // escape evaluation just because neither is ours.
+    it.each(["settle", "cancel"] as const)("still evaluates both legs on %s", (action) => {
+      const { legs } = buildDvpTradeActionPolicyCandidate(
+        context,
+        agentTrade(),
+        settlement,
+        action
+      );
+
+      expect(legs.map((leg) => leg.amount)).toEqual(["1000", "2000"]);
+    });
+
+    // Naming one of two external parties "the counterparty" would put a false
+    // fact in front of whoever approves the operation.
+    it("names both parties rather than inventing a counterparty", () => {
+      const { candidate } = buildDvpTradeActionPolicyCandidate(
+        context,
+        agentTrade(),
+        settlement,
+        "settle"
+      );
+
+      expect(candidate.context).not.toHaveProperty("counterparty");
+      expect(candidate.context).toHaveProperty("parties");
+    });
+  });
+
   // A funding top-up moves ONE leg, so the counterparty's leg is not part of
   // the operation and must not be evaluated as though it were.
   it("evaluates only SDP's leg when funding", () => {

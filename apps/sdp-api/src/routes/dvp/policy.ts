@@ -76,7 +76,12 @@ export function buildDvpTradeActionPolicyCandidate(
   fundingAmount: bigint | null = null
 ): { candidate: PolicyCandidate; legs: PolicyCandidate[] } {
   const auth = getAuth(c);
-  const sdpLegIsA = trade.sdpSide === "a";
+  // Null on an agent trade, where SDP delivers neither leg. Compared against
+  // "a" this used to answer false for BOTH "SDP holds leg B" and "SDP holds no
+  // leg", so an agent settle built its candidate out of leg B and told policy
+  // this organization was moving tokens it does not hold. `sdpLegOf` in
+  // `services/dvp/fund.ts:71` guards the same read; this one did not.
+  const sdpSide = trade.tradeKind === "agent" ? null : trade.sdpSide;
   const sdpAmount = fundingAmount === null ? null : fundingAmount.toString();
 
   const base = {
@@ -136,12 +141,18 @@ export function buildDvpTradeActionPolicyCandidate(
 
   // Only SDP's leg is ever overridden: the counterparty's leg describes what
   // THEY owe, which a partial top-up on our side does not change.
-  const sdpLegAtTarget = sdpLegIsA ? legA : legB;
+  //
+  // An agent trade has no leg of ours to override or to lead with. Leg A is the
+  // representative then — chosen, not fallen into — and both legs are evaluated
+  // below regardless, so nothing escapes policy either way.
+  const sdpLegAtTarget = sdpSide === "b" ? legB : legA;
   const sdpLeg: PolicyCandidate =
     sdpAmount === null ? sdpLegAtTarget : { ...sdpLegAtTarget, amount: sdpAmount };
 
   // Funding moves ONE leg — SDP's — so the counterparty's leg is not part of
-  // the operation and must not be evaluated as though it were.
+  // the operation and must not be evaluated as though it were. Funding is
+  // refused outright on an agent trade (`services/dvp/fund.ts:119`), so the
+  // one-leg branch is only ever reached with a side.
   const legs = action === "fund" ? [sdpLeg] : [legA, legB];
 
   return {
@@ -150,9 +161,15 @@ export function buildDvpTradeActionPolicyCandidate(
       context: {
         dvpTradeId: trade.id,
         dvpAction: action,
-        dvpSdpSide: trade.sdpSide,
+        dvpTradeKind: trade.tradeKind,
+        dvpSdpSide: sdpSide,
         swapDvp: trade.swapDvp,
-        counterparty: sdpLegIsA ? trade.userB : trade.userA,
+        // On an agent trade neither party is a counterparty OF OURS, so naming
+        // one of them as "the counterparty" would put a false fact in front of
+        // an approver. Both are named instead.
+        ...(sdpSide === null
+          ? { parties: [trade.userA, trade.userB] }
+          : { counterparty: sdpSide === "a" ? trade.userB : trade.userA }),
       },
     },
     legs,
