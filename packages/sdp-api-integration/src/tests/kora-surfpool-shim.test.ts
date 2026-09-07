@@ -49,14 +49,6 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
     expect(confirmation.err).toBeNull();
   });
 
-  /**
-   * `KoraFeePayment.signAndSend` retries on a timeout and re-sends identical
-   * bytes, relying on the cluster deduplicating the duplicate and answering
-   * with the same signature. Surfpool answers "This transaction has already
-   * been processed" instead, so a shim that surfaced that as a failure told the
-   * caller its payout failed while the transaction was on chain — which is how
-   * a slow CI box turned a landed issuance deploy into a 503.
-   */
   it("answers a duplicate submit with the original signature, as the cluster does", async () => {
     if (!env.KORA_RPC_URL) {
       throw new Error("KORA_RPC_URL is required for the Kora Surfpool shim test.");
@@ -84,7 +76,6 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
     const signature = await adapter.signAndSend(transactionBytes);
     await confirmTransaction(rpc, signature, { commitment: "confirmed" });
 
-    // The same bytes again: what a retry sends, byte for byte.
     const replayed = await adapter.signAndSend(transactionBytes);
 
     expect(replayed).toBe(signature);

@@ -243,17 +243,8 @@ jobs:
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
-          # Self-hosted runners keep $HOME between jobs, so a credential left by
-          # an earlier job makes `oidc login` refuse with "This scope is already
-          # authorized from a previous token" and exit 0 — a green step that
-          # never logged in, whose stale token then fails the test step with
-          # "Invalid Auth token". Clearing the scope first makes the login
-          # idempotent, and heals a runner already carrying a stale token.
           doppler logout --scope=. --yes >/dev/null 2>&1 || true
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
-          # `oidc login` reports success when it did nothing, so prove the
-          # session actually authenticates rather than discovering it three
-          # steps later behind an error that no longer names the cause.
           doppler me >/dev/null
 
       - name: Unit tests (Doppler)
@@ -605,17 +596,8 @@ jobs:
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
-          # Self-hosted runners keep $HOME between jobs, so a credential left by
-          # an earlier job makes `oidc login` refuse with "This scope is already
-          # authorized from a previous token" and exit 0 — a green step that
-          # never logged in, whose stale token then fails the test step with
-          # "Invalid Auth token". Clearing the scope first makes the login
-          # idempotent, and heals a runner already carrying a stale token.
           doppler logout --scope=. --yes >/dev/null 2>&1 || true
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
-          # `oidc login` reports success when it did nothing, so prove the
-          # session actually authenticates rather than discovering it three
-          # steps later behind an error that no longer names the cause.
           doppler me >/dev/null
 
       - name: Validate integration runtime secrets
@@ -790,17 +772,8 @@ jobs:
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
-          # Self-hosted runners keep $HOME between jobs, so a credential left by
-          # an earlier job makes `oidc login` refuse with "This scope is already
-          # authorized from a previous token" and exit 0 — a green step that
-          # never logged in, whose stale token then fails the test step with
-          # "Invalid Auth token". Clearing the scope first makes the login
-          # idempotent, and heals a runner already carrying a stale token.
           doppler logout --scope=. --yes >/dev/null 2>&1 || true
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
-          # `oidc login` reports success when it did nothing, so prove the
-          # session actually authenticates rather than discovering it three
-          # steps later behind an error that no longer names the cause.
           doppler me >/dev/null
 
       - name: Validate browser e2e runtime secrets

@@ -19,11 +19,6 @@ const sendTransactionTimeoutMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
   10
 );
-// Bounded by the CALLER's timeout, not by how long a validator might take:
-// `KoraFeePayment` gives signAndSendTransaction 10s (DEFAULT_TIMEOUT_MS in
-// kora.adapter.ts), so a shim that waits longer than that guarantees the very
-// timeout-and-retry it is trying to avoid. This wait plus the resubmission
-// below has to stay comfortably under it.
 const sendTransactionStatusWaitMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_STATUS_WAIT_MS ?? "3000",
   10
@@ -136,22 +131,10 @@ async function handleRpc(method, params) {
   }
 }
 
-/**
- * A duplicate submit is a SUCCESS, because that is what the cluster this shim
- * stands in for does with one.
- *
- * `KoraFeePayment.signAndSend` retries on a timeout and re-sends identical
- * bytes; ed25519 signing is deterministic, so the retry carries the same
- * signature. Solana deduplicates that and answers with the signature, which is
- * the property the retry is documented to rely on. Surfpool instead answers
- * "This transaction has already been processed", so without this the caller is
- * told its payout failed while the transaction is on chain.
- */
 function isAlreadyProcessed(error) {
   return error instanceof Error && error.message.includes("already been processed");
 }
 
-/** The signature of a signed transaction: its first signer's, i.e. the txid. */
 function signatureOf(signedTransaction) {
   return getSignatureFromTransaction(
     getTransactionDecoder().decode(base64.encode(signedTransaction))
