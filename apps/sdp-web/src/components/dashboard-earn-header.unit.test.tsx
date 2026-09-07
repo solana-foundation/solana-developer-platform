@@ -56,11 +56,17 @@ describe("Markets dashboard headers", () => {
   // sidebar that just removed it.
   it("adds the DvP tab only when the flag is on", () => {
     const off = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t, false, false);
+    // Positional, and main appended custody/payments/policies ahead of this
+    // one, so dvpEnabled is the EIGHTH argument. Passing it fifth silently set
+    // custodyEnabled instead and left the DvP tab off.
     const on = getDashboardPageConfig(
       "/dashboard/markets/treasury-solutions",
       t,
       false,
       false,
+      true,
+      true,
+      true,
       true
     );
 
