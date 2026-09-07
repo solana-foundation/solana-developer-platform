@@ -476,7 +476,7 @@ function TradeSummary({
  * only a position on the page, and holding them inline meant the workspace's
  * control flow was mostly this. Each decides for itself whether it applies.
  */
-function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTradeDetail }) {
+function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) {
   const t = useTranslations();
   const frozen = frozenLegs(trade);
   const overFunded = overFundedLegs(trade);
