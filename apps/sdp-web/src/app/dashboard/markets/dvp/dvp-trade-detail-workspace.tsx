@@ -573,7 +573,9 @@ function LegCards({
     <LegCard
       action={sdpLegIsA ? action : undefined}
       closed={closed}
-      holder={sdpLegIsA ? t("DashboardMarkets.dvp.legSdp") : t("DashboardMarkets.dvp.legCounterparty")}
+      holder={
+        sdpLegIsA ? t("DashboardMarkets.dvp.legSdp") : t("DashboardMarkets.dvp.legCounterparty")
+      }
       key="a"
       leg={trade.legs.a}
       title={t("DashboardMarkets.dvp.legA")}
@@ -583,7 +585,9 @@ function LegCards({
     <LegCard
       action={sdpLegIsA ? undefined : action}
       closed={closed}
-      holder={sdpLegIsA ? t("DashboardMarkets.dvp.legCounterparty") : t("DashboardMarkets.dvp.legSdp")}
+      holder={
+        sdpLegIsA ? t("DashboardMarkets.dvp.legCounterparty") : t("DashboardMarkets.dvp.legSdp")
+      }
       key="b"
       leg={trade.legs.b}
       title={t("DashboardMarkets.dvp.legB")}
@@ -663,11 +667,7 @@ export function DvpTradeDetailWorkspace({
               what you give and then what you get — so on a trade where SDP
               holds leg B, the band and the two cards under it ran opposite
               ways. Same ordering as the create form, for the same reason. */}
-          <LegCards
-            action={fundAction}
-            closed={tradeClosed}
-            trade={trade}
-          />
+          <LegCards action={fundAction} closed={tradeClosed} trade={trade} />
         </div>
 
         {awaitingApproval ? (
