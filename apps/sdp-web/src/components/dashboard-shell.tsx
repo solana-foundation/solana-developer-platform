@@ -855,7 +855,11 @@ export function DashboardShell({
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
+              shouldLockViewportScroll
+                ? "flex min-h-0 flex-1 flex-col"
+                : pageConfig.hideTitleOnMobile
+                  ? "space-y-4 sm:space-y-6"
+                  : "space-y-6",
             ].join(" ")}
           >
             <div className={cn("shrink-0", !isMarketsHeader && "space-y-4")}>
@@ -873,6 +877,7 @@ export function DashboardShell({
                   isMobileSidebarOpen={isMobileSidebarOpen}
                   setMobileSidebarOpen={setMobileSidebarOpen}
                   hideTitle={pageConfig.hideTitle}
+                  hideTitleOnMobile={pageConfig.hideTitleOnMobile}
                   title={pageConfig.title}
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}

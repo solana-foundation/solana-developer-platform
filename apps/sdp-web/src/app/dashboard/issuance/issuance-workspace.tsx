@@ -400,13 +400,9 @@ export function IssuanceWorkspace({
   // back to the visible rows so it is never empty while loading.
   const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? tokens;
 
-  // Asset Profiles UI flag: on → full-page wizard; off → legacy modal.
+  // All creation entry points use the simplified full-page form.
   const startTokenCreation = () => {
-    if (assetProfilesEnabled) {
-      router.push(CREATE_DRAFT_PATH);
-      return;
-    }
-    setIsCreateTokenModalOpen(true);
+    router.push(CREATE_DRAFT_PATH);
   };
 
   useEffect(() => {
@@ -618,12 +614,13 @@ export function IssuanceWorkspace({
                       templateOptions={templateOptions}
                     />
                     <Button
-                      type="button"
+                      asChild
                       className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
-                      onClick={startTokenCreation}
-                      iconLeft={<PlusIcon className="h-4 w-4" />}
                     >
+                      <Link href={CREATE_DRAFT_PATH}>
+                      <PlusIcon className="h-4 w-4" />
                       {t("DashboardIssuance.workspace.createDraft")}
+                      </Link>
                     </Button>
                   </div>
                 </div>

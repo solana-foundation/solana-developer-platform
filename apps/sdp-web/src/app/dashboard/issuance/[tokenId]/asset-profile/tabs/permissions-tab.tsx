@@ -2,55 +2,96 @@
 
 import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
 import { PERMISSION_ROW_ICONS, TokenSettingsSection } from "../../token-settings-section";
 import type { TokenOperations } from "../use-token-operations";
+import type { AssetProfileForm } from "../use-asset-profile-form";
+import { getSignerWalletOptionLabel } from "../../token-management-workspace.utils";
 
 export function PermissionsTab({
   ops,
+  form,
   canManageTokenAdmin,
 }: {
   ops: TokenOperations;
+  form: AssetProfileForm;
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
-
+  const copy = {
+    "mint-authority": [
+      t("DashboardIssuance.simplified.mintPermission"),
+      t("DashboardIssuance.simplified.mintPermissionHint"),
+    ],
+    "freeze-authority": [
+      t("DashboardIssuance.simplified.freezePermission"),
+      t("DashboardIssuance.simplified.freezePermissionHint"),
+    ],
+    "metadata-authority": [
+      t("DashboardIssuance.simplified.metadataPermission"),
+      t("DashboardIssuance.simplified.metadataPermissionHint"),
+    ],
+    "permanent-delegate": [
+      t("DashboardIssuance.simplified.recoveryPermission"),
+      t("DashboardIssuance.simplified.recoveryPermissionHint"),
+    ],
+  };
   return (
-    <div className="space-y-5">
+    <div className="w-full space-y-5">
       {ops.authoritySummary.hasExternal ? <ExternalAuthorityWarning ops={ops} /> : null}
-      <div className="space-y-3">
-        <SectionHeading
-          title={t("DashboardIssuance.management.permissions")}
-          description={t("DashboardIssuance.management.permissionsDescription")}
-        />
+      {ops.authorityWalletsLoading ? (
+        <div aria-busy="true" className="divide-y divide-border-subtle">
+          {ops.permissionRows.map((row) => (
+            <div key={row.id} className="flex flex-wrap items-center justify-between gap-4 py-6">
+              <SkeletonBlock className="h-5 w-52" />
+              <SkeletonBlock className="h-10 w-48 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : ops.canDeployToken ? (
+        <div className="w-full space-y-4">
+          {ops.permissionRows.map((row) => (
+            <div key={row.id} className="space-y-2 border-b border-border-subtle py-3 last:border-0">
+              <p className="text-sm font-medium text-primary">{copy[row.id][0]}</p>
+              <Select
+            ariaLabel={copy[row.id][0]}
+            placeholder={t("DashboardIssuance.signer.select")}
+            value={form.draft.authorityWalletIds?.[row.id] || form.draft.signingWalletId || ops.authorityWallets[0]?.walletId || ""}
+            disabled={!canManageTokenAdmin || form.saving || !ops.authorityWallets.length}
+            onValueChange={(value) => {
+              if (value) form.updateDraft({ authorityWalletIds: { ...form.draft.authorityWalletIds, [row.id]: value } });
+            }}
+          >
+            {ops.authorityWallets.map((wallet) => (
+              <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                {getSignerWalletOptionLabel(wallet, t)}
+              </SelectItem>
+            ))}
+          </Select>
+            </div>
+          ))}
+        </div>
+      ) : (
         <TokenSettingsSection
+          variant="flat"
           mode="permissions"
-          permissionRows={ops.permissionRows}
+          permissionRows={ops.permissionRows.map((row) => ({
+            ...row,
+            title: copy[row.id][0],
+            helper: copy[row.id][1],
+          }))}
           extensionRows={ops.extensionRows}
           authorityWallets={ops.authorityWallets}
           showTitle={false}
+          showEditActions={canManageTokenAdmin && !ops.canDeployToken}
           canEditAuthorities={!ops.canDeployToken && canManageTokenAdmin}
           onCopy={ops.handleCopy}
           onEditAuthority={ops.handleAuthorityModalOpen}
         />
-      </div>
-      <div className="space-y-3 pt-2">
-        <SectionHeading
-          title={t("DashboardIssuance.management.extensions")}
-          description={t("DashboardIssuance.management.extensionsDescription")}
-        />
-        <TokenSettingsSection
-          mode="extensions"
-          permissionRows={ops.permissionRows}
-          extensionRows={ops.extensionRows}
-          authorityWallets={ops.authorityWallets}
-          showTitle={false}
-          canEditAuthorities={false}
-          onCopy={ops.handleCopy}
-          onEditAuthority={ops.handleAuthorityModalOpen}
-        />
-      </div>
+      )}
     </div>
   );
 }
@@ -122,15 +163,6 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
           {t("DashboardIssuance.permissions.externalRemediationNote")}
         </p>
       </div>
-    </div>
-  );
-}
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div>
-      <p className="text-base font-medium text-primary">{title}</p>
-      <p className="mt-0.5 text-sm text-tertiary">{description}</p>
     </div>
   );
 }

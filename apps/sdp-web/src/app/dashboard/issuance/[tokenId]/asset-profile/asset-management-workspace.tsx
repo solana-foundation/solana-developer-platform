@@ -1,63 +1,44 @@
 "use client";
 
 import type { AssetProfile, Token } from "@sdp/types";
-import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { Loader2, Play } from "lucide-react";
-import { motion } from "motion/react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
-import { togglePublicField } from "../../create/draft-mapping";
-import { resolveVerifiedHolders } from "../../issuance-token-fields";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
-import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
 import { AssetProfileHeader } from "./asset-profile-header";
 import { AssetProfileSaveBar } from "./asset-profile-save-bar";
 import { ActivityTab } from "./tabs/activity-tab";
-import { ComplianceTab } from "./tabs/compliance-tab";
 import { DetailsTab } from "./tabs/details-tab";
 import { OperationsTab } from "./tabs/operations-tab";
 import { OpsActionForms } from "./tabs/ops-action-forms";
-import { OverviewTab } from "./tabs/overview-tab";
 import { PermissionsTab } from "./tabs/permissions-tab";
-import { PublicInfoTab } from "./tabs/public-info-tab";
-import { WorkflowsTab } from "./tabs/workflows-tab";
 import { useAssetProfileForm } from "./use-asset-profile-form";
 import { useTokenOperations } from "./use-token-operations";
 
-type AssetManagementTab =
-  | "overview"
-  | "details"
-  | "public-info"
-  | "compliance"
-  | "operations"
-  | "permissions"
-  | "workflows"
-  | "activity";
+type AssetManagementTab = "overview" | "settings" | "operations" | "permissions" | "activity";
 
 const managementTabIds: AssetManagementTab[] = [
   "overview",
-  "details",
-  "public-info",
-  "compliance",
   "operations",
   "permissions",
-  "workflows",
   "activity",
+  "settings",
 ];
 
 // Deep links minted for the legacy workspace keep working.
 const LEGACY_TAB_MAP: Record<string, AssetManagementTab> = {
   "fund-management": "operations",
-  metadata: "details",
-  extensions: "permissions",
+  metadata: "settings",
+  details: "settings",
+  "public-info": "settings",
+  extensions: "settings",
+  compliance: "operations",
+  workflows: "overview",
 };
 
 function resolveTab(value: string | null): AssetManagementTab {
@@ -80,112 +61,58 @@ export function AssetManagementWorkspace({
   tokenError: string | null;
 }) {
   const t = useTranslations();
-  const { dashboardAccess } = useDashboardWorkspace();
+  const { dashboardAccess, sdpEnvironment } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
-  const canManageTokenWrite = dashboardAccess.capabilities.canManageTokenWrite;
-  // Admins get the full compliance tab (policy editor + controls). Non-admins
-  // see it only for tokens that have a control list, and then only the allowlist
-  // controls — the policy editor stays admin-only (also enforced server-side).
-  const showControlList = hasAccessControlList(getTokenAccessControlMode(token));
-  const canViewComplianceTab = canManageTokenAdmin || showControlList;
   const searchParams = useSearchParams();
-  const { pushSearchParams, replaceSearchParams } = useDashboardUrlState();
 
   const requestedTabParam = searchParams.get("tab");
   const requestedTab = resolveTab(requestedTabParam);
-  // A direct ?tab=compliance deep link falls back to the overview when the tab
-  // isn't available to this user.
-  const activeTab: AssetManagementTab =
-    requestedTab === "compliance" && !canViewComplianceTab ? "overview" : requestedTab;
 
   const ops = useTokenOperations({
     token,
-    shouldLoadSupportingData: activeTab !== "overview",
+    shouldLoadSupportingData: true,
     // Authority wallets are also needed on the overview for the SDP-controlled
     // authorities tile (custody-vs-external roll-up), so load them everywhere.
     shouldLoadAuthorityWallets: true,
     canManageTokenAdmin,
   });
   const form = useAssetProfileForm({ token, assetProfile });
-  const managementTabs: Array<{ id: AssetManagementTab; label: string }> = [
-    { id: "overview", label: t("DashboardIssuance.tabs.overview") },
-    { id: "details", label: t("DashboardIssuance.tabs.details") },
-    { id: "public-info", label: t("DashboardIssuance.tabs.publicInformation") },
-    // Full tab for admins; allowlist-only for non-admins on control-list tokens.
-    ...(canViewComplianceTab
-      ? [{ id: "compliance" as const, label: t("DashboardIssuance.tabs.compliance") }]
-      : []),
-    { id: "operations", label: t("DashboardIssuance.tabs.operations") },
-    { id: "permissions", label: t("DashboardIssuance.tabs.permissions") },
-    { id: "workflows", label: t("DashboardIssuance.tabs.workflows") },
-    { id: "activity", label: t("DashboardIssuance.tabs.activity") },
-  ];
+  const showSection = useCallback((section: AssetManagementTab) => {
+    const element = document.getElementById(`token-${section}`);
+    if (element instanceof HTMLDetailsElement) element.open = true;
+    element?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
-  // Shallow update: the tabs are fully client-rendered, so a router.push RSC
-  // refetch on every tab switch would only add latency.
-  const syncActiveTabInUrl = useCallback(
-    (nextTab: AssetManagementTab, mode: "push" | "replace" = "push") => {
-      const sync = mode === "replace" ? replaceSearchParams : pushSearchParams;
-      sync({ tab: nextTab === "overview" ? null : nextTab });
-    },
-    [pushSearchParams, replaceSearchParams]
-  );
-
-  // Normalize legacy/unknown tab params in the URL.
+  // Existing tab links now reveal the corresponding section on the same page.
   useEffect(() => {
-    if (!requestedTabParam) {
-      return;
-    }
-    if (requestedTabParam !== activeTab || activeTab === "overview") {
-      syncActiveTabInUrl(activeTab, "replace");
-    }
-  }, [activeTab, requestedTabParam, syncActiveTabInUrl]);
-
-  // The mint/burn modal belongs to the Operations tab.
-  useEffect(() => {
-    if (activeTab !== "operations" && ops.fundManagementModalAction) {
-      ops.closeFundManagementModal();
-    }
-  }, [activeTab, ops.fundManagementModalAction, ops.closeFundManagementModal]);
-
-  const effectivePauseDisabledReason = ops.effectivePauseDisabledReason;
+    if (requestedTabParam && requestedTab !== "overview") showSection(requestedTab);
+  }, [requestedTabParam, requestedTab, showSection]);
 
   return (
     // Width + centering come from the dashboard shell's action-page layout;
     // the workspace just fills the column it's given.
-    <div className="space-y-4 pb-8">
-      <AssetProfileHeader
-        token={token}
-        assetProfile={form.assetProfile}
-        explorerHref={ops.explorerHref}
-        canDeployToken={ops.canDeployToken}
-        isPending={ops.isPending}
-        deployDisabledReason={ops.deployDisabledReason}
-        pauseDisabledReason={ops.pauseDisabledReason}
-        canManageTokenAdmin={canManageTokenAdmin}
-        onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
-        onCopyTokenId={() =>
-          void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
-        }
-        onDeploy={() => syncActiveTabInUrl("operations")}
-        onUnpause={() => ops.handlePause(false)}
-      />
+    <div className="space-y-5 px-1 pb-8 sm:space-y-6 sm:px-0">
+      <div className="space-y-4 sm:space-y-5 sm:py-2">
+        <AssetProfileHeader
+          token={token}
+          assetProfile={form.assetProfile}
+          networkLabel={sdpEnvironment === "production" ? "Mainnet" : "Devnet"}
+          explorerHref={ops.explorerHref}
+          canDeployToken={ops.canDeployToken}
+          isPending={ops.isPending}
+          deployDisabledReason={form.dirty ? t("DashboardIssuance.simplified.saveBeforeDeploy") : ops.deployDisabledReason}
+          pauseDisabledReason={ops.effectivePauseDisabledReason}
+          canManageTokenAdmin={canManageTokenAdmin}
+          onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
+          onCopyTokenId={() =>
+            void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
+          }
+          onDeploy={ops.deployToken}
+          onUnpause={() => ops.handlePause(false)}
+          onRefreshSupply={ops.handleRefreshSupply}
+        />
 
-      <Tabs
-        // No rule under the tab strip: the tab content below is already carded,
-        // so the border would read as a second, competing edge.
-        bordered={false}
-        value={activeTab}
-        onValueChange={(value) => syncActiveTabInUrl(value as AssetManagementTab)}
-      >
-        <TabList className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {managementTabs.map((tab) => (
-            <Tab key={tab.id} value={tab.id} className="shrink-0 whitespace-nowrap">
-              {tab.label}
-            </Tab>
-          ))}
-        </TabList>
-      </Tabs>
+      </div>
 
       {tokenError ? (
         <div className="rounded-xl border border-error-border bg-error-bg px-4 py-3">
@@ -196,85 +123,48 @@ export function AssetManagementWorkspace({
         </div>
       ) : null}
 
-      {token.status === "paused" ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-warning">
-              {t("DashboardIssuance.workspace.tokenPaused")}
-            </p>
-            <p className="mt-1 text-sm text-warning">
-              {t("DashboardIssuance.workspace.pausedHint")}
-            </p>
-          </div>
-          {canManageTokenAdmin ? (
-            <TokenDisabledActionTooltip
-              reason={ops.isPending ? null : effectivePauseDisabledReason}
-            >
-              <Button
-                type="button"
-                size="sm"
-                iconLeft={<Play />}
-                onClick={() => ops.handlePause(false)}
-                disabled={ops.isPending || Boolean(effectivePauseDisabledReason)}
-              >
-                {t("DashboardIssuance.workspace.unpauseToken")}
-              </Button>
-            </TokenDisabledActionTooltip>
-          ) : null}
-        </div>
-      ) : null}
-
-      <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-        {activeTab === "overview" ? (
-          <OverviewTab
-            token={token}
-            assetProfile={form.assetProfile}
-            draft={form.draft}
+      <div className="w-full divide-y divide-border-subtle [&>details]:min-w-0">
+        <details id="token-operations" open className="group scroll-mt-6 py-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
+            {t("DashboardIssuance.tabs.operations")}
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="pt-4">
+          <OperationsTab
             ops={ops}
-            onViewActivity={() => syncActiveTabInUrl("activity")}
-            onViewPermissions={() => syncActiveTabInUrl("permissions")}
-          />
-        ) : null}
-        {activeTab === "details" ? <DetailsTab token={token} form={form} ops={ops} /> : null}
-        {activeTab === "public-info" ? (
-          <PublicInfoTab
-            draft={form.draft}
-            disabled={form.saving}
-            mintAddress={token.mintAddress}
-            explorerHref={ops.explorerHref}
-            onToggleField={(path, enabled) =>
-              form.updateDraft({
-                publicFields: togglePublicField(form.draft.publicFields, path, enabled),
-              })
-            }
-          />
-        ) : null}
-        {activeTab === "compliance" ? (
-          <ComplianceTab
             token={token}
-            form={form}
-            ops={ops}
             canManageTokenAdmin={canManageTokenAdmin}
+            hasUnsavedChanges={form.dirty}
+            onViewSettings={() => showSection("settings")}
           />
-        ) : null}
-        {activeTab === "operations" ? <OperationsTab ops={ops} tokenId={token.id} /> : null}
-        {activeTab === "permissions" ? (
-          <PermissionsTab ops={ops} canManageTokenAdmin={canManageTokenAdmin} />
-        ) : null}
-        {activeTab === "workflows" ? (
-          <WorkflowsTab
-            tokenId={token.id}
-            canManage={canManageTokenWrite}
-            canManagePrivileged={canManageTokenAdmin}
-            // Enrollment defines who counts as a *verified holder* of the asset, so the
-            // roster only belongs on assets that gate on that (the "Verified holders"
-            // access mode = KYC capacity). On an ungated asset, enrolling a wallet does
-            // nothing, so the card is hidden rather than shown as dead UI.
-            verifiedHolders={resolveVerifiedHolders(form.draft)}
-          />
-        ) : null}
-        {activeTab === "activity" ? <ActivityTab tokenId={token.id} /> : null}
-      </motion.div>
+          </div>
+        </details>
+        <details id="token-permissions" open className="group scroll-mt-6 py-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
+            {t("DashboardIssuance.tabs.permissions")}
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="pt-4">
+          <PermissionsTab ops={ops} form={form} canManageTokenAdmin={canManageTokenAdmin} />
+          </div>
+        </details>
+        <details id="token-settings" className="group scroll-mt-6 py-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
+            {t("DashboardIssuance.simplified.settings")}
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="pt-5"><DetailsTab token={token} form={form} /></div>
+        </details>
+        <details id="token-activity" className="group scroll-mt-6 py-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
+            {t("DashboardIssuance.tabs.activity")}
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="pt-4">
+          <ActivityTab tokenId={token.id} isDraft={!token.mintAddress} />
+          </div>
+        </details>
+      </div>
 
       <AssetProfileSaveBar
         dirty={form.dirty}

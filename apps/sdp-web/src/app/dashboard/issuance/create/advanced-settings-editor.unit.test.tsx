@@ -24,6 +24,35 @@ const baseProps = {
 };
 
 describe("AdvancedSettingsEditor", () => {
+  it("keeps extra controls collapsed and removes their repeated descriptions", () => {
+    const markup = renderWithI18n(
+      <AdvancedSettingsEditor
+        {...baseProps}
+        category="generic"
+        type="generic"
+        controlsOnly
+        showScenarios={false}
+      />
+    );
+    const advanced = markup.match(/<details[\s\S]*?<\/details>/)?.[0];
+    expect(advanced).toBeDefined();
+    expect(advanced).toContain("Advanced controls");
+    expect(advanced).not.toContain('open=""');
+    expect(advanced).not.toContain("mt-0.5 block text-xs text-tertiary");
+    expect(advanced).toContain('type="checkbox"');
+  });
+  it("keeps token-details controls free of off-chain policies and extra panel chrome", () => {
+    const markup = renderWithI18n(
+      <AdvancedSettingsEditor {...baseProps} controlsOnly showScenarios={false} />
+    );
+    expect(markup).not.toContain("Ongoing");
+    expect(markup).not.toContain("Advanced settings");
+    expect(markup).not.toContain("rounded-2xl border border-border-default bg-surface-raised p-5");
+    expect(markup).toContain("Emergency pause capability");
+    expect(markup).toContain("Freeze balances");
+    expect(markup).toContain("Recovery authority");
+    expect(markup).not.toContain("Recommended");
+  });
   it("renders one collapsed list with permanent and ongoing sections (no mode tabs)", () => {
     const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
     expect(markup).toContain("Permanent");
