@@ -61,26 +61,28 @@ export function DvpInboundPanel({ trades }: { trades: DvpInboundTrade[] }) {
   }
 
   return (
-    <section className="grid gap-3">
-      <div className="grid gap-1">
+    // One bordered block, so it reads as a distinct thing rather than as loose
+    // text floating above the list. The heading, the caution and the rows all
+    // belong to the same object and the border is what says so.
+    <section className="overflow-hidden rounded-xl border border-border-default bg-surface-raised">
+      <div className="grid gap-1.5 border-border-subtle border-b px-4 py-3">
         <h2 className="font-medium text-primary text-sm">
           {t("DashboardMarkets.dvp.inboundTitle")}
         </h2>
         <p className="max-w-3xl text-secondary text-sm">
           {t("DashboardMarkets.dvp.inboundDescription")}
         </p>
+        {/* The terms were written by somebody else while this reader was not
+            present, and the escrow address is the thing they are about to send
+            money to. Inside the block, above the rows, so it is read before the
+            addresses rather than after. */}
+        <p className="flex items-start gap-2 text-tertiary text-xs leading-relaxed">
+          <AlertTriangleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-warning" />
+          {t("DashboardMarkets.dvp.inboundVerifyHint")}
+        </p>
       </div>
 
-      {/* The terms were written by somebody else while this reader was not
-          present, and the escrow address is the thing they are about to send
-          money to. Saying so next to the addresses beats saying it once at the
-          top of a page they may have scrolled past. */}
-      <p className="flex items-start gap-2 text-tertiary text-xs leading-relaxed">
-        <AlertTriangleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-warning" />
-        {t("DashboardMarkets.dvp.inboundVerifyHint")}
-      </p>
-
-      <div className="overflow-hidden rounded-xl border border-border-default">
+      <div>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
