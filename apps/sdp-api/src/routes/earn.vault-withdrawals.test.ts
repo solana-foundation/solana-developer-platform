@@ -3,6 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -416,6 +417,37 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     };
     expect(body.data.withdrawal.positionId).toBe(positionId);
     expect(body.data.withdrawal.signature).toBeTruthy();
+    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+  });
+
+  it("withdraws from a PAUSED strategy — admission stops money in, never money out", async () => {
+    // The gate asymmetry stated on the operator stop switch itself:
+    // `assertStrategyDepositable` refuses a paused row on every money-in path,
+    // and the exit deliberately never consults the catalogue, so pausing a
+    // strategy mid-incident cannot trap an existing position (EARN-012).
+    await seedAuth();
+    await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+      provider: "kamino",
+      providerReference: VAULT,
+      name: "Paused Exit Vault",
+      sourceKind: "defi",
+      underlyingSource: "kamino",
+      depositMints: [USDC_MINT],
+      shareMint: SHARE_MINT,
+      apyType: "variable",
+      currentApy: "0.062",
+      liquidityTerm: "instant",
+      redemptionDelayDays: null,
+      riskMetadata: {},
+      status: "paused",
+      hostCluster: "devnet",
+      environment: "sandbox",
+    });
+    const positionId = await seedPosition();
+
+    const res = await postVaultWithdrawal({ positionId, shares: "10" });
+
+    expect(res.status).toBe(200);
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 

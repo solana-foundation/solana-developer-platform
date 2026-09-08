@@ -692,6 +692,22 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(body.error.message).toContain("paused");
   });
 
+  it("refuses a deprecated strategy (catalogue admission)", async () => {
+    // "Delisted" in the threat model (EARN-012/020) is `deprecated` in code:
+    // the delist pass leaves the row behind so it stays addressable by id,
+    // which is exactly why the admission gate must refuse it here too.
+    await seedAuth();
+    const strategy = await seedStrategy({ status: "deprecated" });
+    const res = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("deprecated");
+  });
+
   it("refuses a strategy whose host cluster is not fundable here", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
