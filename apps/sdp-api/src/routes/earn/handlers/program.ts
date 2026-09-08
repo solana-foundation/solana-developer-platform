@@ -830,7 +830,11 @@ export async function extractEarnProgramWithdrawalPolicyCandidate(
     // than starting a second approval.
     await throwOnPriorEarnPolicyOperation(c, {
       organizationId: auth.organizationId,
-      projectId: auth.projectId ?? null,
+      // Organization-scoped on purpose: the ledger's replay above is keyed by
+      // organization + provider wallet + request id, so a per-project lookup
+      // here would miss a held operation a sibling project created and mint a
+      // second approval for the same payout.
+      scope: { kind: "organization" },
       idempotencyKey: requestId,
       idempotencyFingerprint,
       operationNoun: "program withdrawal",

@@ -86,6 +86,22 @@ const TEST_PRODUCTION_PROJECT = {
 };
 const TEST_SESSION_ID = "ses_earn_program";
 
+/**
+ * A second sandbox project in the SAME organization, with its own key. Programs
+ * are resolved per (organization, environment), so a sibling project addresses
+ * the very same program — which is how a payout's idempotency key can arrive
+ * under two project scopes.
+ */
+const TEST_SIBLING_PROJECT = {
+  id: "prj_test_earn_program_sibling",
+  slug: "test-earn-program-project-sibling",
+};
+const TEST_SIBLING_API_KEY = {
+  id: "key_earn_program_sibling",
+  raw: "sk_test_earn_program_sibling",
+  prefix: "sk_test_eps",
+};
+
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
 const GROUND_PRODUCTION_KEY = "ground-production-test-api-key";
@@ -238,6 +254,49 @@ async function seedSessionAuth(): Promise<void> {
          VALUES (?, ?, ?, 'session', ?)`
       )
       .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+  ]);
+}
+
+/** Sibling sandbox project in TEST_ORG, with an api_admin key of its own. */
+async function seedSiblingProjectAuth(): Promise<void> {
+  const keyHash = await hashString(TEST_SIBLING_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_SIBLING_API_KEY.id,
+    projectId: TEST_SIBLING_PROJECT.id,
+  });
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+      )
+      .bind(
+        TEST_SIBLING_PROJECT.id,
+        TEST_ORG.id,
+        "Sibling Project",
+        TEST_SIBLING_PROJECT.slug,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TEST_SIBLING_API_KEY.id,
+        TEST_ORG.id,
+        TEST_SIBLING_PROJECT.id,
+        TEST_USER.id,
+        "Earn Program Sibling Key",
+        TEST_SIBLING_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "active"
+      ),
   ]);
 }
 
@@ -2422,6 +2481,38 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     // second approval per retry would let a caller manufacture approvals, and
     // an approver deciding one of several duplicates could pay out twice.
     const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(retried.status).toBe(202);
+
+    expect(createWithdrawal).not.toHaveBeenCalled();
+    await expect(countMovements()).resolves.toBe(0);
+    const operations = await readWalletOperations();
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ status: "pending_approval" });
+  });
+
+  it("re-answers the same hold when the retry arrives under a sibling project", async () => {
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    const program = await seedProgramWallet();
+    await seedApiKeyControlProfile({
+      rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
+    });
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    const body = withdrawBody({ requestId: "0f3a7c19-52d4-4a8e-b1c6-9d0e5f2a8b47" });
+
+    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(held.status).toBe(202);
+
+    // A program is addressed per (organization, environment) and its payout
+    // ledger is keyed by organization + provider wallet + request id, so the
+    // hold must answer the same key from any project in the organization. A
+    // project-scoped lookup would miss it and open a SECOND approval for one
+    // payout — two approvers, each able to release it.
+    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
+      Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}`,
+    });
     expect(retried.status).toBe(202);
 
     expect(createWithdrawal).not.toHaveBeenCalled();

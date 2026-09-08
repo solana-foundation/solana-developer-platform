@@ -9,20 +9,31 @@ import type { AppContext } from "../context";
  * second one — and a key reused with a different payload is a conflict even
  * before any movement exists.
  *
- * `projectId` is nullable because a program withdrawal is organization-scoped;
- * a null narrows the lookup to operations recorded without a project rather
- * than widening it across siblings.
+ * The lookup scope must match the scope the movement ledger enforces for the
+ * same key, or a retry can miss the operation it should be replaying and open a
+ * second one. A vault movement is keyed per project, so it looks up per project.
+ * A program withdrawal is keyed by organization and provider wallet — its
+ * derived request id already names the operation type and the wallet — so it
+ * looks across every project in the organization; scoping it per project would
+ * let a sibling project mint a second approval for the same payout.
  */
+export type EarnPolicyReplayScope =
+  | { readonly kind: "project"; readonly projectId: string | null }
+  | { readonly kind: "organization" };
+
 export async function throwOnPriorEarnPolicyOperation(
   c: AppContext,
   params: {
     organizationId: string;
-    projectId: string | null;
+    scope: EarnPolicyReplayScope;
     idempotencyKey: string;
     idempotencyFingerprint: string;
     operationNoun: "vault deposit" | "vault withdrawal" | "program withdrawal";
   }
 ): Promise<void> {
+  const projectPredicate =
+    params.scope.kind === "project" ? "AND operation.project_id IS NOT DISTINCT FROM ?" : "";
+  const projectBindings = params.scope.kind === "project" ? [params.scope.projectId] : [];
   const prior = await getDb(c.env)
     .prepare(
       `SELECT operation.id, operation.status, operation.raw_payload,
@@ -37,10 +48,12 @@ export async function throwOnPriorEarnPolicyOperation(
          LIMIT 1
        ) evaluation ON TRUE
        WHERE operation.organization_id = ?
-         AND operation.project_id IS NOT DISTINCT FROM ?
-         AND operation.idempotency_key = ?`
+         ${projectPredicate}
+         AND operation.idempotency_key = ?
+       ORDER BY operation.created_at DESC, operation.id DESC
+       LIMIT 1`
     )
-    .bind(params.organizationId, params.projectId, params.idempotencyKey)
+    .bind(params.organizationId, ...projectBindings, params.idempotencyKey)
     .first<{
       id: string;
       status: string;

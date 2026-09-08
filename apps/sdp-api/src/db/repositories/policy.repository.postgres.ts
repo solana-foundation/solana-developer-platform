@@ -1034,10 +1034,12 @@ async function tenantOwnsWalletTarget(
   custodyWalletId: string | null | undefined,
   /**
    * Whether an Earn program link row may stand in for the custody wallet this
-   * target otherwise has to be. True ONLY for the one operation type that has
-   * no custody wallet by construction; see the fallback below.
+   * target otherwise has to be. Stated at every call site rather than defaulted,
+   * so admitting a program target is always a visible decision; true ONLY for
+   * the one operation type that has no custody wallet by construction, see the
+   * fallback below.
    */
-  allowEarnProgramTarget = false
+  allowEarnProgramTarget: boolean
 ): Promise<boolean> {
   const hasCustodyWalletId = custodyWalletId !== undefined && custodyWalletId !== null;
   const custodyPredicate = hasCustodyWalletId ? "AND w.id = ?" : "";
@@ -1708,7 +1710,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       }
       if (
         input.bindingScope === "selected" &&
-        !(await tenantOwnsWalletTarget(db, scope, input.walletId, input.custodyWalletId))
+        !(await tenantOwnsWalletTarget(db, scope, input.walletId, input.custodyWalletId, false))
       ) {
         return null;
       }
@@ -1742,7 +1744,13 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
               binding.apiKeyControlProfileId
             ))) ||
           (binding.bindingScope === "selected" &&
-            !(await tenantOwnsWalletTarget(db, scope, binding.walletId, binding.custodyWalletId)))
+            !(await tenantOwnsWalletTarget(
+              db,
+              scope,
+              binding.walletId,
+              binding.custodyWalletId,
+              false
+            )))
         ) {
           return [];
         }

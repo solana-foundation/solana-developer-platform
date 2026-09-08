@@ -546,7 +546,7 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
 
   await throwOnPriorEarnPolicyOperation(c, {
     organizationId: resolved.auth.organizationId,
-    projectId: resolved.projectId,
+    scope: { kind: "project", projectId: resolved.projectId },
     idempotencyKey,
     idempotencyFingerprint: resolved.idempotencyFingerprint,
     operationNoun: "vault deposit",
@@ -1232,7 +1232,7 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
 
   await throwOnPriorEarnPolicyOperation(c, {
     organizationId: resolved.auth.organizationId,
-    projectId: resolved.projectId,
+    scope: { kind: "project", projectId: resolved.projectId },
     idempotencyKey,
     idempotencyFingerprint: resolved.idempotencyFingerprint,
     operationNoun: "vault withdrawal",
