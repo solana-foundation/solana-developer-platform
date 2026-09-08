@@ -32,11 +32,19 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
       }
       return (await response.json()) as { token: string };
     });
-    await target.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" });
-    await target.waitForFunction(
-      () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
-      undefined,
-      { timeout: 120_000 }
+    const redactTicket = <T>(action: Promise<T>): Promise<T> =>
+      action.catch((error: unknown) => {
+        throw new Error(String(error).replaceAll(token, "[redacted-clerk-ticket]"));
+      });
+    await redactTicket(
+      target.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" })
+    );
+    await redactTicket(
+      target.waitForFunction(
+        () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
+        undefined,
+        { timeout: 120_000 }
+      )
     );
   } else {
     await clerkSetup({
