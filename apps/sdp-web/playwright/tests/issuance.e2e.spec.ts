@@ -313,7 +313,7 @@ test.describe
       await openTab(page, "Extensions");
 
       await expect(page.getByTestId("extension-row-template")).toContainText("Stablecoin");
-      await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
+      await expect(page.getByTestId("extension-row-control-list")).toContainText("Approved recipients");
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-default-account-state")).toContainText("Frozen");
@@ -379,7 +379,7 @@ test.describe
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await selectComplianceAction(page, "Allowlist");
+      await selectComplianceAction(page, "Approved recipients");
 
       await page
         .getByRole("textbox", { name: "Address", exact: true })
@@ -392,7 +392,7 @@ test.describe
           pathIncludes: `/api/dashboard/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
         },
         async () => {
-          await page.getByRole("button", { name: "Add allowlist entry" }).click();
+          await page.getByRole("button", { name: "Approve recipient" }).click();
         }
       );
       await waitForAllowlistCount(page, 1, { reload: true });
@@ -475,9 +475,9 @@ test.describe
 
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
-      await selectComplianceAction(page, "Denylist");
+      await selectComplianceAction(page, "Blocked recipients");
 
-      await expect(page.getByRole("button", { name: "Denylist", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Blocked recipients", exact: true })).toBeVisible();
       await expect(
         page.getByText("Manage the blocked destination addresses for this token.")
       ).toBeVisible();
@@ -487,7 +487,7 @@ test.describe
           "Need to restrict a wallet before it has a token account? Add it to the denylist first."
         )
       ).toBeVisible();
-      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Denylist Entries");
+      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Blocked recipients");
     });
 
     test("9. user can mint and burn tokens with supply and transactions updating", async ({
@@ -546,7 +546,7 @@ test.describe
       await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Reason (freeze only)").fill("Playwright freeze validation");
-      await page.getByRole("button", { name: "Freeze account", exact: true }).click();
+      await page.getByRole("button", { name: "Freeze balance", exact: true }).click();
       successCount = await page.getByText("Freeze transaction finalized.").count();
       await confirmAction(page, "Freeze now");
       await waitForToast(page, "Freeze transaction finalized.", successCount);
@@ -554,7 +554,7 @@ test.describe
 
       await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
-      await page.getByRole("button", { name: "Unfreeze account", exact: true }).click();
+      await page.getByRole("button", { name: "Unfreeze balance", exact: true }).click();
       successCount = await page.getByText("Unfreeze transaction finalized.").count();
       await confirmAction(page, "Unfreeze now");
       await waitForToast(page, "Unfreeze transaction finalized.", successCount);
