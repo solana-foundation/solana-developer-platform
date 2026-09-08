@@ -48,4 +48,36 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
 
     expect(confirmation.err).toBeNull();
   });
+
+  it("answers a duplicate submit with the original signature, as the cluster does", async () => {
+    if (!env.KORA_RPC_URL) {
+      throw new Error("KORA_RPC_URL is required for the Kora Surfpool shim test.");
+    }
+
+    const adapter = new KoraAdapter({ rpcUrl: env.KORA_RPC_URL });
+    const rpc = createRpc(env);
+    const feePayer = await adapter.getFeePayer();
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+    const instruction = {
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      accounts: [],
+      data: new TextEncoder().encode(`kora surfpool shim duplicate ${Date.now()}`),
+    };
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions([instruction], m)
+    );
+    const transactionBytes = new Uint8Array(
+      getTransactionEncoder().encode(compileTransaction(message))
+    );
+
+    const signature = await adapter.signAndSend(transactionBytes);
+    await confirmTransaction(rpc, signature, { commitment: "confirmed" });
+
+    const replayed = await adapter.signAndSend(transactionBytes);
+
+    expect(replayed).toBe(signature);
+  });
 });
