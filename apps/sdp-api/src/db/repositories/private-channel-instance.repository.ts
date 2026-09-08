@@ -76,6 +76,12 @@ export interface PrivateChannelInstanceRepository {
    * original drain timestamp instead of resetting the clock.
    */
   beginDraining(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
+  /**
+   * Row-lock the active instance for the duration of the caller's transaction.
+   * Admission inserts take the same lock, so in-flight counts read after this
+   * call cannot grow before the transaction commits.
+   */
+  lockActiveForDeletion(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
   /** FK ON DELETE CASCADE handles downstream tables. */
   deleteActive(scope: ProjectScope): Promise<boolean>;
 }

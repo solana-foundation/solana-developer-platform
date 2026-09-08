@@ -54,23 +54,30 @@ export function createPostgresPrivateChannelDepositRepository(
     async createDeposit(input: CreateDepositInput) {
       const row = await db
         .prepare(
-          // SELECT instead of VALUES so admission and the instance's drain
-          // state are decided by ONE statement: once draining_at is set (or
-          // the instance deactivated), this insert returns no row, and the
-          // deletion flow's in-flight count can only shrink (HOO-1011).
-          `INSERT INTO private_channel_deposits (
+          // Admission is decided by ONE statement that first locks the instance
+          // row FOR NO KEY UPDATE: a concurrent beginDraining either commits
+          // first (the lock recheck then fails and nothing is admitted) or waits
+          // behind this insert. Either way the deletion flow's in-flight count
+          // can only shrink, and deletion cannot strand a racing deposit (HOO-1011).
+          `WITH admitting_instance AS (
+               SELECT i.id
+                 FROM private_channel_instances i
+                WHERE i.id = ?
+                  AND i.is_active = TRUE
+                  AND i.draining_at IS NULL
+                  FOR NO KEY UPDATE
+             )
+             INSERT INTO private_channel_deposits (
                id, organization_id, project_id, instance_id, wallet_id,
                depositor, recipient, mint, amount, context,
                idempotency_key, idempotency_fingerprint
              )
              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?
-              WHERE EXISTS (
-                SELECT 1 FROM private_channel_instances i
-                 WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
-              )
+               FROM admitting_instance
           RETURNING *`
         )
         .bind(
+          input.instanceId,
           generatePrivateChannelDepositId(),
           input.organizationId,
           input.projectId,
@@ -82,8 +89,7 @@ export function createPostgresPrivateChannelDepositRepository(
           input.amount,
           JSON.stringify(input.context ?? {}),
           input.idempotencyKey,
-          input.idempotencyFingerprint,
-          input.instanceId
+          input.idempotencyFingerprint
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
@@ -191,7 +197,12 @@ export function createPostgresPrivateChannelDepositRepository(
         )
         .bind(instanceId)
         .first<{ count: number }>();
-      return row?.count ?? 0;
+      // Deletion gates on this count, so a missing or non-numeric row must not
+      // read as "nothing in flight" and clear the way for a delete (HOO-1011).
+      if (typeof row?.count !== "number") {
+        throw new Error("private_channel_deposits in-flight count returned no numeric row");
+      }
+      return row.count;
     },
 
     async patchContext(id: string, patch: PrivateChannelTransferContext) {

@@ -1,14 +1,35 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { CreateDepositInput } from "./private-channel-deposit.repository";
+import { createPostgresPrivateChannelDepositRepository } from "./private-channel-deposit.repository.postgres";
 import type { PrivateChannelInstanceRepository } from "./private-channel-instance.repository";
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_pci_repo_test";
 const OTHER_PROJECT_ID = "prj_pci_repo_test_other";
+
+let nextDepositKey = 0;
+
+function depositInput(instanceId: string): CreateDepositInput {
+  nextDepositKey += 1;
+  return {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    instanceId,
+    walletId: "wal_pci_1",
+    depositor: "DepositorAddr1111111111111111111111111111",
+    recipient: "RecipientAddr11111111111111111111111111111",
+    mint: "MintAddr11111111111111111111111111111111111",
+    amount: "1",
+    context: {},
+    idempotencyKey: `idem_pci_${nextDepositKey}`,
+    idempotencyFingerprint: `fp_pci_${nextDepositKey}`,
+  };
+}
 
 describe("PrivateChannelInstanceRepository (postgres)", () => {
   let repo: PrivateChannelInstanceRepository;
@@ -217,23 +238,58 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     // The admission barrier: the guarded INSERT returns no row for a draining
     // instance — the same statement that would create the movement refuses it,
     // so a movement racing the delete cannot be stranded.
-    const db = getDb(env);
-    const admitted = await db
-      .prepare(
-        `INSERT INTO private_channel_deposits (
-             id, organization_id, project_id, instance_id, wallet_id,
-             depositor, recipient, mint, amount, context
-           )
-           SELECT 'pcd_drain_test', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb
-            WHERE EXISTS (
-              SELECT 1 FROM private_channel_instances i
-               WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
-            )
-        RETURNING id`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID, created.id, created.id)
-      .first<{ id: string }>();
-    expect(admitted).toBeNull();
+    const deposits = createPostgresPrivateChannelDepositRepository(getDb(env));
+    expect(await deposits.createDeposit(depositInput(created.id))).toBeNull();
+  });
+
+  it("refuses an admission racing a drain that another transaction is committing", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const created = await repo.createActive({
+      ...scope,
+      ...SANDBOX_DEFAULTS,
+      createdBy: TEST_USER.id,
+    });
+    if (!created) throw new Error("failed to seed instance");
+
+    const deposits = createPostgresPrivateChannelDepositRepository(getDb(env));
+    let admission: Promise<unknown> = Promise.resolve(null);
+
+    await getDb(env).transaction(async (tx) => {
+      const draining = createPostgresPrivateChannelInstanceRepository(asTransactionalClient(tx));
+      await draining.beginDraining(scope);
+      // Started while the drain is still uncommitted: the admitting insert takes
+      // the same row lock, so it can only proceed once this transaction commits
+      // — and then sees the drain and admits nothing.
+      admission = deposits.createDeposit(depositInput(created.id));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    expect(await admission).toBeNull();
+    const count = await createPostgresPrivateChannelDepositRepository(
+      getDb(env)
+    ).countNonTerminalByInstance(created.id);
+    expect(count).toBe(0);
+  });
+
+  it("reactivateAndUpdate clears a drain left by a refused deletion", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const created = await repo.createActive({
+      ...scope,
+      ...SANDBOX_DEFAULTS,
+      createdBy: TEST_USER.id,
+    });
+    if (!created) throw new Error("failed to seed instance");
+
+    await repo.beginDraining(scope);
+    await repo.deactivateActive(scope);
+
+    const reactivated = await repo.reactivateAndUpdate({ id: created.id, ...SANDBOX_DEFAULTS });
+    expect(reactivated?.is_active).toBe(true);
+    expect(reactivated?.draining_at).toBeNull();
+
+    // A reconnected instance admits movements again.
+    const deposits = createPostgresPrivateChannelDepositRepository(getDb(env));
+    expect(await deposits.createDeposit(depositInput(created.id))).not.toBeNull();
   });
 
   it("scopes reads by (organizationId, projectId): other project's row is not visible", async () => {

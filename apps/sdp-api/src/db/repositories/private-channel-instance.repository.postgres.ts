@@ -10,6 +10,20 @@ import {
   type UpdateActiveInstanceInput,
 } from "./private-channel-instance.repository";
 
+function readDrainingAt(row: Record<string, unknown>): string | null {
+  // The drain flag gates value-movement admission, so a query or migration that
+  // stops returning the column must fail loudly instead of reading as "not
+  // draining" and reopening admission on an instance being deleted (HOO-1011).
+  if (!("draining_at" in row)) {
+    throw new Error("private_channel_instances row is missing draining_at");
+  }
+  const value = row.draining_at;
+  if (value === null || typeof value === "string") {
+    return value;
+  }
+  throw new Error("private_channel_instances.draining_at is not a nullable text value");
+}
+
 function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
   return {
     id: row.id as string,
@@ -22,7 +36,7 @@ function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
     escrow_instance_addr: row.escrow_instance_addr as string,
     auth_url: row.auth_url as string,
     is_active: row.is_active as boolean,
-    draining_at: (row.draining_at ?? null) as string | null,
+    draining_at: readDrainingAt(row),
     created_by: (row.created_by ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -111,6 +125,7 @@ export function createPostgresPrivateChannelInstanceRepository(
                   escrow_instance_addr = ?,
                   auth_url = ?,
                   is_active = TRUE,
+                  draining_at = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ?
           RETURNING *`
@@ -186,6 +201,23 @@ export function createPostgresPrivateChannelInstanceRepository(
               AND project_id = ?
               AND is_active = TRUE
           RETURNING *`
+        )
+        .bind(scope.organizationId, scope.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async lockActiveForDeletion(scope) {
+      // Taken inside the deletion transaction. It waits behind any admission
+      // insert already holding the row and blocks later ones, so the in-flight
+      // counts read after it are stable until this transaction commits.
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_instances
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND is_active = TRUE
+             FOR NO KEY UPDATE`
         )
         .bind(scope.organizationId, scope.projectId)
         .first<Record<string, unknown>>();
