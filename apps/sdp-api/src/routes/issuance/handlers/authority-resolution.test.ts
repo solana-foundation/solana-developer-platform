@@ -162,6 +162,106 @@ describe("authority-resolution", () => {
     });
   });
 
+  it("keeps the stored metadata authority when the RPC reports no extension", async () => {
+    // A read without the extension is indistinguishable from a provider that
+    // failed to decode it, so it must never erase the stored value with NULL.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: {
+          value: {
+            data: {
+              parsed: {
+                info: {
+                  extensions: [],
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenService = {
+      updateTokenAuthorities: vi.fn(),
+    } as unknown as {
+      updateTokenAuthorities: ReturnType<typeof vi.fn>;
+    };
+
+    const authority = await resolveMetadataAuthority(
+      {
+        SOLANA_RPC_URL: "https://rpc.example.test",
+        SOLANA_NETWORK: "devnet",
+      } as never,
+      tokenService as never,
+      createToken({
+        metadataAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
+      })
+    );
+
+    expect(authority).toBe("73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod");
+    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+  });
+
+  it("fails when the RPC cannot find the mint account instead of reporting no authority", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { value: null } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenService = {
+      updateTokenAuthorities: vi.fn(),
+    } as unknown as {
+      updateTokenAuthorities: ReturnType<typeof vi.fn>;
+    };
+
+    await expect(
+      resolveMetadataAuthority(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        tokenService as never,
+        createToken()
+      )
+    ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR" });
+    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+  });
+
+  it("fails when the RPC returns unparsed account data instead of erasing authorities", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: {
+          value: {
+            data: ["bm90LWpzb24tcGFyc2Vk", "base64"],
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenService = {
+      updateTokenAuthorities: vi.fn(),
+    } as unknown as {
+      updateTokenAuthorities: ReturnType<typeof vi.fn>;
+    };
+
+    await expect(
+      resolveMetadataAuthority(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        tokenService as never,
+        createToken()
+      )
+    ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR" });
+    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+  });
+
   it("uses the current authority wallet when the preferred signing wallet is stale", async () => {
     const auth: ApiKeyContext = {
       id: "user_test",
