@@ -321,6 +321,7 @@ export type {
   WalletOperationRow,
   WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
+export { WalletOperationIdempotencyConflictError } from "./policy.repository";
 export { createPostgresPolicyRepository } from "./policy.repository.postgres";
 export type {
   CreatePrivateChannelInput,
