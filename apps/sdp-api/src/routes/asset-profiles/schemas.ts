@@ -11,6 +11,13 @@ const jsonObjectSchema = z.record(z.string(), z.unknown());
 // active-content link on every consumer that renders it (HOO-1013).
 const LINK_KEY_PATTERN = /^(?:website|homepage)$|(?:url|uri|link|logo|image|icon)$/i;
 
+const MAX_LINK_LENGTH = 2048;
+
+// A whole string that is a scheme plus a body, with no whitespace anywhere:
+// `javascript:alert(1)` is a URI, `javascript:alert(1), quoted in a report` is
+// prose. Free text in the open namespace stays free text.
+const URI_LIKE_PATTERN = /^[a-z][a-z0-9+.-]*:\S+$/i;
+
 const isHttpUrl = (value: string): boolean => {
   try {
     const url = new URL(value);
@@ -20,20 +27,60 @@ const isHttpUrl = (value: string): boolean => {
   }
 };
 
-// The namespace stays open, but any key that names a link must hold a bounded
-// http(s) URL — hostile schemes and non-string values fail closed.
-const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
-  for (const [key, value] of Object.entries(record)) {
-    if (value == null || !LINK_KEY_PATTERN.test(key)) {
-      continue;
+// The namespace stays open, but nothing in it may carry a non-http(s) URI into
+// public metadata. Keying this on the KEY name missed `banner`, `avatar` and
+// anything nested; the value is what ends up rendered, so the value decides.
+function collectLinkIssues(
+  value: unknown,
+  path: Array<string | number>,
+  issues: Array<{ path: Array<string | number>; message: string }>
+): void {
+  if (typeof value === "string") {
+    if (!URI_LIKE_PATTERN.test(value)) {
+      return;
     }
-    if (typeof value !== "string" || value.length > 2048 || !isHttpUrl(value)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [key],
-        message: `asset.${key} must be an http(s) URL of at most 2048 characters`,
+    if (value.length > MAX_LINK_LENGTH || !isHttpUrl(value)) {
+      issues.push({
+        path,
+        message: `asset.${path.join(".")} must be an http(s) URL of at most ${MAX_LINK_LENGTH} characters`,
       });
     }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => collectLinkIssues(entry, [...path, index], issues));
+    return;
+  }
+
+  if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      collectLinkIssues(entry, [...path, key], issues);
+    }
+  }
+}
+
+const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
+  const issues: Array<{ path: Array<string | number>; message: string }> = [];
+
+  for (const [key, value] of Object.entries(record)) {
+    if (value == null) {
+      continue;
+    }
+    // A key that names a link must hold a string: `website: {}` is not a link
+    // the value walk can judge, and must not pass by being the wrong type.
+    if (LINK_KEY_PATTERN.test(key) && typeof value !== "string") {
+      issues.push({
+        path: [key],
+        message: `asset.${key} must be an http(s) URL of at most ${MAX_LINK_LENGTH} characters`,
+      });
+      continue;
+    }
+    collectLinkIssues(value, [key], issues);
+  }
+
+  for (const issue of issues) {
+    ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
   }
 });
 

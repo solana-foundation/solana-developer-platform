@@ -1,5 +1,7 @@
+import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+import { isSignature } from "@solana/kit";
 import { z } from "zod";
 import {
   assertAssetTypeSupported,
@@ -262,8 +264,11 @@ export const deployTokenSchema = z.object({
 // and uses the signing wallet pinned at deploy/prepare, so neither can be
 // changed at confirm time.
 export const confirmDeploySchema = z.object({
-  signature: z.string().min(1),
-  mint: z.string().min(32).max(44),
+  // Parsed here rather than asserted at the call site: these are the client's
+  // claim about what it submitted, and everything downstream — signature
+  // lookup, ABL derivation, the persisted mint — treats them as valid.
+  signature: z.string().refine(isSignature, "Invalid transaction signature"),
+  mint: z.string().refine(isAddress, "Invalid mint address"),
   listAddress: z.string().min(32).max(44).optional(),
   signingWalletId: z.string().min(1).optional(),
 });

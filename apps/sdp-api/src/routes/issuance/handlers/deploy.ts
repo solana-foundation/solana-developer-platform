@@ -716,8 +716,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     throw new AppError("CONFLICT", "Token deployment is already in progress");
   }
 
-  const mint = body.mint as Address;
-  const signature = body.signature as Signature;
+  const { mint, signature } = body;
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let deploymentRecorded = false;

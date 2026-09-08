@@ -182,7 +182,13 @@ export const getToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const response: TokenResponse = { token };
+  // `deploying` is the internal claim between the deploy commit and the mint
+  // landing; it is not part of the public TokenStatus union, and the list
+  // endpoint already filters it out. Externally the token is still an
+  // undeployed draft, which is what it read as before the claim existed.
+  const response: TokenResponse = {
+    token: String(token.status) === "deploying" ? { ...token, status: "pending" } : token,
+  };
   return success(c, response);
 };
 

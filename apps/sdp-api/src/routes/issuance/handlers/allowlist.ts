@@ -7,6 +7,7 @@ import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
@@ -235,6 +236,15 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
     throw notFound("Token");
   }
 
+  // An on-chain list is changed by signing, so resolve which wallet does it
+  // under this key's scope rather than handing the token's own value straight
+  // to the signer: a key bound to selected wallets must hold the token's
+  // signing wallet, and a token without one must not silently fall back to the
+  // project default the key was never granted.
+  const signingWalletId = token.ablListAddress
+    ? resolveApiKeySigningWalletId(auth, token.signingWalletId, ["tokens:write"])
+    : null;
+
   try {
     let { entry } = await tokenService.addAllowlistEntry({
       tokenId,
@@ -263,7 +273,7 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
         c,
         organizationId: auth.organizationId,
         projectId,
-        signingWalletId: token.signingWalletId,
+        signingWalletId,
         tokenService,
         entryId: entry.id,
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
@@ -304,6 +314,15 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     return noContent(c);
   }
 
+  // An on-chain list is changed by signing, so resolve which wallet does it
+  // under this key's scope rather than handing the token's own value straight
+  // to the signer: a key bound to selected wallets must hold the token's
+  // signing wallet, and a token without one must not silently fall back to the
+  // project default the key was never granted.
+  const signingWalletId = token.ablListAddress
+    ? resolveApiKeySigningWalletId(auth, token.signingWalletId, ["tokens:write"])
+    : null;
+
   const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "revoke",
@@ -327,7 +346,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         c,
         organizationId: auth.organizationId,
         projectId,
-        signingWalletId: token.signingWalletId,
+        signingWalletId,
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
         wallet: assertValidAddress(entry.address, "address"),
       });

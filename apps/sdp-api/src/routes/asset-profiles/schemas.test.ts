@@ -59,4 +59,41 @@ describe("issuanceMetadataSchema asset link validation", () => {
     // clamped. The schema stays permissive elsewhere by design.
     expect(result.success).toBe(true);
   });
+
+  it("refuses an active-content URI under a key the name pattern never covered", () => {
+    // `banner`, `avatar` and `thumbnail` are rendered like any other link but
+    // matched none of the link key names, so the value is what has to decide.
+    for (const key of ["banner", "avatar", "thumbnail"]) {
+      const result = issuanceMetadataSchema.safeParse({
+        asset: { [key]: "javascript:alert(1)" },
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("refuses an active-content URI nested below the top level", () => {
+    const result = issuanceMetadataSchema.safeParse({
+      asset: { links: { docs: "javascript:alert(1)" } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses an active-content URI inside an array", () => {
+    const result = issuanceMetadataSchema.safeParse({
+      asset: { gallery: ["https://example.com/a.png", "data:text/html,<script>"] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("keeps ordinary nested http(s) links and plain values", () => {
+    const result = issuanceMetadataSchema.safeParse({
+      asset: {
+        links: { docs: "https://example.com/docs" },
+        gallery: ["https://example.com/a.png"],
+        supply: 1000,
+        notes: "see https://example.com for details",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });

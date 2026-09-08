@@ -9,7 +9,7 @@ import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
 import type { CachedApiKey } from "@sdp/types";
-import { address, createNoopSigner } from "@solana/kit";
+import { address, createNoopSigner, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +37,18 @@ import { seedCachedApiKey } from "@/test/mocks/kv";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
+
+/**
+ * A syntactically valid transaction signature for a named case. `confirmDeploy`
+ * parses the signature at the boundary, so a placeholder string is refused
+ * before the case under test is reached.
+ */
+function testSignature(name: string): string {
+  const seed = [...name].reduce((total, char) => total + char.charCodeAt(0), 0);
+  return getBase58Decoder().decode(
+    new Uint8Array(64).map((_, index) => ((seed + index * 7) % 251) + 1)
+  );
+}
 
 async function seedIssuedToken(
   overrides: Partial<typeof TEST_ACTIVE_TOKEN> = {}
@@ -1779,6 +1791,26 @@ describe("Issuance Routes", () => {
       tokenId = created.data.token.id;
     });
 
+    it("does not expose the internal deploying claim on the detail endpoint", async () => {
+      // The claim is not a public TokenStatus value, and the list endpoint
+      // already filters it. A client polling the detail endpoint during a
+      // deploy must not receive a status outside the contract.
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { token: { status: string } } };
+      expect(body.data.token.status).toBe("pending");
+    });
+
     it("returns token details", async () => {
       const res = await app.request(
         `/v1/issuance/tokens/${tokenId}`,
@@ -2896,6 +2928,103 @@ describe("Issuance Routes", () => {
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
+        }
+      });
+
+      it("refuses a wallet-scoped key that does not hold the token's signing wallet", async () => {
+        // `tokens:write` on the project is not authority over a wallet: without
+        // this the key reaches the token's signing wallet, or the project
+        // default when the token names none, purely by touching the list.
+        const db = getDb(env);
+        await db
+          .prepare(
+            "UPDATE issued_tokens SET abl_list_address = ?, signing_wallet_id = ? WHERE id = ?"
+          )
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, "wal_token_signer", tokenId)
+          .run();
+        await seedCachedApiKey(env, apiKeyHash, {
+          ...TEST_PROJECT_CACHED_KEY,
+          walletScope: "selected",
+          signingWalletIds: ["wal_other"],
+          walletBindings: [{ walletId: "wal_other", permissions: ["tokens:write"] }],
+        });
+
+        const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { message: string } };
+          expect(body.error.message).toContain("not authorized for the requested wallet");
+          expect(createOrgSignerSpy).not.toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          await seedCachedApiKey(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
+        }
+      });
+
+      it("signs with the wallet the key is bound to when the token names none", async () => {
+        // The token carries no signing wallet, so the unguarded call fell back
+        // to the project default. Under a scoped key the bound wallet is the
+        // only one it may use, and it is what must reach the signer.
+        const db = getDb(env);
+        await db
+          .prepare(
+            "UPDATE issued_tokens SET abl_list_address = ?, signing_wallet_id = NULL WHERE id = ?"
+          )
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        await seedCachedApiKey(env, apiKeyHash, {
+          ...TEST_PROJECT_CACHED_KEY,
+          walletScope: "selected",
+          signingWalletIds: ["wal_bound"],
+          walletBindings: [{ walletId: "wal_bound", permissions: ["tokens:write"] }],
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(201);
+          expect(createOrgSignerSpy).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.any(String),
+            expect.any(String),
+            "wal_bound"
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          await seedCachedApiKey(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
         }
       });
 
@@ -6464,7 +6593,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5testSigHOO466Confirm",
+                signature: testSignature("5testSigHOO466Confirm"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -6574,7 +6703,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5testSigHOO466ConfirmBookkeeping",
+                signature: testSignature("5testSigHOO466ConfirmBookkeeping"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -6641,7 +6770,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5unrelatedConfirmedSig",
+                signature: testSignature("5unrelatedConfirmedSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -6717,7 +6846,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5wrongAuthorityConfirmedSig",
+                signature: testSignature("5wrongAuthorityConfirmedSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -6773,7 +6902,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5notYetIndexedSig",
+                signature: testSignature("5notYetIndexedSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -6860,7 +6989,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5ablConfirmSig",
+                signature: testSignature("5ablConfirmSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
                 listAddress: TEST_SOLANA_ADDRESSES.wallet1, // bogus — must be ignored
               }),
@@ -6977,7 +7106,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5walletPinSig",
+                signature: testSignature("5walletPinSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
                 signingWalletId: "wallet_body_divergent_ignored",
               }),
@@ -7026,7 +7155,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5unconfirmedSig",
+                signature: testSignature("5unconfirmedSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -7057,7 +7186,7 @@ describe("Issuance Routes", () => {
               Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
             },
             body: JSON.stringify({
-              signature: "5testSig",
+              signature: testSignature("5testSig"),
               mint: TEST_SOLANA_ADDRESSES.mint,
             }),
           },
@@ -7097,7 +7226,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5racedSig",
+                signature: testSignature("5racedSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -7135,7 +7264,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5unconfirmedRetrySig",
+                signature: testSignature("5unconfirmedRetrySig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
@@ -7224,7 +7353,7 @@ describe("Issuance Routes", () => {
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                signature: "5staleSnapshotSig",
+                signature: testSignature("5staleSnapshotSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
               }),
             },
