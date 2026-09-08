@@ -206,10 +206,10 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
       createdBy: TEST_USER.id,
       ...SANDBOX_DEFAULTS,
     });
-    const ok = await repo.deleteActive({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-    });
+    const ok = await repo.deleteActive(
+      { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID },
+      null
+    );
     expect(ok).toBe(true);
 
     const active = await repo.getActiveByProject({
@@ -269,6 +269,30 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
       getDb(env)
     ).countNonTerminalByInstance(created.id);
     expect(count).toBe(0);
+  });
+
+  it("abandons a deletion whose drain was resumed while it was running", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const created = await repo.createActive({
+      ...scope,
+      ...SANDBOX_DEFAULTS,
+      createdBy: TEST_USER.id,
+    });
+    if (!created) throw new Error("failed to seed instance");
+
+    const draining = await repo.beginDraining(scope);
+    const drainToken = draining?.draining_at ?? null;
+    expect(drainToken).not.toBeNull();
+
+    // The operator resumes between the drain and the deletion's own lock.
+    await repo.updateActive({ id: created.id, ...scope, ...SANDBOX_DEFAULTS });
+
+    // The deletion may only ever apply to the drain it established, so both
+    // halves refuse — otherwise it would delete the instance the resume just
+    // told the operator it had kept.
+    expect(await repo.lockActiveForDeletion(scope, drainToken)).toBeNull();
+    expect(await repo.deleteActive(scope, drainToken)).toBe(false);
+    expect(await repo.getActiveByProject(scope)).not.toBeNull();
   });
 
   it("updateActive clears a drain so a refused deletion is not a one-way door", async () => {

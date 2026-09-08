@@ -191,7 +191,8 @@ export const connectPrivateChannelInstance = async (
     if (!alreadyMember) defaultMembershipId = membership.id;
   } catch (error) {
     if (existingByGateway) await repo.deactivateActive(scope);
-    else await repo.deleteActive(scope);
+    // The instance this request just created, which no drain has touched.
+    else await repo.deleteActive(scope, null);
     throw mapPrivateChannelError(error);
   }
 
@@ -336,6 +337,16 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
   if (!draining) {
     throw notFound("Active private channel instance");
   }
+  // The drain this request is acting on. Everything below is guarded by it, so
+  // a resume that lands in between abandons this deletion instead of having it
+  // delete the instance the operator just kept.
+  const drainToken = draining.draining_at;
+  if (drainToken === null) {
+    throw new AppError(
+      "CONFLICT",
+      "The Private Channels instance is no longer draining. Try again."
+    );
+  }
 
   // Counting and deleting are ONE unit under the instance row lock. Admission
   // inserts take the same lock, so the counts cannot grow between the check and
@@ -344,7 +355,7 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
   const outcome = await getDb(c.env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const instances = createPostgresPrivateChannelInstanceRepository(client);
-    const locked = await instances.lockActiveForDeletion(scope);
+    const locked = await instances.lockActiveForDeletion(scope, drainToken);
     if (!locked) {
       return { deleted: false as const, inFlight: null, locked: null };
     }
@@ -360,7 +371,7 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
       return { deleted: false as const, inFlight: { deposits, withdrawals, transfers }, locked };
     }
 
-    const deleted = await instances.deleteActive(scope);
+    const deleted = await instances.deleteActive(scope, drainToken);
     if (!deleted) {
       throw new AppError("CONFLICT", "The active Private Channels instance changed. Try again.");
     }
@@ -369,7 +380,13 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
 
   if (!outcome.deleted) {
     if (!outcome.inFlight) {
-      throw notFound("Active private channel instance");
+      // The drain this deletion established is gone: the instance was resumed
+      // (or replaced) while the request was running, and deleting whatever is
+      // active now would contradict the answer that resume already gave.
+      throw new AppError(
+        "CONFLICT",
+        "This instance was resumed or replaced while the deletion was running; nothing was deleted. Delete again if you still want it gone."
+      );
     }
     // The drain stays in place on purpose: this is the deliberate-disconnect
     // path, and reverting it would reopen admission and turn deletion back

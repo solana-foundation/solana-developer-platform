@@ -214,33 +214,45 @@ export function createPostgresPrivateChannelInstanceRepository(
       return row ? mapRow(row) : null;
     },
 
-    async lockActiveForDeletion(scope) {
+    async lockActiveForDeletion(scope, drainingAt) {
       // Taken inside the deletion transaction. It waits behind any admission
       // insert already holding the row and blocks later ones, so the in-flight
       // counts read after it are stable until this transaction commits.
+      //
+      // Matching draining_at is what ties the deletion to ITS OWN drain: an
+      // operator who resumed the instance in between (updateActive clears the
+      // flag) must not have it deleted out from under a request that answered
+      // "resumed". No row here means the drain this deletion established is
+      // gone, and the deletion is abandoned rather than applied to whatever is
+      // active now.
       const row = await db
         .prepare(
           `SELECT * FROM private_channel_instances
              WHERE organization_id = ?
                AND project_id = ?
                AND is_active = TRUE
+               AND draining_at IS NOT DISTINCT FROM ?
              FOR NO KEY UPDATE`
         )
-        .bind(scope.organizationId, scope.projectId)
+        .bind(scope.organizationId, scope.projectId, drainingAt)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
 
-    async deleteActive(scope) {
+    async deleteActive(scope, drainingAt) {
+      // Same drain guard as the lock above, restated in the statement that
+      // actually removes the row: the delete may only ever apply to the
+      // instance this request drained.
       const row = await db
         .prepare(
           `DELETE FROM private_channel_instances
             WHERE organization_id = ?
               AND project_id = ?
               AND is_active = TRUE
+              AND draining_at IS NOT DISTINCT FROM ?
           RETURNING id`
         )
-        .bind(scope.organizationId, scope.projectId)
+        .bind(scope.organizationId, scope.projectId, drainingAt)
         .first<{ id: string }>();
       return row !== null;
     },

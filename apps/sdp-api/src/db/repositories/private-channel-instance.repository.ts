@@ -80,10 +80,22 @@ export interface PrivateChannelInstanceRepository {
    * Row-lock the active instance for the duration of the caller's transaction.
    * Admission inserts take the same lock, so in-flight counts read after this
    * call cannot grow before the transaction commits.
+   *
+   * `drainingAt` is the drain this deletion established: the row must still
+   * carry it, so a deletion can never apply to an instance an operator resumed
+   * (or to a drain some other request started) while it was running.
    */
-  lockActiveForDeletion(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
-  /** FK ON DELETE CASCADE handles downstream tables. */
-  deleteActive(scope: ProjectScope): Promise<boolean>;
+  lockActiveForDeletion(
+    scope: ProjectScope,
+    drainingAt: string | null
+  ): Promise<PrivateChannelInstanceRow | null>;
+  /**
+   * FK ON DELETE CASCADE handles downstream tables. Guarded by the same
+   * `drainingAt` as the lock, so the delete cannot outlive its own drain —
+   * `null` addresses an instance that is not draining at all, which is what
+   * the connect-rollback path deletes.
+   */
+  deleteActive(scope: ProjectScope, drainingAt: string | null): Promise<boolean>;
 }
 
 export function mapPrivateChannelInstanceRow(
