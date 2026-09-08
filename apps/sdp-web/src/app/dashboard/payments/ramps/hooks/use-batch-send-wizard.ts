@@ -27,8 +27,10 @@ import {
   TransferBatchRequestError,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import {
+  canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
   holdTransferBatchIdempotencyKey,
+  isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   transferBatchRequestFingerprint,
 } from "@/app/dashboard/payments/transfer-batch-idempotency";
@@ -283,17 +285,21 @@ export function useBatchSendWizard({
   const hasMint = !walletId || selectedAssetBalance !== null;
   const trimmedExternalId = externalId.trim();
 
+  // Canonical form, not the order the recipients were assembled in: the API
+  // fingerprints recipients IN ORDER, so a retry that reorders the same set
+  // has to send the same bytes or it is refused as a key conflict.
   const request = useMemo(
-    () => ({
-      ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
-      sourceCustodyWalletId: walletId,
-      token: asset,
-      recipients: recipients.map((r) => ({
-        counterpartyId: r.counterpartyId,
-        counterpartyAccountId: r.counterpartyAccountId,
-        amount: r.amount,
-      })),
-    }),
+    () =>
+      canonicalTransferBatchRequest({
+        ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
+        sourceCustodyWalletId: walletId,
+        token: asset,
+        recipients: recipients.map((r) => ({
+          counterpartyId: r.counterpartyId,
+          counterpartyAccountId: r.counterpartyAccountId,
+          amount: r.amount,
+        })),
+      }),
     [walletId, asset, recipients, trimmedExternalId]
   );
   const recipientsValid = batchSendSchema.safeParse({
@@ -374,8 +380,15 @@ export function useBatchSendWizard({
       // retired and the next attempt is a fresh intent. A 5xx or a network
       // failure keeps the key: the API may have recorded the batch before the
       // answer was lost, and only a retry with the SAME key can find out
-      // without paying every recipient twice.
-      if (error instanceof TransferBatchRequestError && error.status >= 400 && error.status < 500) {
+      // without paying every recipient twice. A 409 is the exception among
+      // 4xx: it says this key already carries a batch whose payload the API
+      // read differently, so the key is the only handle on it.
+      if (
+        error instanceof TransferBatchRequestError &&
+        error.status >= 400 &&
+        error.status < 500 &&
+        !isTransferBatchKeyConflict(error.status)
+      ) {
         releaseTransferBatchIdempotencyKey(fingerprint);
       }
       toast.error(t("DashboardPayments.batchSend.resultFailed"), {

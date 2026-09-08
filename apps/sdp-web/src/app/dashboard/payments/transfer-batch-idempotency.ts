@@ -165,28 +165,52 @@ function writeEntries(entries: readonly StoredEntry[]): void {
 }
 
 /**
+ * The request in canonical form: recipients ordered by account id.
+ *
+ * The client treats re-selecting the same recipients in a different order as
+ * the SAME intent, but the API fingerprints resolved recipients IN ORDER. Left
+ * to diverge, a retry that reorders the list (remove a recipient, add it back)
+ * carries the same key with a differently-ordered body, which the API refuses
+ * as a fingerprint conflict — and a refusal is exactly what retires the key,
+ * so the next press mints a fresh one and sends a SECOND batch for a request
+ * that may already be recorded.
+ *
+ * Sending this form closes that: one intent has one body, so a retry is
+ * byte-identical and the API replays the recorded batch instead of conflicting.
+ * Recipient order carries no meaning to a batch — the same accounts receive
+ * the same amounts either way.
+ */
+export function canonicalTransferBatchRequest(
+  request: PaymentTransferBatchRequest
+): PaymentTransferBatchRequest {
+  return {
+    ...request,
+    recipients: [...request.recipients].sort((a, b) =>
+      a.counterpartyAccountId.localeCompare(b.counterpartyAccountId)
+    ),
+  };
+}
+
+/**
  * What makes two submissions the SAME batch: the source wallet, the token,
  * every recipient with its amount, and the external reference. Change any one
- * and it is a different batch, not a retry. Recipients are sorted by account
- * id so re-selecting the same set in a different order stays the same intent
- * — the API's own fingerprint is over resolved recipients, order-sensitive,
- * but this key only has to be STABLE per intent on this client, and the 409
- * fingerprint conflict is the backstop if the two ever disagree.
+ * and it is a different batch, not a retry. Recipients are read in canonical
+ * order, which is also the order they are SENT in, so this key and the API's
+ * own order-sensitive fingerprint agree on what one intent is.
  */
 export function transferBatchRequestFingerprint(request: PaymentTransferBatchRequest): string {
+  const canonical = canonicalTransferBatchRequest(request);
   return JSON.stringify([
-    request.projectId ?? null,
-    request.externalId ?? null,
-    request.sourceCustodyWalletId,
-    request.token,
-    [...request.recipients]
-      .sort((a, b) => a.counterpartyAccountId.localeCompare(b.counterpartyAccountId))
-      .map((recipient) => [
-        recipient.counterpartyId,
-        recipient.counterpartyAccountId,
-        recipient.amount,
-      ]),
-    request.options ?? null,
+    canonical.projectId ?? null,
+    canonical.externalId ?? null,
+    canonical.sourceCustodyWalletId,
+    canonical.token,
+    canonical.recipients.map((recipient) => [
+      recipient.counterpartyId,
+      recipient.counterpartyAccountId,
+      recipient.amount,
+    ]),
+    canonical.options ?? null,
   ]);
 }
 
@@ -237,9 +261,26 @@ export function holdTransferBatchIdempotencyKey(fingerprint: string): void {
  * downstream of an API that already recorded the batch looks exactly like the
  * API being down before it did, and a key released too early turns the next
  * retry into a second batch. A key held too long only costs a replay.
+ *
+ * A 409 is the one 4xx that must NOT retire the key — see
+ * `isTransferBatchKeyConflict`.
  */
 export function releaseTransferBatchIdempotencyKey(fingerprint: string): void {
   const entries = readEntries();
   if (!entries.some((entry) => entry.id === fingerprint)) return;
   writeEntries(entries.filter((entry) => entry.id !== fingerprint));
+}
+
+/**
+ * Is this refusal the API saying "this key was used with a different payload"?
+ *
+ * A genuinely different batch never reaches that answer: a changed payload has
+ * a different fingerprint, so it claims a different key. Under our own key the
+ * conflict can only mean this client and the API disagree about what one
+ * intent is — and then the key is the only handle on a batch that may already
+ * be recorded. Retiring it there is how one intent becomes two batches, so
+ * this refusal keeps the key and the retry is answered as a replay.
+ */
+export function isTransferBatchKeyConflict(status: number): boolean {
+  return status === 409;
 }

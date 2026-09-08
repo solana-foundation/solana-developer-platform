@@ -2,8 +2,10 @@
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
   holdTransferBatchIdempotencyKey,
+  isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
   transferBatchRequestFingerprint,
@@ -30,6 +32,39 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("canonicalTransferBatchRequest", () => {
+  it("sends one intent as one body regardless of selection order", () => {
+    // The API fingerprints recipients IN ORDER. Two clients of the same intent
+    // must therefore agree on the order, or the retry is refused as a key
+    // conflict and the wizard opens a second batch.
+    const forward = batchRequest();
+    const reversed = batchRequest({ recipients: [...forward.recipients].reverse() });
+    expect(canonicalTransferBatchRequest(reversed)).toEqual(canonicalTransferBatchRequest(forward));
+    expect(
+      canonicalTransferBatchRequest(reversed).recipients.map((r) => r.counterpartyAccountId)
+    ).toEqual(["acct_1", "acct_2"]);
+  });
+
+  it("leaves everything except recipient order alone", () => {
+    const request = batchRequest({ externalId: "ext_1" });
+    const canonical = canonicalTransferBatchRequest(request);
+    expect(canonical.sourceCustodyWalletId).toBe(request.sourceCustodyWalletId);
+    expect(canonical.token).toBe(request.token);
+    expect(canonical.externalId).toBe("ext_1");
+    expect(canonical.recipients).toHaveLength(request.recipients.length);
+  });
+});
+
+describe("isTransferBatchKeyConflict", () => {
+  it("singles out the 409 that must keep the key", () => {
+    expect(isTransferBatchKeyConflict(409)).toBe(true);
+    expect(isTransferBatchKeyConflict(400)).toBe(false);
+    expect(isTransferBatchKeyConflict(403)).toBe(false);
+    expect(isTransferBatchKeyConflict(422)).toBe(false);
+    expect(isTransferBatchKeyConflict(500)).toBe(false);
+  });
 });
 
 describe("transferBatchRequestFingerprint", () => {

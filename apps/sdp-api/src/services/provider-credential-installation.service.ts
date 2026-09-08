@@ -39,7 +39,7 @@ import {
   installationFactsFromConnection,
 } from "@/services/provider-credential-installation";
 import type { SafeProviderCredential } from "@/services/provider-credential-submission.service";
-import { destroySecretVersion } from "@/services/secret-retirement";
+import { destroySecretVersion, queueOrphanedSecretVersion } from "@/services/secret-retirement";
 import {
   getPendingWalletLabel,
   type InstallationConnectionState,
@@ -727,14 +727,31 @@ async function persistFailure(
   leaseToken: string,
   failureCode: "invalid_credentials" | "provider_account_already_connected" | "wallet_conflict"
 ): Promise<LoadedInstallation | null> {
-  const updated = await context.db.transaction(async (tx) =>
-    new ProviderCredentialStore(tx).recordInstallationFailure({
+  const updated = await context.db.transaction(async (tx) => {
+    const row = await new ProviderCredentialStore(tx).recordInstallationFailure({
       providerCredentialId: target.provider_credential_id,
       connectionId: target.id,
       leaseToken,
       failureCode,
-    })
-  );
+    });
+    if (!row) {
+      return row;
+    }
+    // Recorded WITH the failure, not after it: this commit is what makes the
+    // stored version garbage, so the obligation to destroy it has to become
+    // true at the same instant. Queuing after the commit leaves a window in
+    // which a lost worker takes the only knowledge that the version needs
+    // destroying with it, and the tenant's credential stays readable in the
+    // backend with nothing that would ever retry. Same ordering as rotation
+    // and deactivation. The destroy below clears this row on success.
+    await queueOrphanedSecretVersion(
+      tx,
+      retirementContext(target),
+      storedSecretRef(target),
+      "orphaned by a rejected Privy installation"
+    );
+    return row;
+  });
   if (!updated) {
     const current = await loadInstallation(context, target.id);
     if (current.decisions.complete.kind === "replay") return current;
@@ -798,17 +815,23 @@ async function destroyGcpVersionBestEffort(
   c: Context<{ Bindings: Env }>,
   credential: InstallationConnectionState
 ): Promise<void> {
-  await destroySecretVersion(
-    c.env,
-    {
-      storageBackend: credential.credential_storage_backend,
-      secretRef: credential.credential_secret_ref ?? undefined,
-      secretVersionRef: credential.credential_secret_version_ref ?? undefined,
-    },
-    {
-      provider: "privy",
-      orgId: credential.organization_id,
-      sourceId: credential.provider_credential_id,
-    }
-  );
+  await destroySecretVersion(c.env, storedSecretRef(credential), retirementContext(credential));
+}
+
+/** The stored version this connection points at, in retirement-store shape. */
+function storedSecretRef(credential: InstallationConnectionState) {
+  return {
+    storageBackend: credential.credential_storage_backend,
+    secretRef: credential.credential_secret_ref ?? undefined,
+    secretVersionRef: credential.credential_secret_version_ref ?? undefined,
+  };
+}
+
+/** Who the retirement belongs to, for the queue row and the orphan-risk log. */
+function retirementContext(credential: InstallationConnectionState) {
+  return {
+    provider: "privy" as const,
+    orgId: credential.organization_id,
+    sourceId: credential.provider_credential_id,
+  };
 }
