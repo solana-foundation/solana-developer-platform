@@ -333,7 +333,9 @@ jobs:
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler logout --scope=. --yes >/dev/null 2>&1 || true
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+          doppler me >/dev/null
 
       - name: Unit tests (Doppler)
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -684,7 +686,9 @@ jobs:
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler logout --scope=. --yes >/dev/null 2>&1 || true
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+          doppler me >/dev/null
 
       - name: Validate integration runtime secrets
         if: matrix.provider == 'kora' && env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -858,7 +862,9 @@ jobs:
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
+          doppler logout --scope=. --yes >/dev/null 2>&1 || true
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_CI_IDENTITY_ID }}" --token="${oidc_jwt}"
+          doppler me >/dev/null
 
       - name: Validate browser e2e runtime secrets
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
