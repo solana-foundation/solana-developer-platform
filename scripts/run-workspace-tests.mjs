@@ -120,16 +120,32 @@ try {
             : changedSince
               ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
               : ["--filter=!@sdp/api-integration"];
-    const cacheDir = process.env.TURBO_CACHE_DIR?.trim();
-    await run("pnpm", [
-      "exec",
-      "turbo",
-      "run",
-      "test",
-      ...(cacheDir ? [`--cache-dir=${cacheDir}`] : []),
-      ...filters,
-      ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
-    ]);
+    if (split === "api" && changedSince) {
+      // PR runs: only the test files whose import graph reaches the diff, no
+      // coverage. Every main push still runs the full suite with coverage, so
+      // an unimported coupling a PR misses is caught one commit later.
+      await run("pnpm", [
+        "--filter",
+        "@sdp/api",
+        "exec",
+        "vitest",
+        "run",
+        `--changed=${changedSince}`,
+        "--passWithNoTests",
+        ...forwardedArgs,
+      ]);
+    } else {
+      const cacheDir = process.env.TURBO_CACHE_DIR?.trim();
+      await run("pnpm", [
+        "exec",
+        "turbo",
+        "run",
+        "test",
+        ...(cacheDir ? [`--cache-dir=${cacheDir}`] : []),
+        ...filters,
+        ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
+      ]);
+    }
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
