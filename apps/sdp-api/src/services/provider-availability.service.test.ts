@@ -421,7 +421,7 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("entitles every provider in self-hosted mode regardless of tier", async () => {
+  it("applies general defaults and metadata overrides uniformly to self-hosted orgs", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -430,21 +430,21 @@ describe("provider-availability.service", () => {
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
-      entitled: true,
+      entitled: false,
       configured: true,
-      enabled: true,
+      enabled: false,
     });
     expect(availability.providers.custody.dfns).toEqual({
-      entitled: true,
+      entitled: false,
       configured: false,
       enabled: false,
     });
     expect(availability.providers.custody.ibm_haven).toEqual({
-      entitled: true,
+      entitled: false,
       configured: false,
       enabled: false,
     });
-    expect(availability.providers.compliance.range.entitled).toBe(true);
+    expect(availability.providers.compliance.range.entitled).toBe(false);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
   });
@@ -507,7 +507,7 @@ describe("provider-availability.service", () => {
     ).resolves.toBe(false);
   });
 
-  it("respects providerOverrides[id] === false in self-hosted mode", async () => {
+  it("honors a custody override disabling local the same way in self-hosted mode", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -534,7 +534,7 @@ describe("provider-availability.service", () => {
     expect(availability.providers.custody.privy.entitled).toBe(true);
   });
 
-  it("does not bypass entitlements when SDP_DEPLOYMENT_MODE is unset", async () => {
+  it("applies general defaults when SDP_DEPLOYMENT_MODE is unset", async () => {
     env.SDP_DEPLOYMENT_MODE = undefined;
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
