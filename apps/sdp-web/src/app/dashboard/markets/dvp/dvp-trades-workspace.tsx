@@ -180,12 +180,24 @@ function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): b
     .some((value) => matchesAddressQuery(String(value), needle));
 }
 
+/**
+ * The same groupings as sets, built once.
+ *
+ * The filter runs per trade per keystroke, and `Array.includes` rescans the
+ * whole group every time it is asked.
+ */
+const STATUS_FILTER_SETS = Object.fromEntries(
+  Object.entries(STATUS_FILTERS).map(([filter, statuses]) => [
+    filter,
+    statuses ? new Set<string>(statuses) : null,
+  ])
+) as Record<StatusFilter, ReadonlySet<string> | null>;
+
 /** The project's own trades on the current segment. */
 function filterOwnTrades(trades: DvpTrade[], status: StatusFilter, needle: string): DvpTrade[] {
-  const allowed = STATUS_FILTERS[status];
+  const allowed = STATUS_FILTER_SETS[status];
   return trades.filter(
-    (trade) =>
-      (!allowed || allowed.includes(trade.status as never)) && matchesTradeQuery(trade, needle)
+    (trade) => (!allowed || allowed.has(trade.status)) && matchesTradeQuery(trade, needle)
   );
 }
 
@@ -286,15 +298,23 @@ function TradesToolbar({
   // would be a permanent dead control. The count rides on the label, because a
   // trade waiting on this project is the one thing here with a deadline against
   // it and a number says so without a banner that is empty most days.
-  const items = STATUS_FILTER_ORDER.filter(
-    (option) => option !== "waiting" || inboundCount > 0
-  ).map((option) => ({
-    value: option,
-    label:
-      option === "waiting"
-        ? `${t(STATUS_FILTER_LABELS[option])} \u00b7 ${inboundCount}`
-        : t(STATUS_FILTER_LABELS[option]),
-  }));
+  // One pass: dropping the empty segment and labelling the rest are the same
+  // decision per option, and splitting them into filter-then-map walks the list
+  // twice to answer it.
+  const items = STATUS_FILTER_ORDER.flatMap((option) => {
+    if (option === "waiting" && inboundCount === 0) {
+      return [];
+    }
+    return [
+      {
+        value: option,
+        label:
+          option === "waiting"
+            ? `${t(STATUS_FILTER_LABELS[option])} \u00b7 ${inboundCount}`
+            : t(STATUS_FILTER_LABELS[option]),
+      },
+    ];
+  });
 
   return (
     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -324,6 +344,63 @@ function TradesToolbar({
   );
 }
 
+/**
+ * The table for whichever segment is showing.
+ *
+ * Both segments share one header because they answer the same shape of
+ * question; only two column names change, since a party acts on an expiry and
+ * a funding action rather than on when we created the trade.
+ */
+function TradesTable({
+  inbound,
+  showingInbound,
+  trades,
+}: {
+  inbound: DvpInboundTrade[];
+  showingInbound: boolean;
+  trades: DvpTrade[];
+}) {
+  const t = useTranslations();
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border-default">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("DashboardMarkets.dvp.columnStatus")}</TableHead>
+            <TableHead>{t("DashboardMarkets.dvp.columnAsset")}</TableHead>
+            <TableHead>{t("DashboardMarkets.dvp.columnCash")}</TableHead>
+            {/* "Parties", not "Counterparty": the list mixes trades
+                  where we hold a leg with trades set up for two other
+                  parties, and the second kind has no counterparty
+                  because we are not one of the sides. */}
+            <TableHead>
+              {t(
+                showingInbound
+                  ? "DashboardMarkets.dvp.inboundColumnFund"
+                  : "DashboardMarkets.dvp.columnParties"
+              )}
+            </TableHead>
+            <TableHead>
+              {t(
+                showingInbound
+                  ? "DashboardMarkets.dvp.inboundColumnExpires"
+                  : "DashboardMarkets.dvp.columnCreated"
+              )}
+            </TableHead>
+            <TableHead className="w-10" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {showingInbound ? <InboundRows trades={inbound} /> : null}
+          {trades.map((trade) => (
+            <OwnTradeRow key={trade.id} trade={trade} />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export function DvpTradesWorkspace({
   trades,
   inbound,
@@ -341,13 +418,12 @@ export function DvpTradesWorkspace({
   // Filtered here rather than in the URL: the list arrives already capped by
   // `listByProject`, so everything being filtered is on the page — a round trip
   // per keystroke would be slower and no more correct.
+  //
   // The waiting segment lists trades belonging to other organizations, so the
-  // project's own list is not filtered down to nothing — it is replaced.
+  // project's own list is not filtered down to nothing, it is replaced. Both
+  // sides run the same query so the search box means one thing on either.
   const showingInbound = status === "waiting";
   const needle = query.trim().toLowerCase();
-  // The waiting segment lists trades belonging to other organizations, so the
-  // project's own list is not filtered down to nothing — it is replaced. Both
-  // sides run the same query so the search box means one thing on either.
   const visible = showingInbound ? [] : filterOwnTrades(trades, status, needle);
   const visibleInbound = showingInbound
     ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
@@ -454,42 +530,11 @@ export function DvpTradesWorkspace({
                 message={t("DashboardMarkets.dvp.filterNoMatches")}
               />
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-border-default">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("DashboardMarkets.dvp.columnStatus")}</TableHead>
-                      <TableHead>{t("DashboardMarkets.dvp.columnAsset")}</TableHead>
-                      <TableHead>{t("DashboardMarkets.dvp.columnCash")}</TableHead>
-                      {/* "Parties", not "Counterparty": the list mixes trades
-                          where we hold a leg with trades set up for two other
-                          parties, and the second kind has no counterparty
-                          because we are not one of the sides. */}
-                      <TableHead>
-                        {t(
-                          showingInbound
-                            ? "DashboardMarkets.dvp.inboundColumnFund"
-                            : "DashboardMarkets.dvp.columnParties"
-                        )}
-                      </TableHead>
-                      <TableHead>
-                        {t(
-                          showingInbound
-                            ? "DashboardMarkets.dvp.inboundColumnExpires"
-                            : "DashboardMarkets.dvp.columnCreated"
-                        )}
-                      </TableHead>
-                      <TableHead className="w-10" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {showingInbound ? <InboundRows trades={visibleInbound} /> : null}
-                    {visible.map((trade) => (
-                      <OwnTradeRow key={trade.id} trade={trade} />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <TradesTable
+                inbound={visibleInbound}
+                showingInbound={showingInbound}
+                trades={visible}
+              />
             )}
           </>
         )}
