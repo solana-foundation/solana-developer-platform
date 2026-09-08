@@ -2975,6 +2975,49 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("names the fix when the token has no signing wallet and the key holds several", async () => {
+        // With no wallet on the token and more than one binding there is
+        // nothing to disambiguate on this route — it takes no walletId — so the
+        // refusal has to point at the token, not ask for a parameter.
+        const db = getDb(env);
+        await db
+          .prepare(
+            "UPDATE issued_tokens SET abl_list_address = ?, signing_wallet_id = NULL WHERE id = ?"
+          )
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        await seedCachedApiKey(env, apiKeyHash, {
+          ...TEST_PROJECT_CACHED_KEY,
+          walletScope: "selected",
+          signingWalletIds: ["wal_one", "wal_two"],
+          walletBindings: [
+            { walletId: "wal_one", permissions: ["tokens:write"] },
+            { walletId: "wal_two", permissions: ["tokens:write"] },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { message: string } };
+          expect(body.error.message).toContain("Token has no signing wallet");
+        } finally {
+          await seedCachedApiKey(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
+        }
+      });
+
       it("signs with the wallet the key is bound to when the token names none", async () => {
         // The token carries no signing wallet, so the unguarded call fell back
         // to the project default. Under a scoped key the bound wallet is the

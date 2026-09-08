@@ -7,7 +7,10 @@ import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
+import {
+  getAllowedApiKeyWalletIds,
+  resolveApiKeySigningWalletId,
+} from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
@@ -166,6 +169,38 @@ async function removeExistingAllowlistEntryOnChain(opts: {
   }
 }
 
+/**
+ * Which wallet signs an on-chain control-list change, under this key's scope.
+ *
+ * The token's own value cannot be handed to the signer directly: a key bound to
+ * selected wallets would reach a wallet it was never granted, and a token that
+ * names no wallet would fall back to the project default. A key that is not
+ * wallet-scoped keeps resolving exactly as before.
+ */
+function resolveAllowlistSigningWalletId(
+  auth: Parameters<typeof resolveApiKeySigningWalletId>[0],
+  signingWalletId: string | null
+): string | null {
+  if (signingWalletId) {
+    return resolveApiKeySigningWalletId(auth, signingWalletId, ["tokens:write"]);
+  }
+
+  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  if (allowedWalletIds === null) {
+    return null;
+  }
+  if (allowedWalletIds.length === 1) {
+    return resolveApiKeySigningWalletId(auth, allowedWalletIds[0], ["tokens:write"]);
+  }
+
+  // The generic resolver would answer "specify a walletId" here, which this
+  // route has no parameter for. Name the fix the caller can actually apply.
+  throw new AppError(
+    "FORBIDDEN",
+    "Token has no signing wallet; set one before changing its control list"
+  );
+}
+
 export const listAllowlist = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
@@ -242,7 +277,7 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
   // signing wallet, and a token without one must not silently fall back to the
   // project default the key was never granted.
   const signingWalletId = token.ablListAddress
-    ? resolveApiKeySigningWalletId(auth, token.signingWalletId, ["tokens:write"])
+    ? resolveAllowlistSigningWalletId(auth, token.signingWalletId)
     : null;
 
   try {
@@ -320,7 +355,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   // signing wallet, and a token without one must not silently fall back to the
   // project default the key was never granted.
   const signingWalletId = token.ablListAddress
-    ? resolveApiKeySigningWalletId(auth, token.signingWalletId, ["tokens:write"])
+    ? resolveAllowlistSigningWalletId(auth, token.signingWalletId)
     : null;
 
   const auditService = new AuditService(getDb(c.env));
