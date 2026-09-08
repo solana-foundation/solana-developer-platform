@@ -346,10 +346,13 @@ function IssuanceResults({
   );
 }
 
-function useIssuancePlaygroundKey(
-  apiKeys: IssuanceWorkspaceProps["apiKeys"],
-  isPlaygroundTab: boolean
-) {
+function useIssuancePlaygroundKey({
+  apiKeys,
+  isPlaygroundTab,
+}: {
+  apiKeys: IssuanceWorkspaceProps["apiKeys"];
+  isPlaygroundTab: boolean;
+}) {
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
@@ -373,10 +376,8 @@ function useIssuancePlaygroundKey(
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
 
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
+  const selectedPlaygroundApiKey =
+    apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null;
   const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
   const playgroundApiKeyValue = useMemo(() => {
     if (!selectedPlaygroundApiKey) {
@@ -445,7 +446,7 @@ export function IssuanceWorkspace({
     router.push(CREATE_DRAFT_PATH);
   };
 
-  const playgroundApiKeyValue = useIssuancePlaygroundKey(apiKeys, isPlaygroundTab);
+  const playgroundApiKeyValue = useIssuancePlaygroundKey({ apiKeys, isPlaygroundTab });
 
   // Template options for the filter popover. Sourced from the project-wide facet
   // counts rather than the loaded rows, so the choices don't shrink to whatever

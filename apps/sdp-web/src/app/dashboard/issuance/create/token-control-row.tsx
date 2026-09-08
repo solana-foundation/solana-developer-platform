@@ -64,7 +64,7 @@ export function TokenControlRow({
         selection={selection}
         conflictWith={conflictWith}
         showErrors={showErrors}
-        disabled={disabled}
+        disabled={mode !== "editable"}
         onParam={onParam}
       />
     </div>

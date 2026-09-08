@@ -466,6 +466,7 @@ function TokenDetailsStep({
           type="url"
           pattern="https?://.*"
           value={draft.website}
+          maxLength={2048}
           onChange={(event) => updateDraft("website", event.target.value)}
         />
       </Field>

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { AdvancedSettingsEditor } from "./advanced-settings-editor";
+import { TokenControlRow } from "./token-control-row";
 import {
   findControlConflict,
   groupTokenControls,
@@ -26,6 +27,26 @@ const baseProps = {
   mode: "editable" as const,
 };
 describe("token controls editor", () => {
+  it("locks a required control toggle without disabling its draft parameters", () => {
+    const fee = listSettingsForType("generic", "generic").find(
+      (entry) => entry.key === "transferFee"
+    );
+    if (!fee) throw new Error("Missing transfer-fee capability");
+    const markup = renderWithI18n(
+      <TokenControlRow
+        entry={{ ...fee, availability: "locked" }}
+        selection={{ params: { basisPoints: "50", maxFee: "100" } }}
+        variant="advanced"
+        mode="editable"
+        showErrors={false}
+        onToggle={() => undefined}
+        onParam={() => undefined}
+      />
+    );
+    const inputs = markup.match(/<input[^>]*>/g) ?? [];
+    expect(inputs.find((input) => input.includes('type="checkbox"'))).toContain('disabled=""');
+    expect(inputs.find((input) => input.includes('value="50"'))).not.toContain('disabled=""');
+  });
   it("keeps advanced controls collapsed without repeated descriptions", () => {
     const markup = renderWithI18n(
       <AdvancedSettingsEditor {...baseProps} category="generic" type="generic" />
