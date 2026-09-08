@@ -11,7 +11,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
   const env = getE2EEnv();
   const identity = await resolveClerkTestIdentity();
 
-  if (env.clerkPublishableKey.startsWith("pk_live_")) {
+  if (env.ticketAuth) {
     const { token } = await withTransientClerkRetry(async () => {
       const response = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
         method: "POST",
@@ -29,12 +29,33 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
       }
       return (await response.json()) as { token: string };
     });
-    await page.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" });
+    // Complete the ticket in-page rather than putting it in the URL: a
+    // retained failure trace would otherwise ship a live sign-in token.
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(
-      () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
+      () => Boolean((window as unknown as { Clerk?: { client?: unknown } }).Clerk?.client),
       undefined,
       { timeout: 120_000 }
     );
+    await page.evaluate(async (ticket) => {
+      const clerkClient = (
+        window as unknown as {
+          Clerk?: {
+            client: {
+              signIn: {
+                create: (p: Record<string, string>) => Promise<{ createdSessionId: string }>;
+              };
+            };
+            setActive: (p: { session: string }) => Promise<void>;
+          };
+        }
+      ).Clerk;
+      if (!clerkClient) {
+        throw new Error("Clerk failed to load in Playwright global setup");
+      }
+      const signIn = await clerkClient.client.signIn.create({ strategy: "ticket", ticket });
+      await clerkClient.setActive({ session: signIn.createdSessionId });
+    }, token);
   } else {
     await clerkSetup({
       publishableKey: env.clerkPublishableKey,
