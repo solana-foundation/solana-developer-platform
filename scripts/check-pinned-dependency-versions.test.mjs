@@ -28,6 +28,28 @@ test("rejects semver ranges in direct dependency fields", () => {
   ]);
 });
 
+test("requires Solana Earn packages to come from immutable registry versions", () => {
+  const violations = validateManifest(
+    {
+      dependencies: {
+        "@solana/earn": "workspace:*",
+        "@solana/earn-kit": "link:../../../solana-earn/packages/kit",
+        "@solana/earn-transactions": "0.1.0-beta.1",
+      },
+      devDependencies: {
+        "@solana/earn-core": "catalog:",
+        "@solana/earn-test-utils": "catalog:solana-earn",
+      },
+    },
+    "apps/sdp-api/package.json"
+  );
+
+  assert.deepEqual(violations, [
+    "apps/sdp-api/package.json: dependencies.@solana/earn must use an exact registry version or catalog: (found workspace:*).",
+    "apps/sdp-api/package.json: dependencies.@solana/earn-kit must use an exact registry version or catalog: (found link:../../../solana-earn/packages/kit).",
+  ]);
+});
+
 test("rejects ranges in pnpm catalogs", () => {
   const violations = validatePnpmCatalog(
     "catalog:\n  '@solana/kit': ^6.5.0\n  '@solana/rpc': 6.8.0\n",

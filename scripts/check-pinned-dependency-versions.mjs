@@ -8,6 +8,8 @@ const directDependencyFields = ["dependencies", "devDependencies", "optionalDepe
 const exactVersion = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const supportedNonRegistrySpecifiers =
   /^(?:workspace:\*|catalog:|file:|link:|git\+|github:|https?:)/;
+const catalogSpecifier = /^catalog:(?:[0-9A-Za-z._-]+)?$/;
+const solanaEarnPackage = /^@solana\/earn(?:-|$)/;
 
 export function isPinnedVersion(specifier) {
   return exactVersion.test(specifier) || supportedNonRegistrySpecifiers.test(specifier);
@@ -18,6 +20,17 @@ export function validateManifest(manifest, manifestPath) {
 
   for (const field of directDependencyFields) {
     for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
+      if (
+        solanaEarnPackage.test(name) &&
+        !catalogSpecifier.test(specifier) &&
+        !exactVersion.test(specifier)
+      ) {
+        violations.push(
+          `${manifestPath}: ${field}.${name} must use an exact registry version or catalog: ` +
+            `(found ${specifier}).`
+        );
+        continue;
+      }
       if (!isPinnedVersion(specifier)) {
         violations.push(
           `${manifestPath}: ${field}.${name} must be an exact version (found ${specifier}).`
