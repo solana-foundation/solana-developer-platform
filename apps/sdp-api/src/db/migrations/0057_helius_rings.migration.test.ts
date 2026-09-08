@@ -125,6 +125,7 @@ describe("0057_helius_rings schema", () => {
         "idx_helius_rings_operations_intent_key",
         "idx_helius_rings_operations_wallet_created",
         "idx_helius_rings_operations_in_flight",
+        "idx_helius_rings_operations_connection",
         "idx_helius_rings_timelocks_pending",
         "idx_helius_rings_events_operation_created",
       ])

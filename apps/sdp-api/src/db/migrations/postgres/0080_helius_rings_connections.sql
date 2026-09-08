@@ -100,7 +100,26 @@ CREATE POLICY sdp_tenant_isolation ON helius_rings_connections
         )
     );
 
--- Operations pin the upstream bundle selected at prepare time.
+-- Operations pin the upstream bundle selected at prepare time. The pin is
+-- NOT NULL from birth, which a non-empty table cannot satisfy: rows created
+-- before this migration were configured from the now-removed HELIUS_RINGS_*
+-- environment variables and have nothing to pin to. A backfill is impossible
+-- (a connection row requires a live-probed encrypted credential), so the
+-- env-era rows are deleted instead — they are devnet-only pre-production
+-- data with no migration path. Events and timelocks cascade with them; the
+-- retry self-reference nulls out.
+DO $$
+DECLARE
+    deleted_operation_count BIGINT;
+BEGIN
+    DELETE FROM helius_rings_operations;
+
+    GET DIAGNOSTICS deleted_operation_count = ROW_COUNT;
+    RAISE NOTICE 'Deleted % env-configured Helius Rings operations with no connection to pin to',
+        deleted_operation_count;
+END;
+$$;
+
 ALTER TABLE helius_rings_operations
     ADD COLUMN IF NOT EXISTS rings_connection_id TEXT NOT NULL;
 

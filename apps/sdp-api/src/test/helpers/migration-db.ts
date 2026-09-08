@@ -2,6 +2,7 @@ import type { Client } from "pg";
 import { expect } from "vitest";
 
 /** Postgres SQLSTATEs the migration tests distinguish between. */
+export const NOT_NULL_VIOLATION = "23502";
 export const UNIQUE_VIOLATION = "23505";
 export const FK_VIOLATION = "23503";
 export const CHECK_VIOLATION = "23514";
