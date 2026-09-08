@@ -9,11 +9,15 @@ import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
 const BVNK_WEBHOOK_SECRET = "bvnk_counterparties_webhook_secret";
+const TEST_CP_CUSTODY_WALLET_ID = "cwlt_counterparties_test";
+const TEST_CP_CUSTODY_CONFIG_ID = "ccfg_counterparties_test";
+const TEST_CP_WALLET_PUBLIC_KEY = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
@@ -108,6 +112,33 @@ describe("Counterparties Routes", () => {
     await kv.apiKeys.put(
       `key:${apiKeyHash}`,
       JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT_ID })
+    );
+
+    const seededAt = new Date().toISOString();
+    await seedTestCustodySetup(
+      env,
+      {
+        id: TEST_CP_CUSTODY_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        provider: "local",
+        config: "test-config",
+        encryptionVersion: "sdp-custody-encryption-v1",
+        defaultWalletId: null,
+        status: "active",
+        createdAt: seededAt,
+        updatedAt: seededAt,
+      },
+      {
+        id: TEST_CP_CUSTODY_WALLET_ID,
+        custodyConfigId: TEST_CP_CUSTODY_CONFIG_ID,
+        walletId: TEST_CP_WALLET_PUBLIC_KEY,
+        publicKey: TEST_CP_WALLET_PUBLIC_KEY,
+        label: "Counterparties test wallet",
+        purpose: "transfer",
+        status: "active",
+        createdAt: seededAt,
+      }
     );
   });
 
@@ -414,12 +445,14 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe("BAD_REQUEST");
-      expect(body.error.message).toContain("destinationWallet is required for onramp requirements");
+      expect(body.error.message).toContain(
+        "destinationCustodyWalletId is required for onramp requirements"
+      );
       expect(body.error.details.errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            path: ["destinationWallet"],
-            message: "destinationWallet is required for onramp requirements",
+            path: ["destinationCustodyWalletId"],
+            message: "destinationCustodyWalletId is required for onramp requirements",
           }),
         ])
       );
@@ -939,7 +972,7 @@ describe("Counterparties Routes", () => {
       const counterparty = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
         {
           headers: { "Content-Type": "application/json", Authorization: authHeader },
         },
@@ -1021,7 +1054,7 @@ describe("Counterparties Routes", () => {
               provider: "bvnk",
               direction: "onramp",
               assetRail: "usdc.solana",
-              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
               fiatCurrency: "USD",
               collectedData,
             }),
@@ -1145,7 +1178,7 @@ describe("Counterparties Routes", () => {
               provider: "bvnk",
               direction: "onramp",
               assetRail: "usdc.solana",
-              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
               fiatCurrency: "USD",
               collectedData,
               agreementConsent: true,
@@ -1302,7 +1335,7 @@ describe("Counterparties Routes", () => {
         ).toBe(200);
 
         const requirements = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );
@@ -1319,7 +1352,7 @@ describe("Counterparties Routes", () => {
               provider: "bvnk",
               direction: "onramp",
               assetRail: "usdc.solana",
-              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
               fiatCurrency: "USD",
               collectedData,
             }),
@@ -1407,7 +1440,7 @@ describe("Counterparties Routes", () => {
           ).status
         ).toBe(200);
         const response = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );
@@ -1428,7 +1461,7 @@ describe("Counterparties Routes", () => {
           ).status
         ).toBe(200);
         const rejected = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );

@@ -92,7 +92,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       ({
         provider,
         counterpartyId: fields.counterpartyId,
-        destinationWallet: selectedWallet.walletId,
+        destinationCustodyWalletId: selectedWallet.id,
         assetRail,
         fiatCurrency: selectedRampPair.fiatCurrency,
         fiatAmount: fields.amount.trim(),
@@ -197,7 +197,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
               amount: Number(wizard.fields.amount.trim()),
               fiatCurrency: wizard.selectedRampPair.fiatCurrency,
               assetRail: wizard.selectedRampPair.assetRail,
-              destinationWallet: wizard.selectedWallet.walletId,
+              destinationCustodyWalletId: wizard.selectedWallet.id,
             },
           },
           t

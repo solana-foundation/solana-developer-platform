@@ -195,7 +195,7 @@ export function useRampWizard<TId extends string>(
     direction: requirementsConfig.direction,
     assetRail: selectedRampPair.assetRail,
     fiatCurrency: selectedRampPair.fiatCurrency,
-    destinationWallet: selectedWallet?.walletId ?? "",
+    destinationCustodyWalletId: selectedWallet === null ? null : selectedWallet.id,
   });
 
   const { mutate: mutateCounterparties } = useSWR(
@@ -373,7 +373,7 @@ export function useRampWizard<TId extends string>(
     try {
       const result = await requirements.submitRequirements({
         assetRail: selectedRampPair.assetRail,
-        destinationWallet: selectedWallet.walletId,
+        destinationCustodyWalletId: selectedWallet.id,
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);

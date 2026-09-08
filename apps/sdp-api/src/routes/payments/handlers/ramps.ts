@@ -122,9 +122,10 @@ import {
 } from "../schemas";
 import {
   assertFreshPaymentWalletAccess,
+  assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
-  resolveWalletAddress,
+  resolveWalletByCustodyWalletId,
 } from "../wallets";
 import {
   bvnkOnrampQuote,
@@ -294,43 +295,22 @@ interface PersistRampQuoteTransferInput {
   providerData?: Record<string, unknown>;
 }
 
-function requireRampTransferWallet(
-  scope: ResolvedScope,
-  walletIdOrAddress: string,
-  walletAddress: string,
-  fieldName: string
-): ScopedRampWallet {
-  const matches = scope.wallets.filter(
-    (entry) => entry.walletId === walletIdOrAddress || entry.publicKey === walletAddress
-  );
-  if (matches.length > 1) {
-    throw conflict("Custody wallet ownership is ambiguous");
-  }
-  const wallet = matches[0];
-  if (!wallet) {
-    throw badRequest(`${fieldName} must reference an SDP wallet.`);
-  }
-  return wallet;
-}
-
 /**
  * Resolve the state shared by both ramp-quote extractions: corridor support,
  * provider availability, the counterparty, and the SDP wallet on the crypto
- * leg.
+ * leg. The wallet is keyed by its internal custody wallet id.
  *
  * @param c - Request context.
  * @param direction - The quote direction.
  * @param input - The validated quote request body.
- * @param walletFieldName - The request field naming the wallet.
- * @param walletIdOrAddress - The requested wallet id or address.
+ * @param custodyWalletId - The internal custody wallet id from the request.
  * @returns The resolved scope, project, counterparty, wallet, and address.
  */
 async function resolveRampQuoteRequest(
   c: AppContext,
   direction: RampQuoteDirection,
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
-  walletFieldName: "destinationWallet" | "sourceWallet",
-  walletIdOrAddress: string
+  custodyWalletId: string
 ): Promise<RampQuotePolicyResolved> {
   assertRampProviderSurfaced(input.provider, resolveSdpEnvironment(c));
   assertRampCorridorSupported(direction, input, resolveSdpEnvironment(c));
@@ -347,21 +327,10 @@ async function resolveRampQuoteRequest(
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
 
-  const walletAddress = resolveWalletAddress(
-    scope.wallets,
-    walletIdOrAddress,
-    walletFieldName,
-    scope.auth,
-    ["payments:write"]
-  );
-  const wallet = requireRampTransferWallet(
-    scope,
-    walletIdOrAddress,
-    walletAddress,
-    walletFieldName
-  );
+  const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
+  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
-  return { scope, projectId, counterparty, wallet, walletAddress };
+  return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 
 /**
@@ -378,8 +347,7 @@ export async function extractOnrampQuotePolicyCandidate(
     c,
     "onramp",
     input,
-    "destinationWallet",
-    input.destinationWallet
+    input.destinationCustodyWalletId
   );
 
   return {
@@ -427,8 +395,7 @@ export async function extractOfframpQuotePolicyCandidate(
     c,
     "offramp",
     input,
-    "sourceWallet",
-    input.sourceWallet
+    input.sourceCustodyWalletId
   );
 
   return {
@@ -833,12 +800,12 @@ export async function advanceCounterpartyRequirements(
         return readyCounterparty("bvnk", input.direction);
       }
       const scope = await resolveScope(c);
-      const destinationWalletAddress = resolveWalletAddress(
+      const destinationWallet = resolveWalletByCustodyWalletId(
         scope.wallets,
-        input.destinationWallet,
-        "destinationWallet",
-        scope.auth
+        input.destinationCustodyWalletId
       );
+      assertPaymentWalletExactAccess(c, destinationWallet.id, []);
+      const destinationWalletAddress = destinationWallet.publicKey;
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(input.assetRail)
       );
@@ -1560,13 +1527,12 @@ export async function simulateSandboxTransfer(
       if (!counterparty) {
         throw new AppError("NOT_FOUND", "Counterparty not found");
       }
-      const destinationWalletAddress = resolveWalletAddress(
+      const destinationWallet = resolveWalletByCustodyWalletId(
         scope.wallets,
-        payload.destinationWallet,
-        "destinationWallet",
-        scope.auth,
-        ["payments:write"]
+        payload.destinationCustodyWalletId
       );
+      assertPaymentWalletExactAccess(c, destinationWallet.id, ["payments:write"]);
+      const destinationWalletAddress = destinationWallet.publicKey;
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(payload.assetRail)
       );

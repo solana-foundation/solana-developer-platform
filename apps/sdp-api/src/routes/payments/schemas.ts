@@ -661,7 +661,7 @@ export const rampsMemoSchema = z
 export const createOnrampQuoteSchema = z.strictObject({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
-  destinationWallet: z.string().min(1),
+  destinationCustodyWalletId: z.string().min(1),
   assetRail: onrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
@@ -682,7 +682,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       provider: z.literal("bvnk"),
       direction: z.literal("onramp"),
       assetRail: onrampCryptoRailSchema,
-      destinationWallet: z.string().min(1),
+      destinationCustodyWalletId: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
       agreementConsent: z.literal(true).optional(),
@@ -717,7 +717,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
       provider: z.literal("mural"),
       direction: z.literal("onramp"),
       assetRail: onrampCryptoRailSchema,
-      destinationWallet: z.string().min(1),
+      destinationCustodyWalletId: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
     }),
     z.object({
@@ -732,7 +732,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
 
 const offrampQuoteBaseShape = {
   counterpartyId: z.string().min(1),
-  sourceWallet: z.string().min(1),
+  sourceCustodyWalletId: z.string().min(1),
   assetRail: offrampCryptoRailSchema,
   cryptoAmount: paymentAmountSchema,
   rampsMemo: rampsMemoSchema.optional(),
@@ -805,7 +805,7 @@ const simulateBvnkSandboxPayinPayloadSchema = z.object({
   amount: z.number().positive(),
   fiatCurrency: rampFiatCurrencySchema,
   assetRail: onrampCryptoRailSchema,
-  destinationWallet: z.string().min(1),
+  destinationCustodyWalletId: z.string().min(1),
 });
 
 const simulateMuralSandboxPayinPayloadSchema = z.object({

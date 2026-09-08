@@ -162,15 +162,18 @@ export function useBatchSendWizard({
     () => selectedWallet?.balances?.find((balance) => balance.mint === asset) ?? null,
     [selectedWallet, asset]
   );
-  const displayAsset = assetOptions.find((option) => option.value === asset)?.label ?? "";
+  const selectedAssetOption = assetOptions.find((option) => option.value === asset);
+  const displayAsset: string | null =
+    selectedAssetOption === undefined ? null : selectedAssetOption.label;
 
   const selectWallet = (nextWalletId: string) => {
     setWalletId(nextWalletId);
     const nextWallet = liveWallets.find((wallet) => wallet.id === nextWalletId) ?? null;
     const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
     if (!nextAssets.some((option) => option.value === asset)) {
-      const preferred = nextAssets.find((option) => option.label === "USDC") ?? nextAssets[0];
-      setAsset(preferred?.value ?? "");
+      const preferred = nextAssets.find((option) => option.label === "USDC");
+      const fallback = preferred === undefined ? nextAssets[0] : preferred;
+      setAsset(fallback === undefined ? "" : fallback.value);
     }
   };
 

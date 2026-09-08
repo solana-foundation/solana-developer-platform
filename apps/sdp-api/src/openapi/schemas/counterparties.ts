@@ -71,11 +71,12 @@ export const counterpartyRequirementsQuerySchema = z
       description: "Fiat currency code.",
       example: "USD",
     }),
-    destinationWallet: withOpenApi(
-      onrampRequirementsQuerySchema.shape.destinationWallet.optional(),
+    destinationCustodyWalletId: withOpenApi(
+      onrampRequirementsQuerySchema.shape.destinationCustodyWalletId.optional(),
       {
-        description: "Destination wallet ID. Required when direction is onramp.",
-        example: "privy_wallet_123",
+        description:
+          "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+        example: "cwlt_example",
       }
     ),
     destinationCountry: withOpenApi(z.string().optional(), {

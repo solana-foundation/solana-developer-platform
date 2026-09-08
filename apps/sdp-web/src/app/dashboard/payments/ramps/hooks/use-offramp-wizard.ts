@@ -119,7 +119,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     }) => {
       const base = {
         counterpartyId: fields.counterpartyId,
-        sourceWallet: selectedWallet.walletId,
+        sourceCustodyWalletId: selectedWallet.id,
         assetRail,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,

@@ -131,17 +131,11 @@ export function buildPaymentsPlaygroundEndpointConfigs(
     t("DashboardPayments.playground.custodyWalletIdPlaceholder"),
     custodyWalletOptions
   );
-  const destinationWalletField = buildSelectBackedField(
-    "destinationWallet",
-    "destinationWallet",
+  const destinationCustodyWalletIdField = buildSelectBackedField(
+    "destinationCustodyWalletId",
+    "destinationCustodyWalletId",
     t("DashboardPayments.playground.destinationWalletIdPlaceholder"),
-    providerWalletOptions
-  );
-  const sourceWalletField = buildSelectBackedField(
-    "sourceWallet",
-    "sourceWallet",
-    t("DashboardPayments.playground.sourceWalletIdPlaceholder"),
-    providerWalletOptions
+    custodyWalletOptions
   );
   const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
@@ -340,7 +334,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           placeholder: t("DashboardPayments.playground.counterpartyIdPlaceholder"),
           required: true,
         },
-        destinationWalletField,
+        destinationCustodyWalletIdField,
         {
           key: "assetRail",
           label: "assetRail",
@@ -398,7 +392,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           placeholder: t("DashboardPayments.playground.counterpartyIdPlaceholder"),
           required: true,
         },
-        sourceWalletField,
+        sourceCustodyWalletIdField,
         {
           key: "assetRail",
           label: "assetRail",

@@ -743,7 +743,7 @@ type SandboxTransferSimulationInput =
         amount: number;
         fiatCurrency: string;
         assetRail: CryptoRailId;
-        destinationWallet: string;
+        destinationCustodyWalletId: string;
       };
     }
   | {

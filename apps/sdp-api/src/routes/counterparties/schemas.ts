@@ -28,9 +28,9 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
       direction: z.literal("onramp"),
       assetRail: onrampCryptoRailSchema,
       fiatCurrency: rampFiatCurrencySchema,
-      destinationWallet: z
-        .string({ error: "destinationWallet is required for onramp requirements" })
-        .min(1, { error: "destinationWallet is required for onramp requirements" }),
+      destinationCustodyWalletId: z
+        .string({ error: "destinationCustodyWalletId is required for onramp requirements" })
+        .min(1, { error: "destinationCustodyWalletId is required for onramp requirements" }),
     })
     .strict(),
   z.discriminatedUnion("provider", [

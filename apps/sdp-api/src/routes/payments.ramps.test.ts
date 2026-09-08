@@ -164,7 +164,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId: "cpty_asset_rail_validation",
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "100.00",
@@ -236,7 +236,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId: "cpty_asset_rail_validation",
-          sourceWallet: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
@@ -250,11 +250,10 @@ describe("Payments routes — ramps", () => {
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
-  it("rejects an ambiguous Provider wallet ID before creating a hosted quote", async () => {
+  it("rejects the retired destinationWallet key on the onramp quote endpoint", async () => {
     const counterpartyId = await seedCounterparty({
-      externalId: "ambiguous_ramp_wallet",
+      externalId: "retired_destination_wallet_key",
     });
-    await seedActiveConnectionWallet({ walletId: TEST_WALLET_ID });
 
     const response = await app.request(
       "/v1/payments/ramps/onramp/quote",
@@ -276,20 +275,15 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
-    expect(
-      await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>()
-    ).toEqual({ count: 0 });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
   });
 
-  it("rejects cross-owner address ambiguity after resolving a Provider wallet ID", async () => {
+  it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
     const counterpartyId = await seedCounterparty({
-      externalId: "ambiguous_ramp_wallet_address",
+      externalId: "provider_walletid_as_custody_id",
     });
-    await seedActiveConnectionWallet({ publicKey: TEST_SOLANA_ADDRESSES.wallet1 });
 
     const response = await app.request(
       "/v1/payments/ramps/onramp/quote",
@@ -302,7 +296,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -311,8 +305,8 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(
       await getDb(env)
         .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
@@ -335,7 +329,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_CONNECTION_WALLET_ID,
+          destinationCustodyWalletId: TEST_CONNECTION_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -617,7 +611,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -703,7 +697,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
@@ -769,7 +763,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -810,7 +804,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
@@ -870,7 +864,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -903,7 +897,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -932,7 +926,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "usdc.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
@@ -956,7 +950,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
@@ -1003,7 +997,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "bvnk",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
@@ -1043,7 +1037,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "bvnk",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
@@ -1319,7 +1313,7 @@ describe("Payments routes — ramps", () => {
             fiatCurrency: "EUR",
             fiatAmount: "100",
             counterpartyId: "cpty_quota_test",
-            destinationWallet: TEST_WALLET_ID,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           }),
         },
         env
@@ -1470,7 +1464,7 @@ describe("Payments routes — ramps", () => {
           body: JSON.stringify({
             provider: "moneygram",
             counterpartyId,
-            destinationWallet: TEST_WALLET_ID,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             assetRail: "usdc.solana",
             fiatCurrency: "USD",
             fiatAmount,
@@ -1751,7 +1745,7 @@ describe("Payments routes — ramps", () => {
           },
           body: JSON.stringify({
             provider: "lightspark",
-            sourceWallet: TEST_WALLET_ID,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             assetRail: "usdc.solana",
             cryptoAmount: "25",
             fiatCurrency: "USD",

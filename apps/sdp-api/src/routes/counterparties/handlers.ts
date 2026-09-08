@@ -46,7 +46,11 @@ import {
 import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
-import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
+import {
+  assertPaymentWalletExactAccess,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
@@ -366,11 +370,11 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
-    const destinationWalletAddress = resolveWalletAddress(
+    const destinationWallet = resolveWalletByCustodyWalletId(
       scope.wallets,
-      query.data.destinationWallet,
-      "destinationWallet"
+      query.data.destinationCustodyWalletId
     );
+    const destinationWalletAddress = destinationWallet.publicKey;
     if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
       const resolution = bvnkOnrampPaymentRuleResolutionFromProviderData(
         counterparty.provider_data,
@@ -459,12 +463,12 @@ export const submitCounterpartyRequirements = async (
   let destinationWalletAddress: string | undefined;
   if (input.provider === "bvnk" && input.direction === "onramp") {
     const scope = await resolveScope(c);
-    destinationWalletAddress = resolveWalletAddress(
+    const destinationWallet = resolveWalletByCustodyWalletId(
       scope.wallets,
-      input.destinationWallet,
-      "destinationWallet",
-      scope.auth
+      input.destinationCustodyWalletId
     );
+    assertPaymentWalletExactAccess(c, destinationWallet.id, []);
+    destinationWalletAddress = destinationWallet.publicKey;
   }
   const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
     getDb(c.env)
