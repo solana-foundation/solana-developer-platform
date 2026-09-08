@@ -21,9 +21,15 @@ const buildWithdrawal = vi.fn();
 const hydrateWallet = vi.fn();
 const buildRingWithdrawalTx = vi.fn();
 const buildRingTransferTx = vi.fn();
+const spendKeys = vi.fn();
+const destroyKeys = vi.fn();
 
 vi.mock("./flows/spend.js", () => ({
   buildWithdrawal: (...args: unknown[]) => buildWithdrawal(...args),
+}));
+
+vi.mock("./keys.js", () => ({
+  spendKeys: (...args: unknown[]) => spendKeys(...args),
 }));
 
 vi.mock("./flows/ring-spend.js", () => ({
@@ -112,6 +118,7 @@ describe("buildRingsOperation manual transaction assembly", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hydrateWallet.mockResolvedValue({ wallet: {} });
+    spendKeys.mockReturnValue({ destroy: destroyKeys });
     buildWithdrawal.mockResolvedValue({
       instructions: [protocolInstruction()],
       inputNotes: ["note_1"],
@@ -146,12 +153,16 @@ describe("buildRingsOperation manual transaction assembly", () => {
       code: "invalid_input",
       message: "the Rings request contains invalid input",
     });
+    // The keys are copies of the material, so a build that throws still has to
+    // reclaim them rather than leave them to the material's scope.
+    expect(destroyKeys).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("buildRingsOperation ring-bound operations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    spendKeys.mockReturnValue({ destroy: destroyKeys });
   });
 
   function ringShieldInput(): BuildOperationInput {

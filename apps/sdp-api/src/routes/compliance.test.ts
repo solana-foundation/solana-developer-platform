@@ -337,10 +337,13 @@ describe("Compliance routes", () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
+        // The documented synchronous wallet analysis carries risk_score at the
+        // TOP level; the old nested fixture only passed under the deep search
+        // this change removes (a nested per-rule score must never read as the
+        // wallet's verdict).
         JSON.stringify({
-          analysis: {
-            risk_score: 42,
-          },
+          risk_score: 42,
+          risk_level: "high",
         }),
         {
           status: 200,

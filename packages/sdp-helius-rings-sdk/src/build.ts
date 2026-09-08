@@ -1,5 +1,5 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
-import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import { checkedTransactionSize } from "@heliuslabs/zolana/interface";
 import {
   type BuildOperationInput,
@@ -24,11 +24,11 @@ import {
   getSetComputeUnitLimitInstruction,
   MAX_COMPUTE_UNIT_LIMIT,
 } from "@solana-program/compute-budget";
-import { CustodyWalletAuthority } from "./authority.js";
 import { withZolanaErrorBridgeSync } from "./error-bridge.js";
 import { buildRingTransferTx, buildRingWithdrawalTx } from "./flows/ring-spend.js";
 import { buildShieldTransaction } from "./flows/shield.js";
 import { buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
+import { spendKeys } from "./keys.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
 import { hydrateWallet } from "./wallet.js";
 
@@ -76,7 +76,7 @@ export async function buildRingsOperation(
       const mint = requireMint(input);
 
       if (operation.opType === "shield") {
-        // No wallet, no authority, no note selection: a deposit creates notes.
+        // No wallet, no keys, no note selection: a deposit creates notes.
         // The builder fetches its own blockhash, so this one is only a floor
         // for the recorded expiry — read here to keep that floor tight.
         const floor = await deps.client.getLatestBlockhash();
@@ -105,41 +105,44 @@ export async function buildRingsOperation(
       // before the wallet read it could never use.
       const ring = operation.ringProgramId ? requireRing(input) : null;
 
-      // Every spend reads the wallet first: note selection is only as good as
-      // the state it selects from. `requireComplete` makes an incomplete read
-      // fatal here, unlike on the reporting path.
-      const authority = new CustodyWalletAuthority({
-        material,
-        authorization: {
-          owner: input.owner,
-          operationId: operation.id,
-          intentKey: operation.intentKey,
-        },
-      });
-      const { wallet } = await hydrateWallet({
-        walletId: operation.walletId,
-        client: deps.client,
-        material,
-        authority,
-        requireComplete: true,
-        // A note the indexer has not yet seen consumed still looks spendable,
-        // and the chain rejects the transaction it is chosen for.
-        ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
-      });
+      // Copies of the material's keys, so they carry their own lifetime inside
+      // the material's scope.
+      const keys = spendKeys(material, deps.client);
 
-      if (ring) {
-        return buildRingSpend(deps, input, { ring, mint, wallet, authority, owner });
-      }
+      try {
+        // Every spend reads the wallet first: note selection is only as good as
+        // the state it selects from. `requireComplete` makes an incomplete read
+        // fatal here, unlike on the reporting path.
+        const { wallet } = await hydrateWallet({
+          walletId: operation.walletId,
+          client: deps.client,
+          keys,
+          requireComplete: true,
+          // A note the indexer has not yet seen consumed still looks spendable,
+          // and the chain rejects the transaction it is chosen for.
+          ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
+        });
 
-      const spend: SpendDeps = { client: deps.client, wallet, authority, material, owner };
+        if (ring) {
+          return await buildRingSpend(deps, input, { ring, mint, wallet, keys, owner });
+        }
 
-      if (operation.opType === "transfer_registered") {
-        const built = await buildTransfer(spend, {
-          recipient: await liftRecipientShieldedAddress(deps, input),
+        const spend: SpendDeps = { client: deps.client, wallet, keys, owner };
+        const asset = {
           mint,
           amountRaw: requireAmount(input),
           ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
-        });
+        };
+
+        // The two spends differ only in how the recipient is named: a shielded
+        // address the recipient's own material has to yield, or a public one.
+        const built =
+          operation.opType === "transfer_registered"
+            ? await buildTransfer(spend, {
+                ...asset,
+                recipient: await liftRecipientShieldedAddress(deps, input),
+              })
+            : await buildWithdrawal(spend, { ...asset, recipient: requireRecipient(input) });
 
         const lifetime = await deps.client.getLatestBlockhash();
         return finish(
@@ -147,21 +150,9 @@ export async function buildRingsOperation(
           built.inputNotes,
           lifetime
         );
+      } finally {
+        keys.destroy();
       }
-
-      const built = await buildWithdrawal(spend, {
-        recipient: requireRecipient(input),
-        mint,
-        amountRaw: requireAmount(input),
-        ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
-      });
-
-      const lifetime = await deps.client.getLatestBlockhash();
-      return finish(
-        assemble(owner, built.instructions ?? [], lifetime),
-        built.inputNotes,
-        lifetime
-      );
     }
   );
 }
@@ -191,14 +182,14 @@ async function buildRingSpend(
     ring: Readonly<{ programId: string; lookupTable: string }>;
     mint: string;
     wallet: HydratedWallet;
-    authority: CustodyWalletAuthority;
+    keys: WalletKeys;
     owner: ReturnType<typeof address>;
   }>
 ): Promise<BuildOperationResult> {
   const ringSpend = {
     client: deps.client,
     wallet: context.wallet,
-    authority: context.authority,
+    keys: context.keys,
     owner: context.owner,
   };
   const ringInput = {

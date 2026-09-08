@@ -1,3 +1,4 @@
+import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -80,10 +81,12 @@ describe("Markets dashboard navigation", () => {
       {
         label: "Shared.dashboardShell.treasurySolutions",
         href: "/dashboard/markets/treasury-solutions",
+        icon: LandmarkIcon,
       },
       {
         label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/embedded-yield",
+        icon: PercentIcon,
       },
     ]);
   });
@@ -95,10 +98,17 @@ describe("Markets dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  it("hides Markets when no sub-module is enabled", () => {
-    expect(
-      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: false }))
-    ).toBeUndefined();
+  // Treasury Solutions left the Earn gate on main, so it is now listed for any
+  // org with the Markets flag. Markets therefore always has at least one child
+  // and can no longer be emptied by turning the sub-modules off.
+  it("still lists Treasury when every sub-module flag is off", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: false })
+    );
+
+    expect(markets?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/markets/treasury-solutions",
+    ]);
   });
 
   // DvP is the first Markets sub-module that is not Earn-backed, so the entry
@@ -109,7 +119,10 @@ describe("Markets dashboard navigation", () => {
     );
 
     expect(markets).toBeDefined();
-    expect(markets?.children?.map((child) => child.href)).toEqual(["/dashboard/markets/dvp"]);
+    expect(markets?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/markets/treasury-solutions",
+      "/dashboard/markets/dvp",
+    ]);
   });
 
   it("omits DvP from the sub-nav when its own flag is off", () => {

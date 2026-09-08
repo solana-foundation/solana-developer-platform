@@ -3,6 +3,16 @@ import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 
+export interface CounterpartyRequirementsParams {
+  counterpartyId: string;
+  provider: RampProviderId | null;
+  direction: RampDirection;
+  assetRail: CryptoRailId;
+  fiatCurrency: RampFiatCurrency;
+  /** Onramp only: the destination custody wallet the quote pays into. null until selected. */
+  destinationCustodyWalletId: string | null;
+}
+
 export const paymentsQueryKeys = {
   actionCounterparties: () => "payments-action-counterparties",
   actionWallets: () => "payments-action-wallets",
@@ -19,25 +29,25 @@ export const paymentsQueryKeys = {
     counterpartyId,
     provider,
     direction,
-    cryptoToken,
+    assetRail,
     fiatCurrency,
-    destinationWallet,
+    destinationCustodyWalletId,
   }: {
     counterpartyId: string;
     provider: RampProviderId;
     direction: RampDirection;
-    cryptoToken: string;
+    assetRail: CryptoRailId;
     fiatCurrency: RampFiatCurrency;
-    destinationWallet: string;
+    destinationCustodyWalletId: string;
   }) =>
     [
       "counterparty-requirements",
       counterpartyId,
       provider,
       direction,
-      cryptoToken,
+      assetRail,
       fiatCurrency,
-      destinationWallet,
+      destinationCustodyWalletId,
     ] as const,
   rampEstimate: ({
     direction,
@@ -66,3 +76,34 @@ export const paymentsQueryKeys = {
     ["payments-transaction-filter-options", projectId] as const,
   counterpartyFieldOptions: () => "counterparty-field-options",
 };
+
+/**
+ * Builds the SWR key for the counterparty-requirements fetch. Returns null (no
+ * fetch) until a provider, counterparty, and — for onramp — a destination
+ * custody wallet are all chosen, so the fetcher never sees an absent wallet id.
+ * For offramp the wallet id is irrelevant and the key carries an empty string
+ * sentinel.
+ *
+ * @param params - The requirements params, or null while the caller is disabled.
+ * @returns The SWR key, or null while a required selection is missing.
+ */
+export function buildCounterpartyRequirementsKey(
+  params: CounterpartyRequirementsParams | null
+): ReturnType<typeof paymentsQueryKeys.counterpartyRequirements> | null {
+  if (params === null || params.provider === null || params.counterpartyId === "") {
+    return null;
+  }
+  const destinationCustodyWalletId =
+    params.direction === "offramp" ? "" : params.destinationCustodyWalletId;
+  if (destinationCustodyWalletId === null) {
+    return null;
+  }
+  return paymentsQueryKeys.counterpartyRequirements({
+    counterpartyId: params.counterpartyId,
+    provider: params.provider,
+    direction: params.direction,
+    assetRail: params.assetRail,
+    fiatCurrency: params.fiatCurrency,
+    destinationCustodyWalletId,
+  });
+}

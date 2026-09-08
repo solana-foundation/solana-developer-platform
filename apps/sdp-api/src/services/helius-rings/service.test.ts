@@ -1,5 +1,9 @@
 import type { BuildOperationInput } from "@sdp/helius-rings";
-import { HeliusRingsError, type PrivateOperationInput } from "@sdp/helius-rings";
+import {
+  HeliusRingsError,
+  type PrivateOperationInput,
+  RINGS_IDENTITY_MISMATCH,
+} from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyDecision } from "@sdp/types";
 import {
@@ -225,6 +229,17 @@ function liveishService(deps: HeliusRingsServiceDependencies = {}) {
         getTransactionDecoder().decode(getBase64Codec().encode(signedTxBase64))
       ),
     ...deps,
+  });
+}
+
+/**
+ * What the SDK raises when derived material misses the persisted identity.
+ * Built from the exported marker, so renaming it upstream fails here rather
+ * than quietly leaving the quarantine untested.
+ */
+function identityMismatch(): HeliusRingsError {
+  return new HeliusRingsError("conflict", "derived identity is not the provisioned one", {
+    cause: { upstream: RINGS_IDENTITY_MISMATCH },
   });
 }
 
@@ -470,6 +485,442 @@ describe("HeliusRingsService", () => {
       await expect(
         service({ gateway: new InMemoryRingsGateway() }).syncWallet(wallet.id)
       ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("pauses a wallet whose material no longer derives its provisioned identity", async () => {
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "syncPhoton").mockRejectedValue(identityMismatch());
+
+      await expect(service({ gateway }).syncWallet(walletId)).rejects.toMatchObject({
+        code: "conflict",
+      });
+
+      // The mismatch is derived from fixed inputs, so it recurs on every read.
+      // Pausing records it once instead of failing per dashboard visit forever.
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      expect(row?.status).toBe("paused");
+    });
+
+    it("does not read a paused wallet again, and says what would clear it", async () => {
+      const gateway = new InMemoryRingsGateway();
+      const syncPhoton = vi.spyOn(gateway, "syncPhoton");
+      await createHeliusRingsWalletRepository(env).updateStatus({
+        ...tenant,
+        id: walletId,
+        status: "paused",
+      });
+
+      await expect(service({ gateway }).syncWallet(walletId)).rejects.toMatchObject({
+        code: "conflict",
+        // Both ways out are named, and only ways that exist: there is no
+        // retire action for a rings wallet.
+        message: expect.stringMatching(/restore its original owner.*or re-key/),
+      });
+      expect(syncPhoton).not.toHaveBeenCalled();
+    });
+
+    it("does not re-pause a wallet whose re-key landed while the read was in flight", async () => {
+      // The mismatch is real but stale: it describes the identity the wallet
+      // held when the read began, and a re-key has since moved it on. Applying
+      // it would take a recovered wallet back out of service.
+      const gateway = new InMemoryRingsGateway();
+      const repository = createHeliusRingsWalletRepository(env);
+      vi.spyOn(gateway, "syncPhoton").mockImplementation(async () => {
+        await repository.rekeyWallet({
+          ...tenant,
+          id: walletId,
+          shieldedAddress: "rings1recovered",
+          ownerAddress: WALLET_OWNER,
+          materialTag: "simulated",
+        });
+        throw new HeliusRingsError("conflict", "identity mismatch", {
+          cause: { upstream: RINGS_IDENTITY_MISMATCH },
+        });
+      });
+
+      await expect(service({ gateway }).syncWallet(walletId)).rejects.toMatchObject({
+        code: "conflict",
+      });
+
+      const row = await repository.getWalletById({ ...tenant, id: walletId });
+      expect(row?.status).toBe("ready");
+      expect(row?.shielded_address).toBe("rings1recovered");
+    });
+
+    it("refuses to prepare an operation on a paused wallet", async () => {
+      // A paused wallet cannot decrypt its own notes, so the operation is
+      // already lost. Reserving an intent for it spends an intent key to reach
+      // a later, vaguer error.
+      const gateway = new InMemoryRingsGateway();
+      await createHeliusRingsWalletRepository(env).updateStatus({
+        ...tenant,
+        id: walletId,
+        status: "paused",
+      });
+
+      await expect(
+        service({ gateway }).prepareOperation(
+          operationInput({ clientNonce: "nonce-paused" }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("leaves the wallet readable when the gateway fails for any other reason", async () => {
+      const gateway = new InMemoryRingsGateway();
+      // Only the identity mismatch is terminal. Pausing on a transient outage
+      // would take a healthy wallet out of service until an operator noticed.
+      vi.spyOn(gateway, "syncPhoton").mockRejectedValue(
+        new HeliusRingsError("gateway_unavailable", "photon is unreachable")
+      );
+
+      await expect(service({ gateway }).syncWallet(walletId)).rejects.toMatchObject({
+        code: "gateway_unavailable",
+      });
+
+      const row = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      expect(row?.status).toBe("ready");
+    });
+  });
+
+  describe("rekeyWalletIdentity", () => {
+    const wallets = () => createHeliusRingsWalletRepository(env);
+
+    /** A record that exists under this owner but is not what the wallet derives. */
+    function foreignGateway() {
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "foreign",
+        derivedShieldedAddress: "rings1derived",
+        publishedShieldedAddress: "rings1published",
+        mismatch: "nullifier_key",
+      });
+      return gateway;
+    }
+
+    async function pause() {
+      await wallets().updateStatus({ ...tenant, id: walletId, status: "paused" });
+      return wallets().getWalletById({ ...tenant, id: walletId });
+    }
+
+    function rekey(gateway: InMemoryRingsGateway, confirmation: string, id = walletId) {
+      return service({ gateway }).rekeyWalletIdentity(
+        id,
+        { confirmation, custodyOwner: WALLET_OWNER },
+        actorContext
+      );
+    }
+
+    it("adopts the rotated identity and lets the wallet be read again", async () => {
+      const paused = await pause();
+
+      const result = await rekey(foreignGateway(), paused?.name ?? "");
+
+      expect(result.status).toBe("ready");
+      const row = await wallets().getWalletById({ ...tenant, id: walletId });
+      expect(row?.status).toBe("ready");
+      expect(row?.shielded_address).not.toBe(paused?.shielded_address);
+    });
+
+    it("recovers a wallet that never provisioned because the registry was taken", async () => {
+      // Nothing was ever recorded for this row, so the owner has to come from
+      // custody; the broken state is on chain rather than in the database.
+      const fresh = await wallets().createWallet({
+        ...tenant,
+        sdpWalletId: "wal_never_provisioned",
+        name: "Test 1",
+        materialTag: "simulated",
+      });
+      if (!fresh) throw new Error("wallet fixture was not created");
+
+      const result = await rekey(foreignGateway(), "Test 1", fresh.id);
+
+      expect(result.status).toBe("ready");
+      const row = await wallets().getWalletById({ ...tenant, id: fresh.id });
+      expect(row?.owner_address).toBe(WALLET_OWNER);
+      expect(row?.shielded_address).not.toBeNull();
+    });
+
+    it("drops the read position, because it belonged to the abandoned identity", async () => {
+      await wallets().advanceIndexedSlot({ ...tenant, id: walletId, slot: "4242" });
+      await wallets().updateSyncCursor({
+        ...tenant,
+        id: walletId,
+        syncCursor: new Date().toISOString(),
+      });
+      const paused = await pause();
+
+      await rekey(foreignGateway(), paused?.name ?? "");
+
+      // Kept, these would start the new identity part-way through history and
+      // silently skip every deposit made before the rotation.
+      const row = await wallets().getWalletById({ ...tenant, id: walletId });
+      expect(row?.last_indexed_slot).toBeNull();
+      expect(row?.sync_cursor).toBeNull();
+    });
+
+    it("finishes a rotation that landed on chain but never reached the database", async () => {
+      // Confirmation, the re-read, or the write can fail after the transaction
+      // lands. The registry is then correct and the row is not, and `readIdentity`
+      // answers `ours` — so without a reconciliation the re-key path would refuse
+      // its own leftovers and the wallet would be stranded paused for good.
+      await pause();
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "ours",
+        derivedShieldedAddress: "rings1rotated",
+        publishedShieldedAddress: "rings1rotated",
+        mismatch: null,
+      });
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      const result = await rekey(gateway, "Treasury");
+
+      expect(result.status).toBe("ready");
+      expect(result.shieldedAddress).toBe("rings1rotated");
+      // A second irreversible write would buy nothing; the registry already agrees.
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("rotates and adopts a wallet still labelled ready whose registry is foreign", async () => {
+      // Nothing re-checks the identity between provisioning and the first sync,
+      // so a broken wallet can still be `ready`. Rotating it and then refusing to
+      // adopt would report success while the row kept the abandoned address.
+      const gateway = foreignGateway();
+
+      const result = await rekey(gateway, "Treasury");
+
+      expect(result.status).toBe("ready");
+      const row = await wallets().getWalletById({ ...tenant, id: walletId });
+      expect(row?.shielded_address).toBe(result.shieldedAddress);
+      expect(row?.shielded_address).not.toBe(WALLET_SHIELDED_IDENTITY);
+    });
+
+    it("refuses before touching the chain when the row cannot be claimed", async () => {
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      // Ordering is the whole point: a claim that fails after the transaction
+      // landed would be a guard against something already done. The claim runs
+      // on the lock's executor, so change the row while the registry is being
+      // read — the captured `updated_at` no longer matches.
+      vi.spyOn(gateway, "readIdentity").mockImplementation(async () => {
+        await createHeliusRingsWalletRepository(env).updateStatus({
+          ...tenant,
+          id: walletId,
+          status: "paused",
+        });
+        return {
+          status: "foreign",
+          derivedShieldedAddress: "rings1derived",
+          publishedShieldedAddress: "rings1published",
+          mismatch: "nullifier_key",
+        };
+      });
+
+      await expect(
+        service({ gateway }).rekeyWalletIdentity(
+          walletId,
+          { confirmation: "Treasury", custodyOwner: WALLET_OWNER },
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("serializes two genuinely concurrent re-keys into one rotation", async () => {
+      // The guard on the row cannot do this alone: a rival claims after the
+      // winner's claim commits, so exclusion has to be held across the chain
+      // call. One request wins, the other is refused, and only one
+      // irreversible transaction is sent.
+      await pause();
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+      const svc = service({ gateway });
+      const attempt = () =>
+        svc.rekeyWalletIdentity(
+          walletId,
+          { confirmation: "Treasury", custodyOwner: WALLET_OWNER },
+          actorContext
+        );
+
+      const outcomes = await Promise.allSettled([attempt(), attempt()]);
+
+      expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.filter((o) => o.status === "rejected")).toHaveLength(1);
+      expect(rekeyIdentity).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects overlapping re-keys at the pool concurrency limit without timing out", async () => {
+      // Blocking waiters each occupy a pool slot for the advisory lock. The
+      // pool is ten connections with a five-second checkout timeout, so ten
+      // overlapping requests can fill it before the winner claims or adopts.
+      // Hold the rotation so those waiters have time to check out.
+      await pause();
+      const gateway = foreignGateway();
+      const holdRotation = deferred<void>();
+      const originalRekey = gateway.rekeyIdentity.bind(gateway);
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity").mockImplementation(async (input) => {
+        await holdRotation.promise;
+        return originalRekey(input);
+      });
+      const svc = service({ gateway });
+      const attempt = () =>
+        svc.rekeyWalletIdentity(
+          walletId,
+          { confirmation: "Treasury", custodyOwner: WALLET_OWNER },
+          actorContext
+        );
+
+      const inFlight = Array.from({ length: 10 }, () => attempt());
+      const outcomesPromise = Promise.allSettled(inFlight);
+      // Waiters must have time to check out before the winner's claim or
+      // adoption needs another connection from the same ten-slot pool.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      holdRotation.resolve();
+      const outcomes = await outcomesPromise;
+
+      expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+      const rejected = outcomes.filter(
+        (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected"
+      );
+      expect(rejected).toHaveLength(9);
+      for (const outcome of rejected) {
+        expect(outcome.reason).toMatchObject({ code: "conflict" });
+        expect(String(outcome.reason)).not.toMatch(/timeout/i);
+      }
+      expect(rekeyIdentity).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets only one of two concurrent re-keys reach the chain", async () => {
+      // Both would rotate to the same derived identity, so the end state
+      // converges — but the loser's transaction is a redundant irreversible
+      // write, and it has to be stopped before it is sent, not after.
+      await pause();
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+      // Stands in for the rival request: it claims the row while this one is
+      // still reading the registry, so this one's guard no longer matches.
+      vi.spyOn(gateway, "readIdentity").mockImplementation(async () => {
+        await createHeliusRingsWalletRepository(env).updateStatus({
+          ...tenant,
+          id: walletId,
+          status: "paused",
+        });
+        return {
+          status: "foreign",
+          derivedShieldedAddress: "rings1derived",
+          publishedShieldedAddress: "rings1published",
+          mismatch: "nullifier_key",
+        };
+      });
+
+      await expect(rekey(gateway, "Treasury")).rejects.toMatchObject({ code: "conflict" });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("reports a divergence rather than a success when adoption fails after rotating", async () => {
+      await pause();
+      const gateway = foreignGateway();
+
+      // Returning the stored row here would hide a registry that has moved on
+      // behind a 200.
+      await expect(
+        service({
+          gateway,
+          wallets: {
+            ...createHeliusRingsWalletRepository(env),
+            rekeyWallet: async () => null,
+          },
+        }).rekeyWalletIdentity(
+          walletId,
+          { confirmation: "Treasury", custodyOwner: WALLET_OWNER },
+          actorContext
+        )
+      ).rejects.toMatchObject({
+        code: "conflict",
+        message: expect.stringMatching(/landed on chain/),
+      });
+    });
+
+    it("refuses a wallet that already derives what the chain publishes", async () => {
+      const ready = await wallets().getWalletById({ ...tenant, id: walletId });
+      // The chain is the gate, not the row's status: a working wallet holds a
+      // balance somebody can still spend, and rotating it discards that for
+      // nothing. A healthy wallet is one where all three agree, so the registry
+      // has to report the identity this row actually stores.
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "ours",
+        derivedShieldedAddress: ready?.shielded_address ?? "",
+        publishedShieldedAddress: ready?.shielded_address ?? "",
+        mismatch: null,
+      });
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      await expect(rekey(gateway, ready?.name ?? "")).rejects.toMatchObject({
+        code: "conflict",
+      });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("refuses when no identity is published for the owner at all", async () => {
+      const paused = await pause();
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "unregistered",
+        derivedShieldedAddress: "rings1derived",
+        publishedShieldedAddress: null,
+        mismatch: null,
+      });
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      // Rotating nothing would quietly become a first provision, and the two
+      // are not the same decision.
+      await expect(rekey(gateway, paused?.name ?? "")).rejects.toMatchObject({
+        code: "conflict",
+      });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the confirmation does not name the wallet", async () => {
+      await pause();
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      // Checked here rather than in the browser: a dialog is a courtesy to the
+      // operator, and any caller can skip it.
+      await expect(rekey(gateway, "not the name")).rejects.toMatchObject({
+        code: "invalid_input",
+      });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+
+      const row = await wallets().getWalletById({ ...tenant, id: walletId });
+      expect(row?.status).toBe("paused");
+    });
+
+    it("leaves the wallet paused when the rotation itself fails", async () => {
+      const paused = await pause();
+      const gateway = foreignGateway();
+      vi.spyOn(gateway, "rekeyIdentity").mockRejectedValue(
+        new HeliusRingsError("gateway_unavailable", "the prover is unreachable")
+      );
+
+      await expect(rekey(gateway, paused?.name ?? "")).rejects.toMatchObject({
+        code: "gateway_unavailable",
+      });
+
+      // Adopting an address the chain never published would leave the wallet
+      // claiming an identity nothing can confirm.
+      const row = await wallets().getWalletById({ ...tenant, id: walletId });
+      expect(row?.status).toBe("paused");
+      expect(row?.shielded_address).toBe(paused?.shielded_address);
     });
   });
 

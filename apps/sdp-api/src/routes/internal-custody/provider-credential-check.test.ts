@@ -995,6 +995,7 @@ describe("exact Custody Connection installation routes", () => {
       write: vi.fn(),
       read: vi.fn().mockResolvedValue({ appId: APP_ID, appSecret: APP_SECRET }),
       destroyVersion,
+      predictFirstVersionRef: vi.fn(() => null),
     });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(privyJson({ error: "invalid" }, 401)));
     const { app, token } = buildApp();

@@ -82,9 +82,42 @@ export interface UpdateHeliusRingsWalletStatusInput extends HeliusRingsProjectSc
   status: WalletStatus;
 }
 
+export interface ClaimHeliusRingsWalletInput extends HeliusRingsProjectScope {
+  id: string;
+  /**
+   * Compare-and-swap guard: the row as it was read before the registry was
+   * consulted. Status cannot serve as the guard here, because `paused` is both
+   * where a claim lands and where the common recovery starts, so a second
+   * claim would be indistinguishable from the first. Requiring the row to be
+   * untouched makes two concurrent re-keys pick a winner before either reaches
+   * the chain, and any other write in that window refuses the claim — the safe
+   * direction, since nothing irreversible has happened yet.
+   */
+  expectedUpdatedAt: string;
+}
+
+export interface QuarantineHeliusRingsWalletInput extends HeliusRingsProjectScope {
+  id: string;
+  /**
+   * Compare-and-swap guard: the identity the failed read was for. A read that
+   * began before a re-key can land after it, and by then the mismatch it found
+   * describes an identity the wallet has already abandoned.
+   */
+  expectedShieldedAddress: string;
+}
+
 export interface UpdateHeliusRingsWalletSyncCursorInput extends HeliusRingsProjectScope {
   id: string;
   syncCursor: string;
+}
+
+export interface RekeyHeliusRingsWalletInput extends HeliusRingsProjectScope {
+  id: string;
+  /** The identity the rotation published, which the wallet now derives. */
+  shieldedAddress: string;
+  /** Pinned with it, and the first owner this row records when it never provisioned. */
+  ownerAddress: string;
+  materialTag: MaterialTag;
 }
 
 export interface ListHeliusRingsWalletsInput extends HeliusRingsProjectScope {
@@ -120,6 +153,46 @@ export interface HeliusRingsWalletRepository {
     input: MarkHeliusRingsWalletProvisionedInput
   ): Promise<HeliusRingsWalletRow | null>;
   updateStatus(input: UpdateHeliusRingsWalletStatusInput): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Adopts a rotated identity and clears the read position with it.
+   *
+   * Separate from `markProvisioned` because of that clearing: the cursor and
+   * indexed slot describe how far a *particular* identity had been read, and
+   * the rotated wallet is not that identity. Carrying them over would start the
+   * new identity mid-history and silently skip everything before it.
+   *
+   * Accepts any live status, because by the time this runs the decision has
+   * already been made and, in the rotation case, already been written to the
+   * chain. Refusing here would only strand the row behind a registry that
+   * moved without it. Whether a rotation is *allowed* is settled earlier, by
+   * the registry read and by `claimWalletForRekey`.
+   */
+  rekeyWallet(input: RekeyHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Takes the row for an imminent rotation, returning null if another writer
+   * got there first.
+   *
+   * Claiming moves the wallet to `paused` before anything irreversible happens,
+   * which is both honest — its balance is about to be abandoned — and useful: if
+   * the process dies between the transaction landing and the row being updated,
+   * the wallet is left in the state the reconciliation path knows how to finish.
+   *
+   * The claim is exclusive rather than unconditional so that two concurrent
+   * re-keys cannot both reach the chain. Both would rotate to the same derived
+   * identity, so the end state converges, but one of them would be a redundant
+   * irreversible write.
+   */
+  claimWalletForRekey(input: ClaimHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Pauses a wallet whose material stopped deriving its identity, returning
+   * null if the row has since moved to a different identity.
+   *
+   * Guarded rather than unconditional because the finding can arrive stale: a
+   * read that started before a re-key reports a mismatch against the identity
+   * that was abandoned, and applying it would take the recovered wallet back
+   * out of service.
+   */
+  quarantineWallet(input: QuarantineHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
   updateSyncCursor(
     input: UpdateHeliusRingsWalletSyncCursorInput
   ): Promise<HeliusRingsWalletRow | null>;
