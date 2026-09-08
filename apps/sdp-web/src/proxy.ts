@@ -14,10 +14,6 @@ import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
-  // Throwaway, development-only product prototypes render without Clerk so
-  // they can be shared and reviewed on a local server. The routes themselves
-  // return 404 in production.
-  "/prototype(.*)",
   WORKSPACE_LOADING_PATH,
   "/pay/:token",
   "/",

@@ -1,0 +1,543 @@
+.prototypePage {
+  --ink: var(--emph-xh);
+  --muted: var(--emph-m);
+  --quiet: var(--emph-l);
+  height: 100dvh;
+  min-height: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.prototypePage button,
+.prototypePage input,
+.prototypePage textarea,
+.prototypePage select {
+  font: inherit;
+}
+
+.mainShell {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.contentCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.embeddedPrototypePage {
+  height: 100%;
+}
+
+.secondaryButton,
+.primaryButton {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: 120ms ease;
+}
+
+.secondaryButton {
+  padding: 0 14px;
+  border: 0;
+  background: color-mix(in srgb, var(--emph-xh) 7.5%, transparent);
+  color: color-mix(in srgb, var(--emph-xh) 78.0%, transparent);
+}
+
+.secondaryButton:hover {
+  background: color-mix(in srgb, var(--emph-xh) 12.0%, transparent);
+}
+
+.secondaryButton:disabled,
+.primaryButton:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.primaryButton {
+  padding: 0 17px;
+  border: 0;
+  background: var(--emph-xh);
+  color: var(--on-primary);
+}
+
+.primaryButton:hover {
+  background: color-mix(in srgb, var(--emph-xh) 86%, transparent);
+}
+
+.focusVariant {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 40px;
+}
+
+.progressHeader {
+  flex: none;
+  width: min(100%, 576px);
+  margin: 0 auto;
+  padding: 32px 0 24px;
+}
+
+.focusGrid {
+  width: min(100%, 576px);
+  margin: 0 auto;
+  padding: 24px 0 40px;
+}
+
+.wizardScrollRegion {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.stepStage {
+  min-width: 0;
+}
+
+.stepPanel {
+  width: 100%;
+}
+
+.stepFooter {
+  flex: none;
+  margin: 0 -40px;
+  padding: 16px 40px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid color-mix(in srgb, var(--emph-xh) 8.0%, transparent);
+}
+
+.stepFooterInner {
+  width: min(100%, 576px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.classificationGrid {
+  display: grid;
+  gap: 11px;
+}
+
+.classificationCard {
+  width: 100%;
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: 44px 1fr 22px;
+  align-items: center;
+  gap: 15px;
+  padding: 20px;
+  border: 1.5px solid color-mix(in srgb, var(--emph-xh) 10.0%, transparent);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  color: var(--emph-xh);
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.025);
+}
+
+.classificationCard:hover {
+  border-color: color-mix(in srgb, var(--emph-xh) 28.0%, transparent);
+}
+
+.classificationCardSelected {
+  border-color: var(--emph-xh);
+  box-shadow: inset 0 0 0 0.5px var(--emph-xh);
+}
+
+.classificationIcon,
+.controlIcon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: color-mix(in srgb, var(--emph-xh) 5.5%, transparent);
+  color: color-mix(in srgb, var(--emph-xh) 68.0%, transparent);
+}
+
+.classificationIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+}
+
+.classificationCopy {
+  display: flex;
+  flex-direction: column;
+}
+
+.classificationCopy strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.classificationCopy > span {
+  max-width: 510px;
+  margin-top: 5px;
+  color: color-mix(in srgb, var(--emph-xh) 58.0%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.radio {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid color-mix(in srgb, var(--emph-xh) 20.0%, transparent);
+  border-radius: 50%;
+  color: var(--on-primary);
+}
+
+.radioSelected {
+  border-color: var(--emph-xh);
+  background: var(--emph-xh);
+}
+
+.formStack,
+.controlStack,
+.permissionsStack,
+.reviewStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 0.55fr;
+  gap: 13px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: color-mix(in srgb, var(--emph-xh) 70.0%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border: 1.5px solid color-mix(in srgb, var(--emph-xh) 10.0%, transparent);
+  border-radius: 9px;
+  outline: 0;
+  background: var(--surface-raised);
+  color: var(--emph-xh);
+  font-size: 13px;
+  font-weight: 450;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.field input,
+.field select {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.field textarea {
+  padding: 11px 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  border-color: color-mix(in srgb, var(--emph-xh) 50.0%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--emph-xh) 8.0%, transparent);
+}
+
+.field small {
+  color: color-mix(in srgb, var(--emph-xh) 45.0%, transparent);
+  font-size: 10px;
+  font-weight: 450;
+}
+
+.controlRow {
+  width: 100%;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--emph-xh) 9.0%, transparent);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--emph-xh);
+  text-align: left;
+}
+
+.controlRow:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.controlIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.controlCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.controlCopy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.controlCopy span {
+  color: color-mix(in srgb, var(--emph-xh) 52.0%, transparent);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--emph-xh) 14.0%, transparent);
+  transition: background 160ms ease;
+}
+
+.toggle > span {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  transition: transform 160ms ease;
+}
+
+.toggleOn {
+  background: var(--emph-xh);
+}
+
+.toggleOn > span {
+  transform: translateX(16px);
+}
+
+.docsLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--emph-xh) 60.0%, transparent);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.docsLink:hover {
+  color: var(--emph-xh);
+}
+
+.advancedSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.advancedSection > button {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--emph-xh) 66.0%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.advancedSection > button span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.advancedSection > button svg {
+  transition: transform 140ms ease;
+}
+
+.advancedSection > button svg.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.advancedBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reviewList {
+  border-top: 1px solid color-mix(in srgb, var(--emph-xh) 9%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--emph-xh) 9%, transparent);
+}
+
+.reviewRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--emph-xh) 7.0%, transparent);
+}
+
+.reviewRow:last-child {
+  border-bottom: 0;
+}
+
+.reviewRow span {
+  flex: none;
+  color: color-mix(in srgb, var(--emph-xh) 48.0%, transparent);
+  font-size: 13px;
+}
+
+.reviewRow strong {
+  max-width: 72%;
+  color: color-mix(in srgb, var(--emph-xh) 78.0%, transparent);
+  font-size: 13px;
+  font-weight: 550;
+  text-align: right;
+}
+
+.apiPreview {
+  display: none;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--emph-xh) 10.0%, transparent);
+  border-radius: 13px;
+  background: #1d1d1e;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+@media (min-width: 768px) {
+  .apiPreview {
+    display: block;
+  }
+}
+
+.apiPreviewHeader {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.apiPreviewHeader span,
+.apiPreviewHeader button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.apiPreviewHeader span {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.apiPreviewHeader button {
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 9px;
+}
+
+.apiPreview pre {
+  margin: 0;
+  padding: 14px 16px 17px;
+  overflow: auto;
+  color: rgba(255, 255, 255, 0.54);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.apiPreview pre span {
+  color: #8dd3b4;
+  font-weight: 700;
+}
+
+.apiPreview pre b {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 550;
+}
+
+/* Token workspace */
+
+/* Wallet modal */
+
+@media (max-width: 900px) {
+  .mainShell {
+    padding: 0;
+  }
+
+  .contentCard {
+    border-radius: 0;
+  }
+
+  .focusVariant {
+    padding-inline: 22px;
+  }
+
+  .stepFooter {
+    margin-inline: -22px;
+    padding-inline: 22px;
+  }
+}
+
+@media (max-width: 620px) {
+  .progressHeader {
+    padding-block: 24px;
+  }
+
+  .focusVariant {
+    padding-inline: 17px;
+  }
+
+  .stepFooter {
+    margin-inline: -17px;
+    padding-inline: 17px;
+  }
+
+  .focusGrid {
+    padding-top: 25px;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -620,7 +620,7 @@ export function AdvancedSettingsEditor({
             )}
           </p>
         ) : null}
-        <ControlTimingNote compact={controlsOnly} readOnly={settingsReadOnly} />
+        <ControlTimingNote compact={controlsOnly} readOnly={Boolean(settingsReadOnly)} />
 
         <div className="mt-3 grid gap-2.5">
           {onAccessControlChange ? (

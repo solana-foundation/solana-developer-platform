@@ -1,20 +1,5 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { Suspense } from "react";
-import { IssuanceSimplifiedPrototype } from "./issuance-simplified-prototype";
-
-export const metadata: Metadata = {
-  title: "Simplified issuance prototype",
-};
+import { redirect } from "next/navigation";
 
 export default function SimplifiedIssuancePrototypePage() {
-  if (process.env.NODE_ENV === "production") {
-    notFound();
-  }
-
-  return (
-    <Suspense>
-      <IssuanceSimplifiedPrototype />
-    </Suspense>
-  );
+  redirect("/dashboard/issuance/create");
 }

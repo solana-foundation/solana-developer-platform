@@ -39,8 +39,6 @@ export function OperationsTab({
   ops: TokenOperations;
   token: Token;
   canManageTokenAdmin: boolean;
-  hasUnsavedChanges: boolean;
-  onViewSettings: () => void;
 }) {
   const t = useTranslations();
   const [activeAction, setActiveAction] = useState<
@@ -59,6 +57,7 @@ export function OperationsTab({
   const availability = ops.operationAvailability;
 
   const draftReason = !token.mintAddress ? t("DashboardIssuance.simplified.deployFirst") : null;
+  const isStablecoinDraft = !token.mintAddress && token.template === "stablecoin";
 
   const supply: OperationRow[] = [
     {
@@ -95,7 +94,10 @@ export function OperationsTab({
       onAction: () => setActiveAction("allowlist"),
       // Keep the list readable even when its mutation signer is unavailable.
     });
-  if (canManageTokenAdmin && (token.extensions?.pausable || token.status === "paused"))
+  if (
+    canManageTokenAdmin &&
+    (token.extensions?.pausable || token.status === "paused" || isStablecoinDraft)
+  )
     transfers.push({
       id: "pause",
       icon: token.status === "paused" ? Play : Pause,
@@ -128,7 +130,7 @@ export function OperationsTab({
       disabledReason: ops.effectiveFreezeDisabledReason,
     });
   const recovery: OperationRow[] = [];
-  if (canManageTokenAdmin && token.extensions?.permanentDelegate)
+  if (canManageTokenAdmin && (token.extensions?.permanentDelegate || isStablecoinDraft))
     recovery.push(
       {
         id: "seize",
@@ -264,9 +266,6 @@ function OperationRows({ rows, pending }: { rows: OperationRow[]; pending: boole
           <div className="min-w-0">
             <p className="text-sm font-medium text-primary">{row.title}</p>
             <p className="mt-1 text-sm text-secondary">{row.helper}</p>
-            {row.disabledReason ? (
-              <p className="mt-1 text-xs text-tertiary">{row.disabledReason}</p>
-            ) : null}
           </div>
           <TokenDisabledActionTooltip reason={row.disabledReason}>
             <Button

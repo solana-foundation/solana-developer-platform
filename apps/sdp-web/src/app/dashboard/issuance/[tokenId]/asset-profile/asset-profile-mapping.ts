@@ -203,12 +203,18 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     propertyType: readString(asset, "propertyType"),
     propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
-    accessControl: readAccessControl(compliance.accessControl),
+    accessControl:
+      readAccessControl(compliance.accessControl) ||
+      (token.requiresAllowlist ? "allowlist" : "disabled"),
     capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
     signingWalletId: token.signingWalletId ?? "",
     authorityWalletIds: isRecord(customer.authorityWalletIds)
-      ? Object.fromEntries(Object.entries(customer.authorityWalletIds).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+      ? Object.fromEntries(
+          Object.entries(customer.authorityWalletIds).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string"
+          )
+        )
       : undefined,
     metadataUri: token.uri ?? "",
     customFields: readCustomFields(customer),
@@ -394,7 +400,9 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
           .sort(([a], [b]) => a.localeCompare(b)),
       })),
     signingWalletId: draft.signingWalletId.trim(),
-    authorityWalletIds: Object.entries(draft.authorityWalletIds ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    authorityWalletIds: Object.entries(draft.authorityWalletIds ?? {}).sort(([a], [b]) =>
+      a.localeCompare(b)
+    ),
     metadataUri: draft.metadataUri.trim(),
     customFields: draft.customFields
       .filter((field) => field.key.trim() || field.value.trim())

@@ -890,7 +890,9 @@ export function DashboardShell({
                 contentWidthClass,
                 // Clears the fixed mobile bottom bar so the last row of any page is
                 // still reachable; the bar is xl:hidden, so the padding is too.
-                shouldLockViewportScroll ? "" : "pb-20 xl:pb-0",
+                pathname === "/dashboard/issuance/create" || !shouldLockViewportScroll
+                  ? "pb-20 xl:pb-0"
+                  : "",
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",

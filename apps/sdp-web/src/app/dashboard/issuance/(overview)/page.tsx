@@ -6,7 +6,6 @@ import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { parseIssuanceListQuery } from "../issuance-list-query";
 import {
@@ -125,22 +124,18 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
-    const [templatesResult, tokensPage, facets, apiKeysResult, signerWalletsResult] =
-      await Promise.all([
-        trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
-        trace.step("fetch_tokens", () =>
-          fetchIssuanceTokensPage(apiClient.request, listQuery, {
-            untitledLabel: t("DashboardIssuance.management.untitledToken"),
-          })
-        ),
-        // Facet counts drive the filter options and the "no assets yet" vs "no
-        // matches" distinction, so they must not be narrowed by the active filters.
-        trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
-        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-        trace.step("fetch_signer_wallets", () =>
-          fetchPaymentsWallets(apiClient.request, { view: "summary" })
-        ),
-      ]);
+    const [templatesResult, tokensPage, facets, apiKeysResult] = await Promise.all([
+      trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
+      trace.step("fetch_tokens", () =>
+        fetchIssuanceTokensPage(apiClient.request, listQuery, {
+          untitledLabel: t("DashboardIssuance.management.untitledToken"),
+        })
+      ),
+      // Facet counts drive the filter options and the "no assets yet" vs "no
+      // matches" distinction, so they must not be narrowed by the active filters.
+      trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+    ]);
 
     const tokens = assetProfilesEnabled
       ? await trace.step("attach_asset_profiles", () =>
@@ -165,7 +160,6 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
       pageSize: tokensPage.pageSize,
       templateCount: templatesResult.data?.length ?? 0,
       apiKeyCount: apiKeys.length,
-      signerWalletCount: signerWalletsResult.data?.length ?? 0,
     });
 
     return (
@@ -177,19 +171,9 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
         facets={facets}
         templates={templatesResult.data ?? []}
         apiKeys={apiKeys}
-        signerWallets={signerWalletsResult.data ?? []}
         apiBaseUrl={apiBaseUrl}
         templatesError={templatesError}
         tokensNotice={tokensPage.error ? resolveTokenListNotice(tokensPage.status, t) : null}
-        signerWalletsError={
-          signerWalletsResult.ok
-            ? null
-            : t("DashboardIssuance.errors.apiRequestFailed", {
-                resource: t("DashboardIssuance.errors.walletResource"),
-                status: signerWalletsResult.status ?? t("DashboardIssuance.errors.unavailable"),
-                error: signerWalletsResult.error ?? t("DashboardIssuance.errors.unknown"),
-              })
-        }
       />
     );
   } catch (error) {

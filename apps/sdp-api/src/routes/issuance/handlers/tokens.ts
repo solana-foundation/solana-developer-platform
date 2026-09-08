@@ -1,6 +1,6 @@
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenResponse } from "@sdp/types";
+import type { Token, TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -186,6 +186,37 @@ export const getToken = async (c: AppContext) => {
   return success(c, response);
 };
 
+function validateDraftOnlyUpdates(existing: Token, body: z.infer<typeof updateTokenSchema>) {
+  // Access-control enforcement is baked into the mint at deploy; the flag only
+  // makes sense to change while the token is still an undeployed draft.
+  if (
+    body.requiresAllowlist !== undefined &&
+    (existing.mintAddress || existing.status !== "pending")
+  ) {
+    throw badRequest("requiresAllowlist cannot be changed after deployment");
+  }
+
+  // Symbol and decimals define the mint itself, so they're immutable once the
+  // token is deployed on-chain — only editable while it's an undeployed draft.
+  if (
+    (body.symbol !== undefined || body.decimals !== undefined) &&
+    (existing.mintAddress || existing.status !== "pending")
+  ) {
+    throw badRequest("symbol and decimals cannot be changed after deployment");
+  }
+
+  // SPL carries no supply cap, so SDP enforces it at mint time — which it can
+  // only do while it holds the mint authority. Once that authority is revoked
+  // (lock-supply), the total can never change again and neither can the cap.
+  if (
+    body.maxSupply !== undefined &&
+    existing.mintAddress &&
+    (!existing.isMintable || !existing.mintAuthority)
+  ) {
+    throw badRequest("maxSupply cannot be changed after the supply is locked on-chain");
+  }
+}
+
 export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -219,34 +250,7 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     await createOrgSigner(c.env, orgId, projectId, walletId);
   }
 
-  // Access-control enforcement is baked into the mint at deploy; the flag only
-  // makes sense to change while the token is still an undeployed draft.
-  if (
-    body.requiresAllowlist !== undefined &&
-    (existing.mintAddress || existing.status !== "pending")
-  ) {
-    throw badRequest("requiresAllowlist cannot be changed after deployment");
-  }
-
-  // Symbol and decimals define the mint itself, so they're immutable once the
-  // token is deployed on-chain — only editable while it's an undeployed draft.
-  if (
-    (body.symbol !== undefined || body.decimals !== undefined) &&
-    (existing.mintAddress || existing.status !== "pending")
-  ) {
-    throw badRequest("symbol and decimals cannot be changed after deployment");
-  }
-
-  // SPL carries no supply cap, so SDP enforces it at mint time — which it can
-  // only do while it holds the mint authority. Once that authority is revoked
-  // (lock-supply), the total can never change again and neither can the cap.
-  if (
-    body.maxSupply !== undefined &&
-    existing.mintAddress &&
-    (!existing.isMintable || !existing.mintAuthority)
-  ) {
-    throw badRequest("maxSupply cannot be changed after the supply is locked on-chain");
-  }
+  validateDraftOnlyUpdates(existing, body);
 
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;

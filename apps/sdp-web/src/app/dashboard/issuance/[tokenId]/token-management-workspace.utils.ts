@@ -782,7 +782,7 @@ export function getAvailableSignerWallets(
 
 export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet, t: Translate): string {
   const primaryLabel = wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled");
-  return `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  return `${primaryLabel} · ${formatValue(wallet.publicKey, t)}`;
 }
 
 export function findWalletByWalletId(

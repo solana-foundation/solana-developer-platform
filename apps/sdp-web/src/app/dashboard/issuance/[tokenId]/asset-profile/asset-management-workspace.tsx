@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect } from "react";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { getDraftDeploymentBlocker } from "../../draft-permissions";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenLockSupplyModal } from "../token-lock-supply-modal";
@@ -77,6 +78,10 @@ export function AssetManagementWorkspace({
     canManageTokenAdmin,
   });
   const form = useAssetProfileForm({ token, assetProfile });
+  const draftDeploymentBlocker = getDraftDeploymentBlocker(
+    form.draft.authorityWalletIds,
+    form.draft.signingWalletId
+  );
   const showSection = useCallback((section: AssetManagementTab) => {
     const element = document.getElementById(`token-${section}`);
     if (element instanceof HTMLDetailsElement) element.open = true;
@@ -100,18 +105,23 @@ export function AssetManagementWorkspace({
           explorerHref={ops.explorerHref}
           canDeployToken={ops.canDeployToken}
           isPending={ops.isPending}
-          deployDisabledReason={form.dirty ? t("DashboardIssuance.simplified.saveBeforeDeploy") : ops.deployDisabledReason}
+          deployDisabledReason={
+            form.dirty
+              ? t("DashboardIssuance.simplified.saveBeforeDeploy")
+              : draftDeploymentBlocker || ops.deployDisabledReason
+          }
           pauseDisabledReason={ops.effectivePauseDisabledReason}
           canManageTokenAdmin={canManageTokenAdmin}
           onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
           onCopyTokenId={() =>
             void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
           }
-          onDeploy={ops.deployToken}
+          onDeploy={() => {
+            if (!form.dirty && !draftDeploymentBlocker) ops.deployToken();
+          }}
           onUnpause={() => ops.handlePause(false)}
           onRefreshSupply={ops.handleRefreshSupply}
         />
-
       </div>
 
       {tokenError ? (
@@ -130,13 +140,7 @@ export function AssetManagementWorkspace({
             <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
           </summary>
           <div className="pt-4">
-          <OperationsTab
-            ops={ops}
-            token={token}
-            canManageTokenAdmin={canManageTokenAdmin}
-            hasUnsavedChanges={form.dirty}
-            onViewSettings={() => showSection("settings")}
-          />
+            <OperationsTab ops={ops} token={token} canManageTokenAdmin={canManageTokenAdmin} />
           </div>
         </details>
         <details id="token-permissions" open className="group scroll-mt-6 py-5">
@@ -145,7 +149,7 @@ export function AssetManagementWorkspace({
             <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
           </summary>
           <div className="pt-4">
-          <PermissionsTab ops={ops} form={form} canManageTokenAdmin={canManageTokenAdmin} />
+            <PermissionsTab ops={ops} form={form} canManageTokenAdmin={canManageTokenAdmin} />
           </div>
         </details>
         <details id="token-settings" className="group scroll-mt-6 py-5">
@@ -153,7 +157,9 @@ export function AssetManagementWorkspace({
             {t("DashboardIssuance.simplified.settings")}
             <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
           </summary>
-          <div className="pt-5"><DetailsTab token={token} form={form} /></div>
+          <div className="pt-5">
+            <DetailsTab token={token} form={form} />
+          </div>
         </details>
         <details id="token-activity" className="group scroll-mt-6 py-5">
           <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
@@ -161,7 +167,7 @@ export function AssetManagementWorkspace({
             <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
           </summary>
           <div className="pt-4">
-          <ActivityTab tokenId={token.id} isDraft={!token.mintAddress} />
+            <ActivityTab tokenId={token.id} isDraft={!token.mintAddress} />
           </div>
         </details>
       </div>

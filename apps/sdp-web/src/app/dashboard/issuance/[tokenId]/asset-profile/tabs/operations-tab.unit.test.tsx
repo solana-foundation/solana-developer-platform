@@ -70,12 +70,7 @@ function makeOps(overrides: Partial<TokenOperations> = {}): TokenOperations {
   } as TokenOperations;
 }
 
-function render(
-  input: Token = token,
-  overrides: Partial<TokenOperations> = {},
-  admin = true,
-  dirty = false
-) {
+function render(input: Token = token, overrides: Partial<TokenOperations> = {}, admin = true) {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <main className="mx-auto max-w-5xl space-y-6 p-6 sm:p-10">
@@ -98,13 +93,7 @@ function render(
           <span>Activity</span>
           <span>Settings</span>
         </div>
-        <OperationsTab
-          token={input}
-          ops={makeOps(overrides)}
-          canManageTokenAdmin={admin}
-          hasUnsavedChanges={dirty}
-          onViewSettings={vi.fn()}
-        />
+        <OperationsTab token={input} ops={makeOps(overrides)} canManageTokenAdmin={admin} />
       </main>
     </I18nProvider>
   );
@@ -122,27 +111,22 @@ describe("simplified token operations", () => {
     expect(html).not.toContain('data-slot="card"');
   });
 
-  it("shows deployment instead of live operations for a draft", () => {
+  it("shows disabled operations for a draft", () => {
     const html = render(
       { ...token, mintAddress: null, status: "pending" },
       { canDeployToken: true }
     );
-    expect(html).toContain("This draft is saved in SDP");
-    expect(html).not.toContain('data-testid="fund-management-row-mint"');
+    expect(html).toContain("Deploy this token first");
+    expect(html).toContain('data-testid="fund-management-row-mint"');
   });
 
-  it("does not deploy over unsaved settings", () => {
+  it("does not duplicate the header deploy action", () => {
     const html = render(
       { ...token, mintAddress: null, status: "pending" },
-      { canDeployToken: true },
-      true,
-      true
+      { canDeployToken: true }
     );
-    expect(html).toContain("Save or discard your changes before deploying");
-    const deployButton = [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)]
-      .map((match) => match[0])
-      .find((button) => button.includes(">Deploy<"));
-    expect(deployButton).toContain('disabled=""');
+    expect(html).not.toContain(">Deploy<");
+    expect(html).toMatch(/aria-label="Mint tokens"[^>]*disabled=""/);
   });
 
   it("keeps recipient lists readable while hiding privileged actions from non-admins", () => {

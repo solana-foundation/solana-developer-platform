@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getCategoryPresentation } from "../../create/asset-taxonomy";
-import { formatSupply, tokenMarkInitial, tokenStatusPresentation } from "../../issuance-token-fields";
+import {
+  formatSupply,
+  tokenMarkInitial,
+  tokenStatusPresentation,
+} from "../../issuance-token-fields";
 import { shortenAddress } from "../../wallet-identity";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import { formatDate } from "../token-management-workspace.utils";
@@ -95,22 +99,24 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
             </div>
 
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-secondary">
-              {metaSegments.filter((segment) => segment.key !== "status" || Boolean(token.mintAddress)).map((segment, index) => (
-                <span
-                  key={segment.key}
-                  className={cn(
-                    "items-center gap-2",
-                    segment.desktopOnly ? "hidden sm:inline-flex" : "inline-flex"
-                  )}
-                >
-                  {index > 0 ? (
-                    <span aria-hidden="true" className="text-muted">
-                      &middot;
-                    </span>
-                  ) : null}
-                  {segment.node}
-                </span>
-              ))}
+              {metaSegments
+                .filter((segment) => segment.key !== "status" || Boolean(token.mintAddress))
+                .map((segment, index) => (
+                  <span
+                    key={segment.key}
+                    className={cn(
+                      "items-center gap-2",
+                      segment.desktopOnly ? "hidden sm:inline-flex" : "inline-flex"
+                    )}
+                  >
+                    {index > 0 ? (
+                      <span aria-hidden="true" className="text-muted">
+                        &middot;
+                      </span>
+                    ) : null}
+                    {segment.node}
+                  </span>
+                ))}
             </div>
 
             <div className="hidden flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:flex">
@@ -145,16 +151,28 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
       <dl className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs sm:pl-[60px]">
         <div className="flex items-center gap-2">
           <dt className="text-tertiary">{t("DashboardIssuance.simplified.issuedSupply")}</dt>
-          <dd className="text-secondary">{formatSupply(token.totalSupply, locale)} {token.symbol}</dd>
+          <dd className="text-secondary">
+            {formatSupply(token.totalSupply, locale)} {token.symbol}
+          </dd>
           {token.mintAddress && props.onRefreshSupply ? (
-            <button type="button" aria-label={t("DashboardIssuance.management.refreshSupply")} disabled={props.isPending} onClick={props.onRefreshSupply} className="rounded p-1 text-tertiary hover:bg-fill">
+            <button
+              type="button"
+              aria-label={t("DashboardIssuance.management.refreshSupply")}
+              disabled={props.isPending}
+              onClick={props.onRefreshSupply}
+              className="rounded p-1 text-tertiary hover:bg-fill"
+            >
               <RefreshCw className="size-3.5" />
             </button>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
           <dt className="text-tertiary">{t("DashboardIssuance.simplified.supplyCap")}</dt>
-          <dd className="text-secondary">{token.maxSupply ? formatSupply(token.maxSupply, locale) : t("DashboardIssuance.simplified.noCap")}</dd>
+          <dd className="text-secondary">
+            {token.maxSupply
+              ? formatSupply(token.maxSupply, locale)
+              : t("DashboardIssuance.simplified.noCap")}
+          </dd>
         </div>
         {!token.deployedAt ? (
           <div className="hidden items-center gap-2 sm:flex">

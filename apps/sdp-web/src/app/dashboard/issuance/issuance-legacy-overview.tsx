@@ -33,7 +33,6 @@ interface IssuanceLegacyOverviewProps {
   tokensNotice: string | null;
   emptyResultsNotice: ReactNode;
   pagination: ReactNode;
-  createModal: ReactNode;
 }
 
 export function IssuanceLegacyOverview({
@@ -45,7 +44,6 @@ export function IssuanceLegacyOverview({
   tokensNotice,
   emptyResultsNotice,
   pagination,
-  createModal,
 }: IssuanceLegacyOverviewProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -172,8 +170,6 @@ export function IssuanceLegacyOverview({
       </div>
 
       {pagination}
-
-      {createModal}
     </>
   );
 }

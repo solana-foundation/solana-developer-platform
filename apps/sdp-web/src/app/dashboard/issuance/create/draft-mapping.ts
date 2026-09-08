@@ -313,7 +313,9 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
     ...customer,
     ...(draft.authorityWalletIds ? { authorityWalletIds: draft.authorityWalletIds } : {}),
   };
-  const custom = pruneEmpty({ customer: Object.keys(customerWithAuthorities).length > 0 ? customerWithAuthorities : undefined });
+  const custom = pruneEmpty({
+    customer: Object.keys(customerWithAuthorities).length > 0 ? customerWithAuthorities : undefined,
+  });
 
   const selectedSettings = buildSelectedSettings(draft.advancedSettings);
   const settings =
