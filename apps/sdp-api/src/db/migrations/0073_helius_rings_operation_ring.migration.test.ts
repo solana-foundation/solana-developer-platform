@@ -49,13 +49,13 @@ async function insertOperation(input: {
   projectId: string;
   walletId: string;
   ringProgramId: string | null;
-}): Promise<void> {
+}) {
   const connection = await client.query<{ id: string }>(
     `SELECT id FROM helius_rings_connections
       WHERE organization_id = $1 AND project_id = $2 AND is_default = TRUE`,
     [input.organizationId, input.projectId]
   );
-  await client.query(
+  return client.query(
     `INSERT INTO helius_rings_operations
        (id, organization_id, project_id, rings_connection_id, wallet_id,
         op_type, intent_key, ring_program_id)
