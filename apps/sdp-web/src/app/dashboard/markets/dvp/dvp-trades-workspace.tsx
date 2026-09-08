@@ -401,6 +401,62 @@ function TradesTable({
   );
 }
 
+/** The one call to action on this page, in both places it appears. */
+function CreateTradeButton({ className }: { className?: string }) {
+  const t = useTranslations();
+  return (
+    <Button asChild className={className} size="sm">
+      <Link href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`}>
+        <PlusIcon className="size-4" />
+        {t("DashboardMarkets.dvp.createAction")}
+      </Link>
+    </Button>
+  );
+}
+
+/**
+ * What the list is showing right now.
+ *
+ * Filtered here rather than in the URL: the list arrives already capped by
+ * `listByProject`, so everything being filtered is on the page and a round trip
+ * per keystroke would be slower and no more correct.
+ *
+ * The waiting segment lists trades belonging to other organizations, so the
+ * project's own list is not filtered down to nothing, it is replaced. Both sides
+ * run the same query so the search box means one thing on either.
+ */
+function useTradeListView(
+  trades: DvpTrade[],
+  inbound: DvpInboundTrade[],
+  status: StatusFilter,
+  query: string
+) {
+  const showingInbound = status === "waiting";
+  const needle = query.trim().toLowerCase();
+  const visible = showingInbound ? [] : filterOwnTrades(trades, status, needle);
+  const visibleInbound = showingInbound
+    ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
+    : [];
+
+  // A project whose only DvP activity is a trade somebody else set up for it has
+  // none of its own, and treating that as an empty page rendered "No trades yet"
+  // over the one thing waiting on them, with no filter control on screen to
+  // reach it by. Having nothing to do is what empty means here.
+  const listIsEmpty = trades.length === 0 && inbound.length === 0;
+  // Rows shown on the current segment, from either source. The waiting segment
+  // draws from `inbound` and leaves `visible` empty by design, so counting only
+  // `visible` declared "no trades match" over a table that had a row to render.
+  const shownCount = showingInbound ? visibleInbound.length : visible.length;
+
+  return {
+    showingInbound,
+    visible,
+    visibleInbound,
+    listIsEmpty,
+    filteredToNothing: !(listIsEmpty && !showingInbound) && shownCount === 0,
+  };
+}
+
 export function DvpTradesWorkspace({
   trades,
   inbound,
@@ -415,31 +471,8 @@ export function DvpTradesWorkspace({
   const [status, setStatus] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
 
-  // Filtered here rather than in the URL: the list arrives already capped by
-  // `listByProject`, so everything being filtered is on the page — a round trip
-  // per keystroke would be slower and no more correct.
-  //
-  // The waiting segment lists trades belonging to other organizations, so the
-  // project's own list is not filtered down to nothing, it is replaced. Both
-  // sides run the same query so the search box means one thing on either.
-  const showingInbound = status === "waiting";
-  const needle = query.trim().toLowerCase();
-  const visible = showingInbound ? [] : filterOwnTrades(trades, status, needle);
-  const visibleInbound = showingInbound
-    ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
-    : [];
-
-  // A project whose only DvP activity is a trade somebody else set up for it
-  // has none of its own, and treating that as an empty page rendered "No trades
-  // yet" over the one thing waiting on them — with no filter control on screen
-  // to reach it by. Having nothing to do is what empty means here.
-  const listIsEmpty = trades.length === 0 && inbound.length === 0;
-  // Rows shown on the current segment, from either source. The waiting segment
-  // draws from `inbound` and leaves `visible` empty by design, so counting only
-  // `visible` declared "no trades match" over a table that had a row to render.
-  const shownCount = showingInbound ? visibleInbound.length : visible.length;
-  const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
-  const createHref = `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`;
+  const { showingInbound, visible, visibleInbound, listIsEmpty, filteredToNothing } =
+    useTradeListView(trades, inbound, status, query);
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
@@ -450,14 +483,7 @@ export function DvpTradesWorkspace({
           {/* Suppressed while the list is empty, because the empty state already
               carries this exact call to action and two of the same button on one
               screen reads as two different actions. */}
-          {listIsEmpty ? null : (
-            <Button asChild className="shrink-0" size="sm">
-              <Link href={createHref}>
-                <PlusIcon className="size-4" />
-                {t("DashboardMarkets.dvp.createAction")}
-              </Link>
-            </Button>
-          )}
+          {listIsEmpty ? null : <CreateTradeButton className="shrink-0" />}
         </div>
 
         {/* An error and a table of nothing say different things, and showing
@@ -469,14 +495,7 @@ export function DvpTradesWorkspace({
           </Callout>
         ) : listIsEmpty ? (
           <ListEmptyState
-            action={
-              <Button asChild size="sm">
-                <Link href={createHref}>
-                  <PlusIcon className="size-4" />
-                  {t("DashboardMarkets.dvp.createAction")}
-                </Link>
-              </Button>
-            }
+            action={<CreateTradeButton />}
             description={t("DashboardMarkets.dvp.emptyDescription")}
             icon={<ArrowLeftRightIcon className="size-5" />}
             message={t("DashboardMarkets.dvp.empty")}

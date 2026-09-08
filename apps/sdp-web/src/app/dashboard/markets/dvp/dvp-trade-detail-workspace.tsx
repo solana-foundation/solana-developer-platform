@@ -350,6 +350,49 @@ function LegCard({
  * transaction the trade has produced. Those are one answer to one question —
  * what am I looking at — and the rest of the page is a different question.
  */
+/**
+ * One account this page explains: its address, what it is for, and a way out to
+ * the explorer.
+ *
+ * Both of the accounts above are ones SDP created and neither is one a reader
+ * has seen before, so an address with a bare label is not an explanation. The
+ * settlement authority in particular is minted silently on a project's first
+ * trade, holds the only key that can close one, and has to hold SOL to do it.
+ */
+function ExplorerAddressField({
+  address,
+  cluster,
+  hint,
+  label,
+}: {
+  address: string;
+  cluster: SolanaCluster;
+  hint: string;
+  label: string;
+}) {
+  const t = useTranslations();
+  return (
+    <div>
+      <dt className="text-tertiary text-xs">{label}</dt>
+      <dd className="mt-0.5">
+        <CopyableAddress address={address} label={label} />
+      </dd>
+      <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+        {hint}{" "}
+        <a
+          className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+          href={explorerAddressUrl(address, cluster)}
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          {t("DashboardMarkets.dvp.viewOnExplorer")}
+          <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+        </a>
+      </p>
+    </div>
+  );
+}
+
 function TradeSummary({
   cluster,
   counterparty,
@@ -387,48 +430,18 @@ function TradeSummary({
             explanation — the settlement authority in particular is minted
             silently on a project's first trade, holds the only key that can
             close one, and has to hold SOL to do it. */}
-        <div>
-          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.onChainAddress")}</dt>
-          <dd className="mt-0.5">
-            <CopyableAddress
-              address={trade.swapDvp}
-              label={t("DashboardMarkets.dvp.onChainAddress")}
-            />
-          </dd>
-          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-            {t("DashboardMarkets.dvp.onChainAddressHint")}{" "}
-            <a
-              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-              href={explorerAddressUrl(trade.swapDvp, cluster)}
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              {t("DashboardMarkets.dvp.viewOnExplorer")}
-              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-            </a>
-          </p>
-        </div>
-        <div>
-          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.settlementAuthority")}</dt>
-          <dd className="mt-0.5">
-            <CopyableAddress
-              address={trade.settlementAuthority}
-              label={t("DashboardMarkets.dvp.settlementAuthority")}
-            />
-          </dd>
-          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-            {t("DashboardMarkets.dvp.settlementAuthorityHint")}{" "}
-            <a
-              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-              href={explorerAddressUrl(trade.settlementAuthority, cluster)}
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              {t("DashboardMarkets.dvp.viewOnExplorer")}
-              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-            </a>
-          </p>
-        </div>
+        <ExplorerAddressField
+          address={trade.swapDvp}
+          cluster={cluster}
+          hint={t("DashboardMarkets.dvp.onChainAddressHint")}
+          label={t("DashboardMarkets.dvp.onChainAddress")}
+        />
+        <ExplorerAddressField
+          address={trade.settlementAuthority}
+          cluster={cluster}
+          hint={t("DashboardMarkets.dvp.settlementAuthorityHint")}
+          label={t("DashboardMarkets.dvp.settlementAuthority")}
+        />
       </dl>
 
       {/* The wallet YOU chose, which the page never showed — so the only
@@ -703,6 +716,43 @@ function LegCards({
   return agent || sdpSide === "a" ? [cardA, cardB] : [cardB, cardA];
 }
 
+/**
+ * Which leg the reader may act on, and who the trade is with.
+ *
+ * Only SDP's own leg is fundable from the author's view. The counterparty funds
+ * theirs with an ordinary transfer to the escrow, and making that a button would
+ * mean spending their wallet, which is the whole thing a DvP trade prevents.
+ *
+ * On an agent trade there is no own leg, so there is nothing to fund here at
+ * all. That read used to be `sdpSide === "a" ? a : b`, which answered "b" for a
+ * trade with no SDP leg and offered to fund a leg we hold no key for.
+ *
+ * A party reading somebody else's trade funds THEIR leg, through the party
+ * endpoint, under their own wallet policy. `sdpSide` describes the author and
+ * says nothing about them.
+ */
+function useTradeLegView(trade: DvpTrade) {
+  // Null on an agent trade, where this organization delivers neither leg.
+  const sdpSide = sdpLegSideOf(trade);
+  const sdpLeg = sdpSide === null ? null : sdpSide === "a" ? trade.legs.a : trade.legs.b;
+  const partyView = isDvpPartyView(trade);
+  const fundableLeg = partyView ? (trade.yourSide === "a" ? trade.legs.a : trade.legs.b) : sdpLeg;
+  const fundableStatus = trade.status === "created" || trade.status === "partially_funded";
+
+  return {
+    partyView,
+    // The other side's address, whichever leg is not ours. An agent trade has
+    // two counterparties and we are neither, so it has no "other side".
+    counterparty:
+      sdpSide === null ? null : sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party,
+    canFund:
+      fundableLeg !== null &&
+      fundableStatus &&
+      !fundableLeg.funding?.funded &&
+      !fundableLeg.funding?.frozen,
+  };
+}
+
 export function DvpTradeDetailWorkspace({
   trade,
   cluster,
@@ -719,33 +769,7 @@ export function DvpTradeDetailWorkspace({
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
 
-  // Null on an agent trade, where this organization delivers neither leg.
-  const sdpSide = sdpLegSideOf(trade);
-
-  // Only SDP's own leg is fundable from here. The counterparty funds theirs
-  // with an ordinary transfer to the escrow — making that a button would mean
-  // spending their wallet, which is the whole thing a DvP trade prevents.
-  //
-  // On an agent trade there is no own leg, so there is nothing to fund from
-  // here at all. This read used to be `sdpSide === "a" ? a : b`, which answered
-  // "b" for a trade with no SDP leg and offered to fund a leg we hold no key
-  // for. The API refuses it (`services/dvp/fund.ts:119`), so the button led
-  // nowhere, but it contradicted the one thing an agent trade means.
-  const sdpLeg = sdpSide === null ? null : sdpSide === "a" ? trade.legs.a : trade.legs.b;
-  // The other side's address, which is whichever leg is not ours. An agent
-  // trade has two counterparties and we are neither, so it has no "other side".
-  const counterparty =
-    sdpSide === null ? null : sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party;
-  // A party reading somebody else's trade funds THEIR leg, through the party
-  // endpoint, with their own wallet policy governing it. `sdpSide` describes
-  // the author and says nothing about them.
-  const partyView = isDvpPartyView(trade);
-  const fundableLeg = partyView ? (trade.yourSide === "a" ? trade.legs.a : trade.legs.b) : sdpLeg;
-  const canFund =
-    fundableLeg !== null &&
-    (trade.status === "created" || trade.status === "partially_funded") &&
-    !fundableLeg.funding?.funded &&
-    !fundableLeg.funding?.frozen;
+  const { counterparty, canFund, partyView } = useTradeLegView(trade);
 
   const fundAction = canFund ? (
     <div className="flex flex-col gap-2">
