@@ -45,6 +45,29 @@ describe("handleCoinbaseFrameEvent", () => {
     );
   });
 
+  it("falls back to the error code when Coinbase sends an empty message", () => {
+    handle(
+      frameMessage("onramp_api.session_error", {
+        errorCode: "ERROR_CODE_SESSION_EXPIRED",
+        errorMessage: "   ",
+      })
+    );
+
+    expect(postEvent).toHaveBeenCalledWith(
+      { kind: "errored", orderId: ORDER_ID, reason: "ERROR_CODE_SESSION_EXPIRED" },
+      t
+    );
+  });
+
+  it("falls back to the event name when Coinbase sends neither a message nor a code", () => {
+    handle(frameMessage("onramp_api.session_error", { errorCode: "", errorMessage: "" }));
+
+    expect(postEvent).toHaveBeenCalledWith(
+      { kind: "errored", orderId: ORDER_ID, reason: "onramp_api.session_error" },
+      t
+    );
+  });
+
   it("rejects a session_error without the error payload", () => {
     expect(handle(frameMessage("onramp_api.session_error"))).toBeNull();
     expect(postEvent).not.toHaveBeenCalled();

@@ -40,7 +40,23 @@ const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
 ]);
 
 export type CoinbaseFrameEvent = z.infer<typeof coinbaseFrameEventSchema>;
+type CoinbaseFrameErrorEvent = Extract<CoinbaseFrameEvent, { data: unknown }>;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+/**
+ * The reason recorded and shown for a Coinbase error event. Coinbase's localized message
+ * when it has one, the error code otherwise, and the event name when both are blank, so
+ * the ramp-events endpoint (which requires a non-empty reason) never rejects the report
+ * and the operator never sees a blank notice.
+ */
+export function coinbaseErrorReason(event: CoinbaseFrameErrorEvent): string {
+  const message = event.data.errorMessage.trim();
+  if (message.length > 0) {
+    return message;
+  }
+  const code = event.data.errorCode.trim();
+  return code.length > 0 ? code : event.eventName;
+}
 /** Posts a Coinbase ramp event to the SDP ramp-events endpoint. */
 export type PostCoinbaseRampEvent = typeof postCoinbaseRampEvent;
 
@@ -126,7 +142,11 @@ export function handleCoinbaseFrameEvent(
       break;
     case "onramp_api.commit_error":
     case "onramp_api.session_error":
-      reportRampEvent({ kind: "errored", orderId, reason: event.data.errorMessage }, t, postEvent);
+      reportRampEvent(
+        { kind: "errored", orderId, reason: coinbaseErrorReason(event) },
+        t,
+        postEvent
+      );
       break;
     case "onramp_api.load_pending":
     case "onramp_api.load_success":
