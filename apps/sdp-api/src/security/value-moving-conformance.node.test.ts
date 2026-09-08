@@ -248,7 +248,9 @@ const contracts: ValueMovingContract[] = [
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
-  "apps/sdp-api/src/routes/custody/handlers/signer-check.ts": ["signAndSend"],
+  // The custody signer check is deliberately absent: it partially signs and
+  // SIMULATES its memo transaction — verified locally, never broadcast — so it
+  // has no signAndSend sink and cannot spend sponsorship.
   "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
     // Sponsored signing adds the fee-payer signature without broadcasting, so
     // the final signature can still be recorded before bytes reach the network.
