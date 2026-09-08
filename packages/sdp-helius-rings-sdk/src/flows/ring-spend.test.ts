@@ -22,7 +22,7 @@ function deps() {
   return {
     client: { fake: "client" } as never,
     wallet: { fake: "wallet" } as never,
-    authority: { fake: "authority" } as never,
+    keys: { fake: "keys" } as never,
     owner: OWNER,
   };
 }
@@ -53,6 +53,7 @@ describe("ring-spend flow", () => {
     expect(input).toMatchObject({
       ringProgramId: RING_PROGRAM,
       lookupTable: LOOKUP_TABLE,
+      keys: { fake: "keys" },
       feePayer: OWNER,
       recipient: RECIPIENT,
       amount: 1_000_000n,
