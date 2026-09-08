@@ -4,9 +4,9 @@
 export function getDraftDeploymentBlocker(
   assignments: Record<string, string> | undefined,
   signingWalletId: string | null | undefined
-): string | null {
+): "DashboardIssuance.draftForm.singleSignerRequired" | null {
   if (Object.values(assignments ?? {}).some((id) => id && id !== signingWalletId)) {
-    return "Deployment currently requires the same wallet for every permission. You can transfer permissions after deployment.";
+    return "DashboardIssuance.draftForm.singleSignerRequired";
   }
   return null;
 }

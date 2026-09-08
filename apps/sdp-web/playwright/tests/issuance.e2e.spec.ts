@@ -313,7 +313,9 @@ test.describe
       await openTab(page, "Extensions");
 
       await expect(page.getByTestId("extension-row-template")).toContainText("Stablecoin");
-      await expect(page.getByTestId("extension-row-control-list")).toContainText("Approved recipients");
+      await expect(page.getByTestId("extension-row-control-list")).toContainText(
+        "Approved recipients"
+      );
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-default-account-state")).toContainText("Frozen");
@@ -477,7 +479,9 @@ test.describe
       await gotoToken(page, fixtures.tokens.open.id);
       await selectComplianceAction(page, "Blocked recipients");
 
-      await expect(page.getByRole("button", { name: "Blocked recipients", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Blocked recipients", exact: true })
+      ).toBeVisible();
       await expect(
         page.getByText("Manage the blocked destination addresses for this token.")
       ).toBeVisible();

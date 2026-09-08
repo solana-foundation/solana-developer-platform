@@ -1,6 +1,7 @@
 {
   "DashboardIssuance": {
     "draftForm": {
+      "singleSignerRequired": "Deployment currently requires the same wallet for every permission. You can transfer permissions after deployment.",
       "classification": "Classification",
       "tokenDetails": "Token details",
       "controls": "Controls",

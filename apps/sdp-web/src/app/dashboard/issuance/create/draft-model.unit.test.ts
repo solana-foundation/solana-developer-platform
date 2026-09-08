@@ -80,7 +80,7 @@ describe("draft creation contract", () => {
         { ...draft.authorities, "freeze-authority": "wallet-b" },
         "wallet-a"
       )
-    ).toContain("same wallet");
+    ).toBe("DashboardIssuance.draftForm.singleSignerRequired");
     expect(getDraftDeploymentBlocker(undefined, undefined)).toBeNull();
   });
 });

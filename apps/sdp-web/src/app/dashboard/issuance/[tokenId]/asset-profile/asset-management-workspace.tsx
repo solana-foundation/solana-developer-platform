@@ -78,10 +78,11 @@ export function AssetManagementWorkspace({
     canManageTokenAdmin,
   });
   const form = useAssetProfileForm({ token, assetProfile });
-  const draftDeploymentBlocker = getDraftDeploymentBlocker(
+  const draftDeploymentBlockerKey = getDraftDeploymentBlocker(
     form.draft.authorityWalletIds,
     form.draft.signingWalletId
   );
+  const draftDeploymentBlocker = draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null;
   const showSection = useCallback((section: AssetManagementTab) => {
     const element = document.getElementById(`token-${section}`);
     if (element instanceof HTMLDetailsElement) element.open = true;
