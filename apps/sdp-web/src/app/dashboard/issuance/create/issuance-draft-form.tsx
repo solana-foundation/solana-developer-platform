@@ -21,9 +21,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../wallet-identity";
 import { saveIssuanceDraft } from "./actions";
 import { type AuthorityKey, buildDraftPayload, type DraftState } from "./draft-model";
@@ -31,7 +34,7 @@ import styles from "./issuance-draft-form.module.css";
 
 // The five-step draft flow. Saving persists a draft; it never deploys a token.
 
-const STEPS = ["Classification", "Token details", "Controls", "Permissions", "Review"];
+const STEP_KEYS = ["classification", "tokenDetails", "controls", "permissions", "review"] as const;
 
 type AssetClass = "stablecoin" | "digital-asset";
 const INITIAL_DRAFT: DraftState = {
@@ -57,11 +60,11 @@ const INITIAL_DRAFT: DraftState = {
   },
 };
 
-const authorityCopy: Record<AuthorityKey, string> = {
-  "mint-authority": "Who can mint tokens?",
-  "freeze-authority": "Who can freeze balances?",
-  "metadata-authority": "Who can update token information?",
-  "permanent-delegate": "Who can recover or destroy balances?",
+const authorityCopy: Record<AuthorityKey, MessageKey> = {
+  "mint-authority": "DashboardIssuance.draftForm.mintPermission",
+  "freeze-authority": "DashboardIssuance.draftForm.freezePermission",
+  "metadata-authority": "DashboardIssuance.draftForm.metadataPermission",
+  "permanent-delegate": "DashboardIssuance.draftForm.recoveryPermission",
 };
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -75,6 +78,7 @@ export function IssuanceDraftForm({
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
 }) {
+  const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -138,9 +142,12 @@ export function IssuanceDraftForm({
       toast.success(result.message, { position: "bottom-right" });
       router.push("/dashboard/issuance");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to save draft.", {
-        position: "bottom-right",
-      });
+      toast.error(
+        error instanceof Error ? error.message : t("DashboardIssuance.draftForm.saveError"),
+        {
+          position: "bottom-right",
+        }
+      );
     } finally {
       setSavingDraft(false);
     }
@@ -184,6 +191,8 @@ interface CreateSurfaceProps {
 }
 
 function CreateSurface(props: CreateSurfaceProps) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const t = useTranslations();
   const router = useRouter();
   const { step, setStep, draftSaved, savingDraft, saveDraft } = props;
   const body = <StepContent {...props} />;
@@ -194,13 +203,22 @@ function CreateSurface(props: CreateSurfaceProps) {
         <div className={styles.progressHeader} data-wizard-stepper>
           <WizardStepProgress
             currentStep={step}
-            progressLabel={`Step ${step + 1} of ${STEPS.length}`}
-            steps={STEPS}
+            progressLabel={t("DashboardIssuance.draftForm.progress", {
+              step: step + 1,
+              total: STEP_KEYS.length,
+            })}
+            steps={STEP_KEYS.map((key) => t(`DashboardIssuance.draftForm.${key}`))}
           />
         </div>
         <div className={styles.wizardScrollRegion}>
           <div className={styles.focusGrid}>
-            <div className={styles.stepStage}>{body}</div>
+            <form
+              ref={formRef}
+              className={styles.stepStage}
+              onSubmit={(event) => event.preventDefault()}
+            >
+              {body}
+            </form>
           </div>
         </div>
         <footer className={styles.stepFooter}>
@@ -214,15 +232,17 @@ function CreateSurface(props: CreateSurfaceProps) {
                 else router.push("/dashboard/issuance");
               }}
             >
-              <ArrowLeft size={14} /> Back
+              <ArrowLeft size={14} /> {t("DashboardIssuance.draftForm.back")}
             </button>
             {step < 4 ? (
               <button
                 type="button"
                 className={styles.primaryButton}
-                onClick={() => setStep(step + 1)}
+                onClick={() => {
+                  if (formRef.current?.reportValidity()) setStep(step + 1);
+                }}
               >
-                Continue <ArrowRight size={14} />
+                {t("DashboardIssuance.draftForm.continue")} <ArrowRight size={14} />
               </button>
             ) : (
               <button
@@ -232,14 +252,14 @@ function CreateSurface(props: CreateSurfaceProps) {
                 onClick={saveDraft}
               >
                 {savingDraft ? (
-                  "Saving…"
+                  t("DashboardIssuance.draftForm.saving")
                 ) : draftSaved ? (
                   <>
-                    <Check size={14} /> Draft saved
+                    <Check size={14} /> {t("DashboardIssuance.draftForm.saved")}
                   </>
                 ) : (
                   <>
-                    Save draft <ArrowRight size={14} />
+                    {t("DashboardIssuance.draftForm.save")} <ArrowRight size={14} />
                   </>
                 )}
               </button>
@@ -251,14 +271,14 @@ function CreateSurface(props: CreateSurfaceProps) {
   );
 }
 
-function enabledControls(draft: DraftState) {
+function enabledControls(draft: DraftState, t: ReturnType<typeof useTranslations>) {
   return [
-    draft.allowlist && "Approved recipients",
-    draft.pauseTransfers && "Emergency pause",
-    draft.assetClass === "stablecoin" && "Freeze balances",
-    draft.assetClass === "stablecoin" && "Recovery authority",
-    draft.interestBearing && "Interest-bearing balances",
-    draft.transferFee && "Transfer fee",
+    draft.allowlist && t("DashboardIssuance.draftForm.approved"),
+    draft.pauseTransfers && t("DashboardIssuance.draftForm.pause"),
+    draft.assetClass === "stablecoin" && t("DashboardIssuance.draftForm.freeze"),
+    draft.assetClass === "stablecoin" && t("DashboardIssuance.draftForm.recovery"),
+    draft.interestBearing && t("DashboardIssuance.draftForm.interest"),
+    draft.transferFee && t("DashboardIssuance.draftForm.fee"),
   ].filter(Boolean) as string[];
 }
 
@@ -312,6 +332,7 @@ function ClassificationStep({
   draft: DraftState;
   setAssetClass: (value: AssetClass) => void;
 }) {
+  const t = useTranslations();
   const options: Array<{
     key: AssetClass;
     title: string;
@@ -320,15 +341,14 @@ function ClassificationStep({
   }> = [
     {
       key: "stablecoin",
-      title: "Stablecoin",
-      description: "A token designed to track a stable value, such as the US dollar or euro.",
+      title: t("DashboardIssuance.draftForm.stablecoin"),
+      description: t("DashboardIssuance.draftForm.stablecoinDescription"),
       Icon: CircleDollarSign,
     },
     {
       key: "digital-asset",
-      title: "Non-Security Digital Asset",
-      description:
-        "A digital token for uses like rewards, access, or in-app value, rather than an investment security.",
+      title: t("DashboardIssuance.draftForm.digitalAsset"),
+      description: t("DashboardIssuance.draftForm.digitalAssetDescription"),
       Icon: Sparkles,
     },
   ];
@@ -368,50 +388,67 @@ function TokenDetailsStep({
   draft: DraftState;
   updateDraft: <K extends keyof DraftState>(key: K, value: DraftState[K]) => void;
 }) {
+  const t = useTranslations();
   return (
     <div className={styles.formStack}>
       <div className={styles.formGrid}>
-        <Field label="Token name">
-          <input value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} />
+        <Field label={t("DashboardIssuance.draftForm.tokenName")}>
+          <input
+            required
+            maxLength={100}
+            pattern={".*\\S.*"}
+            value={draft.name}
+            onChange={(event) => updateDraft("name", event.target.value)}
+          />
         </Field>
-        <Field label="Symbol">
+        <Field label={t("DashboardIssuance.draftForm.symbol")}>
           <input
             value={draft.symbol}
+            required
+            pattern="[A-Za-z0-9.]+"
             maxLength={10}
             onChange={(event) => updateDraft("symbol", event.target.value.toUpperCase())}
           />
         </Field>
       </div>
-      <Field label="Description" hint="Used in the token metadata.">
+      <Field
+        label={t("DashboardIssuance.draftForm.description")}
+        hint={t("DashboardIssuance.draftForm.metadataHint")}
+      >
         <textarea
           rows={4}
+          maxLength={500}
           value={draft.description}
           onChange={(event) => updateDraft("description", event.target.value)}
         />
       </Field>
       <div className={styles.formGrid}>
         <Field
-          label={draft.assetClass === "stablecoin" ? "Maximum supply" : "Maximum supply (optional)"}
+          label={
+            draft.assetClass === "stablecoin"
+              ? t("DashboardIssuance.draftForm.maxSupply")
+              : t("DashboardIssuance.draftForm.maxSupplyOptional")
+          }
           hint={
             draft.assetClass === "stablecoin"
-              ? "Use the number stepper or type a value."
-              : "Leave empty for uncapped supply."
+              ? t("DashboardIssuance.draftForm.supplyHint")
+              : t("DashboardIssuance.draftForm.uncappedHint")
           }
         >
           <input
             type="number"
             min="1"
-            step="1000"
+            step="1"
             value={draft.maxSupply}
             onChange={(event) => updateDraft("maxSupply", event.target.value)}
           />
         </Field>
         <Field
-          label="Decimals"
+          label={t("DashboardIssuance.draftForm.decimals")}
           hint={
             draft.assetClass === "stablecoin"
-              ? "Stablecoins use 6 decimal places."
-              : "Digital assets default to 9 decimal places."
+              ? t("DashboardIssuance.draftForm.stableDecimals")
+              : t("DashboardIssuance.draftForm.customDecimals")
           }
         >
           <select
@@ -428,8 +465,13 @@ function TokenDetailsStep({
           </select>
         </Field>
       </div>
-      <Field label="Website" hint="Optional token metadata link.">
+      <Field
+        label={t("DashboardIssuance.draftForm.website")}
+        hint={t("DashboardIssuance.draftForm.websiteHint")}
+      >
         <input
+          type="url"
+          pattern="https?://.*"
           value={draft.website}
           onChange={(event) => updateDraft("website", event.target.value)}
         />
@@ -460,21 +502,22 @@ function ControlsStep({
   advancedOpen: boolean;
   setAdvancedOpen: (value: boolean) => void;
 }) {
+  const t = useTranslations();
   return (
     <div className={styles.controlStack}>
       <ControlRow
-        title="Approved recipients"
-        description="Only approved addresses can receive this token."
+        title={t("DashboardIssuance.draftForm.approved")}
+        description={t("DashboardIssuance.draftForm.approvedDescription")}
         checked={draft.allowlist}
         onChange={(value) => updateDraft("allowlist", value)}
         Icon={ShieldCheck}
       />
       <ControlRow
-        title="Emergency pause capability"
+        title={t("DashboardIssuance.draftForm.pauseCapability")}
         description={
           draft.assetClass === "stablecoin"
-            ? "Included with stablecoins."
-            : "Allow the assigned wallet to pause transfers during an emergency."
+            ? t("DashboardIssuance.draftForm.includedStable")
+            : t("DashboardIssuance.draftForm.pauseDescription")
         }
         checked={draft.pauseTransfers}
         onChange={(value) => updateDraft("pauseTransfers", value)}
@@ -484,16 +527,16 @@ function ControlsStep({
       {draft.assetClass === "stablecoin" && (
         <>
           <ControlRow
-            title="Freeze balances"
-            description="Included with stablecoins."
+            title={t("DashboardIssuance.draftForm.freeze")}
+            description={t("DashboardIssuance.draftForm.includedStable")}
             checked
             onChange={() => undefined}
             Icon={Snowflake}
             disabled
           />
           <ControlRow
-            title="Recovery authority"
-            description="Included with stablecoins."
+            title={t("DashboardIssuance.draftForm.recovery")}
+            description={t("DashboardIssuance.draftForm.includedStable")}
             checked
             onChange={() => undefined}
             Icon={Shield}
@@ -507,28 +550,28 @@ function ControlsStep({
         rel="noreferrer"
         className={styles.docsLink}
       >
-        How approved recipients work <ExternalLink size={13} />
+        {t("DashboardIssuance.draftForm.approvedDocs")} <ExternalLink size={13} />
       </a>
       {draft.assetClass === "digital-asset" && (
         <div className={styles.advancedSection}>
           <button type="button" onClick={() => setAdvancedOpen(!advancedOpen)}>
             <span>
-              <Settings2 size={15} /> Advanced controls
+              <Settings2 size={15} /> {t("DashboardIssuance.draftForm.advanced")}
             </span>
             <ChevronDown size={15} className={advancedOpen ? styles.chevronOpen : undefined} />
           </button>
           {advancedOpen && (
             <div className={styles.advancedBody}>
               <ControlRow
-                title="Interest-bearing balances"
-                description="Display balances with a configured interest rate."
+                title={t("DashboardIssuance.draftForm.interest")}
+                description={t("DashboardIssuance.draftForm.interestDescription")}
                 checked={draft.interestBearing}
                 onChange={(value) => updateDraft("interestBearing", value)}
                 Icon={Eye}
               />
               <ControlRow
-                title="Transfer fee"
-                description="Collect a configurable fee on each transfer."
+                title={t("DashboardIssuance.draftForm.fee")}
+                description={t("DashboardIssuance.draftForm.feeDescription")}
                 checked={draft.transferFee}
                 onChange={(value) => updateDraft("transferFee", value)}
                 Icon={Gauge}
@@ -588,19 +631,23 @@ function PermissionsStep({
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
 }) {
+  const t = useTranslations();
   return (
     <div className={styles.permissionsStack}>
       {walletsError ? <p role="alert">{walletsError}</p> : null}
       {!wallets.length && !walletsError ? (
         <p>
-          No wallets available. <Link href="/dashboard/wallets/setup">Create a wallet</Link> before
-          saving this draft.
+          {t("DashboardIssuance.draftForm.noWallets")}{" "}
+          <Link href="/dashboard/wallets/setup">
+            {t("DashboardIssuance.draftForm.createWallet")}
+          </Link>
         </p>
       ) : null}
       {permissionKeys(draft).map((key) => (
-        <Field key={key} label={authorityCopy[key]}>
+        <Field key={key} label={t(authorityCopy[key])}>
           <select
-            aria-label={authorityCopy[key]}
+            required
+            aria-label={t(authorityCopy[key])}
             value={draft.authorities[key]}
             disabled={!wallets.length}
             onChange={(event) =>
@@ -608,11 +655,12 @@ function PermissionsStep({
             }
           >
             <option value="" disabled>
-              Select a wallet
+              {t("DashboardIssuance.draftForm.selectWallet")}
             </option>
             {wallets.map((wallet) => (
               <option key={wallet.walletId} value={wallet.walletId}>
-                {wallet.label || "Wallet"} · {shortenAddress(wallet.publicKey)}
+                {wallet.label || t("DashboardIssuance.draftForm.wallet")} ·{" "}
+                {shortenAddress(wallet.publicKey)}
               </option>
             ))}
           </select>
@@ -623,34 +671,60 @@ function PermissionsStep({
 }
 
 function ReviewStep({ draft }: { draft: DraftState }) {
+  const t = useTranslations();
+  const { sdpEnvironment } = useDashboardWorkspace();
   return (
     <div className={styles.reviewStack}>
-      <section className={styles.reviewList} aria-label="Asset review">
-        <ReviewRow label="Token" value={`${draft.name} (${draft.symbol})`} />
+      <section
+        className={styles.reviewList}
+        aria-label={t("DashboardIssuance.draftForm.assetReview")}
+      >
         <ReviewRow
-          label="Classification"
-          value={draft.assetClass === "stablecoin" ? "Stablecoin" : "Non-Security Digital Asset"}
-        />
-        <ReviewRow label="Description" value={draft.description} />
-        <ReviewRow label="Website" value={draft.website || "Not included"} />
-        <ReviewRow
-          label="Supply cap"
-          value={draft.maxSupply ? Number(draft.maxSupply).toLocaleString() : "Unlimited"}
+          label={t("DashboardIssuance.draftForm.token")}
+          value={`${draft.name} (${draft.symbol})`}
         />
         <ReviewRow
-          label="Controls"
-          value={enabledControls(draft).join(", ") || "No optional controls"}
+          label={t("DashboardIssuance.draftForm.classification")}
+          value={
+            draft.assetClass === "stablecoin"
+              ? t("DashboardIssuance.draftForm.stablecoin")
+              : t("DashboardIssuance.draftForm.digitalAsset")
+          }
+        />
+        <ReviewRow label={t("DashboardIssuance.draftForm.description")} value={draft.description} />
+        <ReviewRow
+          label={t("DashboardIssuance.draftForm.website")}
+          value={draft.website || t("DashboardIssuance.draftForm.notIncluded")}
         />
         <ReviewRow
-          label="Permissions"
-          value={`${permissionKeys(draft).length} permissions assigned`}
+          label={t("DashboardIssuance.draftForm.supplyCap")}
+          value={
+            draft.maxSupply
+              ? Number(draft.maxSupply).toLocaleString()
+              : t("DashboardIssuance.draftForm.unlimited")
+          }
         />
-        <ReviewRow label="Network" value="Devnet" />
+        <ReviewRow
+          label={t("DashboardIssuance.draftForm.controls")}
+          value={
+            enabledControls(draft, t).join(", ") || t("DashboardIssuance.draftForm.noControls")
+          }
+        />
+        <ReviewRow
+          label={t("DashboardIssuance.draftForm.permissions")}
+          value={t("DashboardIssuance.draftForm.permissionCount", {
+            count: permissionKeys(draft).length,
+          })}
+        />
+        <ReviewRow
+          label={t("DashboardIssuance.draftForm.network")}
+          value={sdpEnvironment === "production" ? "Mainnet" : "Devnet"}
+        />
       </section>
       <section className={styles.apiPreview}>
         <div className={styles.apiPreviewHeader}>
           <span>
-            <Code2 size={15} /> Draft API preview
+            <Code2 size={15} /> {t("DashboardIssuance.draftForm.apiPreview")}
           </span>
           <button
             type="button"
@@ -659,13 +733,13 @@ function ReviewStep({ draft }: { draft: DraftState }) {
                 await navigator.clipboard.writeText(
                   JSON.stringify(buildDraftPayload(draft), null, 2)
                 );
-                toast.success("Draft request copied.");
+                toast.success(t("DashboardIssuance.draftForm.copySuccess"));
               } catch {
-                toast.error("Unable to copy. Try again.");
+                toast.error(t("DashboardIssuance.draftForm.copyError"));
               }
             }}
           >
-            <Copy size={13} /> Copy
+            <Copy size={13} /> {t("DashboardIssuance.draftForm.copy")}
           </button>
         </div>
         <pre>

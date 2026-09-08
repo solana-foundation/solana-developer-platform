@@ -55,11 +55,23 @@ describe("draft creation contract", () => {
   });
   it.each([
     { name: "" },
+    { symbol: "BAD$" },
+    { description: "x".repeat(501) },
     { decimals: "7" },
     { maxSupply: "-1" },
     { website: "javascript:alert(1)" },
   ])("rejects invalid fields: %o", (patch) => {
     expect(draftSchema.safeParse({ ...draft, ...patch }).success).toBe(false);
+  });
+  it("accepts the full API decimals range for digital assets", () => {
+    for (const decimals of ["0", "9", "18"]) {
+      expect(
+        draftSchema.safeParse({ ...draft, assetClass: "digital-asset", decimals }).success
+      ).toBe(true);
+    }
+    expect(
+      draftSchema.safeParse({ ...draft, assetClass: "digital-asset", decimals: "19" }).success
+    ).toBe(false);
   });
   it("blocks deployment rather than silently ignoring different authority wallets", () => {
     expect(getDraftDeploymentBlocker(draft.authorities, "wallet-a")).toBeNull();

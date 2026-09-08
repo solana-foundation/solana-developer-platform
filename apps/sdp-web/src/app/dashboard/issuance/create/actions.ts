@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { assetProfiles } from "@/flags";
+import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
@@ -9,11 +11,15 @@ import { buildDraftPayload, draftSchema } from "./draft-model";
 export async function saveIssuanceDraft(
   input: unknown
 ): Promise<{ state: "success" | "error"; message: string; tokenId: string | null }> {
+  const t = await getTranslations();
+  if (!(await assetProfiles())) {
+    return { state: "error", message: t("DashboardIssuance.draftForm.unavailable"), tokenId: null };
+  }
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success)
     return {
       state: "error",
-      message: parsed.error.issues[0]?.message ?? "Check the draft fields.",
+      message: t("DashboardIssuance.draftForm.invalid"),
       tokenId: null,
     };
   const draft = parsed.data;
@@ -32,7 +38,7 @@ export async function saveIssuanceDraft(
     if (!wallets.ok || required.some((id) => !allowedIds.has(id))) {
       return {
         state: "error",
-        message: "Select an available SDP wallet for each permission.",
+        message: t("DashboardIssuance.draftForm.walletRequired"),
         tokenId: null,
       };
     }
@@ -53,13 +59,13 @@ export async function saveIssuanceDraft(
     revalidatePath("/dashboard/issuance");
     return {
       state: "success",
-      message: "Draft saved to SDP.",
+      message: t("DashboardIssuance.draftForm.saveSuccess"),
       tokenId: body.data?.token?.id ?? null,
     };
   } catch (error) {
     return {
       state: "error",
-      message: error instanceof Error ? error.message : "Unable to save draft.",
+      message: error instanceof Error ? error.message : t("DashboardIssuance.draftForm.saveError"),
       tokenId: null,
     };
   }

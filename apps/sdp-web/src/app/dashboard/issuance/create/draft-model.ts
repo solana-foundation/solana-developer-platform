@@ -5,11 +5,16 @@ export const draftSchema = z
   .object({
     assetClass: z.enum(["stablecoin", "digital-asset"]),
     name: z.string().trim().min(1, "Enter a token name.").max(100),
-    symbol: z.string().trim().min(1, "Enter a symbol.").max(10),
-    description: z.string().max(2000),
+    symbol: z
+      .string()
+      .trim()
+      .min(1)
+      .max(10)
+      .regex(/^[A-Za-z0-9.]+$/),
+    description: z.string().max(500),
     website: z.union([z.literal(""), z.url({ protocol: /^https?$/ })]),
     maxSupply: z.string().regex(/^$|^[1-9]\d*$/, "Enter a positive whole-number supply cap."),
-    decimals: z.string().regex(/^[0-9]$/, "Decimals must be between 0 and 9."),
+    decimals: z.string().regex(/^(?:[0-9]|1[0-8])$/),
     allowlist: z.boolean(),
     pauseTransfers: z.boolean(),
     interestBearing: z.boolean(),

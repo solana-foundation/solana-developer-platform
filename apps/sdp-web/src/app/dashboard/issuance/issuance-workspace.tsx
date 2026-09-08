@@ -518,7 +518,6 @@ export function IssuanceWorkspace({
                 tokens={tokens}
                 search={search}
                 onSearchChange={setSearch}
-                onCreate={startTokenCreation}
                 isRefreshing={isRefreshing}
                 tokensNotice={tokensNotice}
                 emptyResultsNotice={emptyResultsNotice}

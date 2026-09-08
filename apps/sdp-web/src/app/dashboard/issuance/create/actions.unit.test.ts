@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { saveIssuanceDraft } from "./actions";
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), wallets: vi.fn(), revalidate: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  request: vi.fn(),
+  wallets: vi.fn(),
+  revalidate: vi.fn(),
+  enabled: vi.fn(),
+}));
 vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: async () => ({ request: mocks.request }) }));
 vi.mock("../../payments/payments-page.data", () => ({ fetchPaymentsWallets: mocks.wallets }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
+vi.mock("@/flags", () => ({ assetProfiles: mocks.enabled }));
+vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 const input = {
   assetClass: "stablecoin",
   name: "Example",
@@ -29,12 +36,19 @@ const input = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.enabled.mockResolvedValue(true);
   mocks.wallets.mockResolvedValue({ ok: true, data: [{ walletId: "wallet-a" }] });
   mocks.request.mockResolvedValue(
     new Response(JSON.stringify({ data: { token: { id: "tok_saved" } } }), { status: 201 })
   );
 });
 describe("save issuance draft", () => {
+  it("does not save when asset profiles are disabled", async () => {
+    mocks.enabled.mockResolvedValue(false);
+    expect(await saveIssuanceDraft(input)).toMatchObject({ state: "error" });
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.wallets).not.toHaveBeenCalled();
+  });
   it("creates an asset profile, invalidates the list, and never calls deploy", async () => {
     expect(await saveIssuanceDraft(input)).toMatchObject({
       state: "success",
