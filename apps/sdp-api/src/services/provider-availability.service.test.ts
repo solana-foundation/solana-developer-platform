@@ -1,7 +1,9 @@
 import { resolveOrganizationProviderEntitlements } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { getLogger } from "@/runtime/logger";
 import {
+  assertCustodyProviderEntitled,
   assertEarnProviderConfigured,
   assertProviderAvailable,
   getProviderAvailability,
@@ -143,10 +145,43 @@ describe("provider-availability.service", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = originalSelfHostedStoredSetupEnabled;
+  });
+
+  it("logs an attributable custody entitlement denial without changing its 403 response", async () => {
+    const logger = getLogger();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    await expect(
+      assertCustodyProviderEntitled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).resolves.toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+
+    await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+      JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
+      TEST_ORG_ID,
+    ]);
+    await expect(
+      assertCustodyProviderEntitled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      {
+        event: "sdp_api_custody_entitlement_denied",
+        organization_id: TEST_ORG_ID,
+        provider: "privy",
+        reason: "provider_not_entitled",
+      },
+      "sdp_api_custody_entitlement_denied"
+    );
+    warn.mockImplementation(() => {
+      throw new Error("logger unavailable");
+    });
+    await expect(
+      assertCustodyProviderEntitled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
 
   it("resolves general defaults independently of the legacy tier value", () => {

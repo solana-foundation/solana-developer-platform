@@ -184,8 +184,17 @@ async function seedAuthAndWallet(): Promise<void> {
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        "enterprise",
+        "active",
+        JSON.stringify({ providerOverrides: { custody: { local: true } } })
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),

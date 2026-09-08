@@ -22,10 +22,12 @@ import {
   resolveOrganizationProviderEntitlements,
   type SdpEnvironment,
 } from "@sdp/types";
+import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
@@ -484,7 +486,7 @@ export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizati
 }
 
 export async function getOrganizationTierState(
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string
 ): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
   const row = await db
@@ -577,7 +579,7 @@ function getProviderLabel(family: OrganizationProviderFamily, providerId: string
 
 export async function getProviderAvailability(
   env: Env,
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string
 ): Promise<OrganizationProviderAvailabilityResponse> {
   const organization = await getOrganizationTierState(db, organizationId);
@@ -609,6 +611,46 @@ export async function getProviderAvailability(
       earn: buildAvailabilityEntries(entitled.earn, configured.earn),
     },
   };
+}
+
+export function isCustodyProviderEntitled(
+  availability: OrganizationProviderAvailabilityResponse,
+  provider: CustodyProvider
+): boolean {
+  return availability.providers.custody[provider]?.entitled === true;
+}
+
+/**
+ * Runtime admission for persisted custody owners depends on organization
+ * entitlement, not on legacy environment credentials. Stored Connection
+ * credentials remain usable when the matching runtime-env credential is absent.
+ */
+export async function assertCustodyProviderEntitled(
+  env: Env,
+  db: DatabaseExecutor,
+  organizationId: string,
+  provider: CustodyProvider
+): Promise<void> {
+  const availability = await getProviderAvailability(env, db, organizationId);
+  const entry = availability.providers.custody[provider];
+  if (!isCustodyProviderEntitled(availability, provider)) {
+    logEvent("warn", {
+      event: "sdp_api_custody_entitlement_denied",
+      organization_id: organizationId,
+      provider,
+      reason: "provider_not_entitled",
+    });
+    throw new AppError(
+      "FORBIDDEN",
+      getAvailabilityMessage(
+        env,
+        availability.tier,
+        "custody",
+        provider,
+        entry ?? { entitled: false, configured: false, enabled: false }
+      )
+    );
+  }
 }
 
 export async function isPersistedCustodyCompletionEnabled(

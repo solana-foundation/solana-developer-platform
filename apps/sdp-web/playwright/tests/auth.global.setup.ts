@@ -11,9 +11,6 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   const env = getE2EEnv();
   const identity = await resolveClerkTestIdentity();
 
-  // The ticket flow runs in a manually created context: Playwright tracing only
-  // instruments fixture contexts, so the live sign-in token never enters the
-  // retain-on-failure trace that gets uploaded as a workflow artifact.
   const ticketContext = env.ticketAuth ? await browser.newContext({ baseURL: env.baseURL }) : null;
   const target = ticketContext ? await ticketContext.newPage() : page;
 
@@ -35,47 +32,19 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
       }
       return (await response.json()) as { token: string };
     });
-    await target.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await target.waitForFunction(
-      () => Boolean((window as unknown as { Clerk?: { client?: unknown } }).Clerk?.client),
-      undefined,
-      { timeout: 120_000 }
+    const redactTicket = <T>(action: Promise<T>): Promise<T> =>
+      action.catch((error: unknown) => {
+        throw new Error(String(error).replaceAll(token, "[redacted-clerk-ticket]"));
+      });
+    await redactTicket(
+      target.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" })
     );
-    await target.evaluate(
-      async ({ ticket, organizationId }) => {
-        const clerkClient = (
-          window as unknown as {
-            Clerk?: {
-              client: {
-                signIn: {
-                  create: (p: Record<string, string>) => Promise<{
-                    status: string;
-                    createdSessionId: string | null;
-                  }>;
-                };
-              };
-              setActive: (p: { session: string; organization?: string }) => Promise<void>;
-            };
-          }
-        ).Clerk;
-        if (!clerkClient) {
-          throw new Error("Clerk failed to load in Playwright global setup");
-        }
-        const signIn = await clerkClient.client.signIn.create({ strategy: "ticket", ticket });
-        if (signIn.status !== "complete" || !signIn.createdSessionId) {
-          throw new Error(`ticket sign-in did not complete: status=${signIn.status}`);
-        }
-        await clerkClient.setActive({
-          session: signIn.createdSessionId,
-          organization: organizationId,
-        });
-      },
-      { ticket: token, organizationId: identity.organizationId }
-    );
-    await target.waitForFunction(
-      () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
-      undefined,
-      { timeout: 30_000 }
+    await redactTicket(
+      target.waitForFunction(
+        () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
+        undefined,
+        { timeout: 120_000 }
+      )
     );
   } else {
     await clerkSetup({
