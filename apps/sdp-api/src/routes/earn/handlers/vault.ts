@@ -90,6 +90,7 @@ import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admis
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
+  failEarnDepositAudit,
   recordEarnWithdrawalAudit,
 } from "./movement-audit";
 import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
@@ -229,29 +230,39 @@ export async function createEarnVaultDeposit(
     }
   );
 
-  const result = await depositIntoVault(
-    c.env,
-    {
-      organizationId: auth.organizationId,
-      projectId,
-      environment,
-      provider,
-      providerReference: strategy.provider_reference,
-      wallet,
-      tokenMint,
-      shareMint,
-      label: strategy.name,
-      amount: parsedData.amount,
-      requestId,
-      minSharesOut: parsedData.minSharesOut,
-      ...(resolved.swap === null ? {} : { swap: resolved.swap }),
-      userId: auth.userId ?? null,
-      apiKeyId: auth.apiKeyId ?? null,
-    },
-    {
-      runIntentTransaction: (mutation) => runApprovedWalletOperationEffectTransaction(c, mutation),
-    }
-  );
+  let result: Awaited<ReturnType<typeof depositIntoVault>>;
+  try {
+    result = await depositIntoVault(
+      c.env,
+      {
+        organizationId: auth.organizationId,
+        projectId,
+        environment,
+        provider,
+        providerReference: strategy.provider_reference,
+        wallet,
+        tokenMint,
+        shareMint,
+        label: strategy.name,
+        amount: parsedData.amount,
+        requestId,
+        minSharesOut: parsedData.minSharesOut,
+        ...(resolved.swap === null ? {} : { swap: resolved.swap }),
+        userId: auth.userId ?? null,
+        apiKeyId: auth.apiKeyId ?? null,
+      },
+      {
+        runIntentTransaction: (mutation) =>
+          runApprovedWalletOperationEffectTransaction(c, mutation),
+      }
+    );
+  } catch (error) {
+    // The service throws only before any broadcast (a send error returns
+    // normally, record-before-broadcast), so this is a definitive refusal:
+    // close the intent instead of paging verification over it.
+    await failEarnDepositAudit(c, auditIntent, error);
+    throw error;
+  }
 
   if (result.replayed && approvedWalletOperationId(c)) {
     // Sequential replays do not pass through the insert transaction, so fence
@@ -265,8 +276,9 @@ export async function createEarnVaultDeposit(
     }
   }
 
-  // A thrown path above leaves the intent unresolved on purpose: verification
-  // pages that as an operation needing reconciliation.
+  // The approved-operation fence above deliberately leaves the intent
+  // unresolved when it throws: that outcome is genuinely ambiguous, and
+  // verification paging it for reconciliation is the point.
   await completeEarnDepositAudit(c, auditIntent, {
     resourceId: result.movement.id,
     metadata: {
@@ -1425,30 +1437,30 @@ export async function createEarnVaultWithdrawal(
     }
   }
 
-  // Best-effort, post-effect, and never on a replay (PRO-1866): a fail-closed
-  // audit write here would be a new way for an exit to 5xx, the exact shape
-  // ADR 0002 exit safety rules out. Actor comes from the movement row itself.
-  if (!result.replayed) {
-    await recordEarnWithdrawalAudit(
-      c,
-      {
-        organizationId: auth.organizationId,
-        userId: result.movement.created_by,
-        apiKeyId: result.movement.initiated_by_key_id,
-      },
-      result.movement.id,
-      {
-        executionModel: "vault_direct",
-        signer: "custody",
-        provider: position.provider,
-        positionId: position.id,
-        shares: parsedData.shares,
-        minAmountOut: parsedData.minAmountOut ?? null,
-        signature: result.movement.signature,
-        requestId,
-      }
-    );
-  }
+  // Best-effort and post-effect (PRO-1866): a fail-closed audit write here
+  // would be a new way for an exit to 5xx, the exact shape ADR 0002 exit
+  // safety rules out. Actor comes from the movement row itself; a replay only
+  // backfills an audit row the crashed original never wrote.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: result.movement.created_by,
+      apiKeyId: result.movement.initiated_by_key_id,
+    },
+    result.movement.id,
+    {
+      executionModel: "vault_direct",
+      signer: "custody",
+      provider: position.provider,
+      positionId: position.id,
+      shares: parsedData.shares,
+      minAmountOut: parsedData.minAmountOut ?? null,
+      signature: result.movement.signature,
+      requestId,
+    },
+    { replayed: result.replayed }
+  );
 
   return success(
     c,

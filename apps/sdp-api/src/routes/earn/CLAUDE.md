@@ -1016,13 +1016,20 @@ the two external-wallet submits, and the program withdrawal.
 
 The failure posture follows the metered-quota asymmetry above, on purpose.
 DEPOSITS are admitted through a fail-closed `beginCritical` intent before the
-money effect: an audit outage refuses money IN, and a replay still logs a
-pair whose outcome says `replayed`. WITHDRAWALS log best-effort AFTER the
-effect and never on a replay: the audit persist path fail-closes on its
-external checkpoint store, and a store outage must not 5xx an exit (ADR 0002).
+money effect: an audit outage refuses money IN, a replay still logs a pair
+whose outcome says `replayed`, and a service refusal (always pre-broadcast on
+both deposit paths) closes the intent with a failure outcome so verification
+never pages over money that never moved. Only the approved-operation fence
+leaves an intent unresolved, deliberately: that state needs reconciliation.
+WITHDRAWALS log best-effort AFTER the effect: the audit persist path
+fail-closes on its external checkpoint store, and a store outage must not 5xx
+an exit (ADR 0002). A replayed exit backfills a missing audit row
+(`backfilledOnReplay`) and never duplicates an existing one, so a crash
+between the money effect and the audit write is repaired on the next retry.
 A failed exit audit logs `earn_audit_write_failed` and the movement row stays
 the authoritative money record. Each seam's suite pins its half: parity rows
-in all four route files, fail-closed in `../earn.vault.test.ts`, fail-open in
+in all four route files, fail-closed + failure outcomes in
+`../earn.vault.test.ts`, fail-open + replay backfill in
 `../earn.vault-withdrawals.test.ts`.
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)

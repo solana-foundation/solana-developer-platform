@@ -1116,20 +1116,51 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     });
   });
 
-  it("does not audit a replayed withdrawal submit: no new money moved", async () => {
+  it("backfills a missing audit on a replayed withdrawal submit, exactly once", async () => {
     await seedAuth();
-    submitExternalWalletWithdrawal.mockResolvedValue({
-      ...submitResult({ direction: "withdrawal", denomination: SHARE_MINT }),
-      replayed: true,
+    const result = submitResult({
+      direction: "withdrawal",
+      denomination: SHARE_MINT,
+      initiated_by_key_id: TEST_API_KEY.id,
     });
+    submitExternalWalletWithdrawal.mockResolvedValue({ ...result, replayed: true });
 
-    const res = await post(
+    const first = await post(
       "withdrawals",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
-    expect(res.status).toBe(200);
+    expect(first.status).toBe(200);
+    const rows = await auditRows("withdraw");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ resource_id: result.movement.id });
+    expect(String(rows[0]?.metadata)).toContain("backfilledOnReplay");
 
-    await expect(auditRows("withdraw")).resolves.toHaveLength(0);
+    const second = await post(
+      "withdrawals",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(second.status).toBe(200);
+    await expect(auditRows("withdraw")).resolves.toHaveLength(1);
+  });
+
+  it("closes the deposit intent as a failure when the submit is refused", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(new Error("signature verification failed"));
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(500);
+
+    // A refusal is always pre-broadcast on this path, so the intent closes as
+    // a failure outcome instead of paging verification as unresolved.
+    const rows = await auditRows("deposit");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "failure" });
+    expect(String(rows[0]?.metadata)).toContain("signature verification failed");
   });
 });

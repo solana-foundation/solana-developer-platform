@@ -1181,4 +1181,34 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
     expect(res.status).toBe(500);
     expect(depositIntoVault).not.toHaveBeenCalled();
   });
+
+  it("closes the intent as a failure when the service refuses the deposit", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit_fail",
+      custodyWalletId: "cwlt_earn_vault_audit_fail",
+      providerWalletId: "privy_earn_vault_audit_fail",
+    });
+    depositIntoVault.mockRejectedValue(new Error("simulation failed"));
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit_fail",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(500);
+
+    // The service throws only pre-broadcast, so the intent closes as a
+    // failure outcome instead of paging verification as unresolved.
+    const { results } = await getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>();
+    expect(results).toHaveLength(1);
+    expect(results?.[0]).toMatchObject({ status: "failure" });
+    expect(String(results?.[0]?.metadata)).toContain("simulation failed");
+  });
 });

@@ -910,6 +910,28 @@ async function serveEarnProgramWithdrawalReplay(
     withdrawalRef: providerReference,
   });
   await persistWithdrawalObservation(ledger, intent, withdrawal);
+  // Repair-only audit (PRO-1866): a crash between the original payout and its
+  // audit write must not leave the movement permanently unaudited; an
+  // already-audited movement writes nothing.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: resolved.auth.organizationId,
+      userId: intent.created_by,
+      apiKeyId: intent.initiated_by_key_id,
+    },
+    intent.id,
+    {
+      executionModel: "custodial",
+      programId: resolved.row.id,
+      provider: resolved.client.provider,
+      amountUsd: intent.amount_requested,
+      token: intent.payout_token,
+      destinationAddress: intent.destination_address,
+      requestId: resolved.requestId,
+    },
+    { replayed: true }
+  );
   const response: EarnProgramWithdrawalResponse = { withdrawal };
   return success(c, response, 200);
 }
