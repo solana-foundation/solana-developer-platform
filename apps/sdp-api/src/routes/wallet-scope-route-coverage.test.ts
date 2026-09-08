@@ -175,12 +175,19 @@ describe("wallet-scoped route coverage inventory", () => {
     // question that has nothing to do with one.
     const nonWalletScopedRoutes = new Set(["GET /mints/:mint"]);
 
+    // The two party routes are scoped the same way, by a different question:
+    // the others ask who owns the trade, these ask who holds the key to the
+    // address a leg names. Both answers resolve to custody wallets this caller
+    // holds, so both are wallet-scoped, and `inbound` deliberately takes no
+    // party parameter so it cannot be used to enumerate anyone else's.
     expect(extractRoutes(dvpRoutes).filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       "GET /trades",
       "GET /trades/:tradeId",
+      "GET /trades/inbound",
       "POST /trades",
       "POST /trades/:tradeId/cancel",
       "POST /trades/:tradeId/fund",
+      "POST /trades/:tradeId/fund-as-party",
       "POST /trades/:tradeId/settle",
     ]);
   });

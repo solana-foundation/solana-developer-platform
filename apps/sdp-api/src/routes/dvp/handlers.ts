@@ -559,12 +559,37 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
     throw notFound("DvP trade not found");
   }
 
+  // This path is for a trade ANOTHER organization created. Reaching it for one
+  // of our own means the scoped lookup above already refused it, and the only
+  // way that happens is a wallet-scoped key asking for a wallet it is not bound
+  // to. Answering here would launder the trade straight past its own scope.
+  //
+  // The query behind `getByIdAsParty` is deliberately unfiltered and leans on
+  // RLS 0089 to decide who may see the row. That is correct in a deployed
+  // environment and enforces nothing locally, where the API connects as a role
+  // that bypasses RLS, so this cannot be the only thing standing between a key
+  // and another wallet's trade.
+  if (trade.organizationId === auth.organizationId) {
+    throw notFound("DvP trade not found");
+  }
+
   const fundable = await resolveFundableLeg(c.env, trade, {
     organizationId: auth.organizationId,
     projectId,
     auth,
   });
   if (!fundable) {
+    throw notFound("DvP trade not found");
+  }
+
+  // The party leg resolves against the ORGANIZATION's addresses, which is a
+  // wider question than the one the key is allowed to ask. Without this the
+  // scope filter on the lookup above is decorative: it refuses the trade and
+  // this fallback hands the same trade straight back to a key bound to a
+  // different wallet. Same 404 as everywhere else, so the two paths cannot be
+  // told apart from outside.
+  const scopedWalletIds = readableSdpWalletIds(c);
+  if (scopedWalletIds !== null && !scopedWalletIds.includes(fundable.custodyWalletId)) {
     throw notFound("DvP trade not found");
   }
 

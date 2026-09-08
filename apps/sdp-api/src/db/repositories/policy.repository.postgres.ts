@@ -42,7 +42,6 @@ import type {
   WalletOperationRow,
   WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
-
 import {
   generateApiKeyControlProfileId,
   generateApiKeyControlProfileRevisionId,
@@ -52,6 +51,7 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
   generateWalletOperationId,
+  WalletOperationIdempotencyConflictError,
 } from "./policy.repository";
 
 const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
@@ -1027,39 +1027,19 @@ async function tenantOwnsWallet(
   return Boolean(row);
 }
 
-/** Postgres unique-violation SQLSTATE. */
-function isUniqueViolation(error: unknown): boolean {
-  return (error as { code?: string })?.code === "23505";
-}
-
-/**
- * The operation a previous request with this key created, or null.
- *
- * Scoped to the tenant like every other read here: the unique index is on
- * (organization, project, key), so a lookup that ignored the scope could return
- * another tenant's operation to a caller who merely guessed a key.
- */
-async function findWalletOperationByIdempotencyKey(
-  db: DatabaseClient,
-  scope: TenantScope,
-  idempotencyKey: string
-): Promise<WalletOperationRow | null> {
-  const row = await db
-    .prepare(
-      `SELECT id FROM wallet_operations
-        WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?
-        LIMIT 1`
-    )
-    .bind(scope.organizationId, scope.projectId, idempotencyKey)
-    .first<{ id: string }>();
-  return row ? getWalletOperationByIdInternal(db, row.id) : null;
-}
-
 async function tenantOwnsWalletTarget(
   db: DatabaseExecutor,
   scope: TenantScope,
   walletId: string,
-  custodyWalletId?: string | null
+  custodyWalletId: string | null | undefined,
+  /**
+   * Whether an Earn program link row may stand in for the custody wallet this
+   * target otherwise has to be. Stated at every call site rather than defaulted,
+   * so admitting a program target is always a visible decision; true ONLY for
+   * the one operation type that has no custody wallet by construction, see the
+   * fallback below.
+   */
+  allowEarnProgramTarget: boolean
 ): Promise<boolean> {
   const hasCustodyWalletId = custodyWalletId !== undefined && custodyWalletId !== null;
   const custodyPredicate = hasCustodyWalletId ? "AND w.id = ?" : "";
@@ -1092,7 +1072,29 @@ async function tenantOwnsWalletTarget(
       scope.projectId
     )
     .first<{ id: string }>();
-  return Boolean(row);
+  if (row) return true;
+
+  // An Earn program is a provider ACCOUNT, not a custody wallet, so it has no
+  // `custody_wallets` row to prove ownership through — which is why its payouts
+  // could not be recorded as governed operations at all (HOO-1559). It is
+  // admitted as a target in its own right, by the same rule and not a weaker
+  // one: the link row must belong to this organization.
+  //
+  // Admission is pinned to the ONE operation type that has no custody wallet by
+  // construction. Keying it on "names no custody wallet" instead would be a
+  // widening: any family that can leave `custodyWalletId` null — issuance mint
+  // among them — would gain a second way to prove ownership of a target it does
+  // not custody, just by naming a provider wallet ref.
+  if (hasCustodyWalletId || !allowEarnProgramTarget) return false;
+  const program = await db
+    .prepare(
+      `SELECT id FROM earn_provider_wallets
+        WHERE provider_wallet_ref = ? AND organization_id = ?
+        LIMIT 1`
+    )
+    .bind(walletId, scope.organizationId)
+    .first<{ id: string }>();
+  return Boolean(program);
 }
 
 async function tenantOwnsPolicyRevision(
@@ -1708,7 +1710,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       }
       if (
         input.bindingScope === "selected" &&
-        !(await tenantOwnsWalletTarget(db, scope, input.walletId, input.custodyWalletId))
+        !(await tenantOwnsWalletTarget(db, scope, input.walletId, input.custodyWalletId, false))
       ) {
         return null;
       }
@@ -1742,7 +1744,13 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
               binding.apiKeyControlProfileId
             ))) ||
           (binding.bindingScope === "selected" &&
-            !(await tenantOwnsWalletTarget(db, scope, binding.walletId, binding.custodyWalletId)))
+            !(await tenantOwnsWalletTarget(
+              db,
+              scope,
+              binding.walletId,
+              binding.custodyWalletId,
+              false
+            )))
         ) {
           return [];
         }
@@ -1974,7 +1982,15 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
 
     async createWalletOperation(input: CreateWalletOperationInput) {
       assertTenantClaim(scope, input, "PolicyRepository.createWalletOperation");
-      if (!(await tenantOwnsWalletTarget(db, scope, input.walletId, input.custodyWalletId))) {
+      if (
+        !(await tenantOwnsWalletTarget(
+          db,
+          scope,
+          input.walletId,
+          input.custodyWalletId,
+          input.operationType === "earn_program_withdrawal"
+        ))
+      ) {
         return null;
       }
       if (input.apiKeyId && !(await tenantOwnsRow(db, scope, "api_keys", input.apiKeyId))) {
@@ -1982,7 +1998,13 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       }
       const id = generateWalletOperationId();
 
-      await db
+      // ON CONFLICT DO NOTHING, not a plain insert: the route's prior-operation
+      // check runs before this write, so two concurrent first attempts both see
+      // no prior record and only the unique index decides which one governs the
+      // payout. The loser inserts nothing and says so, and the caller answers
+      // with the winner's operation rather than minting a second approval or
+      // failing on a raw constraint violation (HOO-1559).
+      const inserted = await db
         .prepare(
           `INSERT INTO wallet_operations (
              id,
@@ -2000,7 +2022,9 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              raw_payload,
              idempotency_key,
              status
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+           ON CONFLICT DO NOTHING
+           RETURNING id`
         )
         .bind(
           id,
@@ -2019,28 +2043,13 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           input.idempotencyKey ?? null,
           input.status ?? "created"
         )
-        .run()
-        .catch(async (error: unknown) => {
-          // A keyed operation that already exists is the SAME logical operation
-          // being retried, not a new one. `dvp_settle_<tradeId>` is deliberately
-          // stable — a trade settles once — so every retry after a failed
-          // broadcast collides here, and letting the violation escape turned one
-          // failure into a permanent 500 on every subsequent attempt.
-          //
-          // The row records what policy judged, not whether the chain accepted
-          // it, so replaying it is correct: the caller goes on to rebuild and
-          // resend under the operation it was already granted.
-          if (!input.idempotencyKey || !isUniqueViolation(error)) {
-            throw error;
-          }
-          return null;
-        });
+        .first<{ id: string }>();
 
-      const existing = input.idempotencyKey
-        ? await findWalletOperationByIdempotencyKey(db, scope, input.idempotencyKey)
-        : null;
+      if (inserted === null) {
+        throw new WalletOperationIdempotencyConflictError(input.operationType);
+      }
 
-      return existing ?? (await getWalletOperationByIdInternal(db, id));
+      return getWalletOperationByIdInternal(db, id);
     },
 
     async getWalletOperationById(walletOperationId: string) {
