@@ -850,15 +850,6 @@ export async function syncProviderAccessFromClerk(
     ? nextSettings
     : null;
 
-  const wasProductionEnabled = existing.settings?.enableProductionProject === true;
-  if (wasProductionEnabled !== clerkMetadata.enableProductionProject) {
-    logEvent("info", {
-      event: "sdp_api_organization_production_enablement_changed",
-      organization_id: params.organizationId,
-      enable_production_project: clerkMetadata.enableProductionProject,
-    });
-  }
-
   await db
     .prepare(
       `UPDATE organizations
@@ -871,6 +862,15 @@ export async function syncProviderAccessFromClerk(
       params.organizationId
     )
     .run();
+
+  const wasProductionEnabled = existing.settings?.enableProductionProject === true;
+  if (wasProductionEnabled !== clerkMetadata.enableProductionProject) {
+    logEvent("info", {
+      event: "sdp_api_organization_production_enablement_changed",
+      organization_id: params.organizationId,
+      enable_production_project: clerkMetadata.enableProductionProject,
+    });
+  }
 
   return {
     tier: clerkMetadata.tier,
