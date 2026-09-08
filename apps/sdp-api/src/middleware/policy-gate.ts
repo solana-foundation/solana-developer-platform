@@ -136,8 +136,9 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       return next();
     }
 
-    const enforce = () =>
-      enforceWalletOperationPolicy(
+    let enforcement: WalletOperationPolicyEnforcement;
+    try {
+      enforcement = await enforceWalletOperationPolicy(
         c.env,
         scope,
         {
@@ -155,10 +156,6 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
         approvedWalletOperationId(c),
         approvedWalletOperationAttemptId(c)
       );
-
-    let enforcement: Awaited<ReturnType<typeof enforce>>;
-    try {
-      enforcement = await enforce();
     } catch (error) {
       // A conflict means a concurrent first attempt already governs this key.
       // The route answers with THAT operation; if it has no answer to give, the
