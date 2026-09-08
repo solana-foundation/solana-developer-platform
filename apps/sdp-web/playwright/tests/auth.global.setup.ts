@@ -11,9 +11,6 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   const env = getE2EEnv();
   const identity = await resolveClerkTestIdentity();
 
-  // The ticket flow runs in a manually created context: Playwright tracing only
-  // instruments fixture contexts, so the live sign-in token never enters the
-  // retain-on-failure trace that gets uploaded as a workflow artifact.
   const ticketContext = env.ticketAuth ? await browser.newContext({ baseURL: env.baseURL }) : null;
   const target = ticketContext ? await ticketContext.newPage() : page;
 
@@ -35,10 +32,6 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
       }
       return (await response.json()) as { token: string };
     });
-    // Proven flow (matches the prod canary): let Clerk consume the ticket from
-    // the URL, which establishes an org-capable session that setActive can
-    // switch. This runs on the untraced context above, so the token never
-    // enters a retained trace artifact.
     await target.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" });
     await target.waitForFunction(
       () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
