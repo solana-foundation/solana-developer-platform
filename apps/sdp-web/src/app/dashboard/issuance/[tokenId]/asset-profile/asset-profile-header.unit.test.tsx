@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { shortenAddress } from "../../wallet-identity";
+import { formatDate } from "../token-management-workspace.utils";
 import { AssetProfileHeader } from "./asset-profile-header";
 
 const token = {
@@ -113,7 +114,8 @@ describe("asset profile header", () => {
     const markup = render(deployed);
     expect(markup).toContain("Tokenized Security");
     expect(markup).toContain("Active");
-    expect(markup).toContain("Deployed Jul 22, 2026");
+    // Same formatter as the component, so the assertion holds in any timezone.
+    expect(markup).toContain(`Deployed ${formatDate(deployed.deployedAt, "en")}`);
 
     // A draft has no deploy date to speak of, but still says what it is.
     const draft = render(token);
