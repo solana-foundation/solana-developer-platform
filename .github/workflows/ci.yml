@@ -181,33 +181,8 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: api
-      TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
-      REDIS_URL: redis://127.0.0.1:6379
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: sdp
-          POSTGRES_USER: sdp
-          POSTGRES_PASSWORD: sdp
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sdp -d sdp"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+      DOPPLER_PRESERVE_ENV: TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,33 +244,8 @@ jobs:
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: rest
-      TEST_DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
-      REDIS_URL: redis://127.0.0.1:6379
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-      DOPPLER_PRESERVE_ENV: TEST_DATABASE_URL,REDIS_URL,TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: sdp
-          POSTGRES_USER: sdp
-          POSTGRES_PASSWORD: sdp
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sdp -d sdp"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+      DOPPLER_PRESERVE_ENV: TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
