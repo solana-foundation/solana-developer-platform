@@ -318,6 +318,7 @@ export function proxyFailure(
     {
       status,
       headers: {
+        "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },
@@ -377,6 +378,8 @@ export async function proxyToSdpApi({
       status: response.status,
       headers: {
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+        // Per-org financial state: never storable by browsers or intermediaries.
+        "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },
