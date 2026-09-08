@@ -3,6 +3,7 @@ import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
+import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -29,6 +30,11 @@ import {
   type InstallationConflictReason,
   installationFactsFromConnection,
 } from "@/services/provider-credential-installation";
+import {
+  clearQueuedSecretVersion,
+  queuePendingSecretVersion,
+  reserveSecretVersionIntent,
+} from "@/services/secret-retirement";
 import {
   type ProjectConnectionState,
   type ProviderCredentialRow,
@@ -387,12 +393,49 @@ async function persistPreparedSubmission(
     let stored: StoredCredentialSecret;
     if (prepared.credentialSource === "stored") {
       secretStore = await createSubmissionSecretStore(prepared, providerCredentialId, connectionId);
+      const retirementContext = {
+        provider: "privy",
+        orgId: prepared.organizationId,
+        sourceId: providerCredentialId,
+      };
+      // The obligation is recorded BEFORE the write: with the coming version
+      // ref known up front, a durable row exists before anything external
+      // does, so no crash between the write and any later bookkeeping can
+      // leave a readable credential without a record the sweeper drains. If it
+      // cannot be recorded, the request is refused while the backend still
+      // holds nothing.
+      const predictedVersionRef = secretStore.predictFirstVersionRef({ providerCredentialId });
+      if (predictedVersionRef) {
+        await reserveSecretVersionIntent(
+          prepared.c.env,
+          {
+            storageBackend: secretStore.storageBackend,
+            secretRef: null,
+            secretVersionRef: predictedVersionRef,
+          },
+          retirementContext
+        );
+      }
       stored = await writeSubmissionSecret(
         prepared,
         providerCredentialId,
         connectionId,
         secretStore
       );
+      // The reservation covers the predicted ref; only a write that landed on
+      // a different version (a pre-existing secret, which a freshly minted
+      // credential id should never have) still needs its own record. The
+      // now-pointless reservation is released best-effort: left standing it
+      // only costs the sweeper one NOT_FOUND destroy of a version that was
+      // never written.
+      if (stored.secretVersionRef !== predictedVersionRef) {
+        await queuePendingSecretVersion(prepared.c.env, stored, retirementContext);
+        if (predictedVersionRef) {
+          await createWorkflowSecretRetirementsRepository(prepared.c.env)
+            .deleteRetirementByVersionRef(predictedVersionRef)
+            .catch(() => undefined);
+        }
+      }
     } else {
       stored = { storageBackend: "runtime_env" };
     }
@@ -597,6 +640,13 @@ async function runSubmissionTransaction(
       createdBy: submission.userId,
     });
     await persistConnection(txStore, submission, lockedPlan, providerCredential);
+
+    // The credential row now references the version; the same commit cancels
+    // the provisional retirement queued before this transaction started. A
+    // rollback keeps the obligation, which is the point — even when the
+    // outcome of this transaction is unknowable to the request, the queue and
+    // the row can never BOTH be lost.
+    await clearQueuedSecretVersion(tx, submission.stored);
 
     return {
       kind: "committed",
@@ -1002,7 +1052,6 @@ async function compensateSecretWrite(
 
   try {
     await store.destroyVersion({ secretVersionRef: stored.secretVersionRef });
-    return "succeeded";
   } catch {
     logOrphanRisk({
       providerCredentialId,
@@ -1011,7 +1060,26 @@ async function compensateSecretWrite(
       requestId: c.get("requestId"),
       reason: "secret_cleanup_failed",
     });
+    // The pre-commit queue row for this version is still standing (only the
+    // committing transaction clears it), so the sweeper retries this destroy;
+    // "failed" reports this request's own attempt, not the version's fate.
     return "failed";
+  }
+  // Destroyed: discharge the provisional obligation recorded before the
+  // transaction was attempted. Best effort — a row left behind costs one
+  // sweep that finds the version already gone.
+  await destroySecretVersionObligation(c.env, stored.secretVersionRef);
+  return "succeeded";
+}
+
+async function destroySecretVersionObligation(env: Env, secretVersionRef: string): Promise<void> {
+  try {
+    await createWorkflowSecretRetirementsRepository(env).deleteRetirementByVersionRef(
+      secretVersionRef
+    );
+  } catch {
+    // The sweeper reconciles it: a destroyed version reads as FAILED_PRECONDITION,
+    // which the sweep treats as success.
   }
 }
 

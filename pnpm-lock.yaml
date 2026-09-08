@@ -660,8 +660,8 @@ importers:
   packages/sdp-helius-rings-sdk:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: 0.1.2-alpha
-        version: 0.1.2-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
+        specifier: 0.1.6-alpha
+        version: 0.1.6-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@sdp/helius-rings':
         specifier: workspace:*
         version: link:../sdp-helius-rings
@@ -1661,8 +1661,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  '@heliuslabs/zolana@0.1.2-alpha':
-    resolution: {integrity: sha512-+TPLUxv9/Oik16zHcWQu63l/nzwGyGir5t7ZQnJz8DAjbs06vrNEoBqW8DWwwoiV1vpZdv+/q4R5Vf2jOFtSBA==}
+  '@heliuslabs/zolana@0.1.6-alpha':
+    resolution: {integrity: sha512-ak3VWkpkdQF6xRI8nsodRDA/MDnLiUoULgEuWTpT56sEDHSTK2UjH36c6frzr7jDDDfh7MV9k9PfKTNbIy0m6w==}
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^7.0.0
@@ -10614,7 +10614,7 @@ snapshots:
       protobufjs: 7.6.5
       yargs: 17.7.3
 
-  '@heliuslabs/zolana@0.1.2-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
+  '@heliuslabs/zolana@0.1.6-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.3.0

@@ -1,10 +1,10 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
-import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import {
   buildRingTransferTransaction,
   buildRingWithdrawalTransaction,
 } from "@heliuslabs/zolana/ring";
-import type { Wallet, WalletAuthority } from "@heliuslabs/zolana/transaction";
+import type { Wallet } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Transaction } from "@solana/kit";
 import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
 import { requireProtocolSol } from "./mint.js";
@@ -13,8 +13,8 @@ import { requireProtocolSol } from "./mint.js";
  * Spends of ring-bound notes, through the SDK's one-call ring builders.
  *
  * Unlike the default-pool spends in `spend.ts`, everything happens inside the
- * builder: same-ring note selection, compact change, both proofs, encryption
- * via `authority.encryptCustomRingTransfer`, and compression of the finished
+ * builder: same-ring note selection, compact change, both proofs, ring
+ * encryption, and compression of the finished
  * v0 transaction over the ring's address lookup table. No pinned-input
  * contract and no prepared-intent validation; see docs/ops/helius-rings.md,
  * "Semantics worth knowing".
@@ -27,7 +27,7 @@ import { requireProtocolSol } from "./mint.js";
 export interface RingSpendDeps {
   readonly client: ZolanaClient;
   readonly wallet: Wallet;
-  readonly authority: WalletAuthority;
+  readonly keys: WalletKeys;
   readonly owner: Address;
 }
 
@@ -50,7 +50,7 @@ function ringSpendArgs(deps: RingSpendDeps, input: RingSpendInput) {
     client: deps.client,
     ringProgramId: withConfiguredAddressErrorBridge(() => address(input.ringProgramId)),
     wallet: deps.wallet,
-    authority: deps.authority,
+    keys: deps.keys,
     feePayer: deps.owner,
     amount: BigInt(input.amountRaw),
     lookupTable: withConfiguredAddressErrorBridge(() => address(input.lookupTable)),

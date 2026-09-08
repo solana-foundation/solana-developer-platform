@@ -23,7 +23,6 @@ type DashboardPageConfig = {
   titlePosition?: "left" | "center";
   headerTabs?: DashboardHeaderTabsConfig;
   routeTabs?: DashboardRouteTabsConfig;
-  headerVariant?: "default" | "markets";
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
@@ -442,8 +441,6 @@ function getMarketsRoutePageConfig(
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
-      titlePosition: "left",
-      headerVariant: "markets",
       routeTabs: {
         ariaLabel: t("Shared.dashboardShell.markets"),
         tabs: [

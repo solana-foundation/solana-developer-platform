@@ -120,11 +120,13 @@ try {
             : changedSince
               ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
               : ["--filter=!@sdp/api-integration"];
+    const cacheDir = process.env.TURBO_CACHE_DIR?.trim();
     await run("pnpm", [
       "exec",
       "turbo",
       "run",
       "test",
+      ...(cacheDir ? [`--cache-dir=${cacheDir}`] : []),
       ...filters,
       ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
     ]);
