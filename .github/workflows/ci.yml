@@ -177,12 +177,13 @@ jobs:
 
   test:
     name: Unit Tests
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJson('["self-hosted", "sdp-ci"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: read
       id-token: write
     env:
+      TURBO_CACHE_DIR: ${{ github.workspace }}/.turbo-ci-cache
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: api
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
@@ -203,6 +204,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Restore turbo cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo-ci-cache
+          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ github.job }}-${{ runner.os }}-
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -246,6 +255,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      TURBO_CACHE_DIR: ${{ github.workspace }}/.turbo-ci-cache
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: rest
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
@@ -266,6 +276,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Restore turbo cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo-ci-cache
+          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ github.job }}-${{ runner.os }}-
 
       - name: Install
         run: pnpm install --frozen-lockfile
