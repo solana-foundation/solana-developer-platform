@@ -1,3 +1,4 @@
+import type { OrganizationSettings } from "@sdp/types";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
@@ -83,11 +84,16 @@ export async function ensureClerkOrganizationMapping(params: {
   const slug = await ensureUniqueSlug(params.db, params.organization.slug || name);
   const organizationId = `org_${crypto.randomUUID()}`;
   const providerState = isSelfHostedDeployment(params.env)
-    ? { tier: "enterprise" as const, providerOverrides: undefined }
+    ? { tier: "enterprise" as const, providerOverrides: undefined, enableProductionProject: false }
     : parseClerkOrganizationTierMetadata(params.organization);
-  const settings = providerState.providerOverrides
-    ? JSON.stringify({ providerOverrides: providerState.providerOverrides })
-    : null;
+
+  const initialSettings: OrganizationSettings = {
+    ...(providerState.providerOverrides
+      ? { providerOverrides: providerState.providerOverrides }
+      : {}),
+    ...(providerState.enableProductionProject ? { enableProductionProject: true } : {}),
+  };
+  const settings = Object.keys(initialSettings).length > 0 ? JSON.stringify(initialSettings) : null;
 
   // Persist Clerk-derived access state with the mapping so provisioning cannot
   // commit an organization that depends on a later repair update succeeding.

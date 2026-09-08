@@ -402,11 +402,6 @@ function toStoredOrganizationSettings(settings: OrganizationSettings | null): st
   return JSON.stringify(settings);
 }
 
-function omitProviderOverrides(settings: OrganizationSettings): OrganizationSettings {
-  const { providerOverrides: _providerOverrides, ...rest } = settings;
-  return rest;
-}
-
 function hasOwnEntries(value: Record<string, unknown>): boolean {
   return Object.keys(value).length > 0;
 }
@@ -475,6 +470,7 @@ export function parseProviderOverridesFromClerkMetadata(
 export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizationWithMetadata): {
   tier: OrganizationTier;
   providerOverrides?: OrganizationProviderOverrides;
+  enableProductionProject: boolean;
 } {
   const privateMetadata = asRecord(organization.private_metadata);
   const sdp = asRecord(privateMetadata?.sdp);
@@ -482,6 +478,7 @@ export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizati
   return {
     tier: normalizeOrganizationTier(typeof sdp?.tier === "string" ? sdp.tier : undefined),
     providerOverrides: parseProviderOverridesFromClerkMetadata(sdp?.providerOverrides),
+    enableProductionProject: sdp?.enableProductionProject === true,
   };
 }
 
@@ -872,16 +869,31 @@ export async function syncProviderAccessFromClerk(
   const existing = await getOrganizationTierState(db, params.organizationId);
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
 
-  const nextSettings: OrganizationSettings = clerkMetadata.providerOverrides
-    ? {
-        ...(existing.settings ?? {}),
-        providerOverrides: clerkMetadata.providerOverrides,
-      }
-    : omitProviderOverrides(existing.settings ?? {});
+  const {
+    providerOverrides: _staleOverrides,
+    enableProductionProject: _staleEnableProduction,
+    ...retainedSettings
+  } = existing.settings ?? {};
+  const nextSettings: OrganizationSettings = {
+    ...retainedSettings,
+    ...(clerkMetadata.providerOverrides
+      ? { providerOverrides: clerkMetadata.providerOverrides }
+      : {}),
+    ...(clerkMetadata.enableProductionProject ? { enableProductionProject: true } : {}),
+  };
 
   const persistedSettings = hasOwnEntries(nextSettings as Record<string, unknown>)
     ? nextSettings
     : null;
+
+  const wasProductionEnabled = existing.settings?.enableProductionProject === true;
+  if (wasProductionEnabled !== clerkMetadata.enableProductionProject) {
+    logEvent("info", {
+      event: "sdp_api_organization_production_enablement_changed",
+      organization_id: params.organizationId,
+      enable_production_project: clerkMetadata.enableProductionProject,
+    });
+  }
 
   await db
     .prepare(
