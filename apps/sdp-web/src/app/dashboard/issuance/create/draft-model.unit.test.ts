@@ -56,6 +56,10 @@ describe("draft creation contract", () => {
   it.each([
     { name: "" },
     { symbol: "BAD$" },
+    { symbol: ".." },
+    { symbol: ".USD" },
+    { symbol: "USD." },
+    { symbol: "US..D" },
     { description: "x".repeat(501) },
     { decimals: "7" },
     { maxSupply: "-1" },

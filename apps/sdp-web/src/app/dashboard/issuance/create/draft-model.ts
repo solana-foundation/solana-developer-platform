@@ -10,9 +10,9 @@ export const draftSchema = z
       .trim()
       .min(1)
       .max(10)
-      .regex(/^[A-Za-z0-9.]+$/),
+      .regex(/^[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$/),
     description: z.string().max(500),
-    website: z.union([z.literal(""), z.url({ protocol: /^https?$/ })]),
+    website: z.union([z.literal(""), z.url({ protocol: /^https?$/ }).max(2048)]),
     maxSupply: z.string().regex(/^$|^[1-9]\d*$/, "Enter a positive whole-number supply cap."),
     decimals: z.string().regex(/^(?:[0-9]|1[0-8])$/),
     allowlist: z.boolean(),

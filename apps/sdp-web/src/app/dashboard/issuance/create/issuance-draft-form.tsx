@@ -398,7 +398,7 @@ function TokenDetailsStep({
           <input
             value={draft.symbol}
             required
-            pattern="[A-Za-z0-9.]+"
+            pattern="[A-Za-z0-9]+(?:[.][A-Za-z0-9]+)*"
             maxLength={10}
             onChange={(event) => updateDraft("symbol", event.target.value.toUpperCase())}
           />
