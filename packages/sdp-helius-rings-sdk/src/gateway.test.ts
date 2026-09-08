@@ -148,6 +148,24 @@ describe("createRingsGateway", () => {
     );
   });
 
+  it("dials every probe leg through the configured fetch", async () => {
+    const seen: string[] = [];
+    const recordingFetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify({ result: "ok", circuits: ["custom-ring"] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const health = await createRingsGateway({ ...CONFIG, fetch: recordingFetch }).probeHealth();
+
+    expect(health).toMatchObject({ rpc: "green", photon: "green", prover: "green" });
+    expect(seen).toContain(CONFIG.solanaRpcUrl);
+    expect(seen).toContain(CONFIG.indexerUrl);
+    expect(seen).toContain(`${CONFIG.proverUrl}/health`);
+  });
+
   const WITH_KEY = "http://127.0.0.1:1/?api-key=super-secret-key";
 
   it("never leaks the RPC URL into a health response", async () => {

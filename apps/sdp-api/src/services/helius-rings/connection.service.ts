@@ -16,6 +16,7 @@ import {
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
 import { resolveRingsConnection } from "./connection-resolver";
+import { ringsEgressFetch } from "./gateway";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -124,6 +125,10 @@ export async function createRingsConnection(
   const projectId = requireProjectId(c);
   const normalized = validateRingsConnectionInput(c.env, input);
 
+  // Probes read a status and a short body, so the response is bounded; a
+  // hostile endpoint answering a health check with gigabytes is not a probe
+  // outcome worth buffering.
+  const probeFetch = ringsEgressFetch(c.env, { maxResponseBytes: 64 * 1024 });
   const [health, ringRpcHealth] = await Promise.all([
     createRingsGateway({
       solanaRpcUrl: normalized.solanaRpcUrl,
@@ -132,6 +137,7 @@ export async function createRingsConnection(
       organizationId: auth.organizationId,
       projectId,
       allowInsecureHttp: normalized.allowInsecureHttp,
+      ...(probeFetch ? { fetch: probeFetch } : {}),
       signTransaction: async () => {
         throw new Error("probe does not sign");
       },
@@ -140,7 +146,10 @@ export async function createRingsConnection(
       },
     }).probeHealth(),
     normalized.ringRpcUrl
-      ? probeRingRpcHealth({ url: normalized.ringRpcUrl })
+      ? probeRingRpcHealth({
+          url: normalized.ringRpcUrl,
+          ...(probeFetch ? { fetch: probeFetch } : {}),
+        })
       : Promise.resolve(null),
   ]);
   const failed: string[] = (["rpc", "photon", "prover"] as const).filter(
@@ -277,11 +286,14 @@ export async function testRingsConnection(c: AppContext, connectionId: string) {
     projectId,
     connectionId,
   });
+  // Bounded for the same reason as the create-time probe.
+  const probeFetch = ringsEgressFetch(c.env, { maxResponseBytes: 64 * 1024 });
   const [health, ringRpc] = await Promise.all([
     createRingsGateway({
       ...connection,
       organizationId: auth.organizationId,
       projectId,
+      ...(probeFetch ? { fetch: probeFetch } : {}),
       signTransaction: async () => {
         throw new Error("probe does not sign");
       },
@@ -290,7 +302,10 @@ export async function testRingsConnection(c: AppContext, connectionId: string) {
       },
     }).probeHealth(),
     connection.ringRpcUrl
-      ? probeRingRpcHealth({ url: connection.ringRpcUrl })
+      ? probeRingRpcHealth({
+          url: connection.ringRpcUrl,
+          ...(probeFetch ? { fetch: probeFetch } : {}),
+        })
       : Promise.resolve(null),
   ]);
   return { health, ringRpc };

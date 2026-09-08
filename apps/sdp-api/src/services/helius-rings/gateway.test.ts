@@ -79,6 +79,24 @@ describe("createConfiguredRingsGateway", () => {
     });
   });
 
+  it("dials tenant endpoints through guarded egress outside development", () => {
+    const { captured, createGateway } = capturingCreate();
+    createConfiguredRingsGateway({ ENVIRONMENT: "production" } as Env, tenant, connection, {
+      createGateway,
+    });
+
+    expect(captured[0]?.fetch).toBeTypeOf("function");
+  });
+
+  it("keeps plain transports in development, where endpoints resolve to loopback", () => {
+    const { captured, createGateway } = capturingCreate();
+    createConfiguredRingsGateway({ ENVIRONMENT: "development" } as Env, tenant, connection, {
+      createGateway,
+    });
+
+    expect(captured[0]?.fetch).toBeUndefined();
+  });
+
   it.each([
     ["submit_failed", true, "gateway_unavailable"],
     ["signer_failed", false, "invalid_input"],

@@ -6,6 +6,7 @@ import {
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
+import { createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { type ResolvedRingsConnection, resolveRingsConnection } from "./connection-resolver";
@@ -53,6 +54,22 @@ export async function resolvePersistedRingsGateway(
   return createConfiguredRingsGateway(env, tenant, connection, dependencies);
 }
 
+/**
+ * The fetch every tenant-controlled Rings endpoint is dialed through outside
+ * development: DNS-checked at connect time, redirects refused, so a saved
+ * hostname cannot rebind or bounce the API into a private or metadata address
+ * after passing the literal write-time check. Development returns undefined —
+ * local endpoints legitimately resolve to loopback, which the guard exists to
+ * refuse. The one leg this cannot cover is the Zolana client's own Solana RPC
+ * transport, which the library builds internally (upstream gap).
+ */
+export function ringsEgressFetch(
+  env: Env,
+  options?: { maxResponseBytes?: number }
+): typeof globalThis.fetch | undefined {
+  return env.ENVIRONMENT === "development" ? undefined : createGuardedFetch(options);
+}
+
 export function createConfiguredRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
@@ -64,6 +81,7 @@ export function createConfiguredRingsGateway(
   const submitOuterTransaction = dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
   const create = dependencies.createGateway ?? createRingsGateway;
   const recordRingLookupTable = dependencies.recordRingLookupTable;
+  const egressFetch = ringsEgressFetch(env);
 
   const gatewayConfig = {
     solanaRpcUrl: connection.solanaRpcUrl,
@@ -71,6 +89,7 @@ export function createConfiguredRingsGateway(
     proverUrl: connection.proverUrl,
     ...(connection.ringRpcUrl ? { ringRpcUrl: connection.ringRpcUrl } : {}),
     ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
+    ...(egressFetch ? { fetch: egressFetch } : {}),
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: connection.allowInsecureHttp,

@@ -12,10 +12,6 @@ function timeoutError(): Error {
   return error;
 }
 
-const HEALTHY_CLIENT = {
-  getLatestBlockhash: () => Promise.resolve({} as never),
-};
-
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -35,10 +31,17 @@ const HEALTHY_PROVER = {
 };
 
 function fetchStub(
-  handlers: Readonly<{ indexer?: () => Promise<Response>; prover?: () => Promise<Response> }>
+  handlers: Readonly<{
+    rpc?: () => Promise<Response>;
+    indexer?: () => Promise<Response>;
+    prover?: () => Promise<Response>;
+  }>
 ): typeof globalThis.fetch {
   return ((input: string | URL) => {
     const host = hostOf(input);
+    if (host === "devnet.helius-rpc.com") {
+      return (handlers.rpc ?? (() => Promise.resolve(jsonResponse({ result: {} }))))();
+    }
     if (host === "indexer.test") {
       return (handlers.indexer ?? (() => Promise.resolve(jsonResponse({ result: "ok" }))))();
     }
@@ -51,7 +54,7 @@ function fetchStub(
 
 function input(overrides: Partial<RingsHealthInput> = {}): RingsHealthInput {
   return {
-    client: HEALTHY_CLIENT,
+    solanaRpcUrl: RPC_URL_WITH_KEY,
     indexerUrl: INDEXER_URL,
     proverUrl: PROVER_URL,
     timeoutMs: 50,
@@ -205,7 +208,7 @@ describe("probeRingsHealth", () => {
 
   it("fails the RPC probe red when the node rejects", async () => {
     const health = await probeRingsHealth(
-      input({ client: { getLatestBlockhash: () => Promise.reject(new Error("no")) } })
+      input({ fetch: fetchStub({ rpc: () => Promise.reject(new Error("no")) }) })
     );
 
     expect(health.rpc).toBe("red");
@@ -214,7 +217,7 @@ describe("probeRingsHealth", () => {
 
   it("treats a slow upstream as down rather than waiting on it", async () => {
     const health = await probeRingsHealth(
-      input({ client: { getLatestBlockhash: () => new Promise(() => {}) }, timeoutMs: 10 })
+      input({ fetch: fetchStub({ rpc: () => new Promise(() => {}) }), timeoutMs: 10 })
     );
 
     expect(health.rpc).toBe("red");
@@ -223,7 +226,7 @@ describe("probeRingsHealth", () => {
 
   // The abort signal normally does this, but a `fetch` that ignores it would hang
   // the probe past its budget, which is the one thing a health endpoint must not do.
-  it.each(["photon", "prover"])(
+  it.each(["rpc", "photon", "prover"])(
     "treats a %s fetch that ignores the abort as down",
     async (component) => {
       const health = await probeRingsHealth(
@@ -233,7 +236,7 @@ describe("probeRingsHealth", () => {
         })
       );
 
-      expect(health[component as "photon" | "prover"]).toBe("red");
+      expect(health[component as "rpc" | "photon" | "prover"]).toBe("red");
       expect(health.detail?.[component]).toBe("timed out");
     }
   );
@@ -241,12 +244,9 @@ describe("probeRingsHealth", () => {
   it("never leaks the RPC URL or its API key into the reported detail", async () => {
     const health = await probeRingsHealth(
       input({
-        // What a real client does: quotes the URL it failed to reach.
-        client: {
-          getLatestBlockhash: () =>
-            Promise.reject(new Error(`fetch failed for ${RPC_URL_WITH_KEY}`)),
-        },
         fetch: fetchStub({
+          // What a real transport does: quotes the URL it failed to reach.
+          rpc: () => Promise.reject(new Error(`fetch failed for ${RPC_URL_WITH_KEY}`)),
           indexer: () => Promise.reject(timeoutError()),
           prover: () => Promise.reject(new Error(`connect ECONNREFUSED ${PROVER_URL}`)),
         }),

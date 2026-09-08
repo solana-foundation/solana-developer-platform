@@ -28,12 +28,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TEST_OWNER } from "./test/shielded-identity-fixtures.js";
 
 const createAuditorKey = vi.fn();
+const ringRpcConstructed = vi.fn();
 const fetchRingLookupTable = vi.fn();
 const buildRingLookupTableTransaction = vi.fn();
 
 vi.mock("@heliuslabs/zolana/ring", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@heliuslabs/zolana/ring")>()),
   RingRpc: class {
+    constructor(...args: unknown[]) {
+      ringRpcConstructed(...args);
+    }
     createAuditorKey(...args: unknown[]) {
       return createAuditorKey(...args);
     }
@@ -154,6 +158,7 @@ function harness(accounts: Map<string, unknown>) {
     signMessage: vi.fn(async () => getBase64Codec().decode(new Uint8Array(64).fill(1))),
     submitTransaction: vi.fn(async () => "sig"),
     recordLookupTable: vi.fn(async () => {}),
+    fetch: (async () => new Response("{}")) as unknown as typeof globalThis.fetch,
   };
   return { client, deps };
 }
@@ -253,6 +258,11 @@ describe("provisionCustomRing", () => {
     ];
     expect(request.ringProgramId).toBe(RING_PROGRAM);
     expect(request.authority.address).toBe(AUTHORITY);
+    // The Ring RPC dials through the caller's fetch, so the API's guarded
+    // egress covers this leg too.
+    expect(ringRpcConstructed).toHaveBeenCalledWith("https://ring-rpc.example", {
+      fetch: deps.fetch,
+    });
   });
 
   it("adopts a fully-registered ring once custody proves the config authority", async () => {
