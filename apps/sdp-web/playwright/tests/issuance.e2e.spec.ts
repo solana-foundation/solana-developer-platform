@@ -617,14 +617,24 @@ test.describe
       await selectComplianceAction(page, "Pause");
       await page.getByRole("button", { name: "Pause token", exact: true }).click();
       let successCount = await page.getByText("Pause transaction finalized.").count();
-      await confirmAction(page, "Pause now");
+      await expect(
+        page.getByRole("heading", { name: "Pause transfers for all holders?" })
+      ).toBeVisible();
+      await expect(page.getByText(/This affects every holder:/)).toBeVisible();
+      await confirmAction(page, "Pause all transfers");
       await waitForToast(page, "Pause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toBeVisible();
 
       await selectComplianceAction(page, "Pause");
       await page.getByRole("button", { name: "Unpause token", exact: true }).first().click();
       successCount = await page.getByText("Unpause transaction finalized.").count();
-      await confirmAction(page, "Unpause now");
+      await expect(
+        page.getByRole("heading", { name: "Resume transfers for all holders?" })
+      ).toBeVisible();
+      await expect(
+        page.getByText(/Make sure the reason for pausing has been resolved/)
+      ).toBeVisible();
+      await confirmAction(page, "Resume transfers");
       await waitForToast(page, "Unpause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toHaveCount(0);
     });
