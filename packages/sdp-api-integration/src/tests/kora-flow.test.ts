@@ -11,7 +11,6 @@ import {
 const { createSigningService, getDb, SponsorshipBudgetRepository, TEST_ORG, TEST_PROJECT } =
   apiTestSupport;
 
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS = 20_000_000;
 const KORA_LIVE_SMOKE_POLICY_OPERATOR = "kora-live-smoke";
 const KORA_LIVE_SMOKE_POLICY_REASON =
@@ -45,17 +44,7 @@ type ParsedTransactionResponse = {
   meta: { err: unknown } | null;
 };
 
-const TRANSACTION_LOOKUP_TIMEOUT_MS = 30_000;
-const TRANSACTION_LOOKUP_POLL_MS = 1_000;
 const SOLANA_RPC_REQUEST_TIMEOUT_MS = 10_000;
-const RETRYABLE_SOLANA_RPC_CODES = new Set([-32004, -32005]);
-
-function normalizePubkey(accountKey: ParsedAccountKey): string {
-  if (typeof accountKey === "string") {
-    return accountKey;
-  }
-  return accountKey.pubkey;
-}
 
 async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
   const rpcUrl = env.SOLANA_RPC_URL;
@@ -114,93 +103,6 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
   }
 
   return payload.result;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function getConfirmedTransaction(signature: string): Promise<ParsedTransactionResponse> {
-  const deadline = Date.now() + TRANSACTION_LOOKUP_TIMEOUT_MS;
-  let lastError: unknown;
-
-  while (Date.now() <= deadline) {
-    try {
-      const tx = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
-        signature,
-        {
-          commitment: "confirmed",
-          encoding: "jsonParsed",
-          maxSupportedTransactionVersion: 0,
-        },
-      ]);
-
-      if (tx) {
-        return tx;
-      }
-    } catch (error) {
-      if (!isRetryableTransactionLookupError(error)) {
-        throw error;
-      }
-      lastError = error;
-    }
-
-    await sleep(TRANSACTION_LOOKUP_POLL_MS);
-  }
-
-  const suffix = lastError instanceof Error ? ` Last RPC error: ${lastError.message}` : "";
-  throw new Error(
-    `Unable to fetch confirmed Kora signer-check transaction ${signature} from SOLANA_RPC_URL after ${TRANSACTION_LOOKUP_TIMEOUT_MS}ms.${suffix}`
-  );
-}
-
-function isRetryableTransactionLookupError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  if (error instanceof SolanaRpcError) {
-    if (error.code !== undefined && [-32600, -32601, -32602].includes(error.code)) {
-      return false;
-    }
-
-    if (error.code !== undefined && RETRYABLE_SOLANA_RPC_CODES.has(error.code)) {
-      return true;
-    }
-
-    if (
-      error.code !== undefined &&
-      (error.code === 408 || error.code === 429 || (error.code >= 500 && error.code <= 599))
-    ) {
-      return true;
-    }
-  }
-
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("unable to complete request") ||
-    message.includes("request timed out") ||
-    message.includes("timed out") ||
-    message.includes("failed to fetch") ||
-    message.includes("fetch failed") ||
-    message.includes("aborted") ||
-    message.includes("block not available") ||
-    message.includes("could not find transaction") ||
-    message.includes("not available from this node") ||
-    message.includes("transaction history is not available") ||
-    message.includes("node is behind") ||
-    message.includes("service unavailable") ||
-    message.includes("try again") ||
-    message.includes("too many requests") ||
-    message.includes("invalid json response") ||
-    message.includes("bad gateway") ||
-    message.includes("gateway timeout") ||
-    message.includes("429") ||
-    message.includes("500") ||
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("504")
-  );
 }
 
 function assertKoraLiveSmokeEnvConfigured() {
@@ -282,7 +184,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     }
   });
 
-  it("submits a Privy signer-check memo through Kora signAndSend", {
+  it("verifies a Privy signer-check memo in simulation without broadcasting", {
     timeout: 120000,
   }, async () => {
     const createWalletRes = await request("/v1/wallets", {
@@ -361,21 +263,16 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       expect(signerCheck.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,88}$/);
       expect(signerCheck.feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
       expect(signerCheck.feePayer).not.toBe(signerCheck.walletAddress);
+      expect(signerCheck.simulated).toBe(true);
+      expect(Date.parse(signerCheck.checkedAt)).not.toBeNaN();
 
-      const tx = await getConfirmedTransaction(signerCheck.signature);
-      expect(tx.meta?.err).toBeNull();
-      const accountKeys = tx.transaction.message.accountKeys.map(normalizePubkey);
-      expect(accountKeys[0]).toBe(signerCheck.feePayer);
-      expect(accountKeys).toContain(signerCheck.walletAddress);
-
-      const memoInstruction = tx.transaction.message.instructions.find(
-        (instruction) => instruction.programId === MEMO_PROGRAM_ADDRESS
-      );
-      expect(memoInstruction).toBeTruthy();
-
-      const memoText = memoInstruction?.parsed;
-      expect(typeof memoText).toBe("string");
-      expect(memoText).toBe(signerCheck.memo);
+      // The check runs in RPC simulation and must never broadcast: the
+      // wallet's signature is real, but no transaction may exist on chain.
+      const onChain = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
+        signerCheck.signature,
+        { commitment: "confirmed", encoding: "jsonParsed", maxSupportedTransactionVersion: 0 },
+      ]);
+      expect(onChain).toBeNull();
       signerCheckPassed = true;
     } finally {
       const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {

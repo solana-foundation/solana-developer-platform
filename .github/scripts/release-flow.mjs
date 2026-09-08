@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
-import { autoMergeNeedsRearm } from "./release-automerge.mjs";
+import { reconcileReleaseAutoMerge } from "./release-automerge.mjs";
 import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mjs";
 
 const mode = process.argv[2];
@@ -451,31 +451,22 @@ async function enableAutoMerge(pullRequestId, version) {
   const arm = () =>
     githubGraphqlRequest({ query, variables: { pullRequestId, commitHeadline }, token });
 
-  try {
-    await arm();
-    return;
-  } catch (error) {
-    if (!error.message.includes("Auto merge is already enabled")) {
-      throw error;
-    }
-  }
-
-  // Already armed, which on this repository usually means armed at an earlier
-  // version: this pull request is recreated on every push to main, and the
-  // headline GitHub squash-merges with is frozen at arming time even though the
-  // title is updated. Left alone, the release commit lands on main naming the
-  // wrong version and `publish` refuses it, taking the production deploy with
-  // it. See release-automerge.mjs for the full reasoning.
-  const armedHeadline = await armedAutoMergeHeadline(pullRequestId);
-  if (!autoMergeNeedsRearm(armedHeadline, commitHeadline)) {
-    return;
-  }
-
-  console.log(
-    `Re-arming auto-merge: headline was ${JSON.stringify(armedHeadline)}, expected ${JSON.stringify(commitHeadline)}`
-  );
-  await disableAutoMerge(pullRequestId);
-  await arm();
+  // Read the armed state first. A repeat enablePullRequestAutoMerge on an
+  // already-armed pull request no longer errors with "Auto merge is already
+  // enabled": GitHub returns success and keeps the headline frozen at the
+  // original arming time. Branching on that error therefore never reached
+  // the re-arm, which is how #1650 merged as 0.72.1 while titled 0.73.0 and
+  // #1658 sat armed as 0.73.1 while titled 0.74.0. The pull request is
+  // recreated on every push to main, so a stale headline lands on main naming
+  // the wrong version and `publish` refuses it, taking the production deploy
+  // with it. See release-automerge.mjs for the flow and its tests.
+  await reconcileReleaseAutoMerge({
+    desiredHeadline: commitHeadline,
+    readArmedHeadline: () => armedAutoMergeHeadline(pullRequestId),
+    arm,
+    disarm: () => disableAutoMerge(pullRequestId),
+    log: console.log,
+  });
 }
 
 async function ensureReleasePrSettings() {

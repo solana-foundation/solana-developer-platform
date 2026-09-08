@@ -21,10 +21,11 @@ describe("Markets dashboard headers", () => {
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
-      titlePosition: "left",
-      headerVariant: "markets",
       contentWidthClass: "max-w-none",
     });
+    // The canonical header: no title-position or variant overrides, so the
+    // shell renders Markets exactly like every other tabbed module.
+    expect(config.titlePosition).toBeUndefined();
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs?.tabs).toEqual([
       {
@@ -43,10 +44,9 @@ describe("Markets dashboard headers", () => {
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
-      titlePosition: "left",
-      headerVariant: "markets",
       contentWidthClass: "max-w-none",
     });
+    expect(config.titlePosition).toBeUndefined();
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs?.tabs).toHaveLength(2);
   });

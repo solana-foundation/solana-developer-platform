@@ -152,12 +152,7 @@ async function seedRampEventTransfer(params: {
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
 
-  it("rejects an ambiguous Provider wallet ID before creating a hosted quote", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "ambiguous_ramp_wallet",
-    });
-    await seedActiveConnectionWallet({ walletId: TEST_WALLET_ID });
-
+  it("rejects the retired symbol-shaped onramp quote request", async () => {
     const response = await app.request(
       "/v1/payments/ramps/onramp/quote",
       {
@@ -168,30 +163,97 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
-          counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          counterpartyId: "cpty_asset_rail_validation",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
-          fiatAmount: "120.50",
+          fiatAmount: "100.00",
         }),
       },
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
-    expect(
-      await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>()
-    ).toEqual({ count: 0 });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
-  it("rejects cross-owner address ambiguity after resolving a Provider wallet ID", async () => {
+  it("rejects the retired symbol-shaped onramp estimate request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped offramp estimate request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped offramp quote request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId: "cpty_asset_rail_validation",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired destinationWallet key on the onramp quote endpoint", async () => {
     const counterpartyId = await seedCounterparty({
-      externalId: "ambiguous_ramp_wallet_address",
+      externalId: "retired_destination_wallet_key",
     });
-    await seedActiveConnectionWallet({ publicKey: TEST_SOLANA_ADDRESSES.wallet1 });
 
     const response = await app.request(
       "/v1/payments/ramps/onramp/quote",
@@ -205,7 +267,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -213,8 +275,38 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
+  });
+
+  it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "provider_walletid_as_custody_id",
+    });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationCustodyWalletId: TEST_WALLET_ID,
+          assetRail: "sol.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(
       await getDb(env)
         .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
@@ -237,8 +329,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_CONNECTION_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CONNECTION_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -519,8 +611,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           rampsMemo: { invoice: "INV-123", po: "PO-9" },
@@ -605,8 +697,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -671,8 +763,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -712,8 +804,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -772,8 +864,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -805,8 +897,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           rampsMemo,
@@ -834,8 +926,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -858,8 +950,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -905,8 +997,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "bvnk",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           rampsMemo: { invoice: "INV-123", po: "PO-9" },
@@ -945,8 +1037,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "bvnk",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -1217,11 +1309,11 @@ describe("Payments routes — ramps", () => {
           },
           body: JSON.stringify({
             provider: "bvnk",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "EUR",
             fiatAmount: "100",
             counterpartyId: "cpty_quota_test",
-            destinationWallet: TEST_WALLET_ID,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           }),
         },
         env
@@ -1372,8 +1464,8 @@ describe("Payments routes — ramps", () => {
           body: JSON.stringify({
             provider: "moneygram",
             counterpartyId,
-            destinationWallet: TEST_WALLET_ID,
-            cryptoToken: "USDC",
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             fiatAmount,
           }),
@@ -1653,8 +1745,8 @@ describe("Payments routes — ramps", () => {
           },
           body: JSON.stringify({
             provider: "lightspark",
-            sourceWallet: TEST_WALLET_ID,
-            cryptoToken: "USDC",
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
             cryptoAmount: "25",
             fiatCurrency: "USD",
             destinationCountry: "MY",

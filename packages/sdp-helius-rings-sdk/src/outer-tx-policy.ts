@@ -2,8 +2,10 @@ import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   DEFAULT_TREE_ADDRESS,
+  SHIELDED_POOL_CPI_AUTHORITY,
   SHIELDED_POOL_PROGRAM_ID,
   SOL_INTERFACE,
+  SPL_TOKEN_2022_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
 import { HeliusRingsError } from "@sdp/helius-rings";
@@ -522,9 +524,14 @@ async function derivedRingAuthAddress(ringProgramId: Address): Promise<Address> 
  * address vector byte-equals this list, custody is the table's authority, and
  * custody never signs another extend (the bring-up gate refuses anything
  * else). Order is load-bearing — message lookups index into it. Mirrors
- * zolana's `ringLookupTableAddresses` with inputTree === outputTree deduped; a
+ * zolana's `ringLookupTableAddresses` with inputTree === outputTree deduped,
+ * then its `ringSettlementStatics`, which 0.1.6 puts in every new table; a
  * unit test pins the two together so upstream drift breaks the build instead
  * of custody.
+ *
+ * A table rented before 0.1.6 holds only the first group and still spends: the
+ * settlement group is appended, so an index into the shorter table resolves to
+ * the same address, and a SOL-only ring transact never names those three.
  */
 export async function expectedRingTable(ring: Address, tree: Address): Promise<readonly string[]> {
   const [ringConfig] = await getProgramDerivedAddress({
@@ -539,6 +546,10 @@ export async function expectedRingTable(ring: Address, tree: Address): Promise<r
     await derivedRingAuthAddress(ring),
     ring,
     COMPUTE_LIMIT.programAddress,
+    // Settlement accounts a public withdrawal's interface transfer reaches.
+    SHIELDED_POOL_CPI_AUTHORITY,
+    SPL_TOKEN_PROGRAM_ID,
+    SPL_TOKEN_2022_PROGRAM_ID,
   ];
 }
 
@@ -546,7 +557,7 @@ export async function expectedRingTable(ring: Address, tree: Address): Promise<r
  * The lookup-list analog of `expectStaticAccounts`: what each index list loads
  * must be exactly the expected set — nothing extra rides along as writable.
  * Set equality suffices: the envelope made the indexes unique and the table's
- * seven addresses are distinct, so lengths plus membership pin both sides.
+ * addresses are distinct, so lengths plus membership pin both sides.
  */
 function expectRingLookups(
   lookup: DecodedAddressTableLookup,

@@ -18,6 +18,7 @@ type E2EEnvCommon = {
   clerkOrgName: string;
   clerkTestEmail: string;
   sdpApiBaseUrl: string;
+  ticketAuth: boolean;
   webServerEnv: Record<string, string>;
 };
 
@@ -134,6 +135,15 @@ export function getE2EEnv(): E2EEnv {
 
   const clerkSecretKey = resolveEnvValue("CLERK_SECRET_KEY", fallback);
   const clerkPublishableKey = resolveEnvValue("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", fallback);
+  // Explicit opt-in to the production-Clerk sign-in-token flow (stage smoke).
+  // Not inferred from the key prefix: a misconfigured key must fail loudly, not
+  // silently fall back to the @clerk/testing path and pass without exercising it.
+  const ticketAuth = process.env.E2E_CLERK_TICKET_AUTH === "1";
+  if (ticketAuth && !clerkPublishableKey.startsWith("pk_live_")) {
+    throw new Error(
+      "E2E_CLERK_TICKET_AUTH=1 requires a production (pk_live_) Clerk publishable key"
+    );
+  }
   const sdpApiBaseUrl =
     explicitExternalApiUrl ??
     resolveEnvValue(
@@ -171,6 +181,7 @@ export function getE2EEnv(): E2EEnv {
     clerkOrgName: resolveEnvValue("E2E_CLERK_ORG_NAME", fallback, DEFAULT_CLERK_TEST_ORG_NAME),
     ...identityEnv,
     sdpApiBaseUrl,
+    ticketAuth,
     webServerEnv: {
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
       CLERK_SECRET_KEY: clerkSecretKey,
