@@ -2828,3 +2828,167 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
     await expect(auditRows()).resolves.toHaveLength(1);
   });
 });
+
+/**
+ * HOO-1559 for the other program mutation. `PUT /programs/:programId`
+ * re-points the program's whole balance at a different strategy, and it used
+ * to be gated on `earn:write` alone: no policy ran, so an org's deny rules,
+ * asset limits and approval requirements never consulted the one mutation
+ * that redirects the entire program allocation. A program is a provider
+ * ACCOUNT, not a custody wallet, so — like the payout — a wallet-scoped key
+ * is refused outright and the governing profile is the API key's own.
+ */
+describe("Earn program — retarget authorization (HOO-1559)", () => {
+  async function seedApiKeyControlProfileForRetarget(rules: Record<string, unknown>[]): Promise<void> {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles
+             (id, organization_id, project_id, api_key_id, name, status)
+           VALUES (?, ?, ?, ?, ?, 'active')`
+        )
+        .bind("akcp_retarget", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Retarget controls"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profile_revisions
+             (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
+           VALUES (?, ?, 1, ?::jsonb, 'allow', ?, ?)`
+        )
+        .bind(
+          "akcpr_retarget_1",
+          "akcp_retarget",
+          JSON.stringify(rules),
+          TEST_USER.id,
+          "2026-09-07T00:00:00.000Z"
+        ),
+      getDb(env)
+        .prepare(
+          "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
+        )
+        .bind("akcpr_retarget_1", "2026-09-07T00:00:00.000Z", "akcp_retarget"),
+    ]);
+  }
+
+  it("records the re-target as a governed operation and still retargets when allowed", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    const updateStrategy = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
+    stubProgramReads();
+
+    const res = await requestEarn("PUT", programPath(program.id), {
+      allocations: VALID_ALLOCATIONS,
+      requestId: "3c9d2e61-84b7-4f0a-9c3d-6e1b5a7f2d48",
+    });
+
+    expect(res.status).toBe(200);
+    expect(updateStrategy).toHaveBeenCalledTimes(1);
+    // The audit row is the proof the gate ran: API-key control profile
+    // (custody wallet null), the provider wallet as the asset-rule target,
+    // and the token group plus target strategy stated for approvers.
+    expect(await readWalletOperations()).toMatchObject([
+      {
+        status: "evaluated",
+        operation_family: "program",
+        operation_type: "earn_program_retarget",
+        custody_wallet_id: null,
+        wallet_id: WALLET_REF,
+        asset: "usdc",
+        destination: GROUND_SOURCE,
+      },
+    ]);
+  });
+
+  it("denies a re-target the key's policy forbids, before the provider is driven", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    await seedApiKeyControlProfileForRetarget([
+      {
+        id: "deny-usdt-retargets",
+        kind: "asset",
+        assets: ["usdt"],
+        action: "deny",
+      },
+    ]);
+    const updateStrategy = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy");
+    stubProgramReads();
+
+    const res = await requestEarn("PUT", programPath(program.id), {
+      allocations: { usdt: [{ yieldSourceId: GROUND_USDT_SOURCE, pct: 100 }] },
+      requestId: "9e4f1c28-53a6-4b7d-8e29-0f6c3d8a5b17",
+    });
+
+    expect(res.status).toBe(403);
+    expect(updateStrategy).not.toHaveBeenCalled();
+  });
+
+  it("holds a re-target the policy requires approval for, and a retry re-answers the same hold", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    await seedApiKeyControlProfileForRetarget([
+      { id: "approve-everything", kind: "always", action: "approval_required" },
+    ]);
+    const updateStrategy = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
+    stubProgramReads();
+    const body = {
+      allocations: VALID_ALLOCATIONS,
+      requestId: "b2d8f403-61c7-49ae-8b15-3f7a0c9e4d26",
+    };
+
+    const held = await requestEarn("PUT", programPath(program.id), body);
+    expect(held.status).toBe(202);
+
+    // Same rule as the payout: one governed operation per key, so a retry
+    // answers the SAME hold instead of minting a second approval.
+    const retried = await requestEarn("PUT", programPath(program.id), body);
+    expect(retried.status).toBe(202);
+
+    expect(updateStrategy).not.toHaveBeenCalled();
+    const operations = await readWalletOperations();
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ status: "pending_approval" });
+  });
+
+  it("refuses a wallet-scoped key on the re-target, before the provider is driven", async () => {
+    await seedAuth();
+    await seedGroundStrategy();
+    const program = await seedProgramWallet();
+    const updateStrategy = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy");
+
+    // A key bound to ONE custody wallet — the shape HOO-1559 refuses outright
+    // on program routes, because a program has no custody wallet for a
+    // binding to name and unasserted scope would reach the whole org balance.
+    const WALLET_SCOPED_KEY = {
+      id: "key_earn_program_retarget_scoped",
+      raw: "sk_tes...retgt",
+      prefix: "sk_test_epr",
+    };
+    const keyHash = await hashString(WALLET_SCOPED_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      id: WALLET_SCOPED_KEY.id,
+      walletScope: "selected",
+      signingWalletId: "privy_low_value",
+      walletBindings: [{ walletId: "privy_low_value", permissions: ["*"] }],
+    });
+
+    const res = await requestEarn(
+      "PUT",
+      programPath(program.id),
+      {
+        allocations: VALID_ALLOCATIONS,
+        requestId: "5a1e9b74-2c38-4d6f-9a02-7c4e8b1d3f59",
+      },
+      { Authorization: `Bearer ${WALLET_SCOPED_KEY.raw}` }
+    );
+
+    expect(res.status).toBe(403);
+    expect(updateStrategy).not.toHaveBeenCalled();
+  });
+});

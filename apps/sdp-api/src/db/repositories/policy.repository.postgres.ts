@@ -1988,7 +1988,8 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           scope,
           input.walletId,
           input.custodyWalletId,
-          input.operationType === "earn_program_withdrawal"
+          input.operationType === "earn_program_withdrawal" ||
+            input.operationType === "earn_program_retarget"
         ))
       ) {
         return null;

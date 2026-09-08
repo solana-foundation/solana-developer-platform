@@ -24,6 +24,7 @@ import {
   answerEarnProgramWithdrawalConflict,
   createEarnProgram,
   createEarnProgramWithdrawal,
+  extractEarnProgramRetargetPolicyCandidate,
   extractEarnProgramWithdrawalPolicyCandidate,
   getEarnProgram,
   getEarnProgramWithdrawal,
@@ -353,6 +354,13 @@ earn.put(
   "/programs/:programId",
   requirePermissions("earn:write"),
   validateBody(earnProgramRetargetSchema),
+  // Re-target re-points the program's whole balance at a different strategy,
+  // so it is governed by the API key's own control profile exactly like the
+  // withdrawal below (HOO-1559): deny rules, asset limits and approval
+  // requirements must run before the provider mutation, not after.
+  policyGate({
+    extract: extractEarnProgramRetargetPolicyCandidate,
+  }),
   retargetEarnProgram
 );
 earn.get(

@@ -28,7 +28,11 @@ export async function throwOnPriorEarnPolicyOperation(
     scope: EarnPolicyReplayScope;
     idempotencyKey: string;
     idempotencyFingerprint: string;
-    operationNoun: "vault deposit" | "vault withdrawal" | "program withdrawal";
+    operationNoun:
+      | "vault deposit"
+      | "vault withdrawal"
+      | "program withdrawal"
+      | "program retarget";
   }
 ): Promise<void> {
   const projectPredicate =

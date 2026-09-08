@@ -72,7 +72,7 @@ export const tokenAmountSchema = z.string().openapi({
 
 export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.element, {
   description:
-    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always. Program-family operations include earn_vault_deposit, earn_vault_withdrawal and earn_program_withdrawal.",
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always. Program-family operations include earn_vault_deposit, earn_vault_withdrawal, earn_program_withdrawal and earn_program_retarget.",
   example: {
     id: "approve-vault-deposits",
     kind: "operation_type",

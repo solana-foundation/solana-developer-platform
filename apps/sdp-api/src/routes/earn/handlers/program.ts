@@ -594,6 +594,82 @@ export const retargetEarnProgram = async (
   return success(c, response);
 };
 
+/**
+ * State the re-target as a policy candidate.
+ *
+ * Re-target re-points the program's whole balance at a different strategy, so
+ * like the withdrawal (HOO-1559) it is governed by the API key's own control
+ * profile: `custodyWalletId` is null because a program is a provider account
+ * and SDP signs nothing here, while `walletId` names the provider wallet whose
+ * allocation is being re-pointed — what an asset-scoped rule reads against.
+ *
+ * The gate order matches the handler's: the wallet-scope refusal (403) runs
+ * before key resolution, so an unreachable call never answers "missing
+ * idempotency key".
+ */
+export async function extractEarnProgramRetargetPolicyCandidate(
+  c: ValidatedBodyContext<typeof earnProgramRetargetSchema>
+): Promise<PolicyGateExtraction> {
+  const { programId } = parseParams(c, earnProgramParamsSchema);
+  const body = c.req.valid("json");
+  const { row, client, testMode } = await requireProgramContext(c, programId);
+
+  assertProgramKeyIsNotWalletScoped(c, "re-target Earn programs");
+
+  const auth = getAuth(c);
+  // Same two accepted key sources as the handler resolves downstream; when
+  // absent the gate's own `Idempotency-Key` handling sees `null`, which the
+  // enforcement store refuses for a governed operation — an unkeyed re-target
+  // cannot open an ungoverned one. Optional key on this route stays optional.
+  const callerKey = resolveCallerIdempotencyKey(
+    c,
+    body.requestId,
+    "apply the strategy change twice"
+  );
+
+  return {
+    candidate: {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId ?? null,
+      custodyWalletId: null,
+      walletId: row.provider_wallet_ref,
+      apiKeyId: auth.apiKeyId ?? null,
+      actor: walletOperationActorFromAuth(auth),
+      source: "earn_program_retarget",
+      operationFamily: "program",
+      operationType: "earn_program_retarget",
+      // The deposit token group whose allocation is being re-pointed. V1 is
+      // single-vault, so at most one group can be present (the sum rule pins
+      // each present group to pct: 100).
+      asset: body.allocations.usdc !== undefined ? "usdc" : "usdt",
+      // No USD amount changes hands — this names a strategy, not a size — so
+      // an amount rule has nothing to read and is recorded null.
+      amount: null,
+      // The target strategy reference, stated for approvers the same way a
+      // deposit names the vault it opens a position into.
+      destination: body.allocations.usdc?.[0]?.yieldSourceId ?? body.allocations.usdt?.[0]?.yieldSourceId ?? null,
+      context: {
+        provider: client.provider,
+        programId: row.id,
+        environment: resolveSdpEnvironment(c),
+        allocations: body.allocations,
+      },
+      providerExtensions: {},
+    },
+    legs: [],
+    body,
+    resolved: { row, client, auth },
+    rawPayload: {
+      allocations: body.allocations,
+      ...(callerKey !== undefined && { requestId: body.requestId }),
+      ...(c.req.header(IDEMPOTENCY_KEY_HEADER) !== undefined && {
+        idempotencyKeyHeaderPresent: true,
+      }),
+    },
+    idempotencyKey: callerKey ?? null,
+  };
+}
+
 export const getEarnProgram = async (c: AppContext) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const { row, client, testMode } = await requireProgramContext(c, programId);
