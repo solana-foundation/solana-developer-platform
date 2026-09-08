@@ -3,17 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import { localRateLimit } from "./local-rate-limit";
 
+// SAFETY: the limiter reads only K_SERVICE, via getClientIp; the rest of Env is
+// irrelevant to it and constructing a whole one would say nothing extra.
 const CLOUD_RUN_ENV = { K_SERVICE: "sdp-api" } as unknown as Env;
 
-function buildApp(overrides: { maxRequests?: number; maxTrackedKeys?: number } = {}) {
+function buildApp(limits: { maxRequests: number; maxTrackedKeys: number }) {
   const app = new Hono<{ Bindings: Env }>();
   app.use(
     "*",
     localRateLimit({
       name: "test",
-      maxRequests: overrides.maxRequests ?? 3,
+      maxRequests: limits.maxRequests,
       windowMs: 60_000,
-      maxTrackedKeys: overrides.maxTrackedKeys ?? 8,
+      maxTrackedKeys: limits.maxTrackedKeys,
     })
   );
   app.onError((error) => new Response(error.message, { status: 429 }));
@@ -37,7 +39,7 @@ afterEach(() => {
 
 describe("localRateLimit", () => {
   it("admits up to the limit and refuses the next request from that address", async () => {
-    const app = buildApp();
+    const app = buildApp({ maxRequests: 3, maxTrackedKeys: 8 });
     const request = () => app.request("/", fromAddress("203.0.113.7"), CLOUD_RUN_ENV);
 
     expect((await request()).status).toBe(200);
@@ -47,7 +49,7 @@ describe("localRateLimit", () => {
   });
 
   it("counts each address separately", async () => {
-    const app = buildApp({ maxRequests: 1 });
+    const app = buildApp({ maxRequests: 1, maxTrackedKeys: 8 });
 
     expect((await app.request("/", fromAddress("203.0.113.7"), CLOUD_RUN_ENV)).status).toBe(200);
     expect((await app.request("/", fromAddress("203.0.113.8"), CLOUD_RUN_ENV)).status).toBe(200);
@@ -55,7 +57,7 @@ describe("localRateLimit", () => {
   });
 
   it("admits the refused caller again in the next window", async () => {
-    const app = buildApp({ maxRequests: 1 });
+    const app = buildApp({ maxRequests: 1, maxTrackedKeys: 8 });
     const request = () => app.request("/", fromAddress("203.0.113.7"), CLOUD_RUN_ENV);
 
     expect((await request()).status).toBe(200);
@@ -86,7 +88,7 @@ describe("localRateLimit", () => {
   it("counts a caller the proxy did not verify against the shared bucket", async () => {
     // A single caller-supplied X-Forwarded-For is not a verified address on
     // Cloud Run, so it must not buy its own allowance by inventing one.
-    const app = buildApp({ maxRequests: 1 });
+    const app = buildApp({ maxRequests: 1, maxTrackedKeys: 8 });
     const spoofed = { headers: { "x-forwarded-for": "203.0.113.99" } };
 
     expect((await app.request("/", spoofed, CLOUD_RUN_ENV)).status).toBe(200);
