@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
-import { createRpc, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { createRpcFromTransport, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -23,6 +23,7 @@ import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { FeePaymentError } from "@/services/ports";
+import { createRpcTransportForTarget } from "@/services/rpc-egress";
 import { createOrgSigner } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
@@ -92,10 +93,15 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       }),
     ]);
 
-    const rpc = createRpc(c.env, {
-      rpcUrl: rpcTarget.endpoint,
-      headers: rpcTarget.headers,
-    });
+    // Through the guarded transport, not a raw client: `resolveRpcTarget`
+    // returns the project's own `settings.rpcEndpoint` for the `custom`
+    // provider, and that value is only checked for being a URL when it is
+    // written. Dialling it directly made this route an API-key reachable SSRF
+    // into the metadata server and the private network, with error text and
+    // timing as the oracle — the same sink the relay already guards
+    // (HOO-1560). Platform targets keep the ordinary fetch, so local and
+    // Surfpool endpoints are unaffected.
+    const rpc = createRpcFromTransport(createRpcTransportForTarget(rpcTarget));
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
