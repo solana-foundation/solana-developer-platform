@@ -730,6 +730,7 @@ export type CustodyConnectionFailureCode = (typeof CUSTODY_CONNECTION_FAILURE_CO
 
 /** Lifecycle of the stored provider credential backing a connection. */
 export const PROVIDER_CREDENTIAL_STATUSES = [
+  "creating",
   "pending",
   "active",
   "failed_validation",

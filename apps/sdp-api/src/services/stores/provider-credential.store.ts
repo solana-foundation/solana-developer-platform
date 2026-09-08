@@ -4,6 +4,7 @@ import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 
 export type ProviderCredentialStatus =
+  | "creating"
   | "pending"
   | "active"
   | "failed_validation"
@@ -27,7 +28,17 @@ export interface ProviderCredentialRow {
   rotated_from_provider_credential_id: string | null;
   idempotency_key: string | null;
   idempotency_fingerprint: string | null;
+  last_failure_code: string | null;
   created_at: string;
+}
+
+export interface LifecycleCredentialRow extends ProviderCredentialRow {
+  source: "stored" | "runtime";
+  storage_backend: StoredCredentialSecret["storageBackend"];
+  deactivated_at: string | null;
+  last_validated_at: string | null;
+  last_failed_at: string | null;
+  secret_retention_expires_at: string | null;
 }
 
 export interface CustodyConnectionRow {
@@ -95,6 +106,26 @@ export interface InstallationConnectionState extends CustodyConnectionRow {
   is_selected: boolean;
 }
 
+const CREATING_SUBMISSION = `creating.status = 'creating'
+  AND (creating.rotated_from_provider_credential_id IS NULL OR EXISTS (
+    SELECT 1 FROM provider_credentials predecessor
+    WHERE predecessor.id = creating.rotated_from_provider_credential_id
+      AND predecessor.status = 'failed_validation'
+  ))`;
+
+const CREDENTIAL_LINEAGE_SQL = `WITH RECURSIVE credential_lineage(id, rotated_from_provider_credential_id, credential_version) AS (
+  SELECT id, rotated_from_provider_credential_id, credential_version
+  FROM provider_credentials
+  WHERE id = ? AND organization_id = ? AND provider = 'privy'
+  UNION
+  SELECT related.id, related.rotated_from_provider_credential_id, related.credential_version
+  FROM provider_credentials related
+  JOIN credential_lineage member
+    ON related.rotated_from_provider_credential_id = member.id
+    OR related.id = member.rotated_from_provider_credential_id
+  WHERE related.organization_id = ? AND related.provider = 'privy'
+)`;
+
 export class ProviderCredentialStore {
   constructor(private readonly db: DatabaseExecutor) {}
 
@@ -116,7 +147,7 @@ export class ProviderCredentialStore {
       `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
               display_metadata, status, credential_version,
               rotated_from_provider_credential_id, idempotency_key,
-              idempotency_fingerprint, created_at
+              idempotency_fingerprint, last_failure_code, created_at
        FROM provider_credentials
        WHERE organization_id = ? AND idempotency_key = ?`,
       [organizationId, idempotencyKey]
@@ -169,12 +200,52 @@ export class ProviderCredentialStore {
       `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
               display_metadata, status, credential_version,
               rotated_from_provider_credential_id, idempotency_key,
-              idempotency_fingerprint, created_at
+              idempotency_fingerprint, last_failure_code, created_at
        FROM provider_credentials
        WHERE id = ?
        ${options.lock ? "FOR UPDATE" : ""}`,
       [id]
     );
+  }
+
+  async findLifecycleCredential(
+    organizationId: string,
+    id: string,
+    options: { lock?: boolean } = {}
+  ): Promise<LifecycleCredentialRow | null> {
+    return this.db.queryOne<LifecycleCredentialRow>(
+      `SELECT id, organization_id, project_id, provider, label, scope, scope_key,
+              source, storage_backend, display_metadata, status, credential_version,
+              rotated_from_provider_credential_id, idempotency_key,
+              idempotency_fingerprint, deactivated_at, last_validated_at,
+              last_failed_at, last_failure_code, secret_retention_expires_at, created_at
+       FROM provider_credentials
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       ${options.lock ? "FOR UPDATE" : ""}`,
+      [id, organizationId]
+    );
+  }
+
+  async findGcpContainerRef(organizationId: string, credentialId: string): Promise<string | null> {
+    const row = await this.db.queryOne<{ secret_ref: string }>(
+      `SELECT secret_ref FROM provider_credentials
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+         AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
+         AND secret_ref IS NOT NULL AND secret_version_ref IS NOT NULL`,
+      [credentialId, organizationId]
+    );
+    return row?.secret_ref ?? null;
+  }
+
+  /** The caller holds the existing Project/current-Credential admission locks. */
+  async nextCredentialVersion(organizationId: string, predecessorId: string): Promise<number> {
+    const row = await this.db.queryOne<{ next_version: number | null }>(
+      `${CREDENTIAL_LINEAGE_SQL}
+       SELECT MAX(credential_version) + 1 AS next_version FROM credential_lineage`,
+      [predecessorId, organizationId, organizationId]
+    );
+    if (!row || row.next_version === null) throw new Error("Credential lineage was not found");
+    return row.next_version;
   }
 
   /**
@@ -279,7 +350,7 @@ export class ProviderCredentialStore {
     organizationId: string,
     projectId: string,
     connectionId: string,
-    options: { lock?: boolean } = {}
+    options: { lock?: boolean; excludedCreatingCredentialId?: string } = {}
   ): Promise<InstallationConnectionState | null> {
     return this.db.queryOne<InstallationConnectionState>(
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
@@ -304,14 +375,21 @@ export class ProviderCredentialStore {
                 SELECT 1 FROM custody_wallets owned
                 WHERE owned.custody_connection_id = c.id
               ) AS has_owned_wallet,
-              EXISTS (
+              (EXISTS (
                 SELECT 1 FROM custody_connections sibling
                 WHERE sibling.organization_id = c.organization_id
                   AND sibling.project_id = c.project_id
                   AND sibling.provider = c.provider
                   AND sibling.id <> c.id
                   AND sibling.status IN ('pending', 'checking')
-              ) AS has_sibling_unfinished,
+              ) OR EXISTS (
+                SELECT 1 FROM provider_credentials creating
+                WHERE creating.organization_id = c.organization_id
+                  AND creating.project_id = c.project_id
+                  AND creating.provider = c.provider
+                  AND creating.id IS DISTINCT FROM ?
+                  AND ${CREATING_SUBMISSION}
+              )) AS has_sibling_unfinished,
               EXISTS (
                 SELECT 1 FROM custody_scope_defaults selected
                 WHERE selected.organization_id = c.organization_id
@@ -325,7 +403,7 @@ export class ProviderCredentialStore {
          AND c.project_id = ?
          AND c.provider = 'privy'
        ${options.lock ? "FOR UPDATE OF c, pc" : ""}`,
-      [connectionId, organizationId, projectId]
+      [options.excludedCreatingCredentialId ?? null, connectionId, organizationId, projectId]
     );
   }
 
@@ -424,6 +502,13 @@ export class ProviderCredentialStore {
              AND sibling.provider = c.provider
              AND sibling.id <> c.id
              AND sibling.status IN ('pending', 'checking')
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM provider_credentials creating
+           WHERE creating.organization_id = c.organization_id
+             AND creating.project_id = c.project_id
+             AND creating.provider = c.provider
+             AND ${CREATING_SUBMISSION}
          )
          AND EXISTS (
            SELECT 1 FROM provider_credentials pc
@@ -546,7 +631,7 @@ export class ProviderCredentialStore {
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
                  display_metadata, status, credential_version,
                  rotated_from_provider_credential_id, idempotency_key,
-                 idempotency_fingerprint, created_at`,
+                 idempotency_fingerprint, last_failure_code, created_at`,
       [params.providerCredentialId]
     );
   }
@@ -593,7 +678,7 @@ export class ProviderCredentialStore {
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
                  display_metadata, status, credential_version,
                  rotated_from_provider_credential_id, idempotency_key,
-                 idempotency_fingerprint, created_at`,
+                 idempotency_fingerprint, last_failure_code, created_at`,
       [params.failureCode, params.providerCredentialId]
     );
     if (!credential) {
@@ -705,6 +790,7 @@ export class ProviderCredentialStore {
     label: string;
     scope: "organization" | "project";
     source: "stored" | "runtime";
+    status?: "creating" | "pending";
     stored: StoredCredentialSecret;
     displayMetadata: Record<string, string>;
     version: number;
@@ -712,6 +798,7 @@ export class ProviderCredentialStore {
     idempotencyKey: string;
     idempotencyFingerprint: string;
     createdBy: string;
+    ownsGcpContainer?: boolean;
   }): Promise<ProviderCredentialRow> {
     const scopeKey = params.scope === "organization" ? "__organization__" : params.projectId;
     const row = await this.db.queryOne<ProviderCredentialRow>(
@@ -720,15 +807,15 @@ export class ProviderCredentialStore {
          storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
          display_metadata, status, credential_version,
          rotated_from_provider_credential_id, idempotency_key,
-         idempotency_fingerprint, created_by
+         idempotency_fingerprint, created_by, secret_next_scan_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? THEN clock_timestamp() ELSE NULL END
        )
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
                  display_metadata, status, credential_version,
                  rotated_from_provider_credential_id, idempotency_key,
-                 idempotency_fingerprint, created_at`,
+                 idempotency_fingerprint, last_failure_code, created_at`,
       [
         params.id,
         params.organizationId,
@@ -742,11 +829,13 @@ export class ProviderCredentialStore {
         params.stored.secretVersionRef ?? null,
         params.stored.encryptedSecretPayload ?? null,
         JSON.stringify(params.displayMetadata),
+        params.status ?? "pending",
         params.version,
         params.rotatedFromId,
         params.idempotencyKey,
         params.idempotencyFingerprint,
         params.createdBy,
+        params.ownsGcpContainer ?? false,
       ]
     );
 
@@ -754,6 +843,66 @@ export class ProviderCredentialStore {
       throw new Error("Provider credential insert did not return the expected scope");
     }
     return row;
+  }
+
+  async findCreatingSubmission(
+    organizationId: string,
+    projectId: string
+  ): Promise<ProviderCredentialRow | null> {
+    return this.db.queryOne<ProviderCredentialRow>(
+      `SELECT creating.id, creating.organization_id, creating.project_id, creating.provider,
+              creating.label, creating.scope, creating.scope_key, creating.display_metadata,
+              creating.status, creating.credential_version, creating.rotated_from_provider_credential_id,
+              creating.idempotency_key, creating.idempotency_fingerprint,
+              creating.last_failure_code, creating.created_at
+       FROM provider_credentials creating
+       WHERE creating.organization_id = ? AND creating.project_id = ? AND creating.provider = 'privy'
+         AND ${CREATING_SUBMISSION}
+       ORDER BY creating.created_at, creating.id LIMIT 1`,
+      [organizationId, projectId]
+    );
+  }
+
+  async finalizeCredentialCreation(params: {
+    organizationId: string;
+    credentialId: string;
+    secretRef: string;
+    secretVersionRef: string;
+  }): Promise<ProviderCredentialRow | null> {
+    if (!params.secretVersionRef.trim()) return null;
+    return this.db.queryOne<ProviderCredentialRow>(
+      `UPDATE provider_credentials
+       SET status = 'pending', secret_version_ref = ?, updated_at = sdp_iso_now()
+       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+         AND status = 'creating' AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
+         AND secret_ref = ? AND secret_version_ref IS NULL
+       RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
+                 display_metadata, status, credential_version,
+                 rotated_from_provider_credential_id, idempotency_key,
+                 idempotency_fingerprint, last_failure_code, created_at`,
+      [params.secretVersionRef, params.credentialId, params.organizationId, params.secretRef]
+    );
+  }
+
+  async abandonCredentialCreation(params: {
+    organizationId: string;
+    credentialId: string;
+  }): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE provider_credentials pc
+         SET status = 'deactivated', deactivated_at = sdp_iso_now(),
+             last_failed_at = sdp_iso_now(), last_failure_code = 'secret_creation_abandoned',
+             secret_retention_expires_at = sdp_iso_now(), updated_at = sdp_iso_now()
+         WHERE pc.id = ? AND pc.organization_id = ? AND pc.provider = 'privy'
+           AND pc.status = 'creating' AND pc.storage_backend = 'gcp_secret_manager'
+           AND NOT EXISTS (
+             SELECT 1 FROM custody_connections c
+             WHERE c.provider_credential_id = pc.id AND c.status <> 'deactivated'
+           )`,
+        [params.credentialId, params.organizationId]
+      )) === 1
+    );
   }
 
   async insertConnection(params: {

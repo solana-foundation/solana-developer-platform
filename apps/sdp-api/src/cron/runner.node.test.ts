@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { currentDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
@@ -7,7 +8,7 @@ import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
-import { DVP_TRADES_CRON } from "./dvp-trades";
+import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "./dvp-trades";
 import { EARN_CATALOGUE_SYNC_CRON } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_CRON } from "./earn-split-swaps";
@@ -25,6 +26,10 @@ import {
   PENDING_WITHDRAWALS_CRON,
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
+import {
+  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
+  runProviderCredentialSecretCleanup,
+} from "./provider-credential-secret-cleanup";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -146,6 +151,11 @@ vi.mock("./workflow-secret-retirements", () => ({
   runWorkflowSecretRetirements: vi.fn(),
 }));
 
+vi.mock("./provider-credential-secret-cleanup", () => ({
+  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON: "*/5 * * * *",
+  runProviderCredentialSecretCleanup: vi.fn(),
+}));
+
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
 }
@@ -165,6 +175,7 @@ describe("startCron", () => {
     scheduleMock.mockReturnValue(fakeTask);
     vi.mocked(runApprovedWalletOperationRecovery).mockReset();
     vi.mocked(runEarnVaultMovementsReconciliation).mockReset();
+    vi.mocked(runDvpTradeReconciliation).mockReset();
     vi.mocked(runPendingDepositsReconciliation).mockReset();
     vi.mocked(runPendingTransfersReconciliation).mockReset();
     vi.mocked(runPendingWithdrawalsReconciliation).mockReset();
@@ -173,6 +184,7 @@ describe("startCron", () => {
     vi.mocked(runRingsIndexingPoll).mockReset();
     vi.mocked(runWorkflowExecutions).mockReset();
     vi.mocked(runWorkflowSecretRetirements).mockReset();
+    vi.mocked(runProviderCredentialSecretCleanup).mockReset();
   });
 
   // Asset profiles is on unless a self-hosted operator opts out, so the workflow
@@ -181,14 +193,14 @@ describe("startCron", () => {
   // "* * * * *"), so identity is asserted by firing the tick and seeing which
   // reconciler runs.
   //
-  // The secret-retirement sweep is registered last and behind no flag at all, so it is
+  // The secret-retirement sweep is registered behind no flag at all, so it is
   // in every count below too — including the ones where asset profiles is off.
   //
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 13 tasks. What a
+  // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 14;
+  const ALL_TASKS = 15;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -216,9 +228,10 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[8][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
     expect(scheduleMock.mock.calls[9][0]).toBe(EARN_METRICS_REFRESH_CRON);
     expect(scheduleMock.mock.calls[10][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
-    expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
-    expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
-    expect(scheduleMock.mock.calls[13][0]).toBe(EARN_SPLIT_SWAPS_CRON);
+    expect(scheduleMock.mock.calls[11][0]).toBe(PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON);
+    expect(scheduleMock.mock.calls[12][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[13][0]).toBe(DVP_TRADES_CRON);
+    expect(scheduleMock.mock.calls[14][0]).toBe(EARN_SPLIT_SWAPS_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {
@@ -331,6 +344,26 @@ describe("startCron", () => {
     }
     expect(runWorkflowExecutions).not.toHaveBeenCalled();
     expect(runWorkflowSecretRetirements).toHaveBeenCalledWith({
+      env: SELF_HOSTED_NO_PROFILES,
+      bg,
+      observability: expect.anything(),
+    });
+  });
+
+  it("cleans retained Provider Credential secrets behind no feature flag", () => {
+    const bg = makeBg();
+    const observability = makeObservability();
+    vi.mocked(runProviderCredentialSecretCleanup).mockImplementationOnce(() => {
+      expect(currentDatabaseIdentity()).toEqual({
+        kind: "system",
+        component: "cron:provider-credential-secret-cleanup",
+      });
+    });
+    startCron({ env: SELF_HOSTED_NO_PROFILES, bg, observability });
+
+    (scheduleMock.mock.calls[11][1] as () => void)();
+
+    expect(runProviderCredentialSecretCleanup).toHaveBeenCalledExactlyOnceWith({
       env: SELF_HOSTED_NO_PROFILES,
       bg,
       observability: expect.anything(),
@@ -490,9 +523,26 @@ describe("startCron", () => {
     // Indexed rather than `.at(-1)`: this asserts the vault-movement task
     // specifically, and taking whatever happens to be registered last silently
     // retargets the assertion the moment another task is appended.
-    const tick = scheduleMock.mock.calls[11][1] as () => void;
+    const tick = scheduleMock.mock.calls[12][1] as () => void;
     tick();
     expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
+  });
+
+  it("keeps DvP reconciliation registered under the system identity", () => {
+    const bg = makeBg();
+    const env = SELF_HOSTED_NO_PROFILES;
+    vi.mocked(runDvpTradeReconciliation).mockImplementationOnce(() => {
+      expect(currentDatabaseIdentity()).toEqual({ kind: "system", component: "cron:dvp-trades" });
+    });
+    startCron({ env, bg });
+
+    (scheduleMock.mock.calls[13][1] as () => void)();
+
+    expect(runDvpTradeReconciliation).toHaveBeenCalledExactlyOnceWith({
       env,
       bg,
       observability: expect.anything(),
