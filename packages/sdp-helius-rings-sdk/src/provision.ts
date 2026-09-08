@@ -103,13 +103,88 @@ export async function provisionRingsIdentity(
 }
 
 /**
+ * Repoints an owner's published record at the identity its material derives now.
+ *
+ * This is the deliberate opposite of `provisionRingsIdentity`, which refuses a
+ * mismatch: rotating the record orphans every note encrypted to the old keys,
+ * because the notes stay on chain while nothing can derive the keys that open
+ * them. It exists only as the last recovery step for a wallet whose material no
+ * longer derives its record, where the alternative is a wallet that can never
+ * be read or spent again. The caller is responsible for having confirmed the
+ * loss with a human first.
+ *
+ * Idempotent by re-reading: a rotation that landed but whose response was lost
+ * finds the record already matching and returns it rather than sending a second
+ * one.
+ */
+export async function rekeyRingsIdentity(
+  deps: ProvisionDeps,
+  input: ProvisionInput
+): Promise<ProvisionIdentityResult> {
+  const owner = address(input.owner);
+
+  return deps.material.withMaterial(
+    {
+      organizationId: deps.organizationId,
+      projectId: deps.projectId,
+      walletId: input.walletId,
+      owner: input.owner,
+    },
+    async (material) => {
+      const published = await fetchUserRecord({ rpc: deps.client, owner });
+      if (!published) {
+        // Nothing to rotate. Registering here would quietly turn a recovery into
+        // a first provision, and the two are not the same decision.
+        throw new HeliusRingsError(
+          "conflict",
+          `no Rings user record exists for ${input.owner}; provision the wallet instead of re-keying it`
+        );
+      }
+
+      const signatures: string[] = [];
+      // Undefined means the record already publishes these keys, which is the
+      // landed-but-unacknowledged case rather than an error.
+      const rotation = await buildRegistrationTransaction({
+        client: deps.client,
+        owner,
+        address: material.shieldedAddress,
+      });
+      if (rotation) {
+        signatures.push(await landTransaction(deps, rotation, input.owner));
+      }
+
+      // Re-read rather than trust the send: confirmation says the transaction
+      // landed, not that the record now holds what was intended.
+      const confirmed = await fetchUserRecord({ rpc: deps.client, owner });
+      if (!confirmed) {
+        throw new HeliusRingsError(
+          "gateway_unavailable",
+          "the Rings user record is absent after a confirmed re-key"
+        );
+      }
+      assertRecordMatchesMaterial(confirmed, material, input.owner);
+
+      return {
+        identity: {
+          shieldedAddress: canonicalShieldedIdentity(material.shieldedAddress),
+          owner: input.owner,
+        },
+        registrationSignatures: signatures,
+        mergingEnabled: confirmed.mergingEnabled,
+        materialTag: "live",
+      };
+    }
+  );
+}
+
+/**
  * Fails closed when the published record is not the identity this material
  * derives.
  *
- * There is no recovery path worth offering here. The SDK exposes an update
- * instruction, but using it would repoint an owner at different keys and orphan
- * every note already encrypted to the old ones, so a mismatch has to stop
- * provisioning and be looked at by a human.
+ * Provisioning never rotates: the SDK's update instruction would repoint an
+ * owner at different keys and orphan every note already encrypted to the old
+ * ones, so a mismatch stops provisioning here. `rekeyRingsIdentity` is the
+ * explicit, separately-confirmed recovery path for that state.
  */
 function assertRecordMatchesMaterial(
   record: UserRecord,

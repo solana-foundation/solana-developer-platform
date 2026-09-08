@@ -28,6 +28,12 @@ function hostOf(input: string | URL): string {
   return new URL(String(input)).host;
 }
 
+/** Shaped like the prover's own `/health`, which lists the circuits it serves. */
+const HEALTHY_PROVER = {
+  status: "ok",
+  circuits: ["transfer-confidential", "transfer-ring", "merge", "custom-ring"],
+};
+
 function fetchStub(
   handlers: Readonly<{ indexer?: () => Promise<Response>; prover?: () => Promise<Response> }>
 ): typeof globalThis.fetch {
@@ -37,7 +43,7 @@ function fetchStub(
       return (handlers.indexer ?? (() => Promise.resolve(jsonResponse({ result: "ok" }))))();
     }
     if (host === "prover.test") {
-      return (handlers.prover ?? (() => Promise.resolve(new Response(null, { status: 200 }))))();
+      return (handlers.prover ?? (() => Promise.resolve(jsonResponse(HEALTHY_PROVER))))();
     }
     throw new Error(`unexpected probe target ${String(input)}`);
   }) as typeof globalThis.fetch;
@@ -89,6 +95,42 @@ describe("probeRingsHealth", () => {
 
     const prover = seen.find((request) => hostOf(request.url) === "prover.test");
     expect(prover).toEqual({ url: `${PROVER_URL}/health`, method: "GET" });
+  });
+
+  // A prover that serves the pool but not the ring circuit answers /health and
+  // proves default-ring spends, so only the circuit list distinguishes it.
+  it("reports amber when the prover does not serve the custom-ring circuit", async () => {
+    const health = await probeRingsHealth(
+      input({
+        fetch: fetchStub({
+          prover: () =>
+            Promise.resolve(jsonResponse({ status: "ok", circuits: ["transfer-confidential"] })),
+        }),
+      })
+    );
+
+    expect(health.prover).toBe("amber");
+    expect(health.detail?.prover).toBe("no custom-ring circuit");
+  });
+
+  it("reports amber when the prover does not list its circuits at all", async () => {
+    const health = await probeRingsHealth(
+      input({ fetch: fetchStub({ prover: () => Promise.resolve(jsonResponse({ status: "ok" })) }) })
+    );
+
+    expect(health.prover).toBe("amber");
+    expect(health.detail?.prover).toBe("circuits not reported");
+  });
+
+  it("reports amber, not red, when the prover answers /health with no body", async () => {
+    const health = await probeRingsHealth(
+      input({
+        fetch: fetchStub({ prover: () => Promise.resolve(new Response(null, { status: 200 })) }),
+      })
+    );
+
+    expect(health.prover).toBe("amber");
+    expect(health.detail?.prover).toBe("unreadable health body");
   });
 
   it("keeps a prover mounted behind a path prefix", async () => {

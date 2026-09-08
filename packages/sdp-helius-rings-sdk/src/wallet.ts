@@ -1,42 +1,20 @@
 import { Wallet } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
-import type {
-  SyncReport as SdkSyncReport,
-  SyncWalletAuthority,
-  WalletAuthority,
-} from "@heliuslabs/zolana/transaction";
+import type { SyncReport as SdkSyncReport, ShieldedKeys } from "@heliuslabs/zolana/transaction";
 import { syncWallet } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
-import { canonicalShieldedIdentity, type ShieldedMaterial } from "./material.js";
+import { canonicalShieldedIdentity } from "./material.js";
 import { getCachedWallet, setCachedWallet } from "./wallet-cache.js";
-
-/**
- * An authority that can do nothing but hand over reading material.
- *
- * `syncWallet` is typed against the full `WalletAuthority` but only calls
- * `syncMaterial`. The cast widens to that parameter type, so an SDK that later
- * tried to spend during a sync would fail on a missing method rather than sign
- * something unapproved.
- */
-export function readOnlyAuthority(material: ShieldedMaterial): WalletAuthority {
-  const authority: SyncWalletAuthority = {
-    syncMaterial: async () => ({
-      identity: material.shieldedAddress,
-      viewingKeys: [material.viewingKey],
-      nullifierKey: material.nullifierKey,
-    }),
-  };
-
-  return authority as WalletAuthority;
-}
 
 export interface HydrateWalletInput {
   /** Cache key: same across sync and spend paths for one Rings identity. */
   readonly walletId: string;
   readonly client: ZolanaClient;
-  readonly material: ShieldedMaterial;
-  /** `readOnlyAuthority` for a read; a `CustodyWalletAuthority` for a spend. */
-  readonly authority: WalletAuthority;
+  /**
+   * A sync needs only `ShieldedKeys`, so the read path can pass `readKeys` and
+   * have no way to prove. A spend passes `spendKeys`, which also satisfies this.
+   */
+  readonly keys: ShieldedKeys;
   /**
    * Whether an incomplete read is fatal. True on the spend path: a partial read
    * might offer a note another operation already spent, or hide the one that
@@ -78,13 +56,14 @@ export async function hydrateWallet(input: HydrateWalletInput): Promise<Hydrated
   // Cache is the single point of entry: read and spend paths share one Wallet
   // per identity so cursors, decrypted state, and freshly-observed nullifiers
   // advance in place across every call, not just within one flow.
-  const fingerprint = canonicalShieldedIdentity(input.material.shieldedAddress);
+  const identity = input.keys.address();
+  const fingerprint = canonicalShieldedIdentity(identity);
   const cached = getCachedWallet(input.walletId, fingerprint);
-  const wallet = cached ?? new Wallet({ identity: input.material.shieldedAddress });
+  const wallet = cached ?? new Wallet({ identity });
 
   const report = await syncWallet({
     wallet,
-    authority: input.authority,
+    keys: input.keys,
     client: input.client,
     ...(input.requireSlot === undefined ? {} : { config: { requireSlot: input.requireSlot } }),
   });
