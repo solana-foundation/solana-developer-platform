@@ -410,11 +410,8 @@ const createProgramBody = (extra: Record<string, unknown> = {}) => ({
 });
 
 /** The derived id the provider actually dedupes a program CREATE on. */
-const derivedCreateId = (callerKey: string, environment = "sandbox", projectId = TEST_PROJECT.id) =>
-  deriveProviderRequestId(
-    ["earn_program_create", TEST_ORG.id, projectId, environment, "ground"],
-    callerKey
-  );
+const derivedCreateId = (callerKey: string, environment = "sandbox") =>
+  deriveProviderRequestId(["earn_program_create", TEST_ORG.id, environment, "ground"], callerKey);
 
 interface ProgramEnvelope {
   id: string;
@@ -1316,7 +1313,7 @@ describe("Earn program — session callers and environment isolation", () => {
         allocations: VALID_ALLOCATIONS,
         // Environment is part of the derivation scope, so the same caller key
         // in sandbox is a different provider request.
-        requestId: derivedCreateId(callerKey, "production", TEST_PRODUCTION_PROJECT.id),
+        requestId: derivedCreateId(callerKey, "production"),
       })
     );
 
@@ -2542,6 +2539,47 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
     const operations = await readWalletOperations();
     expect(operations).toHaveLength(1);
+  });
+
+  it("refuses a create whose replayed program belongs to a sibling project (HOO-1563)", async () => {
+    // The create key is derived organization-wide on purpose — narrowing it
+    // would give a retry spanning a deploy a NEW key, and the provider answers a
+    // new key with a SECOND wallet holding real funds. So a sibling project can
+    // still land on the first project's program, and the boundary is enforced
+    // here: say the key is taken rather than hand back a program it cannot use.
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    await seedGroundStrategy();
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    stubProgramReads();
+    const callerKey = crypto.randomUUID();
+
+    const created = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: callerKey })
+    );
+    expect(created.status).toBe(201);
+
+    const sibling = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: callerKey }),
+      { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` }
+    );
+    expect(sibling.status).toBe(409);
+    const body = (await sibling.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("another project");
+
+    // Still exactly one program: the refusal happens on the link row, so the
+    // provider was asked once for this key and no second wallet was persisted.
+    expect(createWallet).toHaveBeenCalledTimes(2);
+    const rows = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM earn_provider_wallets")
+      .first<{ count: number }>();
+    expect(rows?.count).toBe(1);
   });
 
   it("hides the program from a sibling project on every per-program route (HOO-1563)", async () => {

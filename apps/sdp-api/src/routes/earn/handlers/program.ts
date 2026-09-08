@@ -334,18 +334,19 @@ function requireCallerIdempotencyKey(
  * would be answered with a replay of the FIRST organization's wallet — which SDP
  * would then link to the wrong tenant.
  *
- * `projectId` IS in scope, because the project is a boundary on every
- * per-program route (HOO-1563): a create arriving through a sibling project is
- * a different program, not a retry of this one, and deriving the same id would
- * replay the first project's wallet into a project that could not then reach
- * it. Not the allocations or label — scope separates tenants, payload equality is a
+ * Deliberately NOT in scope: `projectId`. The project IS a boundary on every
+ * per-program route (HOO-1563), but putting it in the derivation would change
+ * the key for creates already in flight, and a retry deriving a NEW key is
+ * answered by the provider with a SECOND wallet holding real funds. The
+ * boundary is enforced on the replayed row instead, below. And not the
+ * allocations or label — scope separates tenants, payload equality is a
  * different question, and mixing payload in would turn a retry with a corrected
  * allocation into a second program instead of a conflict.
  */
 function resolveProgramCreateRequestId(
   c: AppContext,
   requestId: string | undefined,
-  scope: { organizationId: string; projectId: string; environment: string; provider: string }
+  scope: { organizationId: string; environment: string; provider: string }
 ): string {
   const callerKey = requireCallerIdempotencyKey(
     c,
@@ -354,13 +355,7 @@ function resolveProgramCreateRequestId(
     "provision a second program the first deposit would not reach"
   );
   return deriveProviderRequestId(
-    [
-      "earn_program_create",
-      scope.organizationId,
-      scope.projectId,
-      scope.environment,
-      scope.provider,
-    ],
+    ["earn_program_create", scope.organizationId, scope.environment, scope.provider],
     callerKey
   );
 }
@@ -503,7 +498,6 @@ export const createEarnProgram = async (
   // generic "missing idempotency key" that hides why the call could never work.
   const requestId = resolveProgramCreateRequestId(c, body.requestId, {
     organizationId: auth.organizationId,
-    projectId: auth.projectId,
     environment,
     provider: client.provider,
   });
@@ -546,6 +540,14 @@ export const createEarnProgram = async (
       // unreachable; if it happens the provider handed us someone else's wallet,
       // and linking it would expose their funds. Refuse rather than adopt it.
       throw conflict("Earn program wallet is already linked to another account");
+    }
+    if (row.project_id !== auth.projectId) {
+      // Same organization, different project. The derivation is deliberately
+      // organization-wide (see `resolveProgramCreateRequestId`), so a sibling
+      // project reusing a caller key lands on the first project's program —
+      // which the project boundary then makes unreachable to it (HOO-1563).
+      // Say so, rather than answering 200 with a program it cannot use.
+      throw conflict("Earn program request id already used by another project");
     }
     replayed = true;
   }
