@@ -68,6 +68,17 @@ describe("CoinbaseRampFrame", () => {
     );
   });
 
+  it("shows the error code when Coinbase's message is empty", () => {
+    renderFrame();
+
+    postFrameMessage({
+      eventName: "onramp_api.session_error",
+      data: { errorCode: "ERROR_CODE_SESSION_EXPIRED", errorMessage: "" },
+    });
+
+    expect(screen.getByText(/ERROR_CODE_SESSION_EXPIRED/)).toBeTruthy();
+  });
+
   it("hides the frame once the payment is committed", () => {
     renderFrame();
 

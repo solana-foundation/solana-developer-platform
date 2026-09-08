@@ -6,7 +6,11 @@ import {
   COINBASE_HOSTED_APPROVED_HOSTS,
   isTrustedRampDestination,
 } from "@/lib/trusted-ramp-destinations";
-import { type CoinbaseFrameEventOptions, handleCoinbaseFrameEvent } from "./frame-events";
+import {
+  type CoinbaseFrameEventOptions,
+  coinbaseErrorReason,
+  handleCoinbaseFrameEvent,
+} from "./frame-events";
 
 /**
  * Embeds a Coinbase on-ramp payment link and forwards its postMessage events
@@ -58,7 +62,7 @@ export function CoinbaseRampFrame({
         setPhase({ kind: "processing" });
       }
       if (frameEvent?.eventName === "onramp_api.session_error") {
-        setPhase({ kind: "failed", message: frameEvent.data.errorMessage });
+        setPhase({ kind: "failed", message: coinbaseErrorReason(frameEvent.data) });
       }
     };
     window.addEventListener("message", handleMessage);
