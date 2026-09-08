@@ -6,18 +6,20 @@ import {
   COINBASE_HOSTED_APPROVED_HOSTS,
   isTrustedRampDestination,
 } from "@/lib/trusted-ramp-destinations";
-import { handleCoinbaseFrameEvent } from "./frame-events";
+import { type CoinbaseFrameEventOptions, handleCoinbaseFrameEvent } from "./frame-events";
 
 /**
- * Embeds a Coinbase headless-onramp payment link and forwards its postMessage
- * events (`onramp_api.*`) to the SDP ramp-events endpoint.
+ * Embeds a Coinbase on-ramp payment link and forwards its postMessage events
+ * (`onramp_api.*`) to the SDP ramp-events endpoint.
  *
  * Coinbase-specific by design: the payment link requires the exact
- * `sandbox`/`referrerPolicy` attributes below to render in an iframe. The
- * framed page renders only the Apple Pay button until it is pressed, then
- * expands a payment sheet inside the same frame — so the frame is sized like
- * a button and grows to a panel on `apple_pay_button_pressed`, shrinking back
- * on `cancel`.
+ * `sandbox`/`referrerPolicy` attributes below to render in an iframe. Orders are
+ * created in embedded mode, so the framed page opens on Coinbase's own
+ * verification and limits screens before it reaches the Apple Pay button — the
+ * frame is therefore a full panel from the first render, and only collapses when
+ * the hosted flow ends: `commit_success` hands over to the transfer status, and
+ * `session_error` (a terminal verification, limits or order-preparation failure)
+ * replaces the frame with Coinbase's localized message.
  *
  * The `allow-scripts allow-same-origin` pair is mandated verbatim by Coinbase's
  * embedding docs. The known sandbox escape for that pair (the framed script
@@ -27,11 +29,18 @@ import { handleCoinbaseFrameEvent } from "./frame-events";
  *
  * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#web-app-testing
  */
-type CoinbaseFramePhase = "button" | "sheet" | "processing";
+type CoinbaseFramePhase =
+  | { kind: "panel" }
+  | { kind: "processing" }
+  | { kind: "failed"; message: string };
 
-export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: string }) {
+export function CoinbaseRampFrame({
+  orderId,
+  src,
+  postEvent,
+}: { orderId: string; src: string } & CoinbaseFrameEventOptions) {
   const t = useTranslations();
-  const [phase, setPhase] = useState<CoinbaseFramePhase>("button");
+  const [phase, setPhase] = useState<CoinbaseFramePhase>({ kind: "panel" });
   // The frame's origin is also what the postMessage listener trusts, so only
   // HTTPS Coinbase payment-link hosts may ever be embedded — fail closed.
   const trustedSrc = isTrustedRampDestination(src, COINBASE_HOSTED_APPROVED_HOSTS);
@@ -44,20 +53,17 @@ export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: stri
       if (event.origin !== expectedOrigin) {
         return;
       }
-      const frameEvent = handleCoinbaseFrameEvent(orderId, event.data, t);
-      if (frameEvent?.eventName === "onramp_api.apple_pay_button_pressed") {
-        setPhase("sheet");
-      }
-      if (frameEvent?.eventName === "onramp_api.cancel") {
-        setPhase("button");
-      }
+      const frameEvent = handleCoinbaseFrameEvent(orderId, event.data, t, { postEvent });
       if (frameEvent?.eventName === "onramp_api.commit_success") {
-        setPhase("processing");
+        setPhase({ kind: "processing" });
+      }
+      if (frameEvent?.eventName === "onramp_api.session_error") {
+        setPhase({ kind: "failed", message: frameEvent.data.errorMessage });
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [src, orderId, t, trustedSrc]);
+  }, [src, orderId, t, trustedSrc, postEvent]);
 
   if (!trustedSrc) {
     return (
@@ -67,18 +73,24 @@ export function CoinbaseRampFrame({ orderId, src }: { orderId: string; src: stri
     );
   }
 
-  if (phase === "processing") {
+  if (phase.kind === "processing") {
     return null;
   }
 
+  if (phase.kind === "failed") {
+    return (
+      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
+        {t("DashboardPayments.ramps.coinbaseSessionError", { message: phase.message })}
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`mx-auto overflow-hidden rounded-lg transition-all duration-300 ${phase === "sheet" ? "max-w-lg" : "max-w-xs"}`}
-    >
+    <div className="mx-auto max-w-lg overflow-hidden rounded-lg">
       <iframe
         title={t("DashboardPayments.ramps.coinbaseOnramp")}
         src={src}
-        className={`w-full border-0 transition-all duration-300 ${phase === "sheet" ? "h-96" : "h-12"}`}
+        className="h-96 w-full border-0"
         allow="payment"
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="no-referrer"
