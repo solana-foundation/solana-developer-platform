@@ -87,17 +87,18 @@ function LegOwner({ owner }: { owner: "you" | "them" | "partyA" | "partyB" }) {
  * provably constant, which is exactly what the compiler said about the first
  * attempt.
  */
-function LegCards({
+/** The asset leg's card. Split out so each leg carries its own branching. */
+function AssetLegCard({
+  agent,
   context,
   form,
 }: {
+  agent: boolean;
   context: DvpCreateContext;
   form: ReturnType<typeof useDvpCreateForm>;
 }) {
   const t = useTranslations();
-  const agent = form.tradeKind === "agent";
-
-  const assetLegCard = (
+  return (
     <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
       <LegOwner owner={agent ? "partyA" : form.sdpSide === "a" ? "you" : "them"} />
       <MintField
@@ -142,8 +143,18 @@ function LegCards({
       />
     </div>
   );
+}
 
-  const cashLegCard = (
+/** The cash leg's card. Its options come from the form, not the token list. */
+function CashLegCard({
+  agent,
+  form,
+}: {
+  agent: boolean;
+  form: ReturnType<typeof useDvpCreateForm>;
+}) {
+  const t = useTranslations();
+  return (
     <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
       <LegOwner owner={agent ? "partyB" : form.sdpSide === "b" ? "you" : "them"} />
       <MintField
@@ -182,14 +193,30 @@ function LegCards({
       />
     </div>
   );
+}
 
-  // Your leg first, on a trade where one of them is yours. An agent trade has
-  // no "your leg", so it keeps the trade's own A-then-B order.
+/**
+ * Both legs, in the order that reads for this trade.
+ *
+ * Your leg first, on a trade where one of them is yours. An agent trade has no
+ * "your leg", so it keeps the trade's own A-then-B order.
+ */
+function LegCards({
+  context,
+  form,
+}: {
+  context: DvpCreateContext;
+  form: ReturnType<typeof useDvpCreateForm>;
+}) {
+  const agent = form.tradeKind === "agent";
+  const asset = <AssetLegCard agent={agent} context={context} form={form} />;
+  const cash = <CashLegCard agent={agent} form={form} />;
   const yoursFirst = !agent && form.sdpSide === "b";
+
   return (
     <>
-      {yoursFirst ? cashLegCard : assetLegCard}
-      {yoursFirst ? assetLegCard : cashLegCard}
+      {yoursFirst ? cash : asset}
+      {yoursFirst ? asset : cash}
     </>
   );
 }

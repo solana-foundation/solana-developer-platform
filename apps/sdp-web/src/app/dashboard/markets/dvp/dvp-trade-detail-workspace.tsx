@@ -165,6 +165,41 @@ function legStatus(
  * — nothing on the page connected them, or named which direction anything went.
  * This is the one place the page earns its width.
  */
+/**
+ * Which words the exchange band uses for each side.
+ *
+ * Past tense once the trade is closed, on BOTH shapes. The principal labels
+ * already did this and the agent ones did not, so a settled agent trade read
+ * "First party delivers" about a delivery that finished minutes ago. Pulled out
+ * of the component because it is four independent choices over two booleans and
+ * none of them is rendering.
+ */
+function exchangeBandLabelKeys(
+  agent: boolean,
+  closed: boolean
+): { given: MessageKey; taken: MessageKey } {
+  if (agent) {
+    return closed
+      ? {
+          given: "DashboardMarkets.dvp.summaryPartyADelivered",
+          taken: "DashboardMarkets.dvp.summaryPartyBDelivered",
+        }
+      : {
+          given: "DashboardMarkets.dvp.summaryPartyADelivers",
+          taken: "DashboardMarkets.dvp.summaryPartyBDelivers",
+        };
+  }
+  return closed
+    ? {
+        given: "DashboardMarkets.dvp.youDelivered",
+        taken: "DashboardMarkets.dvp.youReceived",
+      }
+    : {
+        given: "DashboardMarkets.dvp.youDeliver",
+        taken: "DashboardMarkets.dvp.youReceive",
+      };
+}
+
 function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
   const t = useTranslations();
   const sdpSide = sdpLegSideOf(trade);
@@ -175,23 +210,9 @@ function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
   // Left is always the first party's leg then, because "you" has no referent.
   const given = agent || sdpSide === "a" ? trade.legs.a : trade.legs.b;
   const taken = agent || sdpSide === "a" ? trade.legs.b : trade.legs.a;
-  // Past tense once the trade is closed, on both shapes. The principal labels
-  // already did this and the agent ones did not, so a settled agent trade read
-  // "First party delivers" about a delivery that finished minutes ago.
-  const givenLabel = agent
-    ? t(
-        closed
-          ? "DashboardMarkets.dvp.summaryPartyADelivered"
-          : "DashboardMarkets.dvp.summaryPartyADelivers"
-      )
-    : t(closed ? "DashboardMarkets.dvp.youDelivered" : "DashboardMarkets.dvp.youDeliver");
-  const takenLabel = agent
-    ? t(
-        closed
-          ? "DashboardMarkets.dvp.summaryPartyBDelivered"
-          : "DashboardMarkets.dvp.summaryPartyBDelivers"
-      )
-    : t(closed ? "DashboardMarkets.dvp.youReceived" : "DashboardMarkets.dvp.youReceive");
+  const { given: givenKey, taken: takenKey } = exchangeBandLabelKeys(agent, closed);
+  const givenLabel = t(givenKey);
+  const takenLabel = t(takenKey);
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">

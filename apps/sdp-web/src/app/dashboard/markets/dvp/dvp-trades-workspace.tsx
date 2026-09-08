@@ -150,6 +150,180 @@ const STATUS_FILTER_LABELS = {
 
 const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
 
+/**
+ * Whether a trade answers the search box.
+ *
+ * What somebody has to hand when hunting for one trade: the counterparty they
+ * agreed it with, a symbol, or an address off an explorer. Both parties always,
+ * because on an agent trade neither of them is us and either is what somebody
+ * would paste in.
+ *
+ * Shared by the project's own list and the waiting segment so the two can never
+ * answer the same query differently. `sdpWallet` and `refString` are absent on
+ * purpose: a party is never told them.
+ */
+function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): boolean {
+  if (!needle) {
+    return true;
+  }
+  return [
+    trade.id,
+    trade.swapDvp,
+    trade.legs.a.symbol,
+    trade.legs.b.symbol,
+    trade.legs.a.mint,
+    trade.legs.b.mint,
+    trade.legs.a.party,
+    trade.legs.b.party,
+  ]
+    .filter(Boolean)
+    .some((value) => matchesAddressQuery(String(value), needle));
+}
+
+/** The project's own trades on the current segment. */
+function filterOwnTrades(trades: DvpTrade[], status: StatusFilter, needle: string): DvpTrade[] {
+  const allowed = STATUS_FILTERS[status];
+  return trades.filter(
+    (trade) =>
+      (!allowed || allowed.includes(trade.status as never)) && matchesTradeQuery(trade, needle)
+  );
+}
+
+/**
+ * One row of the project's own trades.
+ *
+ * The whole row navigates, via a stretched link on the status cell. Actions
+ * live on the detail page.
+ */
+function OwnTradeRow({ trade }: { trade: DvpTrade }) {
+  const t = useTranslations();
+  // Who to show in the parties column. On a trade we are a party to that is the
+  // other side; on one we only set up it is both, because neither of them is us.
+  const parties = isDvpAgentTrade(trade)
+    ? [trade.legs.a.party, trade.legs.b.party]
+    : [trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party];
+  // Marked on the row rather than announced in a banner: a warning that does not
+  // say WHICH trade sends an operator through every row to find it.
+  //
+  // The two conditions need different words. Labelling a frozen escrow "holds
+  // more than the trade needs" is not a vague warning, it is a false one, and it
+  // is the only thing a screen reader gets from this icon.
+  const attention = frozenLegs(trade).length
+    ? t("DashboardMarkets.dvp.frozenTitle")
+    : overFundedLegs(trade).length
+      ? t("DashboardMarkets.dvp.surplusTitle")
+      : null;
+  const closed = isDvpTradeClosed(trade);
+
+  return (
+    <TableRow className="relative hover:bg-fill-subtle">
+      <TableCell>
+        <Link
+          className="inline-flex items-center gap-1.5 after:absolute after:inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
+          href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${trade.id}`}
+        >
+          <DvpStatusBadge status={trade.status} />
+          {attention ? (
+            <TriangleAlertIcon
+              aria-label={attention}
+              className="h-3.5 w-3.5 shrink-0 text-warning"
+            />
+          ) : null}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <LegCell closed={closed} leg={trade.legs.a} mine={trade.sdpSide === "a"} />
+      </TableCell>
+      <TableCell>
+        <LegCell closed={closed} leg={trade.legs.b} mine={trade.sdpSide === "b"} />
+      </TableCell>
+      <TableCell className="text-secondary text-sm">
+        {/* Shortened to read, copyable in full. A truncated address is not an
+            address: it cannot be pasted into a wallet, an explorer or a message
+            back to the other side, which is most of what anyone wants this
+            column for. */}
+        <span className="grid gap-0.5">
+          {parties.map((party) => (
+            <span className="inline-flex items-center gap-1" key={party}>
+              <span className="sr-only">{party}</span>
+              <span aria-hidden>{shortenAddress(party)}</span>
+              <WalletAddressCopyButton address={party} tooltip={party} />
+            </span>
+          ))}
+        </span>
+      </TableCell>
+      <TableCell className="text-secondary text-sm">
+        {formatTimestamp(trade.createdAt, t)}
+      </TableCell>
+      <TableCell>
+        <ChevronRightIcon aria-hidden className="h-4 w-4 text-tertiary" />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * The status segments and the search box.
+ *
+ * Extracted so the workspace reads as a sequence of sections rather than as one
+ * function holding the filter markup, its counts and its empty-segment rule.
+ */
+function TradesToolbar({
+  inboundCount,
+  onQueryChange,
+  onStatusChange,
+  query,
+  status,
+}: {
+  inboundCount: number;
+  onQueryChange: (next: string) => void;
+  onStatusChange: (next: StatusFilter) => void;
+  query: string;
+  status: StatusFilter;
+}) {
+  const t = useTranslations();
+  // The waiting segment only exists when it has something in it; an empty one
+  // would be a permanent dead control. The count rides on the label, because a
+  // trade waiting on this project is the one thing here with a deadline against
+  // it and a number says so without a banner that is empty most days.
+  const items = STATUS_FILTER_ORDER.filter(
+    (option) => option !== "waiting" || inboundCount > 0
+  ).map((option) => ({
+    value: option,
+    label:
+      option === "waiting"
+        ? `${t(STATUS_FILTER_LABELS[option])} \u00b7 ${inboundCount}`
+        : t(STATUS_FILTER_LABELS[option]),
+  }));
+
+  return (
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="overflow-x-auto [scrollbar-width:none]">
+        <SegmentedControl
+          aria-label={t("DashboardMarkets.dvp.filterStatusLabel")}
+          items={items}
+          // Re-clicking the active segment can emit an empty value from the
+          // underlying toggle group, and a status filter always has a selection.
+          onValueChange={(next) => next && onStatusChange(next as StatusFilter)}
+          value={status}
+        />
+      </div>
+      <div className="w-full md:w-64 md:shrink-0">
+        <SearchInput
+          aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
+          clear={{
+            label: t("DashboardMarkets.dvp.filterClearSearch"),
+            onClear: () => onQueryChange(""),
+          }}
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
+          placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
+          value={query}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function DvpTradesWorkspace({
   trades,
   inbound,
@@ -171,64 +345,18 @@ export function DvpTradesWorkspace({
   // project's own list is not filtered down to nothing — it is replaced.
   const showingInbound = status === "waiting";
   const needle = query.trim().toLowerCase();
-  const visible = showingInbound
-    ? []
-    : trades.filter((trade) => {
-        const allowed = STATUS_FILTERS[status];
-        if (allowed && !allowed.includes(trade.status as never)) {
-          return false;
-        }
-        if (!needle) {
-          return true;
-        }
-        // What somebody has to hand when hunting for one trade: the counterparty
-        // they agreed it with, a symbol, or an address off an explorer.
-        return [
-          trade.id,
-          trade.swapDvp,
-          trade.legs.a.symbol,
-          trade.legs.b.symbol,
-          trade.legs.a.mint,
-          trade.legs.b.mint,
-          // Both parties, always. Searching only "the other side" found nothing on
-          // an agent trade, where neither party is us and either one is what
-          // somebody would paste in.
-          trade.legs.a.party,
-          trade.legs.b.party,
-        ]
-          .filter(Boolean)
-          .some((value) => matchesAddressQuery(String(value), needle));
-      });
+  // The waiting segment lists trades belonging to other organizations, so the
+  // project's own list is not filtered down to nothing — it is replaced. Both
+  // sides run the same query so the search box means one thing on either.
+  const visible = showingInbound ? [] : filterOwnTrades(trades, status, needle);
+  const visibleInbound = showingInbound
+    ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
+    : [];
 
   // A project whose only DvP activity is a trade somebody else set up for it
   // has none of its own, and treating that as an empty page rendered "No trades
   // yet" over the one thing waiting on them — with no filter control on screen
   // to reach it by. Having nothing to do is what empty means here.
-  // The same query, against the same fields. The search box stays on screen for
-  // this segment, so leaving the list unfiltered made typing look broken: every
-  // row stayed put and there was no way to narrow a list somebody had come to
-  // this segment specifically to act on. `sdpWallet` and `refString` are not
-  // here to search because a party is never told them.
-  const visibleInbound = showingInbound
-    ? inbound.filter((trade) => {
-        if (!needle) {
-          return true;
-        }
-        return [
-          trade.id,
-          trade.swapDvp,
-          trade.legs.a.symbol,
-          trade.legs.b.symbol,
-          trade.legs.a.mint,
-          trade.legs.b.mint,
-          trade.legs.a.party,
-          trade.legs.b.party,
-        ]
-          .filter(Boolean)
-          .some((value) => matchesAddressQuery(String(value), needle));
-      })
-    : [];
-
   const listIsEmpty = trades.length === 0 && inbound.length === 0;
   // Rows shown on the current segment, from either source. The waiting segment
   // draws from `inbound` and leaves `visible` empty by design, so counting only
@@ -295,50 +423,13 @@ export function DvpTradesWorkspace({
                  what a dropdown costs you. Contained, so it can never shed an
                  orphaned pill onto a wrap line; on a narrow viewport it scrolls
                  inside its own strip. Matches the integrations catalog. */
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="overflow-x-auto [scrollbar-width:none]">
-                  <SegmentedControl
-                    aria-label={t("DashboardMarkets.dvp.filterStatusLabel")}
-                    // The count rides on the label. A trade waiting on this
-                    // project is the one thing here with a deadline against it,
-                    // and a number on the control says so without a banner
-                    // above the table that is empty most days.
-                    items={STATUS_FILTER_ORDER.flatMap((option) => {
-                      // The waiting segment only exists when it has something
-                      // in it; an empty one would be a permanent dead control.
-                      if (option === "waiting" && inbound.length === 0) {
-                        return [];
-                      }
-                      return [
-                        {
-                          value: option,
-                          label:
-                            option === "waiting"
-                              ? `${t(STATUS_FILTER_LABELS[option])} · ${inbound.length}`
-                              : t(STATUS_FILTER_LABELS[option]),
-                        },
-                      ];
-                    })}
-                    // Re-clicking the active segment can emit an empty value
-                    // from the underlying toggle group, and a status filter
-                    // always has a selection.
-                    onValueChange={(next) => next && setStatus(next as StatusFilter)}
-                    value={status}
-                  />
-                </div>
-                <div className="w-full md:w-64 md:shrink-0">
-                  <SearchInput
-                    aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
-                    clear={{
-                      label: t("DashboardMarkets.dvp.filterClearSearch"),
-                      onClear: () => setQuery(""),
-                    }}
-                    onChange={(event) => setQuery(event.currentTarget.value)}
-                    placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
-                    value={query}
-                  />
-                </div>
-              </div>
+              <TradesToolbar
+                inboundCount={inbound.length}
+                onQueryChange={setQuery}
+                onStatusChange={setStatus}
+                query={query}
+                status={status}
+              />
             ) : null}
 
             {/* "Nothing matches" and "you have none" are different answers, and
@@ -393,85 +484,9 @@ export function DvpTradesWorkspace({
                   </TableHeader>
                   <TableBody>
                     {showingInbound ? <InboundRows trades={visibleInbound} /> : null}
-                    {visible.map((trade) => {
-                      // Who to show in the parties column. On a trade we are a
-                      // party to that is the other side; on one we only set up
-                      // it is both, because neither of them is us.
-                      const parties = isDvpAgentTrade(trade)
-                        ? [trade.legs.a.party, trade.legs.b.party]
-                        : [trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party];
-                      // Marked on the row rather than announced in a banner: a
-                      // warning that does not say WHICH trade sends an operator
-                      // through every row to find it.
-                      //
-                      // The two conditions need different words. Labelling a frozen
-                      // escrow "holds more than the trade needs" is not a vague
-                      // warning, it is a false one, and it is the only thing a
-                      // screen reader gets from this icon.
-                      const isFrozen = frozenLegs(trade).length > 0;
-                      const isOverFunded = overFundedLegs(trade).length > 0;
-                      const attention = isFrozen
-                        ? t("DashboardMarkets.dvp.frozenTitle")
-                        : isOverFunded
-                          ? t("DashboardMarkets.dvp.surplusTitle")
-                          : null;
-                      return (
-                        // The whole row navigates, via a stretched link on the
-                        // status cell. Actions live on the detail page.
-                        <TableRow className="relative hover:bg-fill-subtle" key={trade.id}>
-                          <TableCell>
-                            <Link
-                              className="inline-flex items-center gap-1.5 after:absolute after:inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
-                              href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${trade.id}`}
-                            >
-                              <DvpStatusBadge status={trade.status} />
-                              {attention ? (
-                                <TriangleAlertIcon
-                                  aria-label={attention}
-                                  className="h-3.5 w-3.5 shrink-0 text-warning"
-                                />
-                              ) : null}
-                            </Link>
-                          </TableCell>
-                          <TableCell>
-                            <LegCell
-                              closed={isDvpTradeClosed(trade)}
-                              leg={trade.legs.a}
-                              mine={trade.sdpSide === "a"}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <LegCell
-                              closed={isDvpTradeClosed(trade)}
-                              leg={trade.legs.b}
-                              mine={trade.sdpSide === "b"}
-                            />
-                          </TableCell>
-                          <TableCell className="text-secondary text-sm">
-                            {/* Shortened to read, copyable in full. A truncated
-                                address is not an address: it cannot be pasted
-                                into a wallet, an explorer or a message back to
-                                the other side, which is most of what anyone
-                                wants this column for. */}
-                            <span className="grid gap-0.5">
-                              {parties.map((party) => (
-                                <span className="inline-flex items-center gap-1" key={party}>
-                                  <span className="sr-only">{party}</span>
-                                  <span aria-hidden>{shortenAddress(party)}</span>
-                                  <WalletAddressCopyButton address={party} tooltip={party} />
-                                </span>
-                              ))}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-secondary text-sm">
-                            {formatTimestamp(trade.createdAt, t)}
-                          </TableCell>
-                          <TableCell>
-                            <ChevronRightIcon aria-hidden className="h-4 w-4 text-tertiary" />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {visible.map((trade) => (
+                      <OwnTradeRow key={trade.id} trade={trade} />
+                    ))}
                   </TableBody>
                 </Table>
               </div>
