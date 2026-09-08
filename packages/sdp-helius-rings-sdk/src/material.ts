@@ -8,7 +8,7 @@ import {
   ShieldedPublicKey,
   ViewingKey,
 } from "@heliuslabs/zolana";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError, RINGS_IDENTITY_MISMATCH, type RingsErrorCause } from "@sdp/helius-rings";
 import { address, getAddressEncoder, getBase58Decoder } from "@solana/kit";
 
 /** A viewing secret is a P-256 scalar, so not every 32 bytes are in range. */
@@ -179,6 +179,10 @@ export function assertProvisionedIdentity(material: ShieldedMaterial, expected: 
     assertShieldedIdentity(material, expected);
   } catch (error) {
     if (!(error instanceof RingsIdentityMismatchError)) throw error;
-    throw new HeliusRingsError("conflict", IDENTITY_MISMATCH_MESSAGE);
+    // Named on the cause so the service can quarantine on this one conflict
+    // without reading the message. The two addresses stay out of it.
+    throw new HeliusRingsError("conflict", IDENTITY_MISMATCH_MESSAGE, {
+      cause: { upstream: RINGS_IDENTITY_MISMATCH } satisfies RingsErrorCause,
+    });
   }
 }

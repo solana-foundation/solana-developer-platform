@@ -263,6 +263,25 @@ export async function syncRingsWallet(
   return { sync: result.data };
 }
 
+/**
+ * Rotates a paused wallet onto the identity its keys derive now, abandoning
+ * every note held under the old ones. `confirmation` is the wallet's name; the
+ * API compares it, so a caller cannot skip the confirmation by not showing it.
+ */
+export async function rekeyRingsWallet(
+  walletId: string,
+  confirmation: string
+): Promise<{ wallet?: RingsWallet; error?: string }> {
+  const result = await postJson<{ wallet: RingsWallet }>(
+    `/api/dashboard/helius-rings/wallets/${encodeURIComponent(walletId)}/rekey`,
+    { confirmation }
+  );
+  if (!result.ok) {
+    return { error: result.error };
+  }
+  return { wallet: result.data.wallet };
+}
+
 /** Mirrors RingsIdentityStatus in @sdp/helius-rings. */
 export type RingsIdentityStatus = "unregistered" | "ours" | "foreign";
 

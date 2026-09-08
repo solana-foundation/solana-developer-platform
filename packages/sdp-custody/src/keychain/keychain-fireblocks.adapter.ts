@@ -10,10 +10,10 @@
  * - Polling for transaction completion
  */
 
+import { scrubTelemetry } from "@sdp/redaction";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
-import { redactCredentialSecrets } from "../redaction";
 import type { SignRequest, SignResult } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
@@ -140,20 +140,20 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
 
     signer.request = (async <T>(method: string, uri: string, body?: unknown): Promise<T> => {
       try {
-        console.info("sdp_fireblocks_api_request", redactCredentialSecrets({ method, uri, body }));
+        console.info("sdp_fireblocks_api_request", scrubTelemetry({ method, uri, body }));
 
         const response = await originalRequest<T>(method, uri, body);
 
         console.info(
           "sdp_fireblocks_api_response",
-          redactCredentialSecrets({ method, uri, body, response })
+          scrubTelemetry({ method, uri, body, response })
         );
 
         return response;
       } catch (error) {
         console.error(
           "sdp_fireblocks_api_error",
-          redactCredentialSecrets({
+          scrubTelemetry({
             method,
             uri,
             body,

@@ -140,7 +140,7 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
     } catch (error) {
       if (controller.signal.aborted) {
         // Deterministic, transient-classified message (see transient.ts).
-        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`);
+        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
       }
       throw error;
     } finally {

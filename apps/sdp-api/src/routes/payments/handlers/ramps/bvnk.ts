@@ -47,6 +47,7 @@ import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type {
   BvnkBankFundingDetails,
   BvnkPaymentRampInstruction,
+  CryptoRailId,
   PaymentRampQuote,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
@@ -92,7 +93,7 @@ export async function createPendingBvnkOfframpTransfer(
     custodyWalletId: string;
     walletId: string;
     walletAddress: string;
-    cryptoToken: string;
+    assetRail: CryptoRailId;
     cryptoAmount: string;
     fiatCurrency: RampFiatCurrency;
     rampsMemo: Record<string, string> | undefined;
@@ -108,7 +109,7 @@ export async function createPendingBvnkOfframpTransfer(
     counterpartyId: input.counterpartyId,
     sourceAddress: input.walletAddress,
     destinationAddress: null,
-    token: rampTransferTokenMint(input.cryptoToken, c.env),
+    token: rampTransferTokenMint(input.assetRail, c.env),
     amount: input.cryptoAmount,
     memo: null,
     type: "offramp",
