@@ -26,10 +26,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
     const { token } = (await response.json()) as { token: string };
     await page.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(
-      () =>
-        Boolean(
-          (window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session
-        ),
+      () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
       undefined,
       { timeout: 120_000 }
     );
