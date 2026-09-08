@@ -5,9 +5,9 @@ import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
 import {
+  expectSqlstate as expectSqlstateOn,
   FK_VIOLATION,
   NOT_NULL_VIOLATION,
-  expectSqlstate as expectSqlstateOn,
   seedHeliusRingsConnection,
   seedOrgProject,
 } from "@/test/helpers/migration-db";
