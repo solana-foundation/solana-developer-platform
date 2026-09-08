@@ -4,23 +4,60 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
-import { resolveClerkTestIdentity } from "../support/clerk-admin";
+import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
-setup("authenticate admin test user and save auth state", async ({ page }) => {
+setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
   setup.setTimeout(360_000);
   const env = getE2EEnv();
   const identity = await resolveClerkTestIdentity();
 
-  await clerkSetup({
-    publishableKey: env.clerkPublishableKey,
-    secretKey: env.clerkSecretKey,
-  });
+  const ticketContext = env.ticketAuth ? await browser.newContext({ baseURL: env.baseURL }) : null;
+  const target = ticketContext ? await ticketContext.newPage() : page;
 
-  await page.goto("/sign-in");
-  await clerk.signIn({ page, emailAddress: identity.email });
-  await clerk.loaded({ page });
+  if (env.ticketAuth) {
+    const { token } = await withTransientClerkRetry(async () => {
+      const response = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.clerkSecretKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ user_id: identity.userId, expires_in_seconds: 300 }),
+      });
+      if (!response.ok) {
+        throw Object.assign(
+          new Error(`sign_in_tokens failed: ${response.status} ${await response.text()}`),
+          { status: response.status }
+        );
+      }
+      return (await response.json()) as { token: string };
+    });
+    const redactTicket = <T>(action: Promise<T>): Promise<T> =>
+      action.catch((error: unknown) => {
+        throw new Error(String(error).replaceAll(token, "[redacted-clerk-ticket]"));
+      });
+    await redactTicket(
+      target.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" })
+    );
+    await redactTicket(
+      target.waitForFunction(
+        () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
+        undefined,
+        { timeout: 120_000 }
+      )
+    );
+  } else {
+    await clerkSetup({
+      publishableKey: env.clerkPublishableKey,
+      secretKey: env.clerkSecretKey,
+    });
 
-  await page.evaluate(
+    await target.goto("/sign-in");
+    await clerk.signIn({ page: target, emailAddress: identity.email });
+    await clerk.loaded({ page: target });
+  }
+
+  await target.evaluate(
     async ({ organizationId }) => {
       const clerkClient = (
         window as unknown as {
@@ -39,7 +76,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
 
   await expect
     .poll(() =>
-      page.evaluate(() => {
+      target.evaluate(() => {
         return (
           window as unknown as {
             Clerk?: { organization?: { id?: string } };
@@ -50,7 +87,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
     .toBe(identity.organizationId);
 
   if (env.useExternalApi) {
-    await page.context().addCookies([
+    await target.context().addCookies([
       {
         name: "sdp_selected_project_id",
         value: env.expectedProjectId,
@@ -62,8 +99,9 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
     ]);
   }
 
-  await page.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
-  await expect(page).toHaveURL(/\/dashboard/);
+  await target.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
+  await expect(target).toHaveURL(/\/dashboard/);
   fs.mkdirSync(path.dirname(authStatePath), { recursive: true });
-  await page.context().storageState({ path: authStatePath });
+  await target.context().storageState({ path: authStatePath });
+  await ticketContext?.close();
 });

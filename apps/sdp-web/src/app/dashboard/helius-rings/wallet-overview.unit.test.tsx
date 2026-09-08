@@ -153,4 +153,19 @@ describe("WalletOverview", () => {
     );
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
   });
+
+  it("reads nothing, and cannot be refreshed, for a paused wallet", () => {
+    // The server refuses an identity it cannot derive, so asking would turn a
+    // known state into a generic read failure — and the refresh control would
+    // invite an operator to keep asking. The recovery lives in the wallets
+    // table, where the same reason is given.
+    renderOverview(RINGS, { ...WALLET, status: "paused" });
+
+    expect(screen.getByText(/This wallet is paused/)).toBeTruthy();
+    expect(screen.queryByText(/Balance could not be read/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Reading…" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
+  });
 });

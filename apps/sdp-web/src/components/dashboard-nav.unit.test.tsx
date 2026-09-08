@@ -1,3 +1,4 @@
+import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -78,10 +79,12 @@ describe("Markets dashboard navigation", () => {
       {
         label: "Shared.dashboardShell.treasurySolutions",
         href: "/dashboard/markets/treasury-solutions",
+        icon: LandmarkIcon,
       },
       {
         label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/embedded-yield",
+        icon: PercentIcon,
       },
     ]);
   });

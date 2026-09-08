@@ -14,7 +14,7 @@ export const complianceProviderNameSchema = z
   .openapi({ description: "Compliance provider identifier.", example: "range" });
 
 export const complianceProviderStatusSchema = z
-  .enum(["ok", "unavailable", "error"])
+  .enum(["ok", "pending", "unavailable", "error"])
   .openapi({ description: "Provider response status.", example: "ok" });
 
 export const addressScreeningRequestSchema = screenAddressSchemaBase
@@ -45,6 +45,11 @@ export const complianceProviderResultSchema = z
     riskLevel: z.string().optional().openapi({
       description: "Provider-specific risk level label.",
       example: "High risk",
+    }),
+    providerStatus: z.string().optional().openapi({
+      description:
+        "The provider's own status word, verbatim, retained for audit; the normalized status field is the decision.",
+      example: "COMPLETE",
     }),
     message: z.string().optional().openapi({
       description: "Optional provider message, such as warnings or error details.",

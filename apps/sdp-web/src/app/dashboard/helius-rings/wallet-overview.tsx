@@ -50,10 +50,12 @@ export function WalletOverview({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { state, refresh } = useRingsBalance(
-    wallet.shieldedAddress === null ? null : wallet.id,
-    refreshTick
-  );
+  // Paused is suppressed alongside unprovisioned, as in the wallets table: the
+  // server refuses to read an identity it cannot derive, so asking only turns a
+  // known state into a generic read failure — and the refresh button would
+  // invite an operator to keep asking.
+  const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
+  const { state, refresh } = useRingsBalance(readable ? wallet.id : null, refreshTick);
 
   const reading = state.name === "loading";
   const refreshLabel = t(
@@ -68,7 +70,7 @@ export function WalletOverview({
           <Button
             variant="ghost"
             size="icon-xs"
-            disabled={reading || wallet.shieldedAddress === null}
+            disabled={reading || !readable}
             aria-label={refreshLabel}
             title={refreshLabel}
             onClick={refresh}
@@ -86,7 +88,9 @@ export function WalletOverview({
         <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
           {t("DashboardHeliusRings.overview.privateBalanceLabel")}
         </p>
-        {wallet.shieldedAddress === null ? (
+        {wallet.status === "paused" ? (
+          <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
+        ) : wallet.shieldedAddress === null ? (
           <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>
         ) : state.name === "loading" ? (
           <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>

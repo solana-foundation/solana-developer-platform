@@ -9,6 +9,7 @@ export const WALLET_OPERATION_TYPES = [
   // exactly the shape an org should be able to require approval on.
   "dvp_cancel",
   "dvp_settle",
+  "earn_program_withdrawal",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "issuance_burn_execute",

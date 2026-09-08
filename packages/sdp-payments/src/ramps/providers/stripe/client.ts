@@ -363,7 +363,7 @@ export class StripeRampClient implements RampProvider {
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
     const config = readStripeConfig(env);
-    const { currency, network } = normalizeStripeOnrampAsset(input.cryptoToken);
+    const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
     if (!input.fiatCurrency) {
       throw badRequest("Stripe on-ramp requires a fiat currency.", { provider: this.id });
     }

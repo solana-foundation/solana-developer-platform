@@ -381,6 +381,66 @@ describe("Private Channels routes", () => {
     expect(getBody.data.instance).toBeNull();
   });
 
+  it("DELETE /instance drains first: in-flight movement → 409, admission closed, retry deletes", async () => {
+    probeConnectionMock.mockResolvedValueOnce(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const instanceId = createdBody.data.instance.id;
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           ) VALUES ('pcd_inflight', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId)
+      .run();
+
+    // In-flight movement: deletion refuses but the drain is durable.
+    const refused = await app.request(
+      "/v1/private-channels/instance",
+      { method: "DELETE", headers: authHeaders() },
+      env
+    );
+    expect(refused.status).toBe(409);
+    const refusedBody = (await refused.json()) as { error: { message: string } };
+    expect(refusedBody.error.message).toContain("draining for deletion");
+
+    // The barrier is atomic with admission: the guarded INSERT refuses now.
+    const admitted = await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           )
+           SELECT 'pcd_late', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb
+            WHERE EXISTS (
+              SELECT 1 FROM private_channel_instances i
+               WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+            )
+        RETURNING id`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId, instanceId)
+      .first<{ id: string }>();
+    expect(admitted).toBeNull();
+
+    // The in-flight movement settles; the retry now deletes cleanly.
+    await db
+      .prepare("UPDATE private_channel_deposits SET status = 'failed' WHERE id = 'pcd_inflight'")
+      .run();
+    const retried = await app.request(
+      "/v1/private-channels/instance",
+      { method: "DELETE", headers: authHeaders() },
+      env
+    );
+    expect(retried.status).toBe(200);
+  });
+
   it("DELETE /instance returns 404 when there is no active row", async () => {
     const res = await app.request(
       "/v1/private-channels/instance",

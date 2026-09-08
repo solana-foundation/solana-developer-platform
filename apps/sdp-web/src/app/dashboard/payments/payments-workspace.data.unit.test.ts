@@ -64,7 +64,7 @@ describe("Payments write requests", () => {
     };
 
     await estimateTransferBatch(request, t);
-    await createTransferBatch(request, t);
+    await createTransferBatch(request, t, "idem_batch_1");
 
     for (const [, init] of fetch.mock.calls) {
       expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
