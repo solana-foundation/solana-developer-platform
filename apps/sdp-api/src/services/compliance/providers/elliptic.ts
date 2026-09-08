@@ -1,13 +1,13 @@
+import { z } from "zod";
 import type {
   ComplianceAddressScreeningInput,
   ComplianceProvider,
   ComplianceProviderResult,
 } from "../types";
+import { describeSchemaFailure, extractProviderErrorMessage } from "./provider-response";
 
 const DEFAULT_ELLIPTIC_API_BASE_URL = "https://aml-api.elliptic.co";
 const ELLIPTIC_SCREENING_PATH = "/v2/wallet/synchronous";
-
-type EllipticAddressScreeningResponse = Record<string, unknown>;
 
 export interface EllipticComplianceProviderConfig {
   apiToken?: string;
@@ -19,26 +19,6 @@ export interface EllipticComplianceProviderConfig {
 function normalizeEllipticApiBaseUrl(baseUrl: string | undefined): string {
   const value = (baseUrl ?? DEFAULT_ELLIPTIC_API_BASE_URL).trim();
   return value.endsWith("/") ? value.slice(0, -1) : value;
-}
-
-function extractErrorMessage(body: string): string {
-  if (!body) {
-    return "";
-  }
-
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
-    if (typeof parsed.error?.message === "string") {
-      return parsed.error.message;
-    }
-    if (typeof parsed.message === "string") {
-      return parsed.message;
-    }
-  } catch {
-    // Fall back to raw body when response is not JSON.
-  }
-
-  return body;
 }
 
 function isNotInBlockchainResponse(responseStatus: number, body: string): boolean {
@@ -108,39 +88,24 @@ async function createSignature(input: {
  * rules triggered). The old deep search took the first `risk_score` found
  * ANYWHERE in the response, which could be a per-rule or per-exposure entry
  * rather than the wallet's own verdict; a nested contribution read as the
- * decision is exactly the ambiguity HOO-1012 closes. Anything but a number or
- * an explicit null at the top level is unreadable — the caller fails closed.
+ * decision is exactly the ambiguity HOO-1012 closes.
+ *
+ * The schema states that at the boundary: the canonical score is required, so
+ * a response without one fails to parse rather than being searched for a
+ * substitute, and the string fields must be strings. Nested objects are left
+ * untyped on purpose — nothing below the top level may inform the verdict.
  */
-function readCanonicalRiskScore(
-  payload: Record<string, unknown>
-): { score: number | null } | "unreadable" {
-  if (!("risk_score" in payload)) {
-    return "unreadable";
-  }
-  const value = payload.risk_score;
-  if (value === null) {
-    return { score: null };
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return { score: value };
-  }
-  return "unreadable";
-}
+const ellipticWalletResponseSchema = z.object({
+  risk_score: z.number().finite().nullable(),
+  risk_level: z.string().min(1).optional(),
+  process_status: z.string().min(1).optional(),
+});
 
 /**
  * Elliptic's own completion word for the synchronous wallet analysis. Compared
  * case-insensitively because the field is provider prose, not an SDP enum.
  */
 const ELLIPTIC_COMPLETED_PROCESS_STATUSES = new Set(["complete", "completed"]);
-
-/** Top level only, same reasoning as the score: never a nested rule's word. */
-function readCanonicalStringField(
-  payload: Record<string, unknown>,
-  field: string
-): string | undefined {
-  const value = payload[field];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
 
 export class EllipticComplianceProvider implements ComplianceProvider {
   readonly name = "elliptic" as const;
@@ -213,7 +178,7 @@ export class EllipticComplianceProvider implements ComplianceProvider {
           })();
 
       if (!response.ok) {
-        const body = extractErrorMessage(await response.text().catch(() => ""));
+        const body = extractProviderErrorMessage(await response.text().catch(() => ""));
         if (isNotInBlockchainResponse(response.status, body)) {
           return {
             provider: this.name,
@@ -235,33 +200,33 @@ export class EllipticComplianceProvider implements ComplianceProvider {
         };
       }
 
-      const result = (await response
-        .json()
-        .catch(() => null)) as EllipticAddressScreeningResponse | null;
-      if (result === null || typeof result !== "object" || Array.isArray(result)) {
+      const body = await response.json().catch(() => undefined);
+      if (body === undefined) {
         return {
           provider: this.name,
           status: "error",
           riskScore: null,
-          message: "Elliptic returned a response that is not a JSON object.",
+          message: "Elliptic returned a response that is not valid JSON.",
           evaluatedAt,
         };
       }
 
-      const read = readCanonicalRiskScore(result);
-      if (read === "unreadable") {
+      const parsed = ellipticWalletResponseSchema.safeParse(body);
+      if (!parsed.success) {
         return {
           provider: this.name,
           status: "error",
           riskScore: null,
-          message:
-            "Elliptic response carried no readable top-level risk_score; refusing to interpret nested fields as the verdict.",
+          message: `Elliptic returned no readable top-level risk_score; refusing to interpret nested fields as the verdict (${describeSchemaFailure(parsed.error)}).`,
           evaluatedAt,
         };
       }
 
-      const riskLevel = readCanonicalStringField(result, "risk_level");
-      const processStatus = readCanonicalStringField(result, "process_status");
+      const {
+        risk_score: riskScore,
+        risk_level: riskLevel,
+        process_status: processStatus,
+      } = parsed.data;
 
       // A screening Elliptic itself calls unfinished is NOT a verdict, exactly
       // as with Chainalysis: a readable score alongside a non-final
@@ -285,14 +250,19 @@ export class EllipticComplianceProvider implements ComplianceProvider {
 
       // A null canonical score is Elliptic's documented "no risk rules
       // triggered" — a completed verdict, not an absence of one.
-      return {
+      const screened: ComplianceProviderResult = {
         provider: this.name,
         status: "ok",
-        riskScore: read.score,
-        ...(riskLevel ? { riskLevel } : {}),
-        ...(processStatus ? { providerStatus: processStatus } : {}),
+        riskScore,
         evaluatedAt,
       };
+      if (riskLevel !== undefined) {
+        screened.riskLevel = riskLevel;
+      }
+      if (processStatus !== undefined) {
+        screened.providerStatus = processStatus;
+      }
+      return screened;
     } catch (error) {
       return {
         provider: this.name,

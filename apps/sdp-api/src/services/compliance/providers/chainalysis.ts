@@ -1,20 +1,32 @@
+import { z } from "zod";
 import type {
   ComplianceAddressScreeningInput,
   ComplianceProvider,
   ComplianceProviderResult,
 } from "../types";
+import { describeSchemaFailure, extractProviderErrorMessage } from "./provider-response";
 
 const DEFAULT_CHAINALYSIS_API_BASE_URL = "https://api.chainalysis.com";
 
-type ChainalysisRiskResponse = {
-  risk?: unknown;
-  riskLevel?: unknown;
-  risk_score?: unknown;
-  riskScore?: unknown;
-  score?: unknown;
-  status?: unknown;
-  message?: unknown;
-};
+/**
+ * The response is parsed at the boundary, not narrowed field by field further
+ * in. Every documented field is typed, and a field carrying the wrong type is
+ * a response we refuse to interpret rather than quietly ignore — reading past
+ * a malformed score is how an ambiguous screening turns into a verdict
+ * (HOO-1012). Undocumented keys are ignored, so the product's own extra fields
+ * never break a screening.
+ */
+const chainalysisRiskResponseSchema = z.object({
+  risk: z.string().optional(),
+  riskLevel: z.string().optional(),
+  risk_score: z.number().finite().optional(),
+  riskScore: z.number().finite().optional(),
+  score: z.number().finite().optional(),
+  status: z.string().optional(),
+  message: z.string().optional(),
+});
+
+type ChainalysisRiskResponse = z.infer<typeof chainalysisRiskResponseSchema>;
 
 export interface ChainalysisComplianceProviderConfig {
   apiKey?: string;
@@ -26,26 +38,6 @@ function normalizeChainalysisApiBaseUrl(baseUrl: string | undefined): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-function extractErrorMessage(body: string): string {
-  if (!body) {
-    return "";
-  }
-
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
-    if (typeof parsed.error?.message === "string") {
-      return parsed.error.message;
-    }
-    if (typeof parsed.message === "string") {
-      return parsed.message;
-    }
-  } catch {
-    // Fall back to raw body when response is not JSON.
-  }
-
-  return body;
-}
-
 /**
  * The numeric score under whichever alias this deployment's Chainalysis
  * product spells it. Aliases are tolerated, ambiguity is not: two aliases
@@ -54,7 +46,7 @@ function extractErrorMessage(body: string): string {
  */
 function readRiskScore(payload: ChainalysisRiskResponse): { score: number | null } | "ambiguous" {
   const candidates = [payload.riskScore, payload.risk_score, payload.score].filter(
-    (value): value is number => typeof value === "number"
+    (value): value is number => value !== undefined
   );
   if (candidates.length === 0) {
     return { score: null };
@@ -66,13 +58,7 @@ function readRiskScore(payload: ChainalysisRiskResponse): { score: number | null
 }
 
 function readRiskLevel(payload: ChainalysisRiskResponse): string | undefined {
-  if (typeof payload.riskLevel === "string") {
-    return payload.riskLevel;
-  }
-  if (typeof payload.risk === "string") {
-    return payload.risk;
-  }
-  return undefined;
+  return payload.riskLevel ?? payload.risk;
 }
 
 export class ChainalysisComplianceProvider implements ComplianceProvider {
@@ -106,7 +92,7 @@ export class ChainalysisComplianceProvider implements ComplianceProvider {
       });
 
       if (!response.ok) {
-        const body = extractErrorMessage(await response.text().catch(() => ""));
+        const body = extractProviderErrorMessage(await response.text().catch(() => ""));
         return {
           provider: this.name,
           status: "error",
@@ -118,8 +104,8 @@ export class ChainalysisComplianceProvider implements ComplianceProvider {
         };
       }
 
-      const payload = (await response.json().catch(() => null)) as ChainalysisRiskResponse | null;
-      if (payload === null) {
+      const body = await response.json().catch(() => undefined);
+      if (body === undefined) {
         return {
           provider: this.name,
           status: "error",
@@ -129,7 +115,19 @@ export class ChainalysisComplianceProvider implements ComplianceProvider {
         };
       }
 
-      const providerStatus = typeof payload.status === "string" ? payload.status : undefined;
+      const parsed = chainalysisRiskResponseSchema.safeParse(body);
+      if (!parsed.success) {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: `Chainalysis returned an unreadable screening (${describeSchemaFailure(parsed.error)}).`,
+          evaluatedAt,
+        };
+      }
+
+      const payload = parsed.data;
+      const providerStatus = payload.status;
 
       // A screening the provider itself calls unfinished is NOT a verdict.
       // Reporting it `ok` let an IN_PROGRESS response read as a pass; it is
@@ -148,37 +146,48 @@ export class ChainalysisComplianceProvider implements ComplianceProvider {
       const read = readRiskScore(payload);
       const riskLevel = readRiskLevel(payload);
       if (read === "ambiguous") {
-        return {
+        const ambiguous: ComplianceProviderResult = {
           provider: this.name,
           status: "error",
           riskScore: null,
-          ...(providerStatus !== undefined ? { providerStatus } : {}),
           message: "Chainalysis returned conflicting risk-score fields; refusing to guess.",
           evaluatedAt,
         };
+        if (providerStatus !== undefined) {
+          ambiguous.providerStatus = providerStatus;
+        }
+        return ambiguous;
       }
 
       // A completed screening with neither a score nor a level carries no
       // verdict at all — malformed, so fail closed rather than pass on it.
-      if (read.score === null && !riskLevel) {
-        return {
+      if (read.score === null && riskLevel === undefined) {
+        const verdictless: ComplianceProviderResult = {
           provider: this.name,
           status: "error",
           riskScore: null,
-          ...(providerStatus !== undefined ? { providerStatus } : {}),
           message: "Chainalysis response carried no risk score or risk level.",
           evaluatedAt,
         };
+        if (providerStatus !== undefined) {
+          verdictless.providerStatus = providerStatus;
+        }
+        return verdictless;
       }
 
-      return {
+      const passed: ComplianceProviderResult = {
         provider: this.name,
         status: "ok",
         riskScore: read.score,
-        ...(riskLevel ? { riskLevel } : {}),
-        ...(providerStatus !== undefined ? { providerStatus } : {}),
         evaluatedAt,
       };
+      if (riskLevel !== undefined) {
+        passed.riskLevel = riskLevel;
+      }
+      if (providerStatus !== undefined) {
+        passed.providerStatus = providerStatus;
+      }
+      return passed;
     } catch (error) {
       return {
         provider: this.name,

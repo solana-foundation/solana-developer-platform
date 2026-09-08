@@ -83,6 +83,13 @@ describe("EllipticComplianceProvider", () => {
     expect(result).toMatchObject({ status: "ok", riskScore: 1.2, providerStatus: "complete" });
   });
 
+  it("fails closed on a wrong-typed risk_level instead of dropping it", async () => {
+    mockResponse({ risk_score: 2, risk_level: 5 });
+    const result = await provider().screenAddress(INPUT);
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("risk_level");
+  });
+
   it("keeps the not-in-blockchain 404 as a passed check", async () => {
     mockResponse({ message: "NotInBlockchain" }, 404);
     const result = await provider().screenAddress(INPUT);

@@ -56,6 +56,15 @@ describe("ChainalysisComplianceProvider", () => {
     expect(result.message).toContain("conflicting");
   });
 
+  it("fails closed on a wrong-typed score rather than falling back to the level", async () => {
+    // Ignoring the malformed field and reading the level instead is a guess:
+    // the response says something about the score that we cannot interpret.
+    mockResponse({ status: "COMPLETE", risk: "Low", riskScore: "high" });
+    const result = await provider().screenAddress(INPUT);
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("riskScore");
+  });
+
   it("fails closed on a body that is not JSON", async () => {
     mockResponse("<html>gateway error</html>");
     const result = await provider().screenAddress(INPUT);
