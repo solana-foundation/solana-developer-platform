@@ -93,14 +93,9 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       }),
     ]);
 
-    // Through the guarded transport, not a raw client: `resolveRpcTarget`
-    // returns the project's own `settings.rpcEndpoint` for the `custom`
-    // provider, and that value is only checked for being a URL when it is
-    // written. Dialling it directly made this route an API-key reachable SSRF
-    // into the metadata server and the private network, with error text and
-    // timing as the oracle — the same sink the relay already guards
-    // (HOO-1560). Platform targets keep the ordinary fetch, so local and
-    // Surfpool endpoints are unaffected.
+    // The `custom` provider endpoint is project-supplied and only URL-checked
+    // on write, so it goes through the guarded transport like the relay's
+    // (HOO-1560). Platform targets keep the ordinary fetch.
     const rpc = createRpcFromTransport(createRpcTransportForTarget(rpcTarget));
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");

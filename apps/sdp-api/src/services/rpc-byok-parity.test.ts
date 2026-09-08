@@ -99,7 +99,25 @@ describe("BYOK parity with organization RPC selection", () => {
 
     const unguarded = files.filter((file) => {
       const source = readFileSync(file, "utf8");
-      return source.includes("resolveRpcTarget(") && source.includes("createRpc(");
+      if (!source.includes("resolveRpcTarget(")) {
+        return false;
+      }
+      // The binding, not the spelling: an alias or a namespace import is the
+      // same sink under another name.
+      const bindings = [
+        ...source.matchAll(/import\s*{([^}]*)}\s*from\s*"@sdp\/rpc\/solana"/g),
+      ].flatMap((match) =>
+        match[1]
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry === "createRpc" || entry.startsWith("createRpc as "))
+          .map((entry) => entry.split(" as ").at(-1)?.trim() ?? entry)
+      );
+      const namespaces = [
+        ...source.matchAll(/import\s*\*\s*as\s*(\w+)\s*from\s*"@sdp\/rpc\/solana"/g),
+      ].map((match) => `${match[1]}.createRpc`);
+
+      return [...bindings, ...namespaces].some((binding) => source.includes(`${binding}(`));
     });
 
     expect(unguarded.map((file) => path.relative(apiSrc, file))).toEqual([]);
