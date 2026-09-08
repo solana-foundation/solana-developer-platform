@@ -65,11 +65,31 @@ describe("fetchDvpTrades", () => {
 });
 
 describe("fetchDvpTrade", () => {
+  // Carries the fields `isRenderableTrade` requires. A bare `{ id }` is not a
+  // trade this page can draw, and asserting on one would only prove the guard
+  // had been bypassed.
+  const renderableTrade = {
+    id: "dvp_1",
+    status: "funded",
+    legs: {
+      a: { party: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn", amount: "1000" },
+      b: { party: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY", amount: "2000" },
+    },
+  };
+
   it("returns the trade and its status", async () => {
+    const result = await fetchDvpTrade(ok({ data: { trade: renderableTrade } }), "dvp_1");
+
+    expect(result.trade).toEqual(renderableTrade);
+    expect(result.status).toBe(200);
+  });
+
+  it("refuses a 200 whose trade cannot be rendered", async () => {
     const result = await fetchDvpTrade(ok({ data: { trade: { id: "dvp_1" } } }), "dvp_1");
 
-    expect(result.trade).toEqual({ id: "dvp_1" });
+    expect(result.trade).toBeNull();
     expect(result.status).toBe(200);
+    expect(result.error).toContain("cannot read");
   });
 
   it("encodes the trade id into the path", async () => {
