@@ -185,6 +185,7 @@ describe("createRequestScopedSdpApiClients", () => {
     });
 
     expect(response.status).toBe(204);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, options] = fetchMock.mock.calls[0] ?? [];
     const headers = new Headers(options?.headers);
@@ -193,5 +194,22 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(headers.get("Authorization")).toBe("Bearer token_test");
     expect(headers.get("x-project-id")).toBe("project_test");
     expect(options?.body).toBe(JSON.stringify({ amount: "1" }));
+  });
+
+  it("marks proxy failure responses uncacheable too", async () => {
+    mocks.cookies.mockResolvedValue({ get: () => undefined });
+    mocks.auth.mockResolvedValue({ userId: null, orgId: null, getToken: vi.fn() });
+
+    const response = await proxyToSdpApi({
+      request: new Request("https://dashboard.example.test/api/anything", {
+        method: "POST",
+        body: "{}",
+      }),
+      traceSource: "test.proxy.cache",
+      path: "/v1/earn/vault-deposits",
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
 });
