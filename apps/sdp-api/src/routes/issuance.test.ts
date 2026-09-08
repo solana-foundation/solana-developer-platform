@@ -1791,6 +1791,26 @@ describe("Issuance Routes", () => {
       tokenId = created.data.token.id;
     });
 
+    it("does not expose the internal deploying claim on the list endpoint", async () => {
+      // The list has no status filter that excludes the claim, so it needs the
+      // same presentation the detail endpoint applies.
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'deploying' WHERE id = ?")
+        .bind(tokenId)
+        .run();
+
+      const res = await app.request(
+        "/v1/issuance/tokens?limit=100",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string; status: string }> };
+      const listed = body.data.find((token) => token.id === tokenId);
+      expect(listed?.status).toBe("pending");
+    });
+
     it("does not expose the internal deploying claim on the detail endpoint", async () => {
       // The claim is not a public TokenStatus value, and the list endpoint
       // already filters it. A client polling the detail endpoint during a

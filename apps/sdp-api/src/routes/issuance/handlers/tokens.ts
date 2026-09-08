@@ -1,6 +1,6 @@
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenResponse } from "@sdp/types";
+import type { TokenResponse, TokenStatus } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -113,6 +113,16 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
   return created(c, response);
 };
 
+/**
+ * `deploying` is the internal claim held between the deploy commit and the mint
+ * landing. It is not part of the public TokenStatus union, so no response may
+ * carry it: externally the token is still an undeployed draft, which is exactly
+ * what it read as before the claim existed.
+ */
+function withPublicStatus<T extends { status: TokenStatus }>(token: T): T {
+  return String(token.status) === "deploying" ? { ...token, status: "pending" } : token;
+}
+
 export const listTokens = async (c: AppContext) => {
   const { projectId } = requireProjectScope(c);
 
@@ -155,7 +165,7 @@ export const listTokens = async (c: AppContext) => {
     offset: (page - 1) * pageSize,
   });
 
-  return paginated(c, tokens, { total, page, pageSize });
+  return paginated(c, tokens.map(withPublicStatus), { total, page, pageSize });
 };
 
 export const listTokenFacets = async (c: AppContext) => {
@@ -182,13 +192,7 @@ export const getToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  // `deploying` is the internal claim between the deploy commit and the mint
-  // landing; it is not part of the public TokenStatus union, and the list
-  // endpoint already filters it out. Externally the token is still an
-  // undeployed draft, which is what it read as before the claim existed.
-  const response: TokenResponse = {
-    token: String(token.status) === "deploying" ? { ...token, status: "pending" } : token,
-  };
+  const response: TokenResponse = { token: withPublicStatus(token) };
   return success(c, response);
 };
 

@@ -13,53 +13,69 @@ const LINK_KEY_PATTERN = /^(?:website|homepage)$|(?:url|uri|link|logo|image|icon
 
 const MAX_LINK_LENGTH = 2048;
 
-// A whole string that is a scheme plus a body, with no whitespace anywhere:
-// `javascript:alert(1)` is a URI, `javascript:alert(1), quoted in a report` is
-// prose. Free text in the open namespace stays free text.
+// Schemes that execute or inline content when a consumer renders them. These
+// are refused wherever they appear in the namespace, not only under a key whose
+// NAME looked like a link — `banner`, `avatar` and anything nested are rendered
+// the same way.
+const ACTIVE_CONTENT_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "blob:", "file:"]);
+
+// A whole string that is a scheme plus a body, with no whitespace: prose that
+// merely quotes a scheme (`javascript:alert(1), seen in an incident`) is text,
+// not a link. Compared after trimming, so surrounding whitespace cannot hide it.
 const URI_LIKE_PATTERN = /^[a-z][a-z0-9+.-]*:\S+$/i;
 
-const isHttpUrl = (value: string): boolean => {
+const parseUri = (value: string): URL | null => {
   try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    return new URL(value.trim());
   } catch {
-    return false;
+    return null;
   }
 };
 
-// The namespace stays open, but nothing in it may carry a non-http(s) URI into
-// public metadata. Keying this on the KEY name missed `banner`, `avatar` and
-// anything nested; the value is what ends up rendered, so the value decides.
-function collectLinkIssues(
+const isHttpUrl = (value: string): boolean => {
+  const url = parseUri(value);
+  return url !== null && (url.protocol === "http:" || url.protocol === "https:");
+};
+
+const isActiveContentUri = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!URI_LIKE_PATTERN.test(trimmed)) {
+    return false;
+  }
+  const url = parseUri(trimmed);
+  return url !== null && ACTIVE_CONTENT_SCHEMES.has(url.protocol);
+};
+
+function collectActiveContentIssues(
   value: unknown,
   path: Array<string | number>,
   issues: Array<{ path: Array<string | number>; message: string }>
 ): void {
   if (typeof value === "string") {
-    if (!URI_LIKE_PATTERN.test(value)) {
-      return;
-    }
-    if (value.length > MAX_LINK_LENGTH || !isHttpUrl(value)) {
+    if (isActiveContentUri(value)) {
       issues.push({
         path,
-        message: `asset.${path.join(".")} must be an http(s) URL of at most ${MAX_LINK_LENGTH} characters`,
+        message: `asset.${path.join(".")} must not be an active-content URI`,
       });
     }
     return;
   }
 
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => collectLinkIssues(entry, [...path, index], issues));
+    value.forEach((entry, index) => collectActiveContentIssues(entry, [...path, index], issues));
     return;
   }
 
   if (value !== null && typeof value === "object") {
     for (const [key, entry] of Object.entries(value)) {
-      collectLinkIssues(entry, [...path, key], issues);
+      collectActiveContentIssues(entry, [...path, key], issues);
     }
   }
 }
 
+// The namespace stays open. A key that names a link must hold a bounded http(s)
+// URL, as before; everywhere else only active-content URIs are refused, so
+// `urn:`/`mailto:` values and free text keep working.
 const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
   const issues: Array<{ path: Array<string | number>; message: string }> = [];
 
@@ -67,16 +83,16 @@ const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
     if (value == null) {
       continue;
     }
-    // A key that names a link must hold a string: `website: {}` is not a link
-    // the value walk can judge, and must not pass by being the wrong type.
-    if (LINK_KEY_PATTERN.test(key) && typeof value !== "string") {
-      issues.push({
-        path: [key],
-        message: `asset.${key} must be an http(s) URL of at most ${MAX_LINK_LENGTH} characters`,
-      });
+    if (LINK_KEY_PATTERN.test(key)) {
+      if (typeof value !== "string" || value.length > MAX_LINK_LENGTH || !isHttpUrl(value)) {
+        issues.push({
+          path: [key],
+          message: `asset.${key} must be an http(s) URL of at most ${MAX_LINK_LENGTH} characters`,
+        });
+      }
       continue;
     }
-    collectLinkIssues(value, [key], issues);
+    collectActiveContentIssues(value, [key], issues);
   }
 
   for (const issue of issues) {

@@ -96,4 +96,33 @@ describe("issuanceMetadataSchema asset link validation", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("still requires a link-named key to hold a real http(s) URL", () => {
+    expect(issuanceMetadataSchema.safeParse({ asset: { website: "not a url" } }).success).toBe(
+      false
+    );
+    expect(
+      issuanceMetadataSchema.safeParse({
+        asset: { website: `https://x.example/${"a".repeat(2100)}` },
+      }).success
+    ).toBe(false);
+  });
+
+  it("sees through whitespace padding around an active-content URI", () => {
+    expect(
+      issuanceMetadataSchema.safeParse({ asset: { banner: " javascript:alert(1)" } }).success
+    ).toBe(false);
+    expect(
+      issuanceMetadataSchema.safeParse({ asset: { banner: "javascript:alert(1)\n" } }).success
+    ).toBe(false);
+  });
+
+  it("keeps inert non-http URIs outside link-named keys", () => {
+    // The rule is about active content, not about being an http URL: an open
+    // namespace legitimately carries identifiers and contact addresses.
+    const result = issuanceMetadataSchema.safeParse({
+      asset: { identifier: "urn:isin:US0000000000", contact: "mailto:ops@example.com" },
+    });
+    expect(result.success).toBe(true);
+  });
 });
