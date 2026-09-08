@@ -14,6 +14,7 @@ import type {
 import {
   type EarnProviderId,
   earnDepositStyle,
+  earnWithdrawSlippageFloor,
   isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -1117,6 +1118,18 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
     throw notFound("Earn vault position");
   }
   const position = toVaultHolding(positionRow);
+
+  // The exit twin of the deposit's share floor, keyed on the provider's
+  // declared policy rather than the environment: a non-null
+  // `withdrawalSlippage` answers a floor-less body with a 400 (the wire
+  // contract the strategy row and the OpenAPI description already state).
+  // Not an admission gate — a caller-fixable 400, derived from the exit
+  // preview, so it can never trap a position.
+  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+    throw badRequest(
+      `minAmountOut is required for this vault withdrawal because ${position.provider} declares a withdrawal slippage policy.`
+    );
+  }
 
   // The signing wallet comes from the POSITION, never the body: a withdrawal
   // returns shares to tokens in the wallet that holds them, and letting a
