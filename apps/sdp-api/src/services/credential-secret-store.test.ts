@@ -65,9 +65,9 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         );
       }
 
-      // The persisted ref is the canonical one, so the reads that follow are
-      // addressed by number.
-      if (url.endsWith(`/v1/projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1:access`)) {
+      // The persisted ref is normalized back to the project-ID spelling, so
+      // the reads that follow are addressed by id (GCP accepts either).
+      if (url.endsWith(`/v1/projects/${PROJECT_ID}/secrets/${SECRET_ID}/versions/1:access`)) {
         return new Response(
           JSON.stringify({
             payload: {
@@ -77,7 +77,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         );
       }
 
-      if (url.endsWith(`/v1/projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1:destroy`)) {
+      if (url.endsWith(`/v1/projects/${PROJECT_ID}/secrets/${SECRET_ID}/versions/1:destroy`)) {
         return new Response(
           JSON.stringify({
             name: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
@@ -107,7 +107,7 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
     expect(stored).toEqual({
       storageBackend: "gcp_secret_manager",
       secretRef: `projects/${PROJECT_ID}/secrets/${SECRET_ID}`,
-      secretVersionRef: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
+      secretVersionRef: `projects/${PROJECT_ID}/secrets/${SECRET_ID}/versions/1`,
     });
     expect(await store.read({ orgId: "org_123", stored })).toEqual(payload);
     await store.destroyVersion({ secretVersionRef: stored.secretVersionRef as string });
@@ -269,10 +269,11 @@ describe("GcpSecretManagerCredentialSecretStore", () => {
         payload: { appSecret: "secret" },
       });
 
-    // The canonical name comes back spelled with the number, which is what the
-    // caller has to persist.
+    // GCP answers with the project-number spelling; the store normalizes back
+    // to the project-ID spelling the write was addressed with, so every
+    // recorded ref lives in one spelling.
     expect(await write()).toMatchObject({
-      secretVersionRef: `projects/${PROJECT_NUMBER}/secrets/${SECRET_ID}/versions/1`,
+      secretVersionRef: `projects/${PROJECT_ID}/secrets/${SECRET_ID}/versions/1`,
     });
     await write();
 

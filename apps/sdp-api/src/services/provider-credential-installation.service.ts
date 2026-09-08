@@ -13,7 +13,6 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
-import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -40,6 +39,7 @@ import {
   installationFactsFromConnection,
 } from "@/services/provider-credential-installation";
 import type { SafeProviderCredential } from "@/services/provider-credential-submission.service";
+import { destroySecretVersion, queueOrphanedSecretVersion } from "@/services/secret-retirement";
 import {
   getPendingWalletLabel,
   type InstallationConnectionState,
@@ -193,7 +193,7 @@ export async function completeProviderCredentialInstallation(
         ? await persistSuccess(context, loaded.target, leaseToken, outcome.wallet)
         : outcome.kind === "retry_unknown"
           ? await persistRetryUnknown(context, loaded.target, leaseToken)
-          : await persistFailure(context, loaded.target, leaseToken, outcome.code, secretStore);
+          : await persistFailure(context, loaded.target, leaseToken, outcome.code);
     if (replay) {
       canRecordFailureOutcome = false;
       if (replay.target.last_check_at === leaseToken) {
@@ -725,23 +725,39 @@ async function persistFailure(
   context: InstallationContext,
   target: InstallationConnectionState,
   leaseToken: string,
-  failureCode: "invalid_credentials" | "provider_account_already_connected" | "wallet_conflict",
-  secretStore: CredentialSecretStore
+  failureCode: "invalid_credentials" | "provider_account_already_connected" | "wallet_conflict"
 ): Promise<LoadedInstallation | null> {
-  const updated = await context.db.transaction(async (tx) =>
-    new ProviderCredentialStore(tx).recordInstallationFailure({
+  const updated = await context.db.transaction(async (tx) => {
+    const row = await new ProviderCredentialStore(tx).recordInstallationFailure({
       providerCredentialId: target.provider_credential_id,
       connectionId: target.id,
       leaseToken,
       failureCode,
-    })
-  );
+    });
+    if (!row) {
+      return row;
+    }
+    // Recorded WITH the failure, not after it: this commit is what makes the
+    // stored version garbage, so the obligation to destroy it has to become
+    // true at the same instant. Queuing after the commit leaves a window in
+    // which a lost worker takes the only knowledge that the version needs
+    // destroying with it, and the tenant's credential stays readable in the
+    // backend with nothing that would ever retry. Same ordering as rotation
+    // and deactivation. The destroy below clears this row on success.
+    await queueOrphanedSecretVersion(
+      tx,
+      retirementContext(target),
+      storedSecretRef(target),
+      "orphaned by a rejected Privy installation"
+    );
+    return row;
+  });
   if (!updated) {
     const current = await loadInstallation(context, target.id);
     if (current.decisions.complete.kind === "replay") return current;
     throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
   }
-  await destroyRejectedGcpVersionBestEffort(context.c, secretStore, target);
+  await destroyGcpVersionBestEffort(context.c, target);
   return null;
 }
 
@@ -791,60 +807,31 @@ async function completeInstallationCriticalNoop(
   });
 }
 
+// Destroys the rejected installation's stored credential version durably: a
+// destroy (or store construction) failure is recorded on the retirement queue
+// for the sweeper instead of only logged — a log line alone left the tenant's
+// credential readable in Secret Manager with nothing that would ever retry.
 async function destroyGcpVersionBestEffort(
   c: Context<{ Bindings: Env }>,
   credential: InstallationConnectionState
 ): Promise<void> {
-  if (
-    credential.credential_storage_backend !== "gcp_secret_manager" ||
-    !credential.credential_secret_version_ref
-  ) {
-    return;
-  }
-  let store: CredentialSecretStore;
-  try {
-    store = createPersistedSecretStore(c.env, credential.credential_storage_backend);
-  } catch {
-    logSecretCleanupFailure(c, credential);
-    return;
-  }
-  await destroyRejectedGcpVersionBestEffort(c, store, credential);
+  await destroySecretVersion(c.env, storedSecretRef(credential), retirementContext(credential));
 }
 
-async function destroyRejectedGcpVersionBestEffort(
-  c: Context<{ Bindings: Env }>,
-  store: CredentialSecretStore,
-  credential: InstallationConnectionState
-): Promise<void> {
-  if (
-    credential.credential_storage_backend !== "gcp_secret_manager" ||
-    !credential.credential_secret_version_ref
-  ) {
-    return;
-  }
-  try {
-    await store.destroyVersion({ secretVersionRef: credential.credential_secret_version_ref });
-  } catch {
-    logSecretCleanupFailure(c, credential);
-  }
+/** The stored version this connection points at, in retirement-store shape. */
+function storedSecretRef(credential: InstallationConnectionState) {
+  return {
+    storageBackend: credential.credential_storage_backend,
+    secretRef: credential.credential_secret_ref ?? undefined,
+    secretVersionRef: credential.credential_secret_version_ref ?? undefined,
+  };
 }
 
-function logSecretCleanupFailure(
-  c: Context<{ Bindings: Env }>,
-  credential: InstallationConnectionState
-): void {
-  const version = credential.credential_secret_version_ref?.split("/").at(-1);
-  getLogger().error(
-    {
-      providerCredentialId: credential.provider_credential_id,
-      provider: "privy",
-      storageBackend: credential.credential_storage_backend,
-      ...(version && /^[1-9][0-9]*$/.test(version)
-        ? { providerResourceVersion: Number(version) }
-        : {}),
-      requestId: c.get("requestId"),
-      reason: "secret_cleanup_failed",
-    },
-    "provider_credential_orphan_risk"
-  );
+/** Who the retirement belongs to, for the queue row and the orphan-risk log. */
+function retirementContext(credential: InstallationConnectionState) {
+  return {
+    provider: "privy" as const,
+    orgId: credential.organization_id,
+    sourceId: credential.provider_credential_id,
+  };
 }

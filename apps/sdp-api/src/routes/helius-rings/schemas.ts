@@ -141,6 +141,14 @@ export const voidRingsOperationSchema = z.object({
   signature: z.string().min(1),
 });
 
+/**
+ * The wallet's own name, typed back. Re-keying cannot be undone, so the request
+ * has to name what it is about to discard; the service compares it.
+ */
+export const rekeyRingsWalletSchema = z.object({
+  confirmation: z.string().min(1).max(120),
+});
+
 export const createRingsZoneSchema = z.object({
   name: z.string().min(1).max(120),
   kind: z.enum(ZONE_KINDS),

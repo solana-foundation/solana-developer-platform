@@ -57,7 +57,7 @@ describe("stripeOnrampQuote", () => {
         await stripeOnrampQuote(c, {
           counterparty: COUNTERPARTY,
           destinationWalletAddress: "wallet_123",
-          cryptoToken: "USDC",
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           fiatAmount: "100",
         })
@@ -69,7 +69,11 @@ describe("stripeOnrampQuote", () => {
     expect(response.status).toBe(200);
     expect(createOnrampQuoteMock).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "sandbox" }),
-      expect.not.objectContaining({ stripeCustomerInfo: expect.anything() })
+      expect.objectContaining({ assetRail: "usdc.solana" })
+    );
+    expect(createOnrampQuoteMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "sandbox" }),
+      expect.objectContaining({ stripeCustomerInfo: expect.anything() })
     );
   });
 });

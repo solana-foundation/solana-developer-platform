@@ -74,9 +74,33 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
+    await seedInstance(TEST_INSTANCE_ID);
 
     repo = createPostgresPrivateChannelWithdrawalRepository(db);
   });
+
+  async function seedInstance(instanceId: string, projectId = TEST_PROJECT_ID) {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_instances (
+           id, organization_id, project_id, gateway_url,
+           escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+         ) VALUES (?, ?, ?, ?,
+           'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+      )
+      .bind(instanceId, TEST_ORG.id, projectId, `https://gateway.example/${instanceId}`)
+      .run();
+  }
+
+  async function seedProject(projectId: string) {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+      )
+      .bind(projectId, TEST_ORG.id, projectId, projectId, TEST_USER.id)
+      .run();
+  }
 
   async function seed(overrides: Partial<CreateWithdrawalInput> = {}) {
     const row = await repo.createWithdrawal(makeInput(overrides));
@@ -189,6 +213,10 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
   });
 
   it("countNonTerminalByInstance counts only in-flight rows for the instance", async () => {
+    await seedProject("prj_pcw_a");
+    await seedProject("prj_pcw_b");
+    await seedInstance("inst_A", "prj_pcw_a");
+    await seedInstance("inst_B", "prj_pcw_b");
     const inFlight = await repo.createWithdrawal(makeInput({ instanceId: "inst_A" }));
     const other = await seed({ instanceId: "inst_A" });
     await repo.createWithdrawal(makeInput({ instanceId: "inst_B" }));
