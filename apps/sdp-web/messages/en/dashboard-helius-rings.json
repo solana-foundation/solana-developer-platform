@@ -103,7 +103,7 @@
       "status_foreign": "Registered with different keys",
       "explain_unregistered": "The registry holds no record for this wallet's owner, so provisioning will create one. Nothing on chain is in the way.",
       "explain_ours": "The published record is the identity this deployment derives, so provisioning already succeeded on chain and only this row is behind. Retry provisioning to record it.",
-      "explain_foreign": "The registry already publishes a different identity for this owner. Provisioning will refuse rather than re-key it, because re-keying would orphan every note encrypted to the published keys. SDP does not rotate an identity, so the fix is to bind this private wallet to a different custody wallet.",
+      "explain_foreign": "The registry already publishes a different identity for this owner, so provisioning will refuse rather than write over it. Bind this private wallet to a different custody wallet, or re-key it to publish the keys this deployment derives — which abandons whatever the published keys hold.",
       "mismatch": "Differs in: {field}",
       "mismatch_owner": "the record's owner",
       "mismatch_nullifier_key": "the nullifier key",
@@ -119,6 +119,7 @@
       "refreshing": "Reading…",
       "unsynced": "Not read yet",
       "notProvisioned": "This wallet has no shielded identity yet, so there is nothing to read. Provision it first.",
+      "paused": "This wallet is paused, so its balance cannot be read: the keys published for its owner are not the ones this deployment derives. Re-key it to publish the derived keys and make it usable again, at the cost of anything the published keys hold.",
       "empty": "0",
       "readFailed": "The shielded balance could not be read. Retry shortly."
     },
@@ -232,6 +233,17 @@
       "void": "Void",
       "voiding": "Voiding…",
       "voidConfirm": "Voiding asserts this signed transaction never landed on chain and releases the wallet's spend slot. Continue only if you have reconciled the signature and confirmed absence."
+    },
+    "rekey": {
+      "action": "Re-key wallet",
+      "title": "Re-key this wallet",
+      "warning": "Re-keying discards whatever this wallet's published keys hold. It cannot be undone.",
+      "effect": "This wallet's owner publishes an identity this deployment cannot derive, so nothing here can read or spend what those keys hold. Re-keying publishes the keys it derives now, which makes the wallet usable again for new deposits. Everything held under the old keys stays on chain with nothing able to open it.",
+      "confirmPrompt": "Type {name} to confirm.",
+      "submit": "Re-key and discard balance",
+      "submitting": "Re-keying…",
+      "cancel": "Cancel",
+      "failed": "The re-key did not complete. Check the wallet's status before trying again — the rotation may still have landed."
     }
   }
 }

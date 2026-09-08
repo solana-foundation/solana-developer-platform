@@ -41,18 +41,13 @@ function create(
 }
 
 const allMethods: Array<[string, (gateway: RingsGatewayPort) => Promise<unknown>]> = [
-  [
-    "provisionIdentity",
-    (gateway) => gateway.provisionIdentity({ walletId: "hrw_1", sdpAddress: "owner" }),
-  ],
-  ["provisionRing", (gateway) => gateway.provisionRing({ ringProgramId: "ring" })],
-  ["readIdentity", (gateway) => gateway.readIdentity({ walletId: "hrw_1", owner: "owner" })],
-  ["syncPhoton", (gateway) => gateway.syncPhoton({ walletId: "hrw_1", owner: "owner" })],
-  [
-    "buildOperation",
-    (gateway) => gateway.buildOperation({ operation: {} as never, owner: "owner" }),
-  ],
-  ["verifyIndexed", (gateway) => gateway.verifyIndexed("sig")],
+  ["provisionIdentity", (g) => g.provisionIdentity({ walletId: "hrw_1", sdpAddress: "owner" })],
+  ["provisionRing", (g) => g.provisionRing({ ringProgramId: "ring" })],
+  ["readIdentity", (g) => g.readIdentity({ walletId: "hrw_1", owner: "owner" })],
+  ["rekeyIdentity", (g) => g.rekeyIdentity({ walletId: "hrw_1", owner: "owner" })],
+  ["syncPhoton", (g) => g.syncPhoton({ walletId: "hrw_1", owner: "owner" })],
+  ["buildOperation", (g) => g.buildOperation({ operation: {} as never, owner: "owner" })],
+  ["verifyIndexed", (g) => g.verifyIndexed("sig")],
 ];
 
 describe("createConfiguredRingsGateway", () => {

@@ -166,6 +166,10 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
     return this.fail();
   }
 
+  async rekeyIdentity(): Promise<never> {
+    return this.fail();
+  }
+
   async syncPhoton(): Promise<never> {
     return this.fail();
   }

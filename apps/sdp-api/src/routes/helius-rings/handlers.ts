@@ -33,6 +33,7 @@ import {
   createRingsZoneSchema,
   listLimitSchema,
   prepareRingsOperationSchema,
+  rekeyRingsWalletSchema,
   retryRingsOperationSchema,
   voidRingsOperationSchema,
 } from "./schemas";
@@ -165,6 +166,40 @@ export async function syncRingsWallet(c: AppContext) {
     degraded: result.report.degraded,
     observedAt: result.observedAt,
   });
+}
+
+/**
+ * POST /wallets/:walletId/rekey — rotate a wallet whose owner publishes an
+ * identity this deployment cannot derive, abandoning whatever those keys hold.
+ *
+ * The body carries the wallet's name as a typed confirmation. The service is
+ * what compares it and what reads the chain to confirm the record really is
+ * foreign; this handler supplies the custody owner for a wallet that never
+ * provisioned and so records no owner of its own.
+ */
+export async function rekeyRingsWallet(c: AppContext) {
+  const parsed = rekeyRingsWalletSchema.safeParse(await c.req.json());
+  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
+
+  const { auth, tenant } = tenantOf(c);
+  const walletId = requireParam(c, "walletId");
+  const ringsWallet = await requireRingsWallet(c, tenant, walletId, ["payments:write"]);
+
+  const scope = await resolveScope(c);
+  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+
+  const service = getHeliusRingsService(c, tenant);
+  const wallet = await withRingsErrors(() =>
+    service.rekeyWalletIdentity(
+      walletId,
+      {
+        confirmation: parsed.data.confirmation,
+        custodyOwner: custodyWallet?.publicKey ?? null,
+      },
+      { apiKeyId: auth.apiKeyId, actor: walletOperationActorFromAuth(auth) }
+    )
+  );
+  return success(c, { wallet });
 }
 
 // Enrich Rings balances with USD via the shared pricing path used by custody.

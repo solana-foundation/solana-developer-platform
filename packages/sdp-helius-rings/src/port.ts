@@ -35,6 +35,16 @@ export interface ReadIdentityInput {
   owner: string;
 }
 
+/**
+ * Rotating a published record to the identity the wallet's material derives
+ * now. Destructive and irreversible: notes encrypted to the old keys stay on
+ * chain with nothing able to derive the keys that open them.
+ */
+export interface RekeyIdentityInput {
+  walletId: string;
+  owner: string;
+}
+
 export type RingsIdentityStatus = "unregistered" | "ours" | "foreign";
 export type RingsIdentityMismatch = "owner" | "nullifier_key" | "viewing_key";
 
@@ -138,6 +148,13 @@ export interface RingsGatewayPort {
    */
   provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult>;
   readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult>;
+  /**
+   * Repoints the owner's on-chain record at the identity its material derives
+   * now, abandoning every note encrypted to the published keys. Only for a
+   * wallet already quarantined for a mismatch, and only behind an explicit
+   * human confirmation — nothing about this is recoverable.
+   */
+  rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult>;
   syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult>;
   buildOperation(input: BuildOperationInput): Promise<BuildOperationResult>;
   verifyIndexed(signature: string): Promise<VerifyIndexedResult | null>;

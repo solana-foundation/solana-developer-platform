@@ -20,6 +20,7 @@ import {
   listRingsZones,
   prepareRingsOperation,
   recheckRingsOperation,
+  rekeyRingsWallet,
   retryRingsOperation,
   syncRingsWallet,
   voidRingsOperation,
@@ -50,6 +51,11 @@ heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallet
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
 heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
 heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
+heliusRings.post(
+  "/wallets/:walletId/rekey",
+  requirePermissions("payments:write"),
+  rekeyRingsWallet
+);
 heliusRings.get(
   "/wallets/:walletId/identity",
   requirePermissions("payments:read"),

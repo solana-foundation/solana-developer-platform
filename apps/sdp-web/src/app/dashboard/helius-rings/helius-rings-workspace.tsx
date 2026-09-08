@@ -218,7 +218,7 @@ export function HeliusRingsWorkspace({
             selectedWalletId={selectedWallet?.id ?? null}
             onSelect={setSelectedWalletId}
             balancesTick={balancesTick}
-            onCreated={refresh}
+            onWalletsChanged={refresh}
           />
 
           {selectedWallet === null ? (

@@ -9,6 +9,7 @@ import {
   type ProvisionRingResult,
   type ReadIdentityInput,
   type ReadIdentityResult,
+  type RekeyIdentityInput,
   type RingsGatewayPort,
   type RuntimeHealth,
   type SyncPhotonInput,
@@ -27,7 +28,7 @@ import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";
 import { verifyRingsIndexed } from "./indexed.js";
 import type { ShieldedMaterialSource } from "./material.js";
-import { provisionRingsIdentity } from "./provision.js";
+import { provisionRingsIdentity, rekeyRingsIdentity } from "./provision.js";
 import { provisionCustomRing } from "./provision-ring.js";
 import { syncRingsWallet } from "./sync.js";
 
@@ -198,6 +199,22 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
               : {}),
           },
           input
+        )
+      );
+    },
+
+    async rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult> {
+      return withZolanaErrorBridge(async () =>
+        rekeyRingsIdentity(
+          {
+            client: await client(),
+            material: requireMaterial(),
+            signTransaction: config.signTransaction,
+            submitTransaction: config.submitTransaction,
+            organizationId: config.organizationId,
+            projectId: config.projectId,
+          },
+          { walletId: input.walletId, owner: input.owner }
         )
       );
     },

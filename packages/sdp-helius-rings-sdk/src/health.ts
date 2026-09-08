@@ -139,19 +139,51 @@ function proverHealthUrl(proverUrl: string): URL {
   return new URL("health", proverUrl.endsWith("/") ? proverUrl : `${proverUrl}/`);
 }
 
+/**
+ * The second proof a custom-ring transact carries, besides the pool transact.
+ * A prover without it still answers `/health` and still proves default-ring
+ * spends, so liveness alone reports green straight through a total ring-bound
+ * outage: every ring build fails at prove time instead.
+ *
+ * Amber rather than red, because that prover serves the default pool fine.
+ */
+const RING_PROOF_CIRCUIT = "custom-ring";
+
 async function probeProver(input: RingsHealthInput, timeoutMs: number): Promise<ProbeOutcome> {
   const send = input.fetch ?? globalThis.fetch;
 
   try {
-    const response = await withHealthTimeout(
-      send(proverHealthUrl(input.proverUrl), {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-      }),
+    // Wrapped so the budget bounds the body read too, as in `probePhoton`.
+    return await withHealthTimeout(
+      (async () => {
+        const response = await send(proverHealthUrl(input.proverUrl), {
+          method: "GET",
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+
+        if (!response.ok) {
+          return { status: "red", reason: `http ${response.status}` } as const;
+        }
+
+        let circuits: unknown;
+        try {
+          ({ circuits } = (await response.json()) as { circuits?: unknown });
+        } catch {
+          return { status: "amber", reason: "unreadable health body" } as const;
+        }
+
+        // A prover old enough to omit the list is old enough to predate the
+        // circuit, so an unlistable prover is reported the same as one missing it.
+        if (!Array.isArray(circuits)) {
+          return { status: "amber", reason: "circuits not reported" } as const;
+        }
+
+        return circuits.includes(RING_PROOF_CIRCUIT)
+          ? ({ status: "green" } as const)
+          : ({ status: "amber", reason: `no ${RING_PROOF_CIRCUIT} circuit` } as const);
+      })(),
       timeoutMs
     );
-
-    return response.ok ? { status: "green" } : { status: "red", reason: `http ${response.status}` };
   } catch (error) {
     return classify(error);
   }

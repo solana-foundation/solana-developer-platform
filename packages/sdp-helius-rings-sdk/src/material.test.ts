@@ -1,5 +1,7 @@
+import { isRingsIdentityMismatch } from "@sdp/helius-rings";
 import { describe, expect, it } from "vitest";
 import {
+  assertProvisionedIdentity,
   assertShieldedIdentity,
   canonicalShieldedIdentity,
   createShieldedMaterial,
@@ -107,6 +109,45 @@ describe("assertShieldedIdentity", () => {
       expect(() =>
         assertShieldedIdentity(material, canonicalShieldedIdentity(other.shieldedAddress))
       ).toThrow(RingsIdentityMismatchError);
+    } finally {
+      material.destroy();
+      other.destroy();
+    }
+  });
+});
+
+describe("assertProvisionedIdentity", () => {
+  it("accepts the identity the material publishes", async () => {
+    const material = await createShieldedMaterial(INPUT);
+
+    try {
+      const expected = canonicalShieldedIdentity(material.shieldedAddress);
+      expect(() => assertProvisionedIdentity(material, expected)).not.toThrow();
+    } finally {
+      material.destroy();
+    }
+  });
+
+  it("raises a mismatch the service can quarantine on, naming neither address", async () => {
+    const material = await createShieldedMaterial(INPUT);
+    const other = await createShieldedMaterial({ ...INPUT, owner: OTHER_OWNER });
+    const expected = canonicalShieldedIdentity(other.shieldedAddress);
+
+    try {
+      let thrown: unknown;
+      try {
+        assertProvisionedIdentity(material, expected);
+      } catch (error) {
+        thrown = error;
+      }
+
+      // The service pauses the wallet on this, so it has to be recognisable
+      // without reading the message.
+      expect(isRingsIdentityMismatch(thrown)).toBe(true);
+      expect(thrown).toMatchObject({ code: "conflict" });
+      // The two shielded addresses tell an operator nothing they can act on,
+      // and one of them is the wallet's persisted identity.
+      expect((thrown as Error).message).not.toContain(expected);
     } finally {
       material.destroy();
       other.destroy();
