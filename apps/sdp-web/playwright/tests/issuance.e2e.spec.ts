@@ -224,9 +224,12 @@ async function createTokenDraft(page: Page, options: CreateDraftOptions): Promis
 
   // Invalid fields must not advance the wizard.
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByLabel(/^Token name(?: \(required\))?$/)).toBeVisible();
-  await page.getByLabel(/^Token name(?: \(required\))?$/).fill(options.name);
-  await page.getByLabel(/^Symbol(?: \(required\))?$/).fill(options.symbol);
+  // Role locators use the accessible name, excluding the decorative aria-hidden asterisk.
+  const tokenName = page.getByRole("textbox", { name: "Token name (required)", exact: true });
+  await expect(tokenName).toBeVisible();
+  await expect(tokenName).toHaveAttribute("required", "");
+  await tokenName.fill(options.name);
+  await page.getByRole("textbox", { name: "Symbol (required)", exact: true }).fill(options.symbol);
   await page.getByLabel(/^Description/).fill("Created by Playwright issuance e2e.");
   await expect(page.getByLabel(/^Decimals/)).toHaveValue("6");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
