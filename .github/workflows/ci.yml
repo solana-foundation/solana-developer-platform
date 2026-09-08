@@ -175,14 +175,48 @@ jobs:
           done
           pnpm --if-present $FILTERS typecheck
 
+  unit_test_scope:
+    name: Unit Test Scope
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+      rest: ${{ steps.detect.outputs.rest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "api=true" >> "$GITHUB_OUTPUT"; echo "rest=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(apps/sdp-api/|packages/|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|scripts/run-workspace-tests\.mjs|scripts/doppler/|\.github/workflows/ci\.yml)'; then
+            echo "api=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=false" >> "$GITHUB_OUTPUT"
+          fi
+          if printf '%s\n' "$changed" | grep -qE '^(apps/|packages/|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|scripts/|\.github/workflows/ci\.yml)'; then
+            echo "rest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rest=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Unit Tests
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJson('["self-hosted", "sdp-ci"]') }}
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.api == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: read
       id-token: write
     env:
+      TURBO_CACHE_DIR: ${{ github.workspace }}/.turbo-ci-cache
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: api
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
@@ -203,6 +237,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Restore turbo cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo-ci-cache
+          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ github.job }}-${{ runner.os }}-
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -232,6 +274,13 @@ jobs:
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
+      - name: Save turbo cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo-ci-cache
+          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+
       - name: Unit tests (fork-safe)
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
@@ -240,12 +289,15 @@ jobs:
 
   test_packages:
     name: Unit Tests (packages)
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.rest == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
     env:
+      TURBO_CACHE_DIR: ${{ github.workspace }}/.turbo-ci-cache
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: rest
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
@@ -266,6 +318,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Restore turbo cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo-ci-cache
+          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ github.job }}-${{ runner.os }}-
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -296,6 +356,13 @@ jobs:
         env:
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
+
+      - name: Save turbo cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo-ci-cache
+          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
 
       - name: Unit tests (fork-safe)
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
