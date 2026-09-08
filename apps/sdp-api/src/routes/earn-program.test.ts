@@ -44,6 +44,7 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -2773,5 +2774,57 @@ describe("Earn program — metered quotas", () => {
     });
     expect(withdrawal.status).toBe(201);
     expect(createWithdrawal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
+  it("records the payout with the movement's attribution, and a replay is not re-audited", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+      WITHDRAWAL
+    );
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    const body = {
+      requestId: "8d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a",
+      amountUsd: "10.00",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+    };
+
+    const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(res.status).toBe(201);
+
+    const movement = await getDb(env)
+      .prepare("SELECT * FROM earn_movements WHERE direction = 'withdrawal'")
+      .first<Record<string, unknown>>();
+    const auditRows = () =>
+      getDb(env)
+        .prepare(
+          "SELECT * FROM audit_logs WHERE action = 'withdraw' AND resource_type = 'earn_movement'"
+        )
+        .all<Record<string, unknown>>()
+        .then(({ results }) => results ?? []);
+
+    // Audit parity: same movement, same actor pair the ledger row carries.
+    const rows = await auditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      resource_id: movement?.id,
+      organization_id: TEST_ORG.id,
+      user_id: movement?.created_by,
+      api_key_id: movement?.initiated_by_key_id,
+    });
+
+    // The org audit feed can surface it (PRO-1866 "done when").
+    const feed = await new AuditService(getDb(env)).getForOrganization(TEST_ORG.id, {
+      action: "withdraw",
+    });
+    expect(feed.some((entry) => entry.resourceId === movement?.id)).toBe(true);
+
+    // A replay of the accepted payout moves no new money: nothing new to audit.
+    const replay = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(replay.status).toBe(200);
+    await expect(auditRows()).resolves.toHaveLength(1);
   });
 });
