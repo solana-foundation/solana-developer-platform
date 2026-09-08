@@ -180,7 +180,6 @@ export interface UpdateTokenInput {
   description?: string | null;
   uri?: string | null;
   imageUrl?: string | null;
-  status?: "active" | "paused";
   signingWalletId?: string | null;
   /** Only accepted while the token is undeployed (enforced by the route handler). */
   requiresAllowlist?: boolean;
@@ -892,11 +891,6 @@ export class TokenService {
       values.push(input.imageUrl);
     }
 
-    if (input.status !== undefined) {
-      updates.push("status = ?");
-      values.push(input.status);
-    }
-
     if (input.signingWalletId !== undefined) {
       updates.push("signing_wallet_id = ?");
       values.push(input.signingWalletId);
@@ -938,8 +932,7 @@ export class TokenService {
       input.name !== undefined ||
       input.description !== undefined ||
       input.uri !== undefined ||
-      input.imageUrl !== undefined ||
-      input.status !== undefined;
+      input.imageUrl !== undefined;
 
     // Same race, one step later in the lifecycle: the cap is only meaningful
     // while the mint authority still exists, and a concurrent lock-supply can
@@ -1244,6 +1237,16 @@ export class TokenService {
       .run();
   }
 
+  /**
+   * Commit a deploy: record the mint and flip the claimed token to `active`.
+   *
+   * Guarded on `deploying`/no-mint so it only completes a claim taken via
+   * {@link beginTokenDeploy}. Every deploy path must claim first; the guard is
+   * what makes the claim mandatory. Without it, two concurrent confirmations
+   * could each pass their handler's read-time checks and the later write would
+   * silently overwrite an established mint address and its recorded
+   * authorities — an unrecoverable identity swap for a live token.
+   */
   async setTokenDeployed(
     tokenId: string,
     mintAddress: string,
@@ -1265,7 +1268,7 @@ export class TokenService {
           status = 'active',
           deployed_at = ?,
           updated_at = ?
-         WHERE id = ?${tenant.clause}`
+         WHERE id = ?${tenant.clause} AND status = 'deploying' AND mint_address IS NULL`
       )
       .bind(
         mintAddress,
@@ -1281,7 +1284,16 @@ export class TokenService {
       .run();
 
     if (rowsAffected === 0) {
-      throw new Error("TOKEN_NOT_FOUND");
+      const existing = await this._getTokenById(tokenId);
+      if (!existing) {
+        throw new Error("TOKEN_NOT_FOUND");
+      }
+      throw new AppError(
+        "CONFLICT",
+        existing.mintAddress
+          ? "Token already has a recorded mint"
+          : "Token is not claimed for deployment"
+      );
     }
 
     const updated = await this._getTokenById(tokenId);
@@ -1512,6 +1524,71 @@ export class TokenService {
         .bind(now, now, transactionId, tokenId)
         .run();
       if (marked !== 1) throw new Error("TOKEN_TRANSACTION_LIFECYCLE_MARKER_CONFLICT");
+    });
+  }
+
+  /**
+   * Mirror pause state OBSERVED on-chain at a known slot into
+   * `issued_tokens.status`, for repair paths that hold no settled transaction
+   * of their own to order against: a lifecycle receipt that arrived without a
+   * slot, or a converge branch that found the mint already in the target state
+   * (possibly because an earlier tick's ledger write died after the chain
+   * effect landed).
+   *
+   * Ordering: the observation at slot S reflects every transition ≤ S, so the
+   * write is vetoed by any confirmed pause/unpause transaction recorded with a
+   * slot > S — a newer settled transition owns the status and its own
+   * bookkeeping writes it. Rows without a slot cannot veto (they are exactly
+   * what this method repairs around). Only the active↔paused flip is ever
+   * written; any other current status is left alone.
+   *
+   * Returns true when a repair write happened, false when the row was already
+   * consistent, vetoed, or not in a pause-mirrorable state.
+   */
+  async reconcileObservedTokenPauseState(
+    tokenId: string,
+    observedStatus: "active" | "paused",
+    observedAtSlot: number
+  ): Promise<boolean> {
+    const tokenScope = this.tenantTokenScope();
+    return this.db.transaction(async (tx) => {
+      const row = await tx
+        .prepare(`SELECT status FROM issued_tokens WHERE id = ?${tokenScope.clause} FOR UPDATE`)
+        .bind(tokenId, ...tokenScope.values)
+        .first<{ status: string }>();
+      if (!row) throw new Error("TOKEN_NOT_FOUND");
+
+      const counterpart = observedStatus === "paused" ? "active" : "paused";
+      if (row.status !== counterpart) {
+        return false;
+      }
+
+      const newer = await tx
+        .prepare(
+          `SELECT 1
+           FROM issuance_transactions
+           WHERE token_id = ?
+             AND type IN ('pause', 'unpause')
+             AND status = 'confirmed'
+             AND slot > ?
+           LIMIT 1`
+        )
+        .bind(tokenId, observedAtSlot)
+        .first<{ exists: number }>();
+      if (newer) {
+        return false;
+      }
+
+      const tokenMutation = this.tenantMutationScope();
+      const updated = await tx
+        .prepare(
+          `UPDATE issued_tokens SET status = ?, updated_at = ?
+           WHERE id = ?${tokenMutation.clause}`
+        )
+        .bind(observedStatus, new Date().toISOString(), tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+      return true;
     });
   }
 

@@ -80,7 +80,20 @@ async function fetchMintPermanentDelegate(
     throw new Error(payload.error.message ?? "RPC returned an error");
   }
 
-  const extensions = payload.result?.value?.data?.parsed?.info?.extensions ?? [];
+  // Distinguish "the extension is absent" from "the RPC couldn't answer".
+  // A missing mint account or non-jsonParsed data used to collapse to the same
+  // nulls as a mint without the extension, and a null then erased the stored
+  // metadata authority (HOO-1013). Incomplete data must error, not report
+  // absence.
+  if (payload.result?.value == null) {
+    throw new Error(`Mint account ${mintAddress} was not found on-chain`);
+  }
+  const parsedInfo = payload.result.value.data?.parsed?.info;
+  if (!parsedInfo) {
+    throw new Error(`RPC returned unparsed account data for mint ${mintAddress}`);
+  }
+
+  const extensions = parsedInfo.extensions ?? [];
   const permanentDelegate = extensions.find(
     (extension) => extension.extension === "permanentDelegate"
   )?.state?.delegate;
@@ -158,11 +171,16 @@ export async function resolveMetadataAuthority(
     const { rpcUrl } = getSolanaConfig(env);
     const { metadataAuthority } = await fetchMintPermanentDelegate(rpcUrl, token.mintAddress);
 
-    if (metadataAuthority !== token.metadataAuthority) {
+    // Backfill only a positive read. A null here means the mint reports no
+    // metadata authority extension — which the RPC cannot distinguish from a
+    // provider that failed to decode it — so it must never overwrite a known
+    // stored authority with NULL; keep the stored value as the answer and let
+    // the on-chain transaction be the arbiter if it is actually stale.
+    if (metadataAuthority && metadataAuthority !== token.metadataAuthority) {
       await tokenService.updateTokenAuthorities(token.id, { metadataAuthority });
     }
 
-    return metadataAuthority;
+    return metadataAuthority ?? token.metadataAuthority ?? null;
   } catch (error) {
     throw new AppError(
       "SOLANA_RPC_ERROR",
