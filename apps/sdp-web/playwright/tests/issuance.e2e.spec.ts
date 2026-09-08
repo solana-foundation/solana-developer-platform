@@ -35,7 +35,7 @@ async function deriveAssociatedTokenAccountAddress(owner: string, mint: string):
 
 async function gotoIssuanceDashboard(page: Page): Promise<void> {
   await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" });
-  const createDraftButton = page.getByRole("button", { name: "New", exact: true });
+  const createDraftButton = page.getByRole("link", { name: "New", exact: true });
   await expect(createDraftButton)
     .toBeVisible({ timeout: 30_000 })
     .catch(async () => {
@@ -214,7 +214,7 @@ interface CreateDraftOptions {
 
 // The single draft flow persists to SDP, then returns to the issuance list.
 async function createTokenDraft(page: Page, options: CreateDraftOptions): Promise<void> {
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("link", { name: "New", exact: true }).click();
   await page.waitForURL("**/dashboard/issuance/create");
   await page
     .getByRole("button", { name: /Stablecoin/i })
