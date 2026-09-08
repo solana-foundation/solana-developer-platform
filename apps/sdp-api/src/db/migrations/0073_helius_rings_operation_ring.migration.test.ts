@@ -7,6 +7,7 @@ import { env } from "@/test/helpers/env";
 import {
   CHECK_VIOLATION,
   expectSqlstate as expectSqlstateOn,
+  seedHeliusRingsConnection,
   seedOrgProject,
 } from "@/test/helpers/migration-db";
 
@@ -30,7 +31,8 @@ async function seedWallet(tag: string): Promise<{
   projectId: string;
   walletId: string;
 }> {
-  const { organizationId, projectId } = await seedOrgProject(client, tag);
+  const { organizationId, projectId, userId } = await seedOrgProject(client, tag);
+  await seedHeliusRingsConnection(client, { organizationId, projectId, userId, tag });
   const walletId = `hrw_${tag}`;
   await client.query(
     `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name)
@@ -41,21 +43,28 @@ async function seedWallet(tag: string): Promise<{
   return { organizationId, projectId, walletId };
 }
 
-function insertOperation(input: {
+async function insertOperation(input: {
   id: string;
   organizationId: string;
   projectId: string;
   walletId: string;
   ringProgramId: string | null;
-}): Promise<unknown> {
-  return client.query(
+}): Promise<void> {
+  const connection = await client.query<{ id: string }>(
+    `SELECT id FROM helius_rings_connections
+      WHERE organization_id = $1 AND project_id = $2 AND is_default = TRUE`,
+    [input.organizationId, input.projectId]
+  );
+  await client.query(
     `INSERT INTO helius_rings_operations
-       (id, organization_id, project_id, wallet_id, op_type, intent_key, ring_program_id)
-     VALUES ($1, $2, $3, $4, 'shield', $5, $6)`,
+       (id, organization_id, project_id, rings_connection_id, wallet_id,
+        op_type, intent_key, ring_program_id)
+     VALUES ($1, $2, $3, $4, $5, 'shield', $6, $7)`,
     [
       input.id,
       input.organizationId,
       input.projectId,
+      connection.rows[0]?.id ?? null,
       input.walletId,
       `sha256:${input.id}`,
       input.ringProgramId,

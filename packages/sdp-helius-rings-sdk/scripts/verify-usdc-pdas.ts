@@ -4,7 +4,7 @@
  * devnet, that's why shields hit InvalidSettlementAccounts (custom 7009).
  *
  * Run: pnpm exec tsx packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts
- * Env: HELIUS_RINGS_RPC_URL (or falls back to public devnet)
+ * Env: SOLANA_RPC_URL (or falls back to public devnet)
  */
 
 /** biome-ignore-all lint/security/noSecrets: base58 mint addresses are public constants, not secrets. */
@@ -20,7 +20,7 @@ import { address, createSolanaRpc } from "@solana/kit";
 
 const USDC_MINT = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 const SOL_MINT = address("So11111111111111111111111111111111111111112");
-const RPC_URL = process.env.HELIUS_RINGS_RPC_URL ?? "https://api.devnet.solana.com";
+const RPC_URL = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 
 async function inspect(label: string, pda: string): Promise<void> {
   const rpc = createSolanaRpc(RPC_URL);

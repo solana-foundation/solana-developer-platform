@@ -111,6 +111,9 @@ describe("Clerk auth request cache", () => {
         email: c.get("clerk")?.email ?? null,
       });
     });
+    app.get("/admin", requirePermissions("org:admin"), (c) => {
+      return c.json({ role: c.get("clerk")?.role ?? null });
+    });
     app.onError((error, c) => {
       if (error instanceof AppError) {
         return c.json(error.toResponse(), error.statusCode as 401 | 403);
@@ -158,6 +161,48 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  it("provisions a second administrator from Clerk v2 organization claims", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind("usr_clerk_second_admin", "second-admin@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+           VALUES (?, 'clerk', ?, ?, ?)`
+        )
+        .bind(
+          "aui_clerk_second_admin",
+          "clerk_user_second_admin",
+          "usr_clerk_second_admin",
+          "second-admin@example.com"
+        ),
+    ]);
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_second_admin",
+      v: 2,
+      o: {
+        id: "clerk_org_cached",
+        rol: "admin",
+        slg: TEST_ORG.slug,
+      },
+      email: "second-admin@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request("/admin", { headers: { Authorization: `Bearer ${token}` } }, env);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ role: "admin" });
+    const membership = await getDb(env)
+      .prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, "usr_clerk_second_admin")
+      .first<{ role: string }>();
+    expect(membership?.role).toBe("admin");
   });
 
   it("counts Clerk dashboard requests against a per-user per-org limit", async () => {

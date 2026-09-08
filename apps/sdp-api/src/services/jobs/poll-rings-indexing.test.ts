@@ -15,7 +15,10 @@ import {
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
 } from "@/db/repositories";
+import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { createHeliusRingsService } from "@/services/helius-rings";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {
   InMemoryRingsGateway,
   type InMemoryRingsGatewayOptions,
@@ -31,6 +34,8 @@ import {
 } from "./poll-rings-indexing";
 
 const TEST_PROJECT_ID = "prj_hr_job_test";
+const TEST_CONNECTION_ID = "hrconn_hr_job_test";
+const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
 const allowPolicy = async () =>
@@ -104,7 +109,11 @@ function serviceWith(gateway: InMemoryRingsGateway) {
 describe("pollRingsIndexing", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    jobEnv = { ...env, HELIUS_RINGS_ENABLED: "true" };
+    jobEnv = {
+      ...env,
+      HELIUS_RINGS_ENABLED: "true",
+      CUSTODY_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+    };
     const db = getDb(env);
 
     await db
@@ -126,6 +135,49 @@ describe("pollRingsIndexing", () => {
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
+
+    const credentialId = "pcred_hr_job_test";
+    const stored = await createCredentialSecretStore(jobEnv, "encrypted_db").write({
+      orgId: TEST_ORG.id,
+      provider: "helius_rings",
+      providerCredentialId: credentialId,
+      payload: {
+        solanaRpcUrl: "https://solana-rpc.mock.invalid",
+        indexerUrl: "https://indexer.mock.invalid",
+        proverUrl: "https://prover.mock.invalid",
+      },
+    });
+    const credential = await new ProviderCredentialStore(db).insertCredential({
+      id: credentialId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "helius_rings",
+      label: "Job test",
+      scope: "project",
+      source: "stored",
+      stored,
+      displayMetadata: {},
+      version: 1,
+      rotatedFromId: null,
+      idempotencyKey: TEST_CONNECTION_ID,
+      idempotencyFingerprint: TEST_CONNECTION_ID,
+      createdBy: TEST_USER.id,
+    });
+    await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+      credentialId,
+    ]);
+    await new HeliusRingsConnectionStore(db).insert({
+      id: TEST_CONNECTION_ID,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      name: "Job test",
+      providerCredentialId: credentialId,
+      providerCredentialScopeKey: credential.scope_key,
+      allowInsecureHttp: false,
+      displayMetadata: {},
+      makeDefault: true,
+      createdBy: TEST_USER.id,
+    });
 
     const wallets = createHeliusRingsWalletRepository(env);
     const wallet = await wallets.createWallet({

@@ -1,4 +1,5 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import { RingRpc } from "@heliuslabs/zolana/ring";
 import type { RuntimeHealth, RuntimeHealthStatus } from "@sdp/helius-rings";
 
 /** A slow answer is a red answer: the caller is a dashboard waiting on it. */
@@ -19,10 +20,16 @@ export interface RingsHealthInput {
   readonly fetch?: typeof globalThis.fetch;
 }
 
-interface ProbeOutcome {
+export interface ProbeOutcome {
   readonly status: RuntimeHealthStatus;
   /** Absent when green. Never carries a URL or an upstream error message. */
   readonly reason?: string;
+}
+
+export interface RingRpcHealthInput {
+  readonly url: string;
+  readonly timeoutMs?: number;
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -51,6 +58,24 @@ export function withHealthTimeout<T>(work: Promise<T>, timeoutMs = DEFAULT_TIMEO
 
     work.then(resolve, reject).finally(() => clearTimeout(timer));
   });
+}
+
+/** Probes the optional custom-ring service without exposing its URL or response. */
+export async function probeRingRpcHealth(input: RingRpcHealthInput): Promise<ProbeOutcome> {
+  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const send = input.fetch ?? globalThis.fetch;
+  const boundedFetch = ((request: RequestInfo | URL, init?: RequestInit) =>
+    send(request, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
+    })) as typeof globalThis.fetch;
+
+  try {
+    await withHealthTimeout(new RingRpc(input.url, { fetch: boundedFetch }).health(), timeoutMs);
+    return { status: "green" };
+  } catch (error) {
+    return classify(error);
+  }
 }
 
 async function probeRpc(input: RingsHealthInput, timeoutMs: number): Promise<ProbeOutcome> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { probeRingsHealth, type RingsHealthInput } from "./health.js";
+import { probeRingRpcHealth, probeRingsHealth, type RingsHealthInput } from "./health.js";
 
 const INDEXER_URL = "http://indexer.test";
 const PROVER_URL = "http://prover.test";
@@ -221,5 +221,46 @@ describe("probeRingsHealth", () => {
       photon: "timed out",
       prover: "unreachable",
     });
+  });
+});
+
+describe("probeRingRpcHealth", () => {
+  it("calls the Ring RPC health method and accepts a valid response", async () => {
+    const requests: unknown[] = [];
+    const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return jsonResponse({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { mode: "derived", servicePubkey: "11111111111111111111111111111111" },
+      });
+    }) as typeof globalThis.fetch;
+
+    await expect(
+      probeRingRpcHealth({ url: "https://ring-rpc.test", fetch, timeoutMs: 50 })
+    ).resolves.toEqual({ status: "green" });
+    expect(requests).toEqual([expect.objectContaining({ method: "health" })]);
+  });
+
+  it("reports an invalid or unreachable Ring RPC without leaking its URL", async () => {
+    const url = "https://ring-rpc.test/?api-key=secret";
+    const outcome = await probeRingRpcHealth({
+      url,
+      fetch: (async () => Promise.reject(new Error(`failed to reach ${url}`))) as typeof fetch,
+      timeoutMs: 50,
+    });
+
+    expect(outcome).toEqual({ status: "red", reason: "unreachable" });
+    expect(JSON.stringify(outcome)).not.toContain("secret");
+  });
+
+  it("bounds a Ring RPC fetch that ignores abort", async () => {
+    await expect(
+      probeRingRpcHealth({
+        url: "https://ring-rpc.test",
+        fetch: (async () => new Promise(() => {})) as unknown as typeof fetch,
+        timeoutMs: 10,
+      })
+    ).resolves.toEqual({ status: "red", reason: "timed out" });
   });
 });
