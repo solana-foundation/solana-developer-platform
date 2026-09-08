@@ -58,12 +58,11 @@ function humanizeKeys(text: string): string {
   });
 }
 
-// Deep-link a notification to its subject (today: a token's asset profile; workflow
-// notifications land directly on the Workflows tab).
+// Retired workflow UI notifications remain readable, without a broken action link.
 function hrefFor(item: NotificationItem): string | null {
+  if (item.type === "workflow_execution") return null;
   if (item.resource_type === "token" && item.resource_id) {
-    const base = `/dashboard/issuance/${item.resource_id}`;
-    return item.type === "workflow_execution" ? `${base}?tab=workflows` : base;
+    return `/dashboard/issuance/${item.resource_id}`;
   }
   return null;
 }

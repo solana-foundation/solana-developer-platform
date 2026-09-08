@@ -18,11 +18,9 @@ import {
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
 import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
-import {
-  IssuanceCreateSkeleton,
-  IssuanceDetailSkeleton,
-  IssuancePageSkeleton,
-} from "@/app/dashboard/issuance/issuance-page-skeleton";
+import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnIntegrationGuideSkeleton,
@@ -588,6 +586,18 @@ export function DashboardShell({
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
   useEffect(() => {
+    const tabletViewport = window.matchMedia("(min-width: 768px)");
+    const closeMobileNavigation = () => {
+      if (tabletViewport.matches) {
+        setMobileSidebarOpen(false);
+        setMoreSheetOpen(false);
+      }
+    };
+    tabletViewport.addEventListener("change", closeMobileNavigation);
+    return () => tabletViewport.removeEventListener("change", closeMobileNavigation);
+  }, []);
+
+  useEffect(() => {
     setOpenSubnavs((current) => {
       const next = { ...current };
       for (const key of Object.keys(DASHBOARD_SUBNAV_GROUPS) as DashboardSubnavKey[]) {
@@ -727,14 +737,14 @@ export function DashboardShell({
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
           shouldLockViewportScroll ? "h-full" : "",
-          "xl:grid-cols-[auto_1fr]",
+          "md:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
         <aside
           style={{
             width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
           }}
-          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
+          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
         >
           <DashboardSidebarContent
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
@@ -794,7 +804,7 @@ export function DashboardShell({
         ) : null}
 
         {isMobileSidebarOpen ? (
-          <div className="fixed inset-0 z-50 flex xl:hidden">
+          <div className="fixed inset-0 z-50 flex md:hidden">
             <button
               type="button"
               aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
@@ -828,7 +838,11 @@ export function DashboardShell({
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
+              shouldLockViewportScroll
+                ? "flex min-h-0 flex-1 flex-col"
+                : pageConfig.hideTitleOnMobile
+                  ? "space-y-4 sm:space-y-6"
+                  : "space-y-6",
             ].join(" ")}
           >
             <div className="shrink-0 space-y-4">
@@ -843,7 +857,13 @@ export function DashboardShell({
                 <DashboardTopBar
                   isMobileSidebarOpen={isMobileSidebarOpen}
                   setMobileSidebarOpen={setMobileSidebarOpen}
-                  hideTitle={pageConfig.hideTitle}
+                  titleVisibility={
+                    pageConfig.hideTitle
+                      ? "screen-reader-only"
+                      : pageConfig.hideTitleOnMobile
+                        ? "desktop-only"
+                        : "visible"
+                  }
                   title={pageConfig.title}
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
@@ -884,8 +904,10 @@ export function DashboardShell({
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
                 // Clears the fixed mobile bottom bar so the last row of any page is
-                // still reachable; the bar is xl:hidden, so the padding is too.
-                shouldLockViewportScroll ? "" : "pb-20 xl:pb-0",
+                // still reachable; the bar is md:hidden, so the padding is too.
+                pathname === "/dashboard/issuance/create" || !shouldLockViewportScroll
+                  ? "pb-20 md:pb-0"
+                  : "",
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",

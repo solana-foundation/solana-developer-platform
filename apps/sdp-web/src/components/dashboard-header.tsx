@@ -26,6 +26,7 @@ type DashboardPageConfig = {
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
+  hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
     label: string;
@@ -35,12 +36,11 @@ type DashboardPageConfig = {
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
-  hideTitle?: boolean;
+  titleVisibility: "visible" | "desktop-only" | "screen-reader-only";
   title: string;
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  alignTitleWithTabs?: boolean;
   // Notifications ship with the asset-profiles feature (its only producer today).
   showNotifications?: boolean;
 };
@@ -103,10 +103,12 @@ export function CenteredDashboardTopBar({
   leadingContent,
   title,
   trailingContent,
+  hideTitleOnMobile = false,
 }: {
   leadingContent: ReactNode;
   title: string;
   trailingContent: ReactNode;
+  hideTitleOnMobile?: boolean;
 }) {
   return (
     <div
@@ -114,7 +116,12 @@ export function CenteredDashboardTopBar({
       data-dashboard-centered-topbar
     >
       <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
-      <div className="col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+      <div
+        className={cn(
+          "col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1",
+          hideTitleOnMobile && "max-xl:sr-only"
+        )}
+      >
         <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {title}
         </h1>
@@ -170,16 +177,16 @@ export function StandardDashboardTopBar({
 export function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
-  hideTitle,
+  titleVisibility,
   title,
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  alignTitleWithTabs = hasHeaderTabs,
   showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
-    !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
+    titleVisibility !== "screen-reader-only" &&
+    (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
@@ -191,6 +198,7 @@ export function DashboardTopBar({
     return (
       <CenteredDashboardTopBar
         title={title}
+        hideTitleOnMobile={titleVisibility === "desktop-only"}
         leadingContent={
           <>
             <SidebarToggle
@@ -207,9 +215,9 @@ export function DashboardTopBar({
 
   return (
     <StandardDashboardTopBar
-      hideTitle={hideTitle}
+      hideTitle={titleVisibility === "screen-reader-only"}
       title={title}
-      alignTitleWithTabs={alignTitleWithTabs}
+      alignTitleWithTabs={hasHeaderTabs}
       leadingContent={
         <>
           <SidebarToggle
@@ -558,12 +566,15 @@ function getIssuanceRoutePageConfig(
   // on → the create flow's centered title + capped column; off → the legacy
   // left-aligned, full-width layout, untouched.
   if (assetProfilesEnabled) {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.assetManagement"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-7xl",
-    });
+    return {
+      ...actionPageConfig({
+        title: t("Shared.dashboardShell.assetManagement"),
+        backHref: "/dashboard/issuance",
+        backLabel: t("Shared.dashboardShell.backToOverview"),
+        contentWidthClass: "max-w-7xl",
+      }),
+      hideTitleOnMobile: true,
+    };
   }
   return {
     title: t("Shared.dashboardShell.issuance"),
