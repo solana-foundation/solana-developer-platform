@@ -374,6 +374,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       scope.wallets,
       query.data.destinationCustodyWalletId
     );
+    assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     const destinationWalletAddress = destinationWallet.publicKey;
     if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
       const resolution = bvnkOnrampPaymentRuleResolutionFromProviderData(

@@ -989,6 +989,41 @@ describe("Counterparties Routes", () => {
       });
     });
 
+    it("rejects an onramp requirements destination wallet outside the API key's bindings", async () => {
+      const created = await createCounterparty({ externalId: "requirements_wallet_scope" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+
+      const kv = createKVStoreSet(env);
+      await kv.apiKeys.put(
+        `key:${apiKeyHash}`,
+        JSON.stringify({
+          ...TEST_CACHED_API_KEY,
+          projectId: TEST_PROJECT_ID,
+          walletScope: "selected",
+          walletBindings: [
+            {
+              walletId: "wallet_counterparties_other",
+              custodyWalletId: "cwlt_counterparties_other",
+              permissions: ["*"],
+            },
+          ],
+        })
+      );
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+        {
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.message).toBe("API key is not authorized for the requested wallet");
+    });
+
     it("returns JIT agreement content without creating or persisting a customer", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_agreements" });
       const counterparty = (await created.json()).data.counterparty;
