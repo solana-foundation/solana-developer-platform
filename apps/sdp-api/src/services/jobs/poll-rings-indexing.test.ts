@@ -710,4 +710,23 @@ describe("pollRingsIndexing", () => {
       expect(row?.state).toBe("indexing");
     });
   });
+
+  it("never hands a tenant connection's RPC to its chain reads", async () => {
+    // The fixture seeds an active default connection, which an earlier
+    // implementation resolved globally and handed to both readers. The
+    // judgments those reads back — expiry escalation, manual reconciliation —
+    // must come from the platform endpoint, so the reader input carries no
+    // tenant URL even while a resolvable connection exists.
+    const seen: Array<Record<string, unknown>> = [];
+    await pollRingsIndexing(jobEnv, {
+      createService: () => serviceWith(ringsGateway({})),
+      readBlockHeight: async (input) => {
+        seen.push({ ...input });
+        return null;
+      },
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual({ env: jobEnv });
+  });
 });

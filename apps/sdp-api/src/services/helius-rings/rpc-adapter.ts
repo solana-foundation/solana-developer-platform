@@ -146,15 +146,10 @@ function readDiagnosticLogs(error: unknown): readonly string[] {
  */
 export async function readRingsBlockHeight(input: {
   env: Env;
-  rpcUrl?: string;
   rpc?: SolanaRpc;
 }): Promise<string | null> {
   try {
-    const rpc =
-      input.rpc ??
-      (input.rpcUrl
-        ? createRpc(input.env, { rpcUrl: input.rpcUrl })
-        : createRingsHeliusRpc(input.env).rpc);
+    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
     return (await rpc.getBlockHeight().send()).toString();
   } catch {
     // Not knowing the height means this tick cannot judge expiry — a reason to
@@ -178,15 +173,10 @@ export type RingsSignatureOutcome = "landed" | "failed" | "absent";
 export async function readRingsSignatureStatus(input: {
   env: Env;
   signature: string;
-  rpcUrl?: string;
   rpc?: SolanaRpc;
 }): Promise<RingsSignatureOutcome | null> {
   try {
-    const rpc =
-      input.rpc ??
-      (input.rpcUrl
-        ? createRpc(input.env, { rpcUrl: input.rpcUrl })
-        : createRingsHeliusRpc(input.env).rpc);
+    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
     const [status] = await getSignatureStatuses(rpc, [input.signature as Signature], {
       searchTransactionHistory: true,
     });

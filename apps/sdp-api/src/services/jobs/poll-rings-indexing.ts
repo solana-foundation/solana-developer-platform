@@ -24,7 +24,6 @@ import {
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
-import { resolveRingsBackgroundRpcUrl } from "@/services/helius-rings/connection-resolver";
 import {
   type RingsSignatureOutcome,
   readRingsBlockHeight,
@@ -96,7 +95,7 @@ export interface PollRingsIndexingDependencies {
   createService?: ServiceFor;
   now?: () => Date;
   /** Test seam for the expiry pass's view of the chain. */
-  readBlockHeight?: (input: { env: Env; rpcUrl?: string }) => Promise<string | null>;
+  readBlockHeight?: (input: { env: Env }) => Promise<string | null>;
   /** Test seam for the lookup that spares a transaction the chain confirms. */
   readSignatureStatus?: SignatureStatusReader;
 }
@@ -124,16 +123,15 @@ export async function pollRingsIndexing(
   const repository = createHeliusRingsOperationRepository(env);
   const logger = getLogger();
 
-  const needsRpcUrl = !dependencies.readBlockHeight || !dependencies.readSignatureStatus;
-  const rpcUrl = needsRpcUrl ? await resolveRingsBackgroundRpcUrl(env) : undefined;
+  // Both chain reads judge tenant operations — expiry escalation and
+  // manual-reconciliation outcomes — so they must come from the
+  // platform-trusted Helius endpoint (the readers' built-in fallback), never
+  // from a tenant-owned connection. Tenant endpoints serve only the
+  // operations pinned to them.
   const readSignatureStatus =
     dependencies.readSignatureStatus ??
-    ((input: { env: Env; signature: string }) =>
-      readRingsSignatureStatus({ ...input, ...(rpcUrl ? { rpcUrl } : {}) }));
-  const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({
-    env,
-    ...(rpcUrl ? { rpcUrl } : {}),
-  });
+    ((input: { env: Env; signature: string }) => readRingsSignatureStatus(input));
+  const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({ env });
   if (blockHeight === null) {
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
   } else {

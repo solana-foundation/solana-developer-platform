@@ -102,29 +102,3 @@ function requiredString(value: unknown, field: string): string {
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
-
-/**
- * Resolve one devnet RPC for chain-wide background reads. All Rings
- * connections are constrained to devnet, so block height does not depend on
- * which project's default connection supplies it.
- */
-export async function resolveRingsBackgroundRpcUrl(env: Env): Promise<string | undefined> {
-  const tenant = await getDb(env).queryOne<{ organization_id: string; project_id: string }>(
-    `SELECT c.organization_id, c.project_id
-       FROM helius_rings_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-      WHERE c.status = 'active' AND c.is_default = TRUE AND pc.status = 'active'
-      ORDER BY c.created_at ASC
-      LIMIT 1`
-  );
-  if (tenant) {
-    return (
-      await resolveRingsConnection({
-        env,
-        organizationId: tenant.organization_id,
-        projectId: tenant.project_id,
-      })
-    ).solanaRpcUrl;
-  }
-  return undefined;
-}
