@@ -114,10 +114,21 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
           {/* The escrow, not the parties. On a trade somebody else set up this
               is the only address a reader acts on, and the column is the one
               place they would look for it. */}
-          <span className="relative z-10 inline-flex items-center gap-1">
-            <span className="sr-only">{yours.escrow}</span>
-            <span aria-hidden>{shortenAddress(yours.escrow)}</span>
-            <WalletAddressCopyButton address={yours.escrow} tooltip={yours.escrow} />
+          <span className="relative z-10 flex flex-col gap-1">
+            <span className="inline-flex items-center gap-1">
+              <span className="sr-only">{yours.escrow}</span>
+              <span aria-hidden>{shortenAddress(yours.escrow)}</span>
+              <WalletAddressCopyButton address={yours.escrow} tooltip={yours.escrow} />
+            </span>
+            {/* Disabling the funding button is not enough on its own: the
+                address next to it stays copyable, so somebody can pay a frozen
+                escrow by hand and lose the fee to a transfer that was always
+                going to bounce. The warning belongs where the address is. */}
+            {yours.frozen === true ? (
+              <span className="text-warning text-xs">
+                {t("DashboardMarkets.dvp.inboundFrozen")}
+              </span>
+            ) : null}
           </span>
         </TableCell>
         <TableCell className="text-secondary text-sm">

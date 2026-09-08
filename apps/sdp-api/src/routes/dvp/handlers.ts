@@ -386,10 +386,18 @@ export const fundTradeAsParty = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
+  // Optional, and read tolerantly because the route has never required a body.
+  // It only matters when the caller holds BOTH party addresses, which happens
+  // on an agent trade set up for one organization: without it leg A always
+  // wins and leg B can never be funded through the product.
+  const body = (await c.req.json().catch(() => ({}))) as { side?: unknown };
+  const preferredSide = body.side === "a" || body.side === "b" ? body.side : undefined;
+
   const result = await fundDvpTradeLegAsParty(c, resolved.trade, {
     organizationId: auth.organizationId,
     projectId,
     auth,
+    preferredSide,
   });
 
   // Same reason as the other funding path: the sweep runs once a minute and the

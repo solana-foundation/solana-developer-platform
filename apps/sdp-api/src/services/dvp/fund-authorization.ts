@@ -41,15 +41,24 @@ export interface DvpFundAuthorizationRequest {
   organizationId: string;
   projectId: string;
   auth: ApiKeyContext;
+  /**
+   * Which leg the caller means, when they hold both party addresses.
+   *
+   * Ignored unless they hold it: this narrows a choice they already have and
+   * never widens one. Absent, leg A wins.
+   */
+  preferredSide?: DvpTradeSide;
 }
 
 /**
  * The leg this caller holds the key for, or null when they hold neither.
  *
- * Leg A is checked first so a caller who somehow holds BOTH party addresses
- * gets a deterministic answer rather than one that depends on map iteration.
- * That case is not hypothetical: an organization can legitimately be both
- * parties to a trade an agent set up for it.
+ * An organization can legitimately be BOTH parties to a trade an agent set up
+ * for it, and then "the leg they hold" has two answers. Leg A used to win
+ * unconditionally, which left leg B unfundable through the product: once A was
+ * funded every later request still resolved to A and was refused for having no
+ * shortfall. So the caller may name the side, and A remains the default so the
+ * answer never depends on map iteration order.
  */
 export async function resolveFundableLeg(
   env: Env,
@@ -58,15 +67,19 @@ export async function resolveFundableLeg(
 ): Promise<DvpFundableLeg | null> {
   const addresses = await callerPartyAddresses(env, request);
 
+  const legs: DvpFundableLeg[] = [];
   const walletForA = addresses.get(trade.userA);
   if (walletForA) {
-    return { side: "a", custodyWalletId: walletForA, party: trade.userA };
+    legs.push({ side: "a", custodyWalletId: walletForA, party: trade.userA });
   }
-
   const walletForB = addresses.get(trade.userB);
   if (walletForB) {
-    return { side: "b", custodyWalletId: walletForB, party: trade.userB };
+    legs.push({ side: "b", custodyWalletId: walletForB, party: trade.userB });
   }
 
-  return null;
+  const preferred = request.preferredSide
+    ? legs.find((leg) => leg.side === request.preferredSide)
+    : undefined;
+
+  return preferred ?? legs[0] ?? null;
 }

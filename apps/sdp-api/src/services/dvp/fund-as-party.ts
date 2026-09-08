@@ -25,10 +25,11 @@
 
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow, DvpTradeSide } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
+import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import type { Env } from "@/types/env";
 import { type DvpFundingPlan, type DvpFundResult, executeDvpFunding, legOfSide } from "./fund";
 import { type DvpFundableLeg, resolveFundableLeg } from "./fund-authorization";
@@ -37,6 +38,8 @@ export interface DvpFundAsPartyRequest {
   organizationId: string;
   projectId: string;
   auth: ApiKeyContext;
+  /** Which leg, when the caller holds both party addresses. See resolveFundableLeg. */
+  preferredSide?: DvpTradeSide;
 }
 
 /** The plan for a party funding the leg its own address is named on. */
@@ -99,6 +102,15 @@ export async function fundDvpTradeLegAsParty(
       `DvP trade ${trade.id}: this is your own leg of a trade you created. Fund it through the trade's own funding action.`
     );
   }
+
+  // The policy gate's auth context is a KV snapshot and can be up to an hour
+  // old, so a key whose `payments:write` was revoked in that window would still
+  // reach here and sign. Every other money-moving DvP handler re-reads the
+  // binding from the database first; this one has to as well, and it has to do
+  // it on the wallet the leg RESOLVED to, which is not known until above.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), request.auth, fundable.custodyWalletId, [
+    "payments:write",
+  ]);
 
   return executeDvpFunding(c, trade, partyFundingPlan(c.env, trade, fundable, request));
 }

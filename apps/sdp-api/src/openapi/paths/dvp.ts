@@ -26,7 +26,12 @@ import {
   projectScopeHeaders,
   projectScopeWithIdempotencyHeaders,
 } from "./helpers";
-import { dvpCloseResponse, dvpTradeResponse, listDvpTradesResponse } from "./responses";
+import {
+  dvpCloseResponse,
+  dvpTradeResponse,
+  listDvpInboundTradesResponse,
+  listDvpTradesResponse,
+} from "./responses";
 
 const DVP_TAG = "DvP";
 
@@ -104,6 +109,58 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
       200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
       202: { description: "Awaiting policy approval", content: jsonContent(errorResponseSchema) },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/dvp/trades/{tradeId}/fund-as-party",
+    tags: [DVP_TAG],
+    summary: "Fund your leg of a trade someone else created",
+    operationId: "fundDvpTradeAsParty",
+    description:
+      "Moves your leg into escrow on a trade another organization created and which names an address you hold the key to. The right to call this comes from holding that key, not from owning the trade, so it is the one DvP action whose authorization is not project scope. The amount is the leg's shortfall, never a parameter. Send `side` only when you hold BOTH party addresses, which happens on an agent trade set up for you: without it leg A is chosen and leg B could never be funded. Subject to wallet policy: a request needing approval returns 202.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: tradeIdPathParams,
+      body: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: z.object({
+              side: z.enum(["a", "b"]).optional().openapi({
+                description:
+                  "Which leg to fund. Only meaningful when you hold both party addresses; ignored for a leg you do not hold. Defaults to a.",
+              }),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
+      202: { description: "Awaiting policy approval", content: jsonContent(errorResponseSchema) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/dvp/trades/inbound",
+    tags: [DVP_TAG],
+    summary: "List trades waiting on you",
+    operationId: "listInboundDvpTrades",
+    description:
+      "Trades another organization created that name an address you hold the key to. Takes no parameters on purpose: the only one it could take is a party address, and accepting that would make it an oracle for enumerating anyone else's trades. Carries the on-chain terms, which are public, and withholds everything around them that belongs to the creating organization.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Trades naming one of your addresses",
+        content: jsonContent(listDvpInboundTradesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 

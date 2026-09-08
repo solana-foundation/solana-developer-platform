@@ -145,6 +145,50 @@ export const dvpTradeResponseSchema = z.object({ trade: dvpTradeSchema });
 
 export const listDvpTradesResponseSchema = z.object({ trades: z.array(dvpTradeSchema) });
 
+/**
+ * A trade another organization created that names one of your addresses.
+ *
+ * Deliberately NOT `dvpTradeSchema`: the terms are public on chain and are
+ * yours to read, but everything around them belongs to the creating
+ * organization. `sdpWallet`, `refString`, `tradeKind`, `sdpSide`, `nonce`,
+ * `createSignature` and `settlementReadiness` are all withheld, and the
+ * serializer builds this shape from scratch rather than trimming the full one
+ * so a field added there cannot leak here by default.
+ */
+export const dvpInboundTradeSchema = z
+  .object({
+    id: dvpTradeIdParamSchema,
+    status: dvpTradeStatusSchema,
+    swapDvp: z.string().openapi({
+      description: "On-chain trade account (PDA). Verify the terms here before funding.",
+    }),
+    settlementAuthority: z.string().openapi({
+      description: "The only key that can settle, cancel or reject this trade. Not yours.",
+    }),
+    yourSide: z.enum(["a", "b"]).openapi({
+      description: "The leg naming an address you hold the key to, and the only one you may fund.",
+    }),
+    yourParty: z.string().openapi({
+      description: "Your address, as named on that leg.",
+    }),
+    legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
+    expiryTimestamp: z.string().openapi({
+      description: "Unix seconds after which the trade can no longer settle, as a string (i64).",
+    }),
+    earliestSettlementTimestamp: z.string().nullable().openapi({
+      description: "Unix seconds before which settlement is refused, as a string (i64), or null.",
+    }),
+    createdAt: isoDateTimeSchema,
+    observedAt: isoDateTimeSchema.nullable().openapi({
+      description: "When the escrow balances were last confirmed against the chain.",
+    }),
+  })
+  .openapi("DvpInboundTrade");
+
+export const listDvpInboundTradesResponseSchema = z.object({
+  trades: z.array(dvpInboundTradeSchema),
+});
+
 export const dvpCloseResponseSchema = z.object({
   tradeId: dvpTradeIdParamSchema,
   action: z.enum(["settle", "cancel"]).openapi({

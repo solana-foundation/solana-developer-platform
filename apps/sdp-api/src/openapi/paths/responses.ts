@@ -42,6 +42,7 @@ import {
   listCounterpartiesResponseSchema,
   listCounterpartyAccountsResponseSchema,
   listCounterpartyProviderAccountsResponseSchema,
+  listDvpInboundTradesResponseSchema,
   listDvpTradesResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
@@ -142,6 +143,9 @@ export const listAssetProfilesResponse = successResponseSchema(listAssetProfiles
 export const dvpTradeResponse = successResponseSchema(dvpTradeResponseSchema);
 export const dvpCloseResponse = successResponseSchema(dvpCloseResponseSchema);
 export const listDvpTradesResponse = successResponseSchema(listDvpTradesResponseSchema);
+export const listDvpInboundTradesResponse = successResponseSchema(
+  listDvpInboundTradesResponseSchema
+);
 
 export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
 export const counterpartyFieldOptionsResponse = successResponseSchema(

@@ -204,11 +204,36 @@ export function DvpTradesWorkspace({
   // has none of its own, and treating that as an empty page rendered "No trades
   // yet" over the one thing waiting on them — with no filter control on screen
   // to reach it by. Having nothing to do is what empty means here.
+  // The same query, against the same fields. The search box stays on screen for
+  // this segment, so leaving the list unfiltered made typing look broken: every
+  // row stayed put and there was no way to narrow a list somebody had come to
+  // this segment specifically to act on. `sdpWallet` and `refString` are not
+  // here to search because a party is never told them.
+  const visibleInbound = showingInbound
+    ? inbound.filter((trade) => {
+        if (!needle) {
+          return true;
+        }
+        return [
+          trade.id,
+          trade.swapDvp,
+          trade.legs.a.symbol,
+          trade.legs.b.symbol,
+          trade.legs.a.mint,
+          trade.legs.b.mint,
+          trade.legs.a.party,
+          trade.legs.b.party,
+        ]
+          .filter(Boolean)
+          .some((value) => matchesAddressQuery(String(value), needle));
+      })
+    : [];
+
   const listIsEmpty = trades.length === 0 && inbound.length === 0;
   // Rows shown on the current segment, from either source. The waiting segment
   // draws from `inbound` and leaves `visible` empty by design, so counting only
   // `visible` declared "no trades match" over a table that had a row to render.
-  const shownCount = showingInbound ? inbound.length : visible.length;
+  const shownCount = showingInbound ? visibleInbound.length : visible.length;
   const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
   const createHref = `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`;
   return (
@@ -367,7 +392,7 @@ export function DvpTradesWorkspace({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {showingInbound ? <InboundRows trades={inbound} /> : null}
+                    {showingInbound ? <InboundRows trades={visibleInbound} /> : null}
                     {visible.map((trade) => {
                       // Who to show in the parties column. On a trade we are a
                       // party to that is the other side; on one we only set up
