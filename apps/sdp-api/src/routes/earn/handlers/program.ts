@@ -63,6 +63,7 @@ import {
   type earnProgramWithdrawalPreviewSchema,
   earnProgramWithdrawalsListQuerySchema,
 } from "../schemas";
+import { recordEarnWithdrawalAudit } from "./movement-audit";
 import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
@@ -1011,6 +1012,30 @@ export const createEarnProgramWithdrawal = async (
   });
 
   await persistWithdrawalObservation(ledger, intentRow, withdrawal);
+
+  // Best-effort, post-effect, and only on the fresh-payout path: the replay
+  // returns above moved no new money (PRO-1866). A fail-closed audit write
+  // would be a new way for the payout to 5xx (ADR 0002 exit safety). Actor
+  // comes from the intent row, which survives the crash-window replay whose
+  // original request carried the attribution.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: intentRow.created_by,
+      apiKeyId: intentRow.initiated_by_key_id,
+    },
+    intentRow.id,
+    {
+      executionModel: "custodial",
+      programId: row.id,
+      provider: client.provider,
+      amountUsd: body.amountUsd,
+      token: body.token,
+      destinationAddress: body.destinationAddress,
+      requestId,
+    }
+  );
 
   const response: EarnProgramWithdrawalResponse = { withdrawal };
   return success(c, response, 201);

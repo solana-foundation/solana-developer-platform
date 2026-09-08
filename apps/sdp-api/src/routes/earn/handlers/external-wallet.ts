@@ -73,6 +73,11 @@ import {
   type earnVaultWithdrawalPreviewSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import {
+  beginEarnDepositAudit,
+  completeEarnDepositAudit,
+  recordEarnWithdrawalAudit,
+} from "./movement-audit";
 import { decodeMovementCursor } from "./movements";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import {
@@ -821,6 +826,22 @@ export async function createEarnExternalWalletDeposit(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
+  // Fail-closed audit admission (PRO-1866): no durable intent, no broadcast.
+  const auditIntent = await beginEarnDepositAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      requestId,
+    }
+  );
+
   const result = await submitExternalWalletDeposit(c.env, {
     organizationId: auth.organizationId,
     projectId,
@@ -830,6 +851,18 @@ export async function createEarnExternalWalletDeposit(
     requestId,
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
+  });
+
+  await completeEarnDepositAudit(c, auditIntent, {
+    resourceId: result.movement.id,
+    metadata: {
+      movementId: result.movement.id,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      replayed: result.replayed,
+    },
   });
 
   const response: EarnExternalWalletDepositResponse = {
@@ -858,6 +891,30 @@ export async function createEarnExternalWalletWithdrawal(
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
+
+  // Best-effort, post-effect, never on a replay (PRO-1866): a fail-closed
+  // audit write would be a new way for the exit submit to 5xx (ADR 0002).
+  if (!result.replayed) {
+    await recordEarnWithdrawalAudit(
+      c,
+      {
+        organizationId: auth.organizationId,
+        userId: result.movement.created_by,
+        apiKeyId: result.movement.initiated_by_key_id,
+      },
+      result.movement.id,
+      {
+        executionModel: "vault_direct",
+        signer: "external_wallet",
+        transactionId: body.transactionId,
+        ownerAddress: result.movement.owner_address,
+        amount: result.movement.amount_requested,
+        denomination: result.movement.denomination,
+        signature: result.movement.signature,
+        requestId,
+      }
+    );
+  }
 
   const response: EarnExternalWalletWithdrawalResponse = {
     withdrawal: toExternalWalletMovementWire(result.movement, result.replayed),

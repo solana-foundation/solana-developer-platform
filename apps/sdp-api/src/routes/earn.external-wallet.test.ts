@@ -1057,3 +1057,79 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     expect(body.data.withdrawal.denomination).toBe(SHARE_MINT);
   });
 });
+
+describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
+  function auditRows(action: "deposit" | "withdraw") {
+    return getDb(env)
+      .prepare("SELECT * FROM audit_logs WHERE action = ? AND resource_type = 'earn_movement'")
+      .bind(action)
+      .all<Record<string, unknown>>()
+      .then(({ results }) => results ?? []);
+  }
+
+  it("records the deposit submit, keyed to the movement and the caller's key", async () => {
+    await seedAuth();
+    const result = submitResult();
+    submitExternalWalletDeposit.mockResolvedValue(result);
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await auditRows("deposit");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      resource_id: result.movement.id,
+      organization_id: TEST_ORG.id,
+      api_key_id: TEST_API_KEY.id,
+      user_id: null,
+    });
+  });
+
+  it("records the withdrawal submit with the movement's own attribution", async () => {
+    await seedAuth();
+    const result = submitResult({
+      direction: "withdrawal",
+      denomination: SHARE_MINT,
+      amount_requested: "10",
+      created_by: null,
+      initiated_by_key_id: TEST_API_KEY.id,
+    });
+    submitExternalWalletWithdrawal.mockResolvedValue(result);
+
+    const res = await post(
+      "withdrawals",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await auditRows("withdraw");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      resource_id: result.movement.id,
+      api_key_id: TEST_API_KEY.id,
+      user_id: null,
+    });
+  });
+
+  it("does not audit a replayed withdrawal submit: no new money moved", async () => {
+    await seedAuth();
+    submitExternalWalletWithdrawal.mockResolvedValue({
+      ...submitResult({ direction: "withdrawal", denomination: SHARE_MINT }),
+      replayed: true,
+    });
+
+    const res = await post(
+      "withdrawals",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(200);
+
+    await expect(auditRows("withdraw")).resolves.toHaveLength(0);
+  });
+});

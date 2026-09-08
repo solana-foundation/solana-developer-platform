@@ -87,6 +87,11 @@ import {
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
 import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admission";
+import {
+  beginEarnDepositAudit,
+  completeEarnDepositAudit,
+  recordEarnWithdrawalAudit,
+} from "./movement-audit";
 import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
@@ -204,6 +209,26 @@ export async function createEarnVaultDeposit(
     throw internalError("Vault deposit execution reached the handler without an idempotency key");
   }
 
+  // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
+  const auditIntent = await beginEarnDepositAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      executionModel: "vault_direct",
+      signer: "custody",
+      provider,
+      strategyId: strategy.id,
+      custodyWalletId: wallet.id,
+      tokenMint,
+      amount: parsedData.amount,
+      requestId,
+    }
+  );
+
   const result = await depositIntoVault(
     c.env,
     {
@@ -239,6 +264,18 @@ export async function createEarnVaultDeposit(
       );
     }
   }
+
+  // A thrown path above leaves the intent unresolved on purpose: verification
+  // pages that as an operation needing reconciliation.
+  await completeEarnDepositAudit(c, auditIntent, {
+    resourceId: result.movement.id,
+    metadata: {
+      movementId: result.movement.id,
+      signature: result.movement.signature,
+      status: result.movement.status,
+      replayed: result.replayed,
+    },
+  });
 
   return success(c, buildEarnVaultDepositResponse(result, strategy));
 }
@@ -1386,6 +1423,31 @@ export async function createEarnVaultWithdrawal(
         "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
       );
     }
+  }
+
+  // Best-effort, post-effect, and never on a replay (PRO-1866): a fail-closed
+  // audit write here would be a new way for an exit to 5xx, the exact shape
+  // ADR 0002 exit safety rules out. Actor comes from the movement row itself.
+  if (!result.replayed) {
+    await recordEarnWithdrawalAudit(
+      c,
+      {
+        organizationId: auth.organizationId,
+        userId: result.movement.created_by,
+        apiKeyId: result.movement.initiated_by_key_id,
+      },
+      result.movement.id,
+      {
+        executionModel: "vault_direct",
+        signer: "custody",
+        provider: position.provider,
+        positionId: position.id,
+        shares: parsedData.shares,
+        minAmountOut: parsedData.minAmountOut ?? null,
+        signature: result.movement.signature,
+        requestId,
+      }
+    );
   }
 
   return success(
