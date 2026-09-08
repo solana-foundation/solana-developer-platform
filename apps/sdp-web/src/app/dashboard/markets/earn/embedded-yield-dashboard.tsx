@@ -411,7 +411,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
   return (
-    <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
+    <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-4 pt-3">
         <div className="flex items-center justify-between gap-4">
           <h2 className="flex items-center gap-2 text-[19px] leading-6 font-medium text-primary">

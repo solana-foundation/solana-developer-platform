@@ -98,9 +98,47 @@ describe("withZolanaErrorBridge", () => {
     const thrown = (await bridge(upstream)) as HeliusRingsError;
 
     // A message quoting the endpoint would publish the API key in the RPC URL,
-    // and a chained cause carries it just as far.
+    // and a chained cause carries it just as far. The code alone is a fixed
+    // enum string, so it names the fault without carrying either.
     expect(thrown.message).toBe("a Rings upstream service is unavailable");
-    expect(thrown.cause).toBeUndefined();
-    expect(JSON.stringify({ message: thrown.message })).not.toContain("super-secret-key");
+    expect(thrown.cause).toEqual({ upstream: "CLIENT_INDEXER" });
+    expect(JSON.stringify(thrown.cause)).not.toContain("super-secret-key");
+    expect(JSON.stringify({ message: thrown.message, cause: thrown.cause })).not.toContain(
+      "getIndexerHealth"
+    );
+  });
+
+  // A 400 is the prover refusing the request itself: the same bytes are refused
+  // on every attempt, so offering a retry is what cost hours on a prover too
+  // old to serve the custom-ring circuit.
+  it("classifies a deterministic prover rejection as configuration, not an outage", async () => {
+    const thrown = (await bridge(
+      new ClientError("CLIENT_PROVER_HTTP", {
+        details: { method: "prove", status: 400, attempts: 1, reason: "malformed_body" },
+      })
+    )) as HeliusRingsError;
+
+    expect(thrown.code).toBe("config_error");
+    expect(thrown.cause).toEqual({ upstream: "CLIENT_PROVER_HTTP", status: 400 });
+    expect(JSON.stringify(thrown.cause)).not.toContain("malformed_body");
+  });
+
+  it.each([500, 502, 503, 408, 429])(
+    "keeps a prover %i retryable, since it can clear on its own",
+    async (status) => {
+      const thrown = (await bridge(
+        new ClientError("CLIENT_PROVER_HTTP", { details: { method: "prove", status } })
+      )) as HeliusRingsError;
+
+      expect(thrown.code).toBe("gateway_unavailable");
+    }
+  );
+
+  it("falls back to an outage when the prover rejection carries no status", async () => {
+    const thrown = (await bridge(
+      new ClientError("CLIENT_PROVER_HTTP", { details: { method: "prove" } })
+    )) as HeliusRingsError;
+
+    expect(thrown.code).toBe("gateway_unavailable");
   });
 });

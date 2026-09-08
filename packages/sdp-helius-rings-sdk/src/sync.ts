@@ -18,15 +18,18 @@ import type {
   SyncReport,
 } from "@sdp/helius-rings";
 import { sdpMint } from "./flows/mint.js";
+import { readKeys } from "./keys.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
-import { hasSyncAnomalies, hydrateWallet, readOnlyAuthority, syncAnomalyCounts } from "./wallet.js";
+import { hasSyncAnomalies, hydrateWallet, syncAnomalyCounts } from "./wallet.js";
 
 /**
  * Reads a wallet's shielded state from Photon.
  *
- * Always a full sync. The SDK keeps three independent read positions and warns
- * that reaching the tip of one says nothing about the others, so there is no
- * cursor to resume from and pretending otherwise would silently skip rows.
+ * Always a full sync, because nothing here persists a read position. Zolana
+ * 0.1.6 added one — `SerializedWalletState` now carries a cursor per stream,
+ * and `syncPersistedWallet` commits it with the sync — so this is now a choice
+ * rather than a limitation, and lifting it needs somewhere durable and
+ * encrypted to keep the snapshot.
  */
 
 /**
@@ -38,6 +41,9 @@ import { hasSyncAnomalies, hydrateWallet, readOnlyAuthority, syncAnomalyCounts }
 const HISTORY_KINDS: Record<PrivateTransactionKind, PrivateHistoryKind> = {
   deposit: "shield",
   privateTransfer: "transfer",
+  // Notes moving into a ring. It spends the wallet's own notes rather than
+  // depositing public funds, so it is a transfer here and not a shield.
+  ringEntry: "transfer",
   publicWithdrawal: "withdraw",
   merge: "merge",
   split: "split",
@@ -74,14 +80,20 @@ export async function syncRingsWallet(
 
       // Tolerant of an incomplete read, unlike the spend path: partial balances
       // are still worth reporting as long as `degraded` says so.
-      const { wallet, report } = await hydrateWallet({
-        walletId: input.walletId,
-        client: deps.client,
-        material,
-        authority: readOnlyAuthority(material),
-        requireComplete: false,
-        ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
-      });
+      const keys = readKeys(material);
+      let wallet: Wallet;
+      let report: SdkSyncReport;
+      try {
+        ({ wallet, report } = await hydrateWallet({
+          walletId: input.walletId,
+          client: deps.client,
+          keys,
+          requireComplete: false,
+          ...(input.requireSlot ? { requireSlot: BigInt(input.requireSlot) } : {}),
+        }));
+      } finally {
+        keys.destroy();
+      }
 
       const labels = assetLabels(input.knownAssets ?? []);
       const transactions = getPrivateTransactions(wallet);
