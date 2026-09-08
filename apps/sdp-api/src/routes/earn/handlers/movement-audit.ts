@@ -19,13 +19,23 @@ import type { AppContext } from "../context";
  *   new money IN, which costs the caller a retry and nothing else. Replays
  *   still produce an intent/outcome pair (the handler cannot tell a replay
  *   from a first send before the service runs); the outcome says `replayed`.
- * - WITHDRAWALS log best-effort AFTER the money effect, and replays log
- *   nothing (no new money moved; the original attempt logged). The audit
- *   persist path fail-closes on its external checkpoint store, and a store
- *   outage that 5xxes a customer's way OUT of a position is exactly what
- *   ADR 0002 exit safety rules out. The movement ledger row (durable before
- *   the effect) remains the authoritative money record; a failed audit
- *   write is loud (`earn_audit_write_failed`) instead of load-bearing.
+ *   A deposit the service REFUSES closes its intent with a failure outcome:
+ *   both deposit services throw only before any broadcast (a send error
+ *   returns normally, record-before-broadcast), so an unresolved intent
+ *   would page verification over money that never moved. Only the
+ *   approved-operation fence leaves an intent unresolved, and that state is
+ *   genuinely ambiguous and needs reconciliation.
+ * - WITHDRAWALS log best-effort AFTER the money effect. The audit persist
+ *   path fail-closes on its external checkpoint store, and a store outage
+ *   that 5xxes a customer's way OUT of a position is exactly what ADR 0002
+ *   exit safety rules out. The movement ledger row (durable before the
+ *   effect) remains the authoritative money record; a failed audit write is
+ *   loud (`earn_audit_write_failed`) instead of load-bearing. A REPLAY
+ *   normally re-serves an already-audited movement and writes nothing, but a
+ *   crash between the money effect and the audit write is repaired on the
+ *   retry: a replayed movement with no audit row gets one, marked
+ *   `backfilledOnReplay`, so the ledger cannot stay permanently silent about
+ *   a movement that exists.
  */
 
 export interface EarnMovementAuditActor {
@@ -81,17 +91,57 @@ export async function completeEarnDepositAudit(
   await new AuditService(getDb(c.env)).completeCritical(c, intent, outcome);
 }
 
-/** Best-effort post-effect record for money OUT; never throws (see header). */
+/**
+ * Close a deposit intent whose service call THREW. Both deposit services
+ * throw only before any broadcast, so this is a definitive no-money-moved
+ * refusal: recorded as a failure outcome rather than left unresolved, which
+ * would page audit-ledger verification over nothing. Never throws.
+ */
+export async function failEarnDepositAudit(
+  c: AppContext,
+  intent: AuditIntent,
+  error: unknown
+): Promise<void> {
+  await new AuditService(getDb(c.env)).completeCritical(c, intent, {
+    status: "failure",
+    metadata: {
+      failureReason: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+    },
+  });
+}
+
+/**
+ * Best-effort post-effect record for money OUT; never throws (see header).
+ *
+ * `replayed: true` switches to repair mode: write only when the movement has
+ * no audit row yet (the original attempt crashed between the money effect
+ * and its audit write), marked `backfilledOnReplay`.
+ */
 export async function recordEarnWithdrawalAudit(
   c: AppContext,
   actor: EarnMovementAuditActor,
   resourceId: string,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
+  options: { replayed?: boolean } = {}
 ): Promise<void> {
   try {
+    let entryMetadata = metadata;
+    if (options.replayed) {
+      const existing = await getDb(c.env)
+        .prepare(
+          `SELECT 1 AS present FROM audit_logs
+            WHERE organization_id = ? AND action = 'withdraw'
+              AND resource_type = 'earn_movement' AND resource_id = ?
+            LIMIT 1`
+        )
+        .bind(actor.organizationId, resourceId)
+        .first<{ present: number }>();
+      if (existing) return;
+      entryMetadata = { ...metadata, backfilledOnReplay: true };
+    }
     await new AuditService(getDb(c.env)).log(
       c,
-      earnMovementEntry("withdraw", actor, metadata, resourceId)
+      earnMovementEntry("withdraw", actor, entryMetadata, resourceId)
     );
   } catch (error) {
     getLogger().error(

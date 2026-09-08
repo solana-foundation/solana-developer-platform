@@ -992,18 +992,35 @@ describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () =
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
-  it("does not audit a replayed exit: no new money moved", async () => {
+  it("backfills a missing audit on replay, exactly once", async () => {
+    // The crash-window repair: the movement exists (replay) but the original
+    // attempt died before its audit write. The retry writes the one missing
+    // row; a further retry finds it and writes nothing.
     await seedAuth();
     const positionId = await seedPosition();
     withdrawFromVault.mockImplementation(async (_env, input) => ({
       position: { id: input.positionId },
-      movement: movementRow({ position_id: input.positionId, request_id: input.requestId }),
+      movement: movementRow({
+        id: "earn_movement_audit_backfill",
+        position_id: input.positionId,
+        request_id: input.requestId,
+        initiated_by_key_id: TEST_API_KEY.id,
+      }),
       replayed: true,
     }));
 
-    const res = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(res.status).toBe(200);
+    const first = await postVaultWithdrawal({ positionId, shares: "10" });
+    expect(first.status).toBe(200);
+    const rows = await auditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      resource_id: "earn_movement_audit_backfill",
+      api_key_id: TEST_API_KEY.id,
+    });
+    expect(String(rows[0]?.metadata)).toContain("backfilledOnReplay");
 
-    await expect(auditRows()).resolves.toHaveLength(0);
+    const second = await postVaultWithdrawal({ positionId, shares: "10" });
+    expect(second.status).toBe(200);
+    await expect(auditRows()).resolves.toHaveLength(1);
   });
 });
