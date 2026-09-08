@@ -121,9 +121,6 @@ try {
               ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
               : ["--filter=!@sdp/api-integration"];
     if (split === "api" && changedSince) {
-      // PR runs: only the test files whose import graph reaches the diff, no
-      // coverage. Every main push still runs the full suite with coverage, so
-      // an unimported coupling a PR misses is caught one commit later.
       await run("pnpm", [
         "--filter",
         "@sdp/api",
