@@ -779,7 +779,12 @@ Never rebuild a transaction during recovery.
     and both mints, so the exit has NO catalogue dependency — a delisted vault
     stays exitable. `expectedAssetIdentity` is the position's stored mints.
   - **Gates: 404 position scoping (org+environment+kind), wallet binding with
-    `earn:write`, wallet policy — and nothing else.** No surfacing, no
+    `earn:write`, wallet policy — and nothing else.** One caller-fixable 400
+    sits beside them without being a gate: a provider whose
+    `withdrawalSlippage` policy is non-null refuses a floor-less
+    `minAmountOut` (PRO-1861 — the wire contract the strategy row documents;
+    the floor comes from the exit preview, so it can never strand a
+    position). No surfacing, no
     entitlement, no availability, no admission, no environment capability
     (`isVaultDirectDepositEnabled` deliberately not consulted: an exit works in
     production today, where deposits are closed). The only provider-shaped
