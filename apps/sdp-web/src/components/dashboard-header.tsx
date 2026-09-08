@@ -119,7 +119,7 @@ export function CenteredDashboardTopBar({
       <div
         className={cn(
           "col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1",
-          hideTitleOnMobile && "max-sm:sr-only"
+          hideTitleOnMobile && "max-xl:sr-only"
         )}
       >
         <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">

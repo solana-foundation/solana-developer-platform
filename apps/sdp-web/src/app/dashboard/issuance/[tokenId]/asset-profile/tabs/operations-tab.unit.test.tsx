@@ -106,8 +106,8 @@ describe("simplified token operations", () => {
     expect(html).toContain("Blocked recipients");
     expect(html).toContain("Pause transfers");
     expect(html).toContain("Freeze a balance");
-    expect(html).toMatch(/<details class=/);
-    expect(html).not.toMatch(/<details[^>]* open/);
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-hidden="true" inert=""');
     expect(html).not.toContain('data-slot="card"');
   });
 
@@ -141,7 +141,8 @@ describe("simplified token operations", () => {
       { ...token, template: "custom", extensions: null, isFreezable: false },
       { showControlList: false, lockSupplyRemaining: null }
     );
-    expect(html).toContain("No transfer controls are enabled");
+    expect(html).not.toContain("No transfer controls are enabled");
+    expect(html).not.toContain(">Transfers</h3>");
     expect(html).not.toContain("Recovery &amp; permanent changes");
   });
 
@@ -155,5 +156,10 @@ describe("simplified token operations", () => {
       },
     });
     expect(html).toContain("Maximum supply reached");
+  });
+
+  it("keeps pause available for a deployed stablecoin without cached extension metadata", () => {
+    const html = render({ ...token, extensions: null });
+    expect(html).toContain('data-testid="fund-management-row-pause"');
   });
 });

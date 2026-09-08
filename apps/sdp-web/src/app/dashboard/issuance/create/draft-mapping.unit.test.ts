@@ -51,10 +51,8 @@ describe("getAssetDetailsErrors (description length)", () => {
     expect(getAssetDetailsErrors(draft, t).description).toBeUndefined();
   });
 
-  it("still requires a non-empty description", () => {
-    expect(getAssetDetailsErrors(draftWith({ description: "   " }), t).description).toBe(
-      t("DashboardIssuance.errors.descriptionRequired")
-    );
+  it("allows an optional description, matching creation", () => {
+    expect(getAssetDetailsErrors(draftWith({ description: "   " }), t).description).toBeUndefined();
   });
 });
 

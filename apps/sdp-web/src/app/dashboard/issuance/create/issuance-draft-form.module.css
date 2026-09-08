@@ -89,13 +89,13 @@
   flex: none;
   width: min(100%, 576px);
   margin: 0 auto;
-  padding: 32px 0 24px;
+  padding: 24px 0 16px;
 }
 
 .focusGrid {
   width: min(100%, 576px);
   margin: 0 auto;
-  padding: 24px 0 40px;
+  padding: 16px 0 32px;
 }
 
 .wizardScrollRegion {
@@ -521,7 +521,7 @@
 
 @media (max-width: 620px) {
   .progressHeader {
-    padding-block: 24px;
+    padding-block: 16px;
   }
 
   .focusVariant {
@@ -534,7 +534,7 @@
   }
 
   .focusGrid {
-    padding-top: 25px;
+    padding-top: 16px;
   }
 
   .formGrid {

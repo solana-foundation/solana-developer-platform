@@ -1,6 +1,8 @@
 "use client";
 
 import type { Token } from "@sdp/types";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -11,6 +13,65 @@ import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 
 export function DetailsTab({ token, form }: { token: Token; form: AssetProfileForm }) {
+  const t = useTranslations();
+  const [editing, setEditing] = useState(false);
+  const { dashboardAccess } = useDashboardWorkspace();
+  const rows = [
+    [t("DashboardIssuance.forms.name"), form.draft.name],
+    [t("DashboardIssuance.create.symbol"), form.draft.symbol],
+    [
+      t("DashboardIssuance.ux.issuanceLimit"),
+      form.draft.maxSupply
+        ? `${Number(form.draft.maxSupply).toLocaleString()} ${form.draft.symbol}`
+        : t("DashboardIssuance.assetDetails.maxSupplyUnlimited"),
+    ],
+    [t("DashboardIssuance.assetDetails.descriptionLabel"), form.draft.description],
+    [t("DashboardIssuance.assetDetails.website"), form.draft.website],
+  ].filter(([, value]) => value);
+  return (
+    <div className="space-y-4">
+      {dashboardAccess.capabilities.canManageTokenAdmin ? (
+        <div className="flex justify-end">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={form.saving || (editing && form.dirty)}
+            onClick={() => setEditing(!editing)}
+          >
+            {t(editing ? "DashboardIssuance.ux.done" : "DashboardIssuance.ux.editSettings")}
+          </Button>
+        </div>
+      ) : null}
+      {editing ? (
+        <EditableDetailsTab token={token} form={form} />
+      ) : (
+        <>
+          <dl className="divide-y divide-border-subtle text-sm">
+            {rows.map(([label, value]) => (
+              <div key={label} className="flex flex-wrap justify-between gap-x-6 gap-y-1 py-3">
+                <dt className="text-tertiary">{label}</dt>
+                <dd className="max-w-full break-words text-primary sm:max-w-[70%] sm:text-right">
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <AdvancedSettingsEditor
+            category={form.draft.assetCategory}
+            type={form.draft.assetType}
+            settings={form.draft.advancedSettings}
+            onSettingsChange={() => {}}
+            accessControl={form.draft.accessControl}
+            onAccessControlChange={() => {}}
+            mode="readonly"
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function EditableDetailsTab({ token, form }: { token: Token; form: AssetProfileForm }) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
@@ -52,15 +113,10 @@ export function DetailsTab({ token, form }: { token: Token; form: AssetProfileFo
           </div>
           {isDeployed ? (
             <>
-              <ReadOnlyField
-                label={t("DashboardIssuance.create.symbol")}
-                value={token.symbol}
-                lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
-              />
+              <ReadOnlyField label={t("DashboardIssuance.create.symbol")} value={token.symbol} />
               <ReadOnlyField
                 label={t("DashboardIssuance.create.decimals")}
                 value={String(token.decimals)}
-                lockReason={t("DashboardIssuance.assetDetails.lockedAfterDeploy")}
               />
             </>
           ) : (
@@ -113,11 +169,7 @@ export function DetailsTab({ token, form }: { token: Token; form: AssetProfileFo
         </div>
         <div className="mt-4 grid gap-1.5">
           <Label htmlFor="asset-description">
-            {t("DashboardIssuance.assetDetails.descriptionLabel")}{" "}
-            <span aria-hidden className="text-destructive">
-              *
-            </span>
-            <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
+            {t("DashboardIssuance.assetDetails.descriptionLabel")}
           </Label>
           <textarea
             id="asset-description"
@@ -125,7 +177,6 @@ export function DetailsTab({ token, form }: { token: Token; form: AssetProfileFo
             value={draft.description}
             onChange={(event) => updateDraft({ description: event.currentTarget.value })}
             rows={3}
-            placeholder={t("DashboardIssuance.assetDetails.descriptionPlaceholder")}
             aria-invalid={descriptionError ? true : undefined}
             className={cn(
               "w-full rounded-[14px] border bg-surface-raised px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted",
@@ -155,7 +206,6 @@ export function DetailsTab({ token, form }: { token: Token; form: AssetProfileFo
             value={draft.imageUrl}
             onChange={(value) => updateDraft({ imageUrl: value })}
             placeholder={t("DashboardIssuance.assetDetails.logoPlaceholder")}
-            help={t("DashboardIssuance.assetDetails.logoHint")}
             error={fieldError("imageUrl")}
           />
         </div>

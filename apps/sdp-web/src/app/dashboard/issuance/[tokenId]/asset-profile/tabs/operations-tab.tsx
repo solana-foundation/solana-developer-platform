@@ -1,12 +1,12 @@
 "use client";
 
 import type { Token } from "@sdp/types";
-import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
+import { AnimatedSection } from "../animated-section";
 import type { TokenOperations } from "../use-token-operations";
 import {
   getOperationGroups,
@@ -50,16 +50,15 @@ export function OperationsTab({
         pending={ops.isPending}
       />
       {recovery.length ? (
-        <details className="group border-t border-border-subtle pt-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-medium text-secondary [&::-webkit-details-marker]:hidden">
-            {t("DashboardIssuance.simplified.recovery")}
-            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-          </summary>
+        <AnimatedSection
+          title={t("DashboardIssuance.simplified.recovery")}
+          className="border-t border-border-subtle pt-5"
+        >
           <p className="mt-2 text-sm text-tertiary">
             {t("DashboardIssuance.simplified.recoveryHint")}
           </p>
           <OperationRows rows={recovery} pending={ops.isPending} />
-        </details>
+        </AnimatedSection>
       ) : null}
       <Modal
         isOpen={Boolean(activeAction)}
@@ -108,17 +107,11 @@ function OperationGroup({
   rows: OperationRow[];
   pending: boolean;
 }) {
-  const t = useTranslations();
+  if (!rows.length) return null;
   return (
     <section>
       <h3 className="mb-2 text-sm font-medium text-tertiary">{title}</h3>
-      {rows.length ? (
-        <OperationRows rows={rows} pending={pending} />
-      ) : (
-        <p className="py-4 text-sm text-secondary">
-          {t("DashboardIssuance.simplified.noTransferControls")}
-        </p>
-      )}
+      <OperationRows rows={rows} pending={pending} />
     </section>
   );
 }
@@ -131,19 +124,19 @@ function OperationRows({ rows, pending }: { rows: OperationRow[]; pending: boole
         <div
           key={row.id}
           data-testid={`fund-management-row-${row.id}`}
-          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-4 sm:grid-cols-[20px_minmax(0,1fr)_auto] sm:gap-4 sm:py-5"
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 sm:grid-cols-[20px_minmax(0,1fr)_auto] sm:gap-4 sm:py-4"
         >
           <Icon className="hidden size-5 shrink-0 text-secondary sm:block" />
           <div className="min-w-0">
             <p className="text-sm font-medium text-primary">{row.title}</p>
-            <p className="mt-1 text-sm text-secondary">{row.helper}</p>
+            <p className="mt-1 hidden text-sm text-tertiary sm:block">{row.helper}</p>
           </div>
           <TokenDisabledActionTooltip reason={row.disabledReason}>
             <Button
               variant="secondary"
               size="sm"
               aria-label={row.title}
-              style={{ width: 100 }}
+              className="min-w-20"
               disabled={pending || Boolean(row.disabledReason)}
               onClick={row.onAction}
             >

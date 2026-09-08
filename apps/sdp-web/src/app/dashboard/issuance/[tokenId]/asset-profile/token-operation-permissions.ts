@@ -66,37 +66,51 @@ export function getTokenOperationPermissions({
   // Custody control is only knowable once the authority wallets have loaded
   // without error; until then a row's control status is "unknown" (no badge).
   const authorityControlKnown = !authorityWalletsLoading && !authorityWalletsError;
-  const permissionRows = getPermissionRows(token, metadataAuthority, t).map((row) => {
-    const displayedAuthorityAddress = getDisplayedAuthorityAddress({
-      token,
-      role: row.authorityRole,
-      metadataAuthority,
-      authorityWallets,
-    });
-    const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
-    const controlStatus: PermissionControlStatus = classifyAuthorityControl(
-      displayedAuthorityAddress,
-      authorityWallets,
-      authorityControlKnown
-    );
+  const permissionRows = getPermissionRows(token, metadataAuthority, t)
+    .filter((row) => {
+      if (row.id === "freeze-authority")
+        return Boolean(
+          token.isFreezable || token.freezeAuthority || token.template === "stablecoin"
+        );
+      if (row.id === "permanent-delegate")
+        return Boolean(token.extensions?.permanentDelegate || token.template === "stablecoin");
+      return true;
+    })
+    .map((row) => {
+      const displayedAuthorityAddress = getDisplayedAuthorityAddress({
+        token,
+        role: row.authorityRole,
+        metadataAuthority,
+        authorityWallets,
+      });
+      const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
+      const controlStatus: PermissionControlStatus = classifyAuthorityControl(
+        displayedAuthorityAddress,
+        authorityWallets,
+        authorityControlKnown
+      );
 
-    return {
-      ...rowWithDisplayedValue,
-      controlStatus,
-      editDisabledReason: canManageTokenAdmin
-        ? withWalletLoadError(
-            getSignerSelectionForAction({
-              action: "authority",
-              token,
-              authorityWallets,
-              metadataAuthority,
-              permissionRow: rowWithDisplayedValue,
-              t,
-            })
-          ).unavailableReason
-        : t("DashboardIssuance.management.onlyAdminsCanEditAuthorities"),
-    };
-  });
+      return {
+        ...rowWithDisplayedValue,
+        controlStatus,
+        removalDisabledReason:
+          row.authorityRole === "freeze" && token.ablListAddress
+            ? t("DashboardIssuance.authority.freezeReassignOnly")
+            : null,
+        editDisabledReason: canManageTokenAdmin
+          ? withWalletLoadError(
+              getSignerSelectionForAction({
+                action: "authority",
+                token,
+                authorityWallets,
+                metadataAuthority,
+                permissionRow: rowWithDisplayedValue,
+                t,
+              })
+            ).unavailableReason
+          : t("DashboardIssuance.management.onlyAdminsCanEditAuthorities"),
+      };
+    });
 
   // Roll-up for the overview "Managed authorities: N of M" tile and the
   // permissions-tab external-authority warning. Shared with the issuance list's

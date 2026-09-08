@@ -1,14 +1,16 @@
 "use client";
 
-import { TriangleAlert } from "lucide-react";
+import { ChevronDown, TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
+import { shortenAddress, toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
+import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
 import { getSignerWalletOptionLabel } from "../../token-management-workspace.utils";
-import { PERMISSION_ROW_ICONS, TokenSettingsSection } from "../../token-settings-section";
+import { PERMISSION_ROW_ICONS } from "../../token-settings-section";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
 
@@ -57,7 +59,7 @@ export function PermissionsTab({
           {ops.permissionRows.map((row) => (
             <div
               key={row.id}
-              className="space-y-2 border-b border-border-subtle py-3 last:border-0"
+              className="grid items-center gap-3 border-b border-border-subtle py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)]"
             >
               <p className="text-sm font-medium text-primary">{copy[row.id][0]}</p>
               <Select
@@ -88,22 +90,35 @@ export function PermissionsTab({
           ))}
         </div>
       ) : (
-        <TokenSettingsSection
-          variant="flat"
-          mode="permissions"
-          permissionRows={ops.permissionRows.map((row) => ({
-            ...row,
-            title: copy[row.id][0],
-            helper: copy[row.id][1],
-          }))}
-          extensionRows={ops.extensionRows}
-          authorityWallets={ops.authorityWallets}
-          showTitle={false}
-          showEditActions={canManageTokenAdmin && !ops.canDeployToken}
-          canEditAuthorities={!ops.canDeployToken && canManageTokenAdmin}
-          onCopy={ops.handleCopy}
-          onEditAuthority={ops.handleAuthorityModalOpen}
-        />
+        <div className="divide-y divide-border-subtle">
+          {ops.permissionRows.map((row) => {
+            const wallet = ops.authorityWallets.find((wallet) => wallet.publicKey === row.value);
+            return (
+              <div
+                key={row.id}
+                data-testid={`permission-row-${row.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <p className="text-sm text-primary">{copy[row.id][0]}</p>
+                <TokenDisabledActionTooltip reason={row.editDisabledReason}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    iconRight={row.value ? <ChevronDown className="size-4" /> : undefined}
+                    disabled={
+                      !canManageTokenAdmin || ops.isPending || Boolean(row.editDisabledReason)
+                    }
+                    onClick={() => ops.handleAuthorityModalOpen(row)}
+                    aria-label={`${copy[row.id][0]} ${wallet?.label || (row.value ? shortenAddress(row.value) : t("DashboardIssuance.wallet.none"))}`}
+                  >
+                    {wallet?.label ||
+                      (row.value ? shortenAddress(row.value) : t("DashboardIssuance.wallet.none"))}
+                  </Button>
+                </TokenDisabledActionTooltip>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

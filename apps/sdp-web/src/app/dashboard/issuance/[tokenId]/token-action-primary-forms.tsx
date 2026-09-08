@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { type ComponentProps, type Dispatch, type SetStateAction, useId } from "react";
+import { type ComponentProps, type Dispatch, type SetStateAction, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
@@ -365,8 +365,13 @@ function ActionField({
 }) {
   const fieldId = useId();
   const errorId = useId();
+  const t = useTranslations();
+  const [invalidNumber, setInvalidNumber] = useState(false);
   const { message: nativeError, onInvalid, revalidate } = useInlineValidationMessage(label);
-  const hasError = Boolean(error) || nativeError !== null;
+  const fieldError = invalidNumber
+    ? t("DashboardIssuance.management.numberRequired")
+    : (error ?? nativeError);
+  const hasError = Boolean(fieldError);
 
   return (
     <div className="space-y-2">
@@ -375,29 +380,43 @@ function ActionField({
         className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary"
       >
         {label}
+        {required ? (
+          <span aria-hidden className="text-destructive">
+            {" "}
+            *
+          </span>
+        ) : null}
       </label>
       {description ? <p className="text-[13px] leading-5 text-secondary">{description}</p> : null}
       <Input
         id={fieldId}
-        type={type}
+        type={type === "number" ? "text" : type}
         value={value}
         required={required}
-        pattern={pattern}
+        pattern={type === "number" ? "([0-9]+([.][0-9]*)?|[.][0-9]+)" : pattern}
         title={title}
         min={min}
         step={step}
         placeholder={placeholder}
-        inputMode={inputMode}
+        inputMode={type === "number" ? "decimal" : inputMode}
         aria-invalid={hasError}
         aria-describedby={hasError ? errorId : undefined}
         onInvalid={onInvalid}
         onChange={(event) => {
+          if (type === "number" && !/^\d*\.?\d*$/.test(event.currentTarget.value)) {
+            event.currentTarget.value = value;
+            event.currentTarget.setCustomValidity(t("DashboardIssuance.management.numberRequired"));
+            setInvalidNumber(true);
+            return;
+          }
+          event.currentTarget.setCustomValidity("");
+          setInvalidNumber(false);
           onChange(event.currentTarget.value);
           revalidate(event.currentTarget);
         }}
         className="h-11 rounded-[12px] border-border-default bg-surface-raised px-4 shadow-none"
       />
-      <TokenValidationMessage id={errorId} message={error ?? nativeError} />
+      <TokenValidationMessage id={errorId} message={fieldError} />
     </div>
   );
 }

@@ -14,6 +14,21 @@ export function RecipientControlSelect({
   onChange: (value: AccessControlMode | "") => void;
 }) {
   const t = useTranslations();
+  if (disabled)
+    return (
+      <div className="flex flex-wrap justify-between gap-3 py-3 text-sm">
+        <span className="text-tertiary">{t("DashboardIssuance.simplified.recipients")}</span>
+        <span className="text-primary">
+          {t(
+            value === "allowlist"
+              ? "DashboardIssuance.ux.approvedOnly"
+              : value === "blocklist"
+                ? "DashboardIssuance.ux.exceptBlocked"
+                : "DashboardIssuance.simplified.anyRecipient"
+          )}
+        </span>
+      </div>
+    );
   return (
     <div className="space-y-2">
       <p className="text-sm font-medium text-primary">

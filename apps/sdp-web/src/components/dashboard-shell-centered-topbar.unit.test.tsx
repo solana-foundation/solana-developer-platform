@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CenteredDashboardTopBar, StandardDashboardTopBar } from "./dashboard-header";
 
 describe("CenteredDashboardTopBar", () => {
-  it("can hide the redundant title on mobile while retaining its accessible heading", () => {
+  it("hides the redundant title on mobile and tablet while retaining its accessible heading", () => {
     const markup = renderToStaticMarkup(
       <CenteredDashboardTopBar
         title="Asset management"
@@ -12,7 +12,7 @@ describe("CenteredDashboardTopBar", () => {
         hideTitleOnMobile
       />
     );
-    expect(markup).toContain("max-sm:sr-only");
+    expect(markup).toContain("max-xl:sr-only");
     expect(markup).toContain("Asset management</h1>");
     expect(markup.match(/<h1/g)).toHaveLength(1);
   });

@@ -753,12 +753,18 @@ export function TokenManagementWorkspace({
   };
 
   const handleRefreshSupply = () => {
-    runAction({
-      label: t("DashboardIssuance.management.refreshSupply"),
-      method: "POST",
-      path: `${tokenBasePath}/refresh-supply`,
-      body: {},
-    });
+    runAction(
+      {
+        label: t("DashboardIssuance.management.refreshSupply"),
+        method: "POST",
+        path: `${tokenBasePath}/refresh-supply`,
+        body: {},
+      },
+      {
+        submitToast: t("DashboardIssuance.management.refreshingSupply"),
+        successToast: t("DashboardIssuance.management.supplyUpdated"),
+      }
+    );
   };
 
   const handleMint = () => {
@@ -994,6 +1000,9 @@ export function TokenManagementWorkspace({
         confirmationTitle: pause
           ? t("DashboardIssuance.management.pauseConfirmationTitle")
           : t("DashboardIssuance.management.unpauseConfirmationTitle"),
+        confirmationWarning: pause
+          ? t("DashboardIssuance.management.pauseImpactWarning")
+          : t("DashboardIssuance.management.unpauseImpactWarning"),
         confirmationDescription: pause
           ? t("DashboardIssuance.management.pauseConfirmationDescription")
           : t("DashboardIssuance.management.unpauseConfirmationDescription"),

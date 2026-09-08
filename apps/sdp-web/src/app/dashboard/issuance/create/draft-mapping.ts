@@ -644,9 +644,7 @@ export function getAssetDetailsErrors(
   }
 
   const description = draft.description.trim();
-  if (!description) {
-    errors.description = t("DashboardIssuance.errors.descriptionRequired");
-  } else if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
+  if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
     errors.description = t("DashboardIssuance.errors.descriptionTooLong", {
       max: ASSET_DESCRIPTION_MAX_LENGTH,
     });

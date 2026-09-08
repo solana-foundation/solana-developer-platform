@@ -31,6 +31,7 @@ interface AssetProfileHeaderProps {
   onDeploy: () => void;
   onUnpause: () => void;
   onRefreshSupply?: () => void;
+  isRefreshingSupply?: boolean;
 }
 
 // The asset-management page header as one identity column: a small round mark,
@@ -161,12 +162,22 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
           {token.mintAddress && props.onRefreshSupply ? (
             <button
               type="button"
-              aria-label={t("DashboardIssuance.management.refreshSupply")}
-              disabled={props.isPending}
+              aria-label={t(
+                props.isRefreshingSupply
+                  ? "DashboardIssuance.management.refreshingSupply"
+                  : "DashboardIssuance.management.refreshSupply"
+              )}
+              aria-busy={props.isRefreshingSupply}
+              disabled={props.isPending || props.isRefreshingSupply}
               onClick={props.onRefreshSupply}
-              className="rounded p-1 text-tertiary hover:bg-fill"
+              className="size-[22px] shrink-0 rounded p-1 text-tertiary hover:bg-fill"
             >
-              <RefreshCw className="size-3.5" />
+              <RefreshCw
+                className={cn(
+                  "size-3.5",
+                  props.isRefreshingSupply && "animate-spin motion-reduce:animate-none"
+                )}
+              />
             </button>
           ) : null}
         </div>

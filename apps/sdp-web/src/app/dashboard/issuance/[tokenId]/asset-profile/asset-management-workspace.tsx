@@ -1,9 +1,10 @@
 "use client";
 
 import type { AssetProfile, Token } from "@sdp/types";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { getDraftDeploymentBlocker } from "../../draft-permissions";
@@ -11,6 +12,7 @@ import { TokenActionConfirmationDialog } from "../token-action-confirmation-dial
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
+import { AnimatedSection } from "./animated-section";
 import { AssetProfileHeader } from "./asset-profile-header";
 import { AssetProfileSaveBar } from "./asset-profile-save-bar";
 import { ActivityTab } from "./tabs/activity-tab";
@@ -68,6 +70,10 @@ export function AssetManagementWorkspace({
 
   const requestedTabParam = searchParams.get("tab");
   const requestedTab = resolveTab(requestedTabParam);
+  const reducedMotion = useReducedMotion();
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ operations: true });
+  const toggleSection = (section: string, open: boolean) =>
+    setOpenSections((current) => ({ ...current, [section]: open }));
 
   const ops = useTokenOperations({
     token,
@@ -83,11 +89,14 @@ export function AssetManagementWorkspace({
     form.draft.signingWalletId
   );
   const draftDeploymentBlocker = draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null;
-  const showSection = useCallback((section: AssetManagementTab) => {
-    const element = document.getElementById(`token-${section}`);
-    if (element instanceof HTMLDetailsElement) element.open = true;
-    element?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+  const showSection = useCallback(
+    (section: AssetManagementTab) => {
+      setOpenSections((current) => ({ ...current, [section]: true }));
+      const element = document.getElementById(`token-${section}`);
+      element?.scrollIntoView({ behavior: reducedMotion ? "instant" : "smooth", block: "start" });
+    },
+    [reducedMotion]
+  );
 
   // Existing tab links now reveal the corresponding section on the same page.
   useEffect(() => {
@@ -122,6 +131,7 @@ export function AssetManagementWorkspace({
           }}
           onUnpause={() => ops.handlePause(false)}
           onRefreshSupply={ops.handleRefreshSupply}
+          isRefreshingSupply={ops.isRefreshingSupply}
         />
       </div>
 
@@ -134,43 +144,53 @@ export function AssetManagementWorkspace({
         </div>
       ) : null}
 
-      <div className="w-full divide-y divide-border-subtle [&>details]:min-w-0">
-        <details id="token-operations" open className="group scroll-mt-6 py-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
-            {t("DashboardIssuance.tabs.operations")}
-            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-          </summary>
+      <div className="w-full divide-y divide-border-subtle [&>section]:min-w-0">
+        <AnimatedSection
+          id="token-operations"
+          title={t("DashboardIssuance.tabs.operations")}
+          open={openSections.operations}
+          onOpenChange={(open) => toggleSection("operations", open)}
+        >
           <div className="pt-4">
+            {ops.isPending ? (
+              <p role="status" className="mb-3 flex items-center gap-2 text-sm text-secondary">
+                <Loader2 className="size-4 animate-spin" />
+                {t("DashboardIssuance.ux.working")}
+              </p>
+            ) : null}
             <OperationsTab ops={ops} token={token} canManageTokenAdmin={canManageTokenAdmin} />
           </div>
-        </details>
-        <details id="token-permissions" open className="group scroll-mt-6 py-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
-            {t("DashboardIssuance.tabs.permissions")}
-            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-          </summary>
+        </AnimatedSection>
+        <AnimatedSection
+          id="token-permissions"
+          title={t("DashboardIssuance.tabs.permissions")}
+          open={openSections.permissions ?? false}
+          onOpenChange={(open) => toggleSection("permissions", open)}
+        >
           <div className="pt-4">
             <PermissionsTab ops={ops} form={form} canManageTokenAdmin={canManageTokenAdmin} />
           </div>
-        </details>
-        <details id="token-settings" className="group scroll-mt-6 py-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
-            {t("DashboardIssuance.simplified.settings")}
-            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-          </summary>
+        </AnimatedSection>
+        <AnimatedSection
+          id="token-settings"
+          title={t("DashboardIssuance.simplified.settings")}
+          open={openSections.settings ?? false}
+          onOpenChange={(open) => toggleSection("settings", open)}
+        >
           <div className="pt-5">
             <DetailsTab token={token} form={form} />
           </div>
-        </details>
-        <details id="token-activity" className="group scroll-mt-6 py-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-primary [&::-webkit-details-marker]:hidden">
-            {t("DashboardIssuance.tabs.activity")}
-            <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-          </summary>
+        </AnimatedSection>
+        <AnimatedSection
+          id="token-activity"
+          title={t("DashboardIssuance.tabs.activity")}
+          open={openSections.activity ?? false}
+          onOpenChange={(open) => toggleSection("activity", open)}
+        >
           <div className="pt-4">
             <ActivityTab tokenId={token.id} isDraft={!token.mintAddress} />
           </div>
-        </details>
+        </AnimatedSection>
       </div>
 
       <AssetProfileSaveBar
@@ -249,13 +269,6 @@ export function AssetManagementWorkspace({
         onCancel={ops.dismissActionConfirmation}
         onConfirm={ops.confirmAction}
       />
-
-      {ops.isPending ? (
-        <div className="fixed right-4 bottom-4 z-30 inline-flex items-center gap-2 rounded-lg border border-border-default bg-surface-raised px-3 py-2 text-sm shadow-lg">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          {t("DashboardIssuance.workspace.runningAction")}
-        </div>
-      ) : null}
     </div>
   );
 }

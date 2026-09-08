@@ -202,7 +202,7 @@ export function DashboardMoreSheet({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end xl:hidden">
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:hidden">
       <button
         type="button"
         aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}

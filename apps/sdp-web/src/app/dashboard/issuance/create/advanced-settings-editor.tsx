@@ -65,6 +65,60 @@ export function AdvancedSettingsEditor({
       />
     );
   };
+  if (mode === "readonly") {
+    const meanings: Record<string, [MessageKey, MessageKey]> = {
+      pauseTransfers: ["DashboardIssuance.ux.pauseLabel", "DashboardIssuance.ux.pauseMeaning"],
+      freezeAccounts: ["DashboardIssuance.ux.freezeLabel", "DashboardIssuance.ux.freezeMeaning"],
+      permanentDelegate: [
+        "DashboardIssuance.ux.recoveryLabel",
+        "DashboardIssuance.ux.recoveryMeaning",
+      ],
+    };
+    return (
+      <section className="border-t border-border-subtle pt-5">
+        <h3 className="mb-2 text-sm font-medium text-primary">
+          {t("DashboardIssuance.ux.holderRules")}
+        </h3>
+        <dl className="divide-y divide-border-subtle text-sm">
+          <div className="grid gap-1 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] sm:gap-6">
+            <dt className="text-tertiary">{t("DashboardIssuance.ux.recipients")}</dt>
+            <dd className="text-primary sm:text-right">
+              {t(
+                accessControl === "allowlist"
+                  ? "DashboardIssuance.ux.approvedOnly"
+                  : accessControl === "blocklist"
+                    ? "DashboardIssuance.ux.exceptBlocked"
+                    : "DashboardIssuance.ux.anyRecipient"
+              )}
+            </dd>
+          </div>
+          {[...included, ...primary].map((entry) => {
+            const copy = meanings[entry.key];
+            if (!copy) return null;
+            return (
+              <div
+                key={entry.key}
+                className="grid gap-1 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] sm:gap-6"
+              >
+                <dt className="text-tertiary">{t(copy[0])}</dt>
+                <dd className="text-primary sm:text-right">{t(copy[1])}</dd>
+              </div>
+            );
+          })}
+        </dl>
+        {advanced.length ? (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm text-secondary">
+              {t("DashboardIssuance.simplified.advancedControls")}
+            </summary>
+            <div className="mt-3 space-y-3">
+              {advanced.map((entry) => renderControl(entry, "advanced"))}
+            </div>
+          </details>
+        ) : null}
+      </section>
+    );
+  }
   return (
     <section>
       <p className="mt-0.5 text-xs text-tertiary">

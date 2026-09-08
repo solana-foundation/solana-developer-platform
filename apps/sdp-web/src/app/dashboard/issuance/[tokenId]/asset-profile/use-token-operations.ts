@@ -3,6 +3,7 @@
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import type { FundManagementModalAction } from "../token-fund-management-section";
@@ -62,6 +63,7 @@ export function useTokenOperations({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
+  const { sdpEnvironment } = useDashboardWorkspace();
   const {
     isPending,
     actionConfirmation,
@@ -70,6 +72,7 @@ export function useTokenOperations({
     dismissActionConfirmation,
     confirmAction,
   } = useTokenActionRunner();
+  const { isPending: isRefreshingSupply, runAction: refreshSupply } = useTokenActionRunner();
 
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
   const [authorityModalCurrentAuthority, setAuthorityModalCurrentAuthority] = useState<
@@ -312,12 +315,19 @@ export function useTokenOperations({
   };
 
   const handleRefreshSupply = () => {
-    runAction({
-      label: t("DashboardIssuance.management.refreshSupply"),
-      method: "POST",
-      path: `${tokenBasePath}/refresh-supply`,
-      body: {},
-    });
+    if (isRefreshingSupply || isPending) return;
+    refreshSupply(
+      {
+        label: t("DashboardIssuance.management.refreshSupply"),
+        method: "POST",
+        path: `${tokenBasePath}/refresh-supply`,
+        body: {},
+      },
+      {
+        submitToast: t("DashboardIssuance.management.refreshingSupply"),
+        successToast: t("DashboardIssuance.management.supplyUpdated"),
+      }
+    );
   };
 
   const handleMint = () => {
@@ -359,6 +369,22 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.mintConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.mintConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.destination"), value: destination },
+          ...(token.requiresAllowlist
+            ? [
+                {
+                  label: t("DashboardIssuance.management.recipientApproval"),
+                  value: t("DashboardIssuance.management.recipientApprovalAutomatic"),
+                },
+              ]
+            : []),
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.mintNow"),
         submitToast: t("DashboardIssuance.management.submittingMint"),
         successToast: t("DashboardIssuance.management.mintFinalized"),
@@ -405,6 +431,14 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.burnConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.burnConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.source"), value: source },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.burnNow"),
         submitToast: t("DashboardIssuance.management.submittingBurn"),
         successToast: t("DashboardIssuance.management.burnFinalized"),
@@ -553,6 +587,9 @@ export function useTokenOperations({
         confirmationTitle: pause
           ? t("DashboardIssuance.management.pauseConfirmationTitle")
           : t("DashboardIssuance.management.unpauseConfirmationTitle"),
+        confirmationWarning: pause
+          ? t("DashboardIssuance.management.pauseImpactWarning")
+          : t("DashboardIssuance.management.unpauseImpactWarning"),
         confirmationDescription: pause
           ? t("DashboardIssuance.management.pauseConfirmationDescription")
           : t("DashboardIssuance.management.unpauseConfirmationDescription"),
@@ -979,6 +1016,7 @@ export function useTokenOperations({
   return {
     // action runner
     isPending,
+    isRefreshingSupply,
     actionConfirmation,
     dismissActionConfirmation,
     confirmAction,

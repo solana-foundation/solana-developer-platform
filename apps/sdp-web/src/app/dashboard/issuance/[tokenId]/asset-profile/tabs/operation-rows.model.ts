@@ -76,7 +76,6 @@ function supplyRows({ ops, t }: OperationContext) {
 }
 
 function transferRows({ ops, token, t, canManageTokenAdmin, onSelect, labels }: OperationContext) {
-  const isStablecoinDraft = !token.mintAddress && token.template === "stablecoin";
   const transfers: OperationRow[] = [];
   if (ops.showControlList)
     transfers.push({
@@ -94,7 +93,7 @@ function transferRows({ ops, token, t, canManageTokenAdmin, onSelect, labels }: 
     });
   if (
     canManageTokenAdmin &&
-    (token.extensions?.pausable || token.status === "paused" || isStablecoinDraft)
+    (token.extensions?.pausable || token.status === "paused" || token.template === "stablecoin")
   )
     transfers.push({
       id: "pause",

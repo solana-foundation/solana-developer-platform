@@ -14,12 +14,10 @@ import {
   Gauge,
   Pause,
   Settings2,
-  Shield,
+  type Shield,
   ShieldCheck,
-  Snowflake,
   Sparkles,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -214,7 +212,11 @@ function CreateSurface(props: CreateSurfaceProps) {
             <form
               id="issuance-draft-step"
               className={styles.stepStage}
-              action={step < 4 ? () => setStep(step + 1) : saveDraft}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (step < 4) setStep(step + 1);
+                else void saveDraft();
+              }}
             >
               {body}
             </form>
@@ -234,7 +236,17 @@ function CreateSurface(props: CreateSurfaceProps) {
               <ArrowLeft size={14} /> {t("DashboardIssuance.draftForm.back")}
             </button>
             {step < 4 ? (
-              <button type="submit" form="issuance-draft-step" className={styles.primaryButton}>
+              <button
+                type="submit"
+                form="issuance-draft-step"
+                className={styles.primaryButton}
+                disabled={
+                  step === 3 &&
+                  !permissionKeys(props.draft).every((key) =>
+                    props.wallets.some((wallet) => wallet.walletId === props.draft.authorities[key])
+                  )
+                }
+              >
                 {t("DashboardIssuance.draftForm.continue")} <ArrowRight size={14} />
               </button>
             ) : (
@@ -385,7 +397,7 @@ function TokenDetailsStep({
   return (
     <div className={styles.formStack}>
       <div className={styles.formGrid}>
-        <Field label={t("DashboardIssuance.draftForm.tokenName")}>
+        <Field label={t("DashboardIssuance.draftForm.tokenName")} required>
           <input
             required
             maxLength={100}
@@ -394,7 +406,7 @@ function TokenDetailsStep({
             onChange={(event) => updateDraft("name", event.target.value)}
           />
         </Field>
-        <Field label={t("DashboardIssuance.draftForm.symbol")}>
+        <Field label={t("DashboardIssuance.draftForm.symbol")} required>
           <input
             value={draft.symbol}
             required
@@ -404,12 +416,9 @@ function TokenDetailsStep({
           />
         </Field>
       </div>
-      <Field
-        label={t("DashboardIssuance.draftForm.description")}
-        hint={t("DashboardIssuance.draftForm.metadataHint")}
-      >
+      <Field label={t("DashboardIssuance.draftForm.description")}>
         <textarea
-          rows={4}
+          rows={3}
           maxLength={500}
           value={draft.description}
           onChange={(event) => updateDraft("description", event.target.value)}
@@ -424,7 +433,7 @@ function TokenDetailsStep({
           }
           hint={
             draft.assetClass === "stablecoin"
-              ? t("DashboardIssuance.draftForm.supplyHint")
+              ? undefined
               : t("DashboardIssuance.draftForm.uncappedHint")
           }
         >
@@ -438,6 +447,7 @@ function TokenDetailsStep({
         </Field>
         <Field
           label={t("DashboardIssuance.draftForm.decimals")}
+          required
           hint={
             draft.assetClass === "stablecoin"
               ? t("DashboardIssuance.draftForm.stableDecimals")
@@ -446,6 +456,7 @@ function TokenDetailsStep({
         >
           <select
             value={draft.decimals}
+            required
             disabled={draft.assetClass === "stablecoin"}
             onChange={(event) => updateDraft("decimals", event.target.value)}
           >
@@ -458,10 +469,7 @@ function TokenDetailsStep({
           </select>
         </Field>
       </div>
-      <Field
-        label={t("DashboardIssuance.draftForm.website")}
-        hint={t("DashboardIssuance.draftForm.websiteHint")}
-      >
+      <Field label={t("DashboardIssuance.draftForm.website")}>
         <input
           type="url"
           pattern="https?://.*"
@@ -474,11 +482,33 @@ function TokenDetailsStep({
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({
+  label,
+  hint,
+  required = false,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: ReactNode;
+}) {
+  const t = useTranslations();
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: Every caller supplies one native input, select, or textarea as children.
     <label className={styles.field}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {required ? (
+          <>
+            {" "}
+            <span aria-hidden className="text-destructive">
+              *
+            </span>
+            <span className="sr-only"> {t("DashboardIssuance.create.required")}</span>
+          </>
+        ) : null}
+      </span>
       {children}
       {hint && <small>{hint}</small>}
     </label>
@@ -506,37 +536,32 @@ function ControlsStep({
         onChange={(value) => updateDraft("allowlist", value)}
         Icon={ShieldCheck}
       />
-      <ControlRow
-        title={t("DashboardIssuance.draftForm.pauseCapability")}
-        description={
-          draft.assetClass === "stablecoin"
-            ? t("DashboardIssuance.draftForm.includedStable")
-            : t("DashboardIssuance.draftForm.pauseDescription")
-        }
-        checked={draft.pauseTransfers}
-        onChange={(value) => updateDraft("pauseTransfers", value)}
-        Icon={Pause}
-        disabled={draft.assetClass === "stablecoin"}
-      />
-      {draft.assetClass === "stablecoin" && (
-        <>
-          <ControlRow
-            title={t("DashboardIssuance.draftForm.freeze")}
-            description={t("DashboardIssuance.draftForm.includedStable")}
-            checked
-            onChange={() => undefined}
-            Icon={Snowflake}
-            disabled
-          />
-          <ControlRow
-            title={t("DashboardIssuance.draftForm.recovery")}
-            description={t("DashboardIssuance.draftForm.includedStable")}
-            checked
-            onChange={() => undefined}
-            Icon={Shield}
-            disabled
-          />
-        </>
+      {draft.assetClass === "stablecoin" ? (
+        <section className="mt-2">
+          <h3 className="text-sm font-medium text-primary">
+            {t("DashboardIssuance.draftForm.includedControls")}
+          </h3>
+          <dl className="mt-2 divide-y divide-border-subtle">
+            {(["pause", "freeze", "recover"] as const).map((control) => (
+              <div key={control} className="py-3">
+                <dt className="text-sm font-medium text-primary">
+                  {t(`DashboardIssuance.draftForm.includedControlsCopy.${control}.title`)}
+                </dt>
+                <dd className="mt-1 text-sm text-secondary">
+                  {t(`DashboardIssuance.draftForm.includedControlsCopy.${control}.description`)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : (
+        <ControlRow
+          title={t("DashboardIssuance.draftForm.pauseCapability")}
+          description={t("DashboardIssuance.draftForm.pauseDescription")}
+          checked={draft.pauseTransfers}
+          onChange={(value) => updateDraft("pauseTransfers", value)}
+          Icon={Pause}
+        />
       )}
       <a
         href="https://sdp-docs-solana-foundation.vercel.app/docs/tokens/allowlists"
@@ -597,6 +622,8 @@ function ControlRow({
     <button
       type="button"
       className={styles.controlRow}
+      role="switch"
+      aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
@@ -630,15 +657,10 @@ function PermissionsStep({
     <div className={styles.permissionsStack}>
       {walletsError ? <p role="alert">{walletsError}</p> : null}
       {!wallets.length && !walletsError ? (
-        <p>
-          {t("DashboardIssuance.draftForm.noWallets")}{" "}
-          <Link href="/dashboard/wallets/setup">
-            {t("DashboardIssuance.draftForm.createWallet")}
-          </Link>
-        </p>
+        <p>{t("DashboardIssuance.draftForm.noWallets")}</p>
       ) : null}
       {permissionKeys(draft).map((key) => (
-        <Field key={key} label={t(authorityCopy[key])}>
+        <Field key={key} label={t(authorityCopy[key])} required>
           <select
             required
             aria-label={t(authorityCopy[key])}
@@ -707,7 +729,7 @@ function ReviewStep({ draft }: { draft: DraftState }) {
         <ReviewRow
           label={t("DashboardIssuance.draftForm.permissions")}
           value={t("DashboardIssuance.draftForm.permissionCount", {
-            count: permissionKeys(draft).length,
+            count: permissionKeys(draft).filter((key) => draft.authorities[key]).length,
           })}
         />
         <ReviewRow
