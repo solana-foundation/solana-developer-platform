@@ -47,7 +47,9 @@ import type { Env } from "@/types/env";
 
 const ROTATION_UNAVAILABLE = "Credential rotation is not available";
 const ROLLBACK_UNAVAILABLE = "Credential rollback is not available";
-const CANDIDATE_UNAVAILABLE = "Credential cannot be deactivated from its current state";
+const CREDENTIAL_DEACTIVATION_UNAVAILABLE =
+  "Credential cannot be deactivated from its current state";
+const CREDENTIAL_IN_USE = "Credential cannot be deactivated while it is in use";
 
 export type RotationFailureCode = "invalid_credentials" | "provider_account_mismatch";
 
@@ -90,6 +92,11 @@ interface AuthorizedCredential {
   references: CredentialReferenceRow[];
 }
 
+interface DeactivationTarget extends AuthorizedCredential {
+  authorizationReferences: CredentialReferenceRow[];
+  predecessor: LifecycleCredentialRow | null;
+}
+
 export async function getProviderCredentialLifecycle(
   c: Context<{ Bindings: Env }>,
   connectionId: string
@@ -104,7 +111,7 @@ export async function getProviderCredentialLifecycle(
 
   const authorized = await loadAuthorizedCredential(context, credentialId);
   const candidate =
-    authorized.credential.status === "active"
+    authorized.credential.status === "active" || authorized.credential.status === "deactivated"
       ? await context.store.findUnfinishedDirectChild(
           context.organizationId,
           authorized.credential.id
@@ -354,7 +361,7 @@ export async function completeRotationCandidate(
       check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
     const race = await settleCandidateOutcome(context, loaded, code);
     if (race?.rotation.status === "success") return race;
-    await cleanupRejectedCandidate(c, candidateSecret);
+    await cleanupTerminalCredential(c, candidateSecret);
     if (race) return race;
     return rotationResult({ ...loaded.candidate, status: "failed_validation" }, "failed", code);
   }
@@ -558,122 +565,200 @@ export async function rollbackProviderCredential(
   };
 }
 
-export async function deactivateRotationCandidate(
+export async function deactivateProviderCredential(
   c: Context<{ Bindings: Env }>,
-  candidateId: string
+  credentialId: string
 ): Promise<{ providerCredential: SafeProviderCredential }> {
   const context = createContext(c);
-  const loaded = await loadAuthorizedCandidate(context, candidateId, true, CANDIDATE_UNAVAILABLE);
-  if (loaded.candidate.status === "deactivated") {
-    const candidateSecret = await requireLifecycleCredentialSecret(context, candidateId);
-    await cleanupRejectedCandidate(c, candidateSecret);
-    return { providerCredential: mapProviderCredential(loaded.candidate) };
+  const loaded = await loadDeactivationTarget(context, credentialId);
+  if (loaded.credential.status === "deactivated") {
+    const secret = await requireLifecycleCredentialSecret(context, credentialId);
+    await cleanupTerminalCredential(c, secret);
+    return { providerCredential: mapProviderCredential(loaded.credential) };
   }
-  const candidateStatus = loaded.candidate.status;
+  const expectedStatus = loaded.credential.status;
   if (
-    (candidateStatus !== "pending" && candidateStatus !== "creating") ||
-    loaded.candidateReferences.length > 0
+    expectedStatus !== "pending" &&
+    expectedStatus !== "active" &&
+    expectedStatus !== "creating"
   ) {
-    throw conflict(CANDIDATE_UNAVAILABLE);
+    throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
   }
-  if (loaded.references.length === 0) throw conflict(CANDIDATE_UNAVAILABLE);
-  const candidateSecret = await requireLifecycleCredentialSecret(context, candidateId);
+  // Keep A's cancellation path for an in-flight rotation, not unfinished initial setup.
+  if (
+    expectedStatus === "creating" &&
+    (loaded.predecessor?.status !== "active" || loaded.authorizationReferences.length === 0)
+  ) {
+    throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
+  }
+  if (
+    loaded.references.length > 0 ||
+    (await context.store.hasActiveCredentialWallet(context.organizationId, credentialId))
+  ) {
+    throw conflict(CREDENTIAL_IN_USE);
+  }
+  const secret = await requireLifecycleCredentialSecret(context, credentialId);
+  const rotationCancellation =
+    expectedStatus !== "active" &&
+    loaded.predecessor !== null &&
+    loaded.predecessor.status !== "failed_validation";
+  const completedEvent = rotationCancellation
+    ? "provider_credential_rotation_canceled"
+    : "provider_credential_deactivated";
 
   const auditIntent = await context.audit.beginCritical(c, {
     organizationId: context.organizationId,
     userId: context.userId,
     action: "deactivate",
     resourceType: "provider_credential",
-    resourceId: loaded.candidate.id,
-    metadata: { event: "provider_credential_rotation_cancellation_started", provider: "privy" },
+    resourceId: credentialId,
+    metadata: {
+      event: rotationCancellation
+        ? "provider_credential_rotation_cancellation_started"
+        : "provider_credential_deactivation_started",
+      provider: "privy",
+    },
   });
   let applied = false;
   try {
     await getDb(c.env).transaction(async (tx) => {
       const store = new ProviderCredentialStore(tx);
-      await assertLockedAuthorization(context, store, loaded.references);
-      const lockedReferences = await store.listCredentialReferences(
+      if (
+        !(await store.lockAuthorizedProjects(context.organizationId, context.userId, [
+          context.projectId,
+          ...loaded.authorizationReferences.map((reference) => reference.project_id),
+        ]))
+      ) {
+        throw forbidden("Requested project is not accessible");
+      }
+      await store.lockCredentialReferenceRows(
         context.organizationId,
-        loaded.predecessor.id,
+        loaded.authorizationReferences.map((reference) => reference.id)
+      );
+      const lockedCredential = await store.findLifecycleCredential(
+        context.organizationId,
+        credentialId,
         { lock: true }
       );
-      const lockedCandidateReferences = await store.listCredentialReferences(
-        context.organizationId,
-        loaded.candidate.id,
-        { lock: true }
-      );
-      const lockedCandidate = await store.findLifecycleCredential(
-        context.organizationId,
-        loaded.candidate.id,
-        { lock: true }
-      );
-      const lockedPredecessor = await store.findLifecycleCredential(
-        context.organizationId,
-        loaded.predecessor.id,
-        { lock: true }
-      );
-      assertCandidateSnapshot(
-        lockedCandidate,
-        lockedPredecessor,
-        lockedReferences,
-        loaded,
-        CANDIDATE_UNAVAILABLE,
-        candidateStatus
-      );
-      if (lockedCandidateReferences.length > 0) throw conflict(CANDIDATE_UNAVAILABLE);
+      if (
+        !lockedCredential ||
+        lockedCredential.status !== expectedStatus ||
+        lockedCredential.rotated_from_provider_credential_id !==
+          loaded.credential.rotated_from_provider_credential_id
+      ) {
+        throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
+      }
+      const lockedPredecessor = loaded.predecessor
+        ? await store.findLifecycleCredential(context.organizationId, loaded.predecessor.id, {
+            lock: true,
+          })
+        : null;
+      const references = await store.listCredentialReferences(context.organizationId, credentialId);
+      const authorizationReferences = loaded.predecessor
+        ? [
+            ...(lockedPredecessor?.status === "active"
+              ? await store.listCredentialReferences(context.organizationId, loaded.predecessor.id)
+              : await store.listCredentialLineageReferences(context.organizationId, credentialId)),
+            ...references,
+          ]
+        : references;
+      if (
+        !sameReferences(authorizationReferences, loaded.authorizationReferences) ||
+        !sameReferences(references, loaded.references) ||
+        (expectedStatus === "creating" &&
+          (lockedPredecessor?.status !== "active" || authorizationReferences.length === 0))
+      ) {
+        throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
+      }
       const changed =
-        candidateStatus === "creating"
+        expectedStatus === "creating"
           ? await store.abandonCredentialCreation({
               organizationId: context.organizationId,
-              credentialId: loaded.candidate.id,
+              credentialId,
             })
-          : await store.deactivateRotationCandidate({
+          : await store.deactivateCredential({
               organizationId: context.organizationId,
-              candidateId: loaded.candidate.id,
-              predecessorId: loaded.predecessor.id,
+              credentialId,
+              expectedStatus,
+              predecessorId: loaded.credential.rotated_from_provider_credential_id,
             });
-      if (!changed) {
-        throw conflict(CANDIDATE_UNAVAILABLE);
-      }
+      if (!changed) throw conflict(CREDENTIAL_IN_USE);
       applied = true;
     });
   } catch (error) {
-    logLifecycleFailure(c, "cancellation_commit", candidateId, error);
-    const visible = await cancellationCommitIsVisible(context, loaded);
+    logLifecycleFailure(c, "deactivation_commit", credentialId, error);
+    // Another request's completed transition cannot override this request's access denial.
+    if (error instanceof AppError && error.code === "FORBIDDEN") {
+      await closeRejectedIntent(
+        context,
+        auditIntent,
+        "provider_credential_deactivation_not_committed"
+      );
+      throw error;
+    }
+    const visible = await deactivationCommitIsVisible(context, loaded);
     if (visible === true) {
+      await loadDeactivationTarget(context, credentialId);
+      // A lost COMMIT reply does not prove which concurrent request won. Keep
+      // an applied-but-uncertain intent open instead of duplicating its outcome.
       if (applied) {
-        logUnresolvedAuditIntent(context, auditIntent, candidateId);
+        logUnresolvedAuditIntent(context, auditIntent, credentialId);
       } else {
         await closeRejectedIntent(
           context,
           auditIntent,
-          "provider_credential_rotation_cancellation_replayed"
+          "provider_credential_deactivation_replayed"
         );
-        await loadAuthorizedCandidate(context, loaded.candidate.id, true, CANDIDATE_UNAVAILABLE);
       }
-      await cleanupRejectedCandidate(c, candidateSecret);
+      await cleanupTerminalCredential(c, secret);
       return {
-        providerCredential: mapProviderCredential({ ...loaded.candidate, status: "deactivated" }),
+        providerCredential: mapProviderCredential({ ...loaded.credential, status: "deactivated" }),
       };
     }
     if (applied || visible === null) {
-      throw providerUnavailable("Credential cancellation outcome is temporarily unknown");
+      throw providerUnavailable("Credential deactivation outcome is temporarily unknown");
     }
     await closeRejectedIntent(
       context,
       auditIntent,
-      "provider_credential_rotation_cancellation_not_committed"
+      "provider_credential_deactivation_not_committed"
     );
     if (error instanceof AppError) throw error;
-    throw conflict(CANDIDATE_UNAVAILABLE);
+    throw providerUnavailable("Credential deactivation is temporarily unavailable");
   }
-  await cleanupRejectedCandidate(c, candidateSecret);
+  await cleanupTerminalCredential(c, secret);
   await context.audit.completeCritical(c, auditIntent, {
-    metadata: { event: "provider_credential_rotation_canceled", provider: "privy" },
+    metadata: { event: completedEvent, provider: "privy" },
   });
   return {
-    providerCredential: mapProviderCredential({ ...loaded.candidate, status: "deactivated" }),
+    providerCredential: mapProviderCredential({ ...loaded.credential, status: "deactivated" }),
   };
+}
+
+async function loadDeactivationTarget(
+  context: LifecycleContext,
+  credentialId: string
+): Promise<DeactivationTarget> {
+  const authorized = await loadAuthorizedCredential(context, credentialId);
+  if (
+    authorized.credential.source === "stored" &&
+    authorized.credential.rotated_from_provider_credential_id &&
+    authorized.credential.status !== "active"
+  ) {
+    const candidate = await loadAuthorizedCandidate(
+      context,
+      credentialId,
+      true,
+      CREDENTIAL_DEACTIVATION_UNAVAILABLE
+    );
+    return {
+      credential: candidate.candidate,
+      references: candidate.candidateReferences,
+      authorizationReferences: [...candidate.references, ...candidate.candidateReferences],
+      predecessor: candidate.predecessor,
+    };
+  }
+  return { ...authorized, authorizationReferences: authorized.references, predecessor: null };
 }
 
 function createContext(c: Context<{ Bindings: Env }>): LifecycleContext {
@@ -1119,25 +1204,22 @@ async function rollbackCommitIsVisible(
   }
 }
 
-async function cancellationCommitIsVisible(
+async function deactivationCommitIsVisible(
   context: LifecycleContext,
-  expected: Awaited<ReturnType<typeof loadAuthorizedCandidate>>
+  expected: DeactivationTarget
 ): Promise<boolean | null> {
   try {
-    const [candidate, predecessor, candidateReferences, predecessorReferences] = await Promise.all([
-      context.store.findLifecycleCredential(context.organizationId, expected.candidate.id),
-      context.store.findLifecycleCredential(context.organizationId, expected.predecessor.id),
-      context.store.listCredentialReferences(context.organizationId, expected.candidate.id),
-      context.store.listCredentialReferences(context.organizationId, expected.predecessor.id),
-    ]);
+    const credential = await context.store.findLifecycleCredential(
+      context.organizationId,
+      expected.credential.id
+    );
     return (
-      candidate?.status === "deactivated" &&
-      predecessor?.status === "active" &&
-      candidateReferences.length === 0 &&
-      sameReferences(predecessorReferences, expected.references)
+      credential?.status === "deactivated" &&
+      credential.rotated_from_provider_credential_id ===
+        expected.credential.rotated_from_provider_credential_id
     );
   } catch (error) {
-    logLifecycleFailure(context.c, "cancellation_outcome_read", expected.candidate.id, error);
+    logLifecycleFailure(context.c, "deactivation_outcome_read", expected.credential.id, error);
     return null;
   }
 }
@@ -1292,16 +1374,16 @@ function storedSecret(row: LifecycleCredentialWithSecretRow): StoredCredentialSe
   };
 }
 
-async function cleanupRejectedCandidate(
+async function cleanupTerminalCredential(
   c: Context<{ Bindings: Env }>,
-  candidate: LifecycleCredentialWithSecretRow
+  credential: LifecycleCredentialWithSecretRow
 ): Promise<void> {
-  if (candidate.storage_backend !== "gcp_secret_manager" || !candidate.secret_version_ref) return;
+  if (credential.storage_backend !== "gcp_secret_manager" || !credential.secret_version_ref) return;
   try {
-    const store = createPersistedSecretStore(c, candidate.storage_backend, candidate.id);
-    await store.destroyVersion({ secretVersionRef: candidate.secret_version_ref });
+    const store = createPersistedSecretStore(c, credential.storage_backend, credential.id);
+    await store.destroyVersion({ secretVersionRef: credential.secret_version_ref });
   } catch {
-    logCleanupFailure(c, candidate.id, candidate.storage_backend);
+    logCleanupFailure(c, credential.id, credential.storage_backend);
   }
 }
 

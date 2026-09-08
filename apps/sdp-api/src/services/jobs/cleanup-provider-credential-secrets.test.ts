@@ -500,6 +500,43 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
     expect(JSON.stringify(logError.mock.calls)).not.toContain("raw upstream detail");
   });
 
+  it("retries exact-version cleanup for a deactivated GCP root on its next container scan", async () => {
+    const id = "pcred_deactivated_root";
+    const retentionExpiresAt = "2020-01-01T00:00:00.000Z";
+    await insertCredential({
+      id,
+      status: "deactivated",
+      backend: "gcp_secret_manager",
+      retentionExpiresAt,
+    });
+    destroyVersion.mockRejectedValueOnce(new Error("transient GCP failure"));
+
+    await expect(cleanupRetiredProviderCredentialSecrets(env)).rejects.toThrow(
+      "Provider Credential secret cleanup failed for 1 row(s)"
+    );
+    await expect(credentialState(id)).resolves.toMatchObject({
+      status: "deactivated",
+      secret_retention_expires_at: retentionExpiresAt,
+    });
+
+    await makeCleanupDue(id);
+    await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
+      cleaned: 1,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(destroyVersion).toHaveBeenCalledTimes(2);
+    expect(destroyVersion).toHaveBeenLastCalledWith({
+      secretVersionRef: `projects/p/secrets/sdp-provider-credentials-${id}/versions/7`,
+      signal: expect.any(AbortSignal),
+      requireDestroyed: true,
+    });
+    await expect(credentialState(id)).resolves.toMatchObject({
+      status: "deactivated",
+      secret_retention_expires_at: null,
+    });
+  });
+
   it.each(["failed_validation", "deactivated"] as const)(
     "retries cleanup for a GCP rotation candidate that ends %s without changing its status",
     async (status) => {
@@ -516,9 +553,10 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
       const transitioned =
         status === "failed_validation"
           ? await credentialStore.recordRotationFailure(candidateId, "invalid_credentials")
-          : await credentialStore.deactivateRotationCandidate({
+          : await credentialStore.deactivateCredential({
               organizationId: ORGANIZATION_ID,
-              candidateId,
+              credentialId: candidateId,
+              expectedStatus: "pending",
               predecessorId,
             });
       expect(transitioned).toBe(true);
@@ -552,6 +590,56 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
       });
     }
   );
+
+  it("preserves a deactivated GCP root marker while a live Connection references it", async () => {
+    const id = "pcred_referenced_deactivated_root";
+    const retentionExpiresAt = "2020-01-01T00:00:00.000Z";
+    await insertCredential({
+      id,
+      status: "deactivated",
+      backend: "gcp_secret_manager",
+      retentionExpiresAt,
+    });
+    await insertConnection("conn_referenced_deactivated_root", id);
+
+    await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
+      cleaned: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(destroyVersion).not.toHaveBeenCalled();
+    await expect(credentialState(id)).resolves.toMatchObject({
+      status: "deactivated",
+      secret_retention_expires_at: retentionExpiresAt,
+    });
+  });
+
+  it("preserves a deactivated GCP root marker if its exact reference changes during destruction", async () => {
+    const id = "pcred_deactivated_ref_cas";
+    const retentionExpiresAt = "2020-01-01T00:00:00.000Z";
+    await insertCredential({
+      id,
+      status: "deactivated",
+      backend: "gcp_secret_manager",
+      retentionExpiresAt,
+    });
+    destroyVersion.mockImplementationOnce(async () => {
+      await getDb(env).execute(
+        "UPDATE provider_credentials SET secret_version_ref = ? WHERE id = ?",
+        [`projects/p/secrets/sdp-provider-credentials-${id}/versions/8`, id]
+      );
+    });
+
+    await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
+      cleaned: 0,
+      skipped: 1,
+      failed: 0,
+    });
+    await expect(credentialState(id)).resolves.toMatchObject({
+      status: "deactivated",
+      secret_retention_expires_at: retentionExpiresAt,
+    });
+  });
 
   it("does not clear a GCP marker that changed while the destroy was in flight", async () => {
     await insertCredential({

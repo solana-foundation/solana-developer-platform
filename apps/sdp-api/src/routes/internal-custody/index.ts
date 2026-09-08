@@ -16,10 +16,13 @@ import {
   getProviderAvailability,
   isCustodyProviderEntitled,
 } from "@/services/provider-availability.service";
-import { getProviderCredentialInstallation } from "@/services/provider-credential-installation.service";
+import {
+  deactivateCustodyConnection,
+  getProviderCredentialInstallation,
+} from "@/services/provider-credential-installation.service";
 import {
   completeRotationCandidate,
-  deactivateRotationCandidate,
+  deactivateProviderCredential,
   getProviderCredentialLifecycle,
   rollbackProviderCredential,
   rotateProviderCredential,
@@ -185,6 +188,15 @@ internalCustody.get("/connections/:connectionId/provider-credential", async (c) 
   return success(c, await getProviderCredentialLifecycle(c, params.data.connectionId));
 });
 
+internalCustody.post("/connections/:connectionId/deactivate", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  await enforceMeteredQuota(c, recoveryQuota);
+  return success(c, await deactivateCustodyConnection(c, params.data.connectionId));
+});
+
 internalCustody.post("/provider-credentials/:credentialId/rotate", async (c) => {
   const params = credentialParamsSchema.safeParse(c.req.param());
   if (!params.success) {
@@ -229,7 +241,7 @@ internalCustody.post("/provider-credentials/:credentialId/deactivate", async (c)
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
   await enforceMeteredQuota(c, recoveryQuota);
-  return success(c, await deactivateRotationCandidate(c, params.data.credentialId));
+  return success(c, await deactivateProviderCredential(c, params.data.credentialId));
 });
 
 internalCustody.post("/connections/:connectionId/complete", async (c) => {

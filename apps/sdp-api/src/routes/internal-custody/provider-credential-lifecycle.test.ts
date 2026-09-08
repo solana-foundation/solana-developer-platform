@@ -571,6 +571,476 @@ describe("provider credential lifecycle", () => {
     ]);
   });
 
+  it("deactivates an unused setup Credential and replays without another lifecycle audit", async () => {
+    const credentialId = "pcred_unused_setup";
+    const stored = await createCredentialSecretStore(env).write({
+      orgId: ORGANIZATION_ID,
+      provider: "privy",
+      providerCredentialId: credentialId,
+      payload: { appId: APP_ID, appSecret: APP_SECRET },
+    });
+    await new ProviderCredentialStore(getDb(env)).insertCredential({
+      id: credentialId,
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_A_ID,
+      provider: "privy",
+      label: "Unused setup",
+      scope: "project",
+      source: "stored",
+      stored,
+      displayMetadata: {},
+      version: 1,
+      rotatedFromId: null,
+      idempotencyKey: "unused-setup",
+      idempotencyFingerprint: "unused-setup-fingerprint",
+      createdBy: USER_ID,
+    });
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await lifecycleRequest(`/provider-credentials/${credentialId}/deactivate`, {
+        method: "POST",
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { providerCredential: { id: credentialId, status: "deactivated" } },
+      });
+    }
+
+    expect(
+      await getDb(env).queryOne(
+        "SELECT status, encrypted_secret_payload FROM provider_credentials WHERE id = ?",
+        [credentialId]
+      )
+    ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
+    expect(
+      await getDb(env).queryOne(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'deactivate'",
+        [credentialId]
+      )
+    ).toEqual({ count: 1 });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "checking", "failed", "active"])(
+    "blocks Credential deactivation while a %s Connection references it, even without active wallets",
+    async (status) => {
+      const db = getDb(env);
+      await db.execute("UPDATE custody_wallets SET status = 'deactivated'");
+      await db.execute(
+        `UPDATE custody_connections SET status = ?, deactivated_at = NULL,
+           last_check_status = CASE ? WHEN 'checking' THEN 'running' WHEN 'failed' THEN 'failed' ELSE 'success' END,
+           activated_at = CASE WHEN ? = 'active' THEN activated_at ELSE NULL END WHERE id = ?`,
+        [status, status, status, CONNECTION_A_ID]
+      );
+      await db.execute(
+        "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
+        [CONNECTION_B_ID]
+      );
+      const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+        CREDENTIAL_ID,
+      ]);
+      const providerFetch = vi.fn();
+      vi.stubGlobal("fetch", providerFetch);
+
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toEqual({
+        code: "CONFLICT",
+        message: "Credential cannot be deactivated while it is in use",
+      });
+      expect(
+        await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+      ).toEqual(original);
+      expect(await db.queryMany("SELECT id FROM audit_logs WHERE action = 'deactivate'")).toEqual(
+        []
+      );
+      expect(providerFetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps a pending child visible and cancelable after its eligible parent is deactivated", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-before-parent-deactivation",
+      body: { fields: { appId: APP_ID, appSecret: "pending-secret" } },
+    });
+    expect(pending.status).toBe(200);
+    const { data } = credentialResponseSchema.parse(await pending.json());
+    const childId = data.providerCredential.id;
+    // Prospective walletless history, prepared only in this test fixture.
+    const db = getDb(env);
+    await db.execute("UPDATE custody_wallets SET status = 'deactivated'");
+    await db.execute(
+      "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now()"
+    );
+    providerFetch.mockClear();
+
+    const parent = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+      method: "POST",
+    });
+    expect(parent.status).toBe(200);
+    expect(await parent.json()).toMatchObject({
+      data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
+    });
+    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    expect(state.status).toBe(200);
+    expect(await state.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
+        rotationCandidate: { id: childId, status: "pending" },
+        rollback: null,
+      },
+    });
+    const child = await lifecycleRequest(`/provider-credentials/${childId}/deactivate`, {
+      method: "POST",
+    });
+    expect(child.status).toBe(200);
+    expect(await child.json()).toMatchObject({
+      data: { providerCredential: { id: childId, status: "deactivated" } },
+    });
+    expect(
+      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).json()
+    ).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
+        rotationCandidate: null,
+      },
+    });
+    expect(
+      await db.queryMany(
+        "SELECT resource_id FROM audit_logs WHERE action = 'deactivate' ORDER BY resource_id"
+      )
+    ).toEqual([CREDENTIAL_ID, childId].sort().map((resource_id) => ({ resource_id })));
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  describe("unreferenced current Credential deactivation", () => {
+    beforeEach(async () => {
+      // Prospective walletless history; Privy has no supported wallet deactivation command.
+      await getDb(env).execute("UPDATE custody_wallets SET status = 'deactivated'");
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now()"
+      );
+    });
+
+    it("refuses deactivation of an initial GCP Credential while its secret is creating", async () => {
+      const gcp = mockGcpRotation();
+      await seedActiveGcpCredential(gcp);
+      const db = getDb(env);
+      await db.execute(
+        "UPDATE provider_credentials SET status = 'creating', secret_version_ref = NULL WHERE id = ?",
+        [CREDENTIAL_ID]
+      );
+      const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+        CREDENTIAL_ID,
+      ]);
+
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect(
+        await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+      ).toEqual(original);
+      expect(await db.queryMany("SELECT id FROM audit_logs WHERE action = 'deactivate'")).toEqual(
+        []
+      );
+      expect(gcp.requests).toEqual([]);
+    });
+
+    it.each(["encrypted_db", "runtime_env"])(
+      "deactivates the active %s Credential without changing deployment secrets or Connection history",
+      async (backend) => {
+        const db = getDb(env);
+        if (backend === "runtime_env") {
+          await db.execute(
+            `UPDATE provider_credentials SET source = 'runtime', storage_backend = 'runtime_env',
+               encrypted_secret_payload = NULL WHERE id = ?`,
+            [CREDENTIAL_ID]
+          );
+        }
+        const deployment = { ...env };
+        const connections = await db.queryMany("SELECT * FROM custody_connections ORDER BY id");
+        const providerFetch = vi.fn();
+        vi.stubGlobal("fetch", providerFetch);
+
+        const response = await lifecycleRequest(
+          `/provider-credentials/${CREDENTIAL_ID}/deactivate`,
+          {
+            method: "POST",
+          }
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
+        });
+        expect(
+          await db.queryOne(
+            "SELECT status, encrypted_secret_payload FROM provider_credentials WHERE id = ?",
+            [CREDENTIAL_ID]
+          )
+        ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
+        expect(await db.queryMany("SELECT * FROM custody_connections ORDER BY id")).toEqual(
+          connections
+        );
+        expect(
+          await db.queryOne(
+            "SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'deactivate'",
+            [CREDENTIAL_ID]
+          )
+        ).toEqual({ count: 1 });
+        expect(env).toEqual(deployment);
+        expect(providerFetch).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each(["failed_validation", "retired"])("preserves %s history", async (status) => {
+      const db = getDb(env);
+      await db.execute("UPDATE provider_credentials SET status = ? WHERE id = ?", [
+        status,
+        CREDENTIAL_ID,
+      ]);
+      const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+        CREDENTIAL_ID,
+      ]);
+      const providerFetch = vi.fn();
+      vi.stubGlobal("fetch", providerFetch);
+
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toEqual({
+        code: "CONFLICT",
+        message: "Credential cannot be deactivated from its current state",
+      });
+      expect(
+        await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+      ).toEqual(original);
+      expect(await db.queryMany("SELECT id FROM audit_logs WHERE action = 'deactivate'")).toEqual(
+        []
+      );
+      expect(providerFetch).not.toHaveBeenCalled();
+    });
+
+    it("returns success with one audit when two deactivations pass preflight together", async () => {
+      let started = 0;
+      let release = () => {};
+      const bothStarted = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const findSecret = ProviderCredentialStore.prototype.findLifecycleCredentialWithSecret;
+      vi.spyOn(
+        ProviderCredentialStore.prototype,
+        "findLifecycleCredentialWithSecret"
+      ).mockImplementation(async function (this: ProviderCredentialStore, ...args) {
+        const row = await findSecret.apply(this, args);
+        if (++started === 2) release();
+        await bothStarted;
+        return row;
+      });
+      const providerFetch = vi.fn();
+      vi.stubGlobal("fetch", providerFetch);
+
+      const responses = await Promise.all(
+        [0, 1].map(() =>
+          lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, { method: "POST" })
+        )
+      );
+
+      for (const response of responses) {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
+        });
+      }
+      expect(
+        await getDb(env).queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'deactivate'",
+          [CREDENTIAL_ID]
+        )
+      ).toEqual({ count: 1 });
+      expect(providerFetch).not.toHaveBeenCalled();
+    });
+
+    it("preserves a fresh authorization refusal when a concurrent deactivation has committed", async () => {
+      const db = getDb(env);
+      const transaction = db.transaction.bind(db);
+      const providerFetch = vi.fn();
+      vi.stubGlobal("fetch", providerFetch);
+      vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+        // The first request has passed preflight; another authorized request wins.
+        const winner = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+          method: "POST",
+        });
+        expect(winner.status).toBe(200);
+        await db.execute("DELETE FROM project_members WHERE project_id = ? AND user_id = ?", [
+          PROJECT_A_ID,
+          USER_ID,
+        ]);
+        return transaction(callback);
+      });
+
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: { code: "FORBIDDEN", message: "Requested project is not accessible" },
+      });
+      expect(
+        await db.queryOne("SELECT status FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+      ).toEqual({ status: "deactivated" });
+      expect(
+        await db.queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'deactivate'",
+          [CREDENTIAL_ID]
+        )
+      ).toEqual({ count: 1 });
+      expect(providerFetch).not.toHaveBeenCalled();
+    });
+
+    it.each(["database failure", "membership loss"])(
+      "preserves Credential and secret when %s occurs after preflight",
+      async (fault) => {
+        const db = getDb(env);
+        const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+          CREDENTIAL_ID,
+        ]);
+        if (fault === "database failure") {
+          const transaction = db.transaction.bind(db);
+          vi.spyOn(db, "transaction").mockImplementationOnce((callback) =>
+            transaction(async (tx) => {
+              await callback(tx);
+              await tx.execute("SELECT 1 / 0");
+            })
+          );
+        } else {
+          const lockProjects = ProviderCredentialStore.prototype.lockAuthorizedProjects;
+          vi.spyOn(
+            ProviderCredentialStore.prototype,
+            "lockAuthorizedProjects"
+          ).mockImplementationOnce(async function (this: ProviderCredentialStore, ...args) {
+            await db.execute("DELETE FROM project_members WHERE project_id = ? AND user_id = ?", [
+              PROJECT_A_ID,
+              USER_ID,
+            ]);
+            return lockProjects.apply(this, args);
+          });
+        }
+        const providerFetch = vi.fn();
+        vi.stubGlobal("fetch", providerFetch);
+
+        const response = await lifecycleRequest(
+          `/provider-credentials/${CREDENTIAL_ID}/deactivate`,
+          { method: "POST" }
+        );
+
+        expect(response.status).toBe(fault === "database failure" ? 503 : 403);
+        expect(
+          await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+        ).toEqual(original);
+        expect(await db.queryMany("SELECT id FROM audit_logs WHERE action = 'deactivate'")).toEqual(
+          []
+        );
+        expect(providerFetch).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it("retries failed GCP root destruction at its container scan and preserves its live child", async () => {
+    const options = { privyStatus: 503, destroyFailure: true };
+    const gcp = mockGcpRotation(options);
+    const secretRef = z.string().parse(await seedActiveGcpCredential(gcp));
+    const canonicalRef = secretRef.replace("projects/sdp-lifecycle-test/", "projects/1234567890/");
+    const rotation = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+      method: "POST",
+      key: "rotate-before-gcp-root-deactivation",
+      body: { fields: { appId: APP_ID, appSecret: "live-child-secret" } },
+    });
+    expect(rotation.status).toBe(200);
+    const childId = credentialResponseSchema.parse(await rotation.json()).data.providerCredential
+      .id;
+    const secrets = () => createCredentialSecretStore(env, "gcp_secret_manager");
+    expect(await scanGcpCredentialContainers(env, secrets)).toMatchObject({
+      scanned: [secretRef],
+      cleaned: 0,
+      failed: [],
+    });
+    // Prospective walletless history, prepared only in this test fixture.
+    const db = getDb(env);
+    await db.execute("UPDATE custody_wallets SET status = 'deactivated'");
+    await db.execute(
+      "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now()"
+    );
+
+    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
+    });
+    expect(JSON.stringify(body)).not.toContain(secretRef);
+    expect(
+      await db.queryOne(
+        `SELECT status, secret_retention_expires_at::timestamptz <= clock_timestamp() AS due,
+           secret_next_scan_at > clock_timestamp() AS scheduled
+         FROM provider_credentials WHERE id = ?`,
+        [CREDENTIAL_ID]
+      )
+    ).toEqual({ status: "deactivated", due: true, scheduled: true });
+    expect(await cleanupRetiredProviderCredentialSecrets(env)).toEqual({
+      cleaned: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    const destruction = {
+      url: `https://gcp-lifecycle.test/v1/${canonicalRef}/versions/1:destroy`,
+      method: "POST",
+    };
+    expect(gcp.requests.filter(({ url }) => url.endsWith(":destroy"))).toEqual([destruction]);
+
+    options.destroyFailure = false;
+    expect(
+      await scanGcpCredentialContainers(env, secrets, { now: new Date(Date.now() + 6 * 60_000) })
+    ).toMatchObject({ scanned: [secretRef], cleaned: 1, failed: [] });
+    expect(gcp.requests.filter(({ url }) => url.endsWith(":destroy"))).toEqual([
+      destruction,
+      destruction,
+    ]);
+    expect(await secrets().listVersions?.({ secretRef, liveOnly: true })).toMatchObject({
+      versions: [{ secretVersionRef: `${canonicalRef}/versions/7`, state: "ENABLED" }],
+    });
+    expect(
+      await db.queryOne(
+        "SELECT status, secret_retention_expires_at FROM provider_credentials WHERE id = ?",
+        [CREDENTIAL_ID]
+      )
+    ).toEqual({ status: "deactivated", secret_retention_expires_at: null });
+    expect(
+      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).json()
+    ).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
+        rotationCandidate: { id: childId, status: "pending" },
+      },
+    });
+  });
+
   it.each(["actor", "organization"])(
     "refuses rotation when the %s quota is exhausted",
     async (scope) => {
@@ -2407,6 +2877,10 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(canceled.status).toBe(409);
+    expect((await canceled.json()).error).toEqual({
+      code: "CONFLICT",
+      message: "Credential cannot be deactivated while it is in use",
+    });
     expect(
       await db.queryOne<{ status: string }>(
         "SELECT status FROM provider_credentials WHERE id = ?",

@@ -509,10 +509,37 @@ export class ProviderCredentialStore {
     return restored === 1 && retired === 1;
   }
 
-  async deactivateRotationCandidate(params: {
+  async lockCredentialReferenceRows(
+    organizationId: string,
+    connectionIds: readonly string[]
+  ): Promise<void> {
+    if (connectionIds.length === 0) return;
+    await this.db.queryMany<{ id: string }>(
+      `SELECT id FROM custody_connections
+       WHERE organization_id = ? AND provider = 'privy'
+         AND id IN (SELECT jsonb_array_elements_text(?::jsonb))
+       ORDER BY project_id, id FOR UPDATE`,
+      [organizationId, JSON.stringify(connectionIds)]
+    );
+  }
+
+  async hasActiveCredentialWallet(organizationId: string, credentialId: string): Promise<boolean> {
+    const row = await this.db.queryOne<{ id: string }>(
+      `SELECT w.id FROM custody_connections c
+       JOIN custody_wallets w ON w.custody_connection_id = c.id
+       WHERE c.organization_id = ? AND c.provider = 'privy'
+         AND c.provider_credential_id = ? AND w.status = 'active'
+       LIMIT 1`,
+      [organizationId, credentialId]
+    );
+    return row !== null;
+  }
+
+  async deactivateCredential(params: {
     organizationId: string;
-    candidateId: string;
-    predecessorId: string;
+    credentialId: string;
+    expectedStatus: "pending" | "active";
+    predecessorId: string | null;
   }): Promise<boolean> {
     return (
       (await this.db.execute(
@@ -527,8 +554,9 @@ export class ProviderCredentialStore {
              deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
          WHERE candidate.id = ?
            AND candidate.organization_id = ?
-           AND candidate.status = 'pending'
-           AND candidate.rotated_from_provider_credential_id = ?
+           AND candidate.provider = 'privy'
+           AND candidate.status = ?
+           AND candidate.rotated_from_provider_credential_id IS NOT DISTINCT FROM ?
            AND NOT EXISTS (
              SELECT 1 FROM custody_connections c
              WHERE c.provider_credential_id = candidate.id AND c.status <> 'deactivated'
@@ -540,7 +568,7 @@ export class ProviderCredentialStore {
                ON w.custody_connection_id = c.id AND w.status = 'active'
              WHERE c.provider_credential_id = candidate.id
            )`,
-        [params.candidateId, params.organizationId, params.predecessorId]
+        [params.credentialId, params.organizationId, params.expectedStatus, params.predecessorId]
       )) === 1
     );
   }
@@ -641,6 +669,59 @@ export class ProviderCredentialStore {
       ]
     );
     return rows.map((row) => row.id);
+  }
+
+  async hasActiveInstallationWallet(
+    organizationId: string,
+    projectId: string,
+    connectionId: string
+  ): Promise<boolean> {
+    return !!(await this.db.queryOne<{ id: string }>(
+      `SELECT w.id FROM custody_wallets w
+       JOIN custody_connections c ON c.id = w.custody_connection_id
+       WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
+         AND c.provider = 'privy' AND w.status = 'active'
+       LIMIT 1`,
+      [connectionId, organizationId, projectId]
+    ));
+  }
+
+  async deactivateInstallationConnection(params: {
+    organizationId: string;
+    projectId: string;
+    connectionId: string;
+    credentialId: string;
+    credentialStatus: ProviderCredentialStatus;
+    observedStatus: "failed" | "active";
+  }): Promise<boolean> {
+    return (
+      (await this.db.execute(
+        `UPDATE custody_connections c
+         SET status = 'deactivated', deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
+         WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
+           AND c.provider = 'privy' AND c.provider_credential_id = ?
+           AND c.status = ? AND c.status IN ('failed', 'active')
+           AND EXISTS (
+             SELECT 1 FROM provider_credentials pc
+             WHERE pc.id = c.provider_credential_id AND pc.organization_id = c.organization_id
+               AND pc.provider = c.provider AND pc.scope_key = c.provider_credential_scope_key
+               AND (pc.scope = 'organization' OR pc.project_id = c.project_id)
+               AND pc.status = ?
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM custody_wallets w
+             WHERE w.custody_connection_id = c.id AND w.status = 'active'
+           )`,
+        [
+          params.connectionId,
+          params.organizationId,
+          params.projectId,
+          params.credentialId,
+          params.observedStatus,
+          params.credentialStatus,
+        ]
+      )) === 1
+    );
   }
 
   async findInstallationConnection(
