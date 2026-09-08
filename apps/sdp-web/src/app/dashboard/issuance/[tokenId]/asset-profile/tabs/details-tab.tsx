@@ -165,20 +165,14 @@ export function DetailsTab({ token, form }: { token: Token; form: AssetProfileFo
           {t("DashboardIssuance.simplified.controls")}
         </h3>
         <AdvancedSettingsEditor
-          controlsOnly
           category={draft.assetCategory}
           type={draft.assetType}
           settings={draft.advancedSettings}
           onSettingsChange={(advancedSettings) => updateDraft({ advancedSettings })}
-          capacities={draft.capacities}
-          onCapacitiesChange={(capacities) => updateDraft({ capacities })}
           accessControl={draft.accessControl}
           onAccessControlChange={(accessControl) => updateDraft({ accessControl })}
-          accessControlReadOnly={isDeployed}
-          showScenarios={false}
-          settingsReadOnly={isDeployed}
+          mode={isDeployed ? "readonly" : saving || !canManageTokenAdmin ? "disabled" : "editable"}
           showErrors={showErrors}
-          disabled={saving || !canManageTokenAdmin}
         />
       </section>
     </div>

@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -191,7 +191,6 @@ interface CreateSurfaceProps {
 }
 
 function CreateSurface(props: CreateSurfaceProps) {
-  const formRef = useRef<HTMLFormElement>(null);
   const t = useTranslations();
   const router = useRouter();
   const { step, setStep, draftSaved, savingDraft, saveDraft } = props;
@@ -213,9 +212,9 @@ function CreateSurface(props: CreateSurfaceProps) {
         <div className={styles.wizardScrollRegion}>
           <div className={styles.focusGrid}>
             <form
-              ref={formRef}
+              id="issuance-draft-step"
               className={styles.stepStage}
-              onSubmit={(event) => event.preventDefault()}
+              action={step < 4 ? () => setStep(step + 1) : saveDraft}
             >
               {body}
             </form>
@@ -235,13 +234,7 @@ function CreateSurface(props: CreateSurfaceProps) {
               <ArrowLeft size={14} /> {t("DashboardIssuance.draftForm.back")}
             </button>
             {step < 4 ? (
-              <button
-                type="button"
-                className={styles.primaryButton}
-                onClick={() => {
-                  if (formRef.current?.reportValidity()) setStep(step + 1);
-                }}
-              >
+              <button type="submit" form="issuance-draft-step" className={styles.primaryButton}>
                 {t("DashboardIssuance.draftForm.continue")} <ArrowRight size={14} />
               </button>
             ) : (

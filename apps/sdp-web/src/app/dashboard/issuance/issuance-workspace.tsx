@@ -346,57 +346,11 @@ function IssuanceResults({
   );
 }
 
-export function IssuanceWorkspace({
-  assetProfilesEnabled,
-  initialQuery,
-  initialTokens,
-  initialTotal,
-  facets,
-  templates,
-  apiKeys,
-  apiBaseUrl,
-  templatesError,
-  tokensNotice,
-}: IssuanceWorkspaceProps) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const router = useRouter();
-  const isPlaygroundTab = issuanceTab === "playground";
-
-  // Search, filters, sort and paging are one server-side query; the hook owns it,
-  // mirrors it into the URL, and hands back the page it resolves to.
-  const {
-    query,
-    search,
-    setSearch,
-    updateQuery,
-    clearFilters,
-    tokens,
-    total,
-    pageCount,
-    rangeStart,
-    rangeEnd,
-    isFiltered,
-    isInitialLoading,
-    isRefreshing,
-    isLoadingNewResults,
-    isLoadingAnotherPage,
-    isSearchPending,
-    errorMessage: listFetchError,
-  } = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
-  const listErrorMessage = listFetchError ? t("DashboardIssuance.errors.unableToLoadTokens") : null;
-  // Unfiltered project count: what separates "no assets yet" from "no matches".
-  const hasTokens = facets.total > 0;
-  // The playground's picker must see the project, not the filtered page; falls
-  // back to the visible rows so it is never empty while loading.
-  const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? tokens;
-
-  // All creation entry points use the simplified full-page form.
-  const startTokenCreation = () => {
-    router.push(CREATE_DRAFT_PATH);
-  };
-
+function useIssuancePlaygroundKey(
+  apiKeys: IssuanceWorkspaceProps["apiKeys"],
+  isPlaygroundTab: boolean
+) {
+  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
   }, [apiKeys, setPlaygroundApiKeys]);
@@ -436,6 +390,62 @@ export function IssuanceWorkspace({
 
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
+
+  return playgroundApiKeyValue;
+}
+
+export function IssuanceWorkspace({
+  assetProfilesEnabled,
+  initialQuery,
+  initialTokens,
+  initialTotal,
+  facets,
+  templates,
+  apiKeys,
+  apiBaseUrl,
+  templatesError,
+  tokensNotice,
+}: IssuanceWorkspaceProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const { issuanceTab } = useDashboardWorkspace();
+  const router = useRouter();
+  const isPlaygroundTab = issuanceTab === "playground";
+
+  // Search, filters, sort and paging are one server-side query; the hook owns it,
+  // mirrors it into the URL, and hands back the page it resolves to.
+  const {
+    query,
+    search,
+    setSearch,
+    updateQuery,
+    clearFilters,
+    tokens,
+    total,
+    pageCount,
+    rangeStart,
+    rangeEnd,
+    isFiltered,
+    isInitialLoading,
+    isRefreshing,
+    isLoadingNewResults,
+    isLoadingAnotherPage,
+    isSearchPending,
+    errorMessage: listFetchError,
+  } = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
+  const listErrorMessage = listFetchError ? t("DashboardIssuance.errors.unableToLoadTokens") : null;
+  // Unfiltered project count: what separates "no assets yet" from "no matches".
+  const hasTokens = facets.total > 0;
+  // The playground's picker must see the project, not the filtered page; falls
+  // back to the visible rows so it is never empty while loading.
+  const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? tokens;
+
+  // All creation entry points use the simplified full-page form.
+  const startTokenCreation = () => {
+    router.push(CREATE_DRAFT_PATH);
+  };
+
+  const playgroundApiKeyValue = useIssuancePlaygroundKey(apiKeys, isPlaygroundTab);
 
   // Template options for the filter popover. Sourced from the project-wide facet
   // counts rather than the loaded rows, so the choices don't shrink to whatever

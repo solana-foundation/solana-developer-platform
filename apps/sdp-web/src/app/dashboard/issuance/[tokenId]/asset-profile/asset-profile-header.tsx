@@ -52,16 +52,22 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
       desktopOnly: true,
       node: <span>{t(entry.labelKey)}</span>,
     })),
-    {
-      key: "status",
-      node: (
-        <span className={cn("inline-flex items-center gap-1.5 font-medium", status.textClassName)}>
-          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", status.dotClassName)} />
-          <span className="sr-only">{t("DashboardIssuance.header.statusLabel")}</span>
-          {status.label}
-        </span>
-      ),
-    },
+    ...(token.mintAddress
+      ? [
+          {
+            key: "status",
+            node: (
+              <span
+                className={cn("inline-flex items-center gap-1.5 font-medium", status.textClassName)}
+              >
+                <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", status.dotClassName)} />
+                <span className="sr-only">{t("DashboardIssuance.header.statusLabel")}</span>
+                {status.label}
+              </span>
+            ),
+          },
+        ]
+      : []),
     ...(token.deployedAt
       ? [
           {
@@ -99,24 +105,22 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
             </div>
 
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-secondary">
-              {metaSegments
-                .filter((segment) => segment.key !== "status" || Boolean(token.mintAddress))
-                .map((segment, index) => (
-                  <span
-                    key={segment.key}
-                    className={cn(
-                      "items-center gap-2",
-                      segment.desktopOnly ? "hidden sm:inline-flex" : "inline-flex"
-                    )}
-                  >
-                    {index > 0 ? (
-                      <span aria-hidden="true" className="text-muted">
-                        &middot;
-                      </span>
-                    ) : null}
-                    {segment.node}
-                  </span>
-                ))}
+              {metaSegments.map((segment, index) => (
+                <span
+                  key={segment.key}
+                  className={cn(
+                    "items-center gap-2",
+                    segment.desktopOnly ? "hidden sm:inline-flex" : "inline-flex"
+                  )}
+                >
+                  {index > 0 ? (
+                    <span aria-hidden="true" className="text-muted">
+                      &middot;
+                    </span>
+                  ) : null}
+                  {segment.node}
+                </span>
+              ))}
             </div>
 
             <div className="hidden flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:flex">

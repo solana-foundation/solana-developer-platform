@@ -36,13 +36,11 @@ type DashboardPageConfig = {
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
-  hideTitle?: boolean;
-  hideTitleOnMobile?: boolean;
+  titleVisibility: "visible" | "desktop-only" | "screen-reader-only";
   title: string;
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  alignTitleWithTabs?: boolean;
   // Notifications ship with the asset-profiles feature (its only producer today).
   showNotifications?: boolean;
 };
@@ -179,17 +177,16 @@ export function StandardDashboardTopBar({
 export function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
-  hideTitle,
-  hideTitleOnMobile,
+  titleVisibility,
   title,
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  alignTitleWithTabs = hasHeaderTabs,
   showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
-    !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
+    titleVisibility !== "screen-reader-only" &&
+    (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
@@ -201,7 +198,7 @@ export function DashboardTopBar({
     return (
       <CenteredDashboardTopBar
         title={title}
-        hideTitleOnMobile={hideTitleOnMobile}
+        hideTitleOnMobile={titleVisibility === "desktop-only"}
         leadingContent={
           <>
             <SidebarToggle
@@ -218,9 +215,9 @@ export function DashboardTopBar({
 
   return (
     <StandardDashboardTopBar
-      hideTitle={hideTitle}
+      hideTitle={titleVisibility === "screen-reader-only"}
       title={title}
-      alignTitleWithTabs={alignTitleWithTabs}
+      alignTitleWithTabs={hasHeaderTabs}
       leadingContent={
         <>
           <SidebarToggle

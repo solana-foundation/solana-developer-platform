@@ -18,11 +18,9 @@ import {
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
 import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
-import {
-  IssuanceCreateSkeleton,
-  IssuanceDetailSkeleton,
-  IssuancePageSkeleton,
-} from "@/app/dashboard/issuance/issuance-page-skeleton";
+import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
   EarnIntegrationGuideSkeleton,
@@ -847,8 +845,13 @@ export function DashboardShell({
                 <DashboardTopBar
                   isMobileSidebarOpen={isMobileSidebarOpen}
                   setMobileSidebarOpen={setMobileSidebarOpen}
-                  hideTitle={pageConfig.hideTitle}
-                  hideTitleOnMobile={pageConfig.hideTitleOnMobile}
+                  titleVisibility={
+                    pageConfig.hideTitle
+                      ? "screen-reader-only"
+                      : pageConfig.hideTitleOnMobile
+                        ? "desktop-only"
+                        : "visible"
+                  }
                   title={pageConfig.title}
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}

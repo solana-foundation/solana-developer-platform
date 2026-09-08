@@ -113,19 +113,13 @@ describe("operations route loading states", () => {
     expect(markup).toContain("max-w-xl");
   });
 
-  it("reserves the settled issuance-detail tab rail geometry", () => {
+  it("matches the single-column detail sections instead of the retired tab rail", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-    const tabList = markup.match(
-      /<div class="([^"]*)" data-loading-tab-list="issuance-detail">([\s\S]*?)<\/div><div class="space-y-5 pt-1 sm:space-y-8">/
-    );
-    const [, tabListClasses = "", tabPlaceholders = ""] = tabList ?? [];
-
-    expect(tabList).not.toBeNull();
-    expect(tabListClasses).toContain("overflow-x-auto");
-    expect(tabListClasses).toContain("hidden");
-    expect(tabListClasses).toContain("sm:flex");
-    expect(markup).toContain("h-11 w-full rounded-lg sm:hidden");
-    expect(tabPlaceholders.match(/shrink-0/g)).toHaveLength(5);
+    expect(markup).not.toContain("data-loading-tab-list");
+    expect(markup).toContain("data-loading-header-stats");
+    expect(markup.match(/data-loading-section=/g)).toHaveLength(4);
+    expect(markup).toContain('data-loading-section="operations"');
+    expect(markup).toContain('data-loading-section="permissions"');
   });
 
   it("reserves the settled issuance-detail header shell, mark and actions", () => {
@@ -139,13 +133,13 @@ describe("operations route loading states", () => {
     expect(markup.match(/h-8 w-\d+ rounded-lg/g)).toHaveLength(2);
   });
 
-  it("reserves both identifier rows in the issuance-detail header", () => {
+  it("reserves only the public mint address in the issuance-detail header", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
 
     expect(markup).toContain('data-loading-meta-line="issuance-detail"');
-    // Mint and token id, each elided to one line with its own copy button.
+    // The internal token ID is no longer part of this screen.
     expect(markup).toContain("data-loading-address-row");
-    expect(markup).toContain("data-loading-token-id-row");
+    expect(markup).not.toContain("data-loading-token-id-row");
   });
 
   it("preserves the responsive and sticky geometry of the final routes", () => {

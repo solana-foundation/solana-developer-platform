@@ -91,6 +91,22 @@ async function fetchTemplates(
   }
 }
 
+function resolveCurrentTab(tab: string | string[] | undefined) {
+  return (Array.isArray(tab) ? tab[0] : tab) === "playground" ? "playground" : "tokens";
+}
+
+function resolveTemplatesError(
+  result: FetchResult<IssuanceTemplateView[]>,
+  t: Awaited<ReturnType<typeof getTranslations>>
+) {
+  if (result.ok) return null;
+  return t("DashboardIssuance.errors.apiRequestFailed", {
+    resource: t("DashboardIssuance.errors.templateResource"),
+    status: result.status ?? t("DashboardIssuance.errors.unavailable"),
+    error: result.error ?? t("DashboardIssuance.errors.unknown"),
+  });
+}
+
 interface IssuancePageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
@@ -112,11 +128,7 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
   const trace = createTimedTrace("dashboard.issuance.page");
 
   try {
-    const currentTab =
-      resolvedSearchParams?.tab === "playground" ||
-      (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
-        ? "playground"
-        : "tokens";
+    const currentTab = resolveCurrentTab(resolvedSearchParams?.tab);
     // Search/filter/sort/page live in the URL, so a shared or reloaded link renders
     // the same filtered page server-side that the client would have fetched.
     const listQuery = parseIssuanceListQuery(resolvedSearchParams);
@@ -143,13 +155,7 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
         )
       : tokensPage.tokens;
     const apiKeys = apiKeysResult.data ?? [];
-    const templatesError = templatesResult.ok
-      ? null
-      : t("DashboardIssuance.errors.apiRequestFailed", {
-          resource: t("DashboardIssuance.errors.templateResource"),
-          status: templatesResult.status ?? t("DashboardIssuance.errors.unavailable"),
-          error: templatesResult.error ?? t("DashboardIssuance.errors.unknown"),
-        });
+    const templatesError = resolveTemplatesError(templatesResult, t);
 
     trace.log({
       ok: true,
