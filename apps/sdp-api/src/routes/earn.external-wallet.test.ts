@@ -9,6 +9,7 @@ import {
 } from "@/db/repositories";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { badRequest } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -1145,9 +1146,33 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     await expect(auditRows("withdraw")).resolves.toHaveLength(1);
   });
 
-  it("closes the deposit intent as a failure when the submit is refused", async () => {
+  it("closes the deposit intent as a failure when the submit is refused with a 4xx", async () => {
     await seedAuth();
-    submitExternalWalletDeposit.mockRejectedValue(new Error("signature verification failed"));
+    submitExternalWalletDeposit.mockRejectedValue(badRequest("signature verification failed"));
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(400);
+
+    // A 4xx refusal is always pre-broadcast on this path, so the intent
+    // closes as a failure outcome instead of paging verification.
+    const rows = await auditRows("deposit");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "failure" });
+    expect(String(rows[0]?.metadata)).toContain("signature verification failed");
+  });
+
+  it("leaves the deposit intent unresolved on an ambiguous 5xx", async () => {
+    // The submit can throw after a successful send (the post-broadcast ledger
+    // transition failed to verify), so a non-4xx never records a failure
+    // outcome: the unresolved intent is what pages an operator to reconcile.
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(
+      new Error("Vault deposit was broadcast but its ledger transition could not be verified")
+    );
 
     const res = await post(
       "deposits",
@@ -1156,11 +1181,6 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     );
     expect(res.status).toBe(500);
 
-    // A refusal is always pre-broadcast on this path, so the intent closes as
-    // a failure outcome instead of paging verification as unresolved.
-    const rows = await auditRows("deposit");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ status: "failure" });
-    expect(String(rows[0]?.metadata)).toContain("signature verification failed");
+    await expect(auditRows("deposit")).resolves.toHaveLength(0);
   });
 });

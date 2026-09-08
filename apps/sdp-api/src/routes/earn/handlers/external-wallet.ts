@@ -76,7 +76,7 @@ import { assertStrategyDepositable } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
-  failEarnDepositAudit,
+  concludeEarnDepositAuditOnError,
   recordEarnWithdrawalAudit,
 } from "./movement-audit";
 import { decodeMovementCursor } from "./movements";
@@ -856,10 +856,11 @@ export async function createEarnExternalWalletDeposit(
       apiKeyId: auth.apiKeyId ?? null,
     });
   } catch (error) {
-    // The submit throws only before any broadcast (verification, build
-    // consumption, recording; a send error returns normally), so this is a
-    // definitive refusal: close the intent instead of paging verification.
-    await failEarnDepositAudit(c, auditIntent, error);
+    // A 4xx is a definitive pre-broadcast refusal (verification, build
+    // consumption, recording): close the intent instead of paging
+    // verification over it. Anything else stays UNRESOLVED (the submit can
+    // 5xx after a successful send; see movement-audit.ts).
+    await concludeEarnDepositAuditOnError(c, auditIntent, error);
     throw error;
   }
 

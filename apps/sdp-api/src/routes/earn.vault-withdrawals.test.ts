@@ -992,6 +992,23 @@ describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () =
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
+  it("enforces one withdraw event per movement at the database (migration 0083)", async () => {
+    // The atomic form of the backfill's existence check: two writers that
+    // both pass the SELECT still cannot append twice.
+    await seedAuth();
+    const insert = () =>
+      getDb(env)
+        .prepare(
+          `INSERT INTO audit_logs (id, organization_id, action, resource_type, resource_id, status)
+           VALUES (?, ?, 'withdraw', 'earn_movement', 'earn_movement_uq_test', 'success')`
+        )
+        .bind(`aud_${crypto.randomUUID()}`, TEST_ORG.id)
+        .run();
+
+    await insert();
+    await expect(insert()).rejects.toThrow(/unique|duplicate/i);
+  });
+
   it("backfills a missing audit on replay, exactly once", async () => {
     // The crash-window repair: the movement exists (replay) but the original
     // attempt died before its audit write. The retry writes the one missing
