@@ -794,13 +794,6 @@ export async function rotateRpcConnection(
 
   const nextCredentialId = `pcred_${crypto.randomUUID()}`;
   const secretStore = createCredentialSecretStore(c.env);
-  const stored = await secretStore.write({
-    orgId: auth.organizationId,
-    provider,
-    providerCredentialId: nextCredentialId,
-    payload: { endpointUrl: candidate.endpointUrl, apiKey: input.apiKey },
-  });
-
   const nextRetirementContext = {
     provider: "rpc_connection",
     orgId: auth.organizationId,
@@ -812,11 +805,48 @@ export async function rotateRpcConnection(
     sourceId: previous.id,
   };
   const previousStored = toStoredSecret(previous);
-  // Same ordering as a create: the incoming version exists and nothing
-  // references it, so its destruction is on record before the transaction that
-  // would make it live, and a process that dies in between leaves a queued row
-  // rather than a readable tenant key nobody knows about.
-  await queuePendingSecretVersion(c.env, stored, nextRetirementContext);
+
+  // Reserved before the write, exactly as a create does. A rotation writes a
+  // BRAND-NEW secret — a fresh credential id, never `existingSecretRef` — so
+  // the version it will create is known up front and the obligation can exist
+  // before the version does. That is what keeps the terminal orphan (a readable
+  // key with no durable record) off this path too: without it, a rotation whose
+  // post-write queue AND destroy both failed left the tenant's new key behind
+  // with nothing to collect it. Refusing here costs nothing — the backend still
+  // holds nothing and the connection carries on with the key it had.
+  const predictedVersionRef = secretStore.predictFirstVersionRef({
+    providerCredentialId: nextCredentialId,
+  });
+  if (predictedVersionRef) {
+    await reserveSecretVersionIntent(
+      c.env,
+      {
+        storageBackend: secretStore.storageBackend,
+        secretRef: null,
+        secretVersionRef: predictedVersionRef,
+      },
+      nextRetirementContext
+    );
+  }
+
+  const stored = await secretStore.write({
+    orgId: auth.organizationId,
+    provider,
+    providerCredentialId: nextCredentialId,
+    payload: { endpointUrl: candidate.endpointUrl, apiKey: input.apiKey },
+  });
+
+  // The prediction held for every backend that has versions to predict; if it
+  // did not, fall back to recording the version that was actually written and
+  // drop the reservation that named the wrong one.
+  if (stored.secretVersionRef !== predictedVersionRef) {
+    await queuePendingSecretVersion(c.env, stored, nextRetirementContext);
+    if (predictedVersionRef) {
+      await createWorkflowSecretRetirementsRepository(c.env)
+        .deleteRetirementByVersionRef(predictedVersionRef)
+        .catch(() => undefined);
+    }
+  }
 
   let rotated: Awaited<ReturnType<RpcConnectionStore["repointConnectionCredential"]>>;
   try {

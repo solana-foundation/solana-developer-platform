@@ -12,7 +12,11 @@ import { getDb } from "@/db";
 import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
-import { deactivateRpcConnection, submitRpcConnection } from "@/services/rpc-connection.service";
+import {
+  deactivateRpcConnection,
+  rotateRpcConnection,
+  submitRpcConnection,
+} from "@/services/rpc-connection.service";
 import { clearQueuedSecretVersion, queuePendingSecretVersion } from "@/services/secret-retirement";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
@@ -396,6 +400,48 @@ describe("BYOK RPC secret retirement", () => {
     );
     expect(credentials).toEqual([]);
     logError.mockRestore();
+  });
+
+  it("refuses a rotation before writing anything when the obligation cannot be reserved", async () => {
+    // A rotation writes a brand-new secret under a fresh credential id, so its
+    // version is as predictable as a create's and gets the same pre-write
+    // reservation. Without it, a rotation was the one remaining way to reach
+    // the terminal orphan through this service.
+    const { connectionId } = await seedGcpConnection("rotate_unrecordable");
+    const credentialsBefore = await getDb(appEnv).queryMany<{ id: string }>(
+      `SELECT id FROM provider_credentials WHERE organization_id = ?`,
+      [ORG_ID]
+    );
+
+    retirementQueueControl.failRecordRetirement = true;
+    gcpMock.destroyVersion.mockRejectedValue(new Error("secret manager unavailable"));
+
+    try {
+      await expect(
+        rotateRpcConnection(serviceContext(), connectionId, {
+          endpointUrl: "https://devnet.helius-rpc.com",
+          apiKey: "rotated-key-retirement",
+        })
+      ).rejects.toThrow(/durably reserved/i);
+
+      // Clean slate: no external version was written, so there is nothing to
+      // destroy and nothing that could leak...
+      expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
+      // ...and the connection still holds exactly the credential it had.
+      const credentialsAfter = await getDb(appEnv).queryMany<{ id: string }>(
+        `SELECT id FROM provider_credentials WHERE organization_id = ?`,
+        [ORG_ID]
+      );
+      expect(credentialsAfter).toHaveLength(credentialsBefore.length);
+    } finally {
+      // This connection stays live (the rotation was refused), and only one
+      // live connection per provider is allowed — so it has to go before the
+      // next test seeds its own.
+      await getDb(appEnv).execute(`DELETE FROM rpc_connections WHERE id = ?`, [connectionId]);
+      await getDb(appEnv).execute(`DELETE FROM provider_credentials WHERE id = ?`, [
+        "pcred_retire_rotate_unrecordable",
+      ]);
+    }
   });
 
   it("keeps a durable obligation when the transaction fails and the destroy also fails", async () => {
