@@ -703,6 +703,45 @@ describe("HeliusRingsService", () => {
       expect(row?.sync_cursor).toBeNull();
     });
 
+    it("refuses to re-key while a signed operation is still in flight", async () => {
+      // Completing that operation after rotation would write its slot onto the
+      // new identity via GREATEST(COALESCE(null, 0), slot) and skip the new
+      // keys' history. The signed bytes can also still land against the
+      // abandoned identity.
+      const inFlight = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-rekey-inflight" }),
+        actorContext
+      );
+      expect(inFlight.state).toBe("indexing");
+      await pause();
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      await expect(rekey(gateway, "Treasury")).rejects.toMatchObject({
+        code: "conflict",
+        message: expect.stringMatching(/not settled/),
+      });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("re-keys after the in-flight operation has settled", async () => {
+      const gateway = new InMemoryRingsGateway({
+        indexingDelayMs: 0,
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+      const svc = liveishService({ gateway });
+      const inFlight = await svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-rekey-settled" }),
+        actorContext
+      );
+      gateway.recordSubmission(OUTER_TX.signature);
+      expect((await svc.executeOperation(inFlight.id)).state).toBe("completed");
+      await pause();
+
+      const result = await rekey(foreignGateway(), "Treasury");
+      expect(result.status).toBe("ready");
+    });
+
     it("finishes a rotation that landed on chain but never reached the database", async () => {
       // Confirmation, the re-read, or the write can fail after the transaction
       // lands. The registry is then correct and the row is not, and `readIdentity`

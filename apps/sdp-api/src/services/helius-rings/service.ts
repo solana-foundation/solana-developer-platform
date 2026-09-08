@@ -21,6 +21,7 @@ import {
   type HeliusRingsErrorCode,
   isRingsIdentityMismatch,
   nextState,
+  OP_TYPES,
   RING_NAME_PATTERN,
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
@@ -36,6 +37,7 @@ import {
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createPolicyRepository,
+  createPostgresHeliusRingsOperationRepository,
   createPostgresHeliusRingsWalletRepository,
   type HeliusRingsAssetRepository,
   type HeliusRingsEventRepository,
@@ -434,18 +436,36 @@ export class HeliusRingsService {
       await withRekeyLock(
         `rings-rekey:${wallet.id}`,
         async (tx) => {
+          const txDb = asTransactionalClient(tx);
+          // An in-flight or signed-failed operation still belongs to the
+          // abandoned identity. If it later completes, advanceIndexedSlot would
+          // write that slot onto the new keys and skip their history. Refuse
+          // until it is reconciled or voided.
+          const blocking = await createPostgresHeliusRingsOperationRepository(
+            txDb
+          ).findBlockingOperation({
+            ...this.tenant,
+            walletId: wallet.id,
+            opTypes: [...OP_TYPES],
+          });
+          if (blocking) {
+            throw new HeliusRingsError(
+              "conflict",
+              `operation ${blocking.id} has not settled; reconcile or void it before re-keying this wallet`
+            );
+          }
           // Guarded by the row as it was before the registry read, so a rival
           // that slipped in while this one was reading the chain loses here
           // rather than rotating a wallet whose state it never saw. The claim
           // runs on the lock's executor so it does not check out a second
           // pool connection while this session still holds the lock.
-          const claimed = await createPostgresHeliusRingsWalletRepository(
-            asTransactionalClient(tx)
-          ).claimWalletForRekey({
-            ...this.tenant,
-            id: wallet.id,
-            expectedUpdatedAt: wallet.updated_at,
-          });
+          const claimed = await createPostgresHeliusRingsWalletRepository(txDb).claimWalletForRekey(
+            {
+              ...this.tenant,
+              id: wallet.id,
+              expectedUpdatedAt: wallet.updated_at,
+            }
+          );
           if (!claimed) {
             throw new HeliusRingsError(
               "conflict",
