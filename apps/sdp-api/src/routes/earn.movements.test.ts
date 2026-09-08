@@ -493,6 +493,61 @@ describe("GET /v1/earn/movements", () => {
       expect((await movementsJson()).movements.map((m) => m.id)).toContain(withdrawal.id);
     });
 
+    it("structurally excludes external-wallet movements (owner-signed, no custody-wallet match)", async () => {
+      // EARN-016: an owner-signed vault row carries owner_address and NULL
+      // custody_wallet_id, so the feed's vault arm (which requires a
+      // custody-wallet match) can never grant it. It is served only by the
+      // per-owner reads. Seed one beside a custody deposit and assert the feed
+      // shows the custody row and never the owner row, whatever wallet scope.
+      const mine = await seedVaultDeposit();
+      const ownerMovementId = `earn_vault_movement_${crypto.randomUUID()}`;
+      const ownerPositionId = `earn_position_${crypto.randomUUID()}`;
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO earn_positions
+               (id, organization_id, project_id, environment, provider, kind,
+                owner_address, vault_address, share_mint, token_mint, label, activated_at)
+             VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Owner vault', sdp_iso_now())`
+          )
+          .bind(
+            ownerPositionId,
+            ORG,
+            PROJECT_A,
+            "OwnerFeed11111111111111111111111111111111111",
+            "VaultFeedOwner11111111111111111111111111111",
+            SHARE_MINT,
+            TOKEN_MINT
+          ),
+        getDb(env)
+          .prepare(
+            `INSERT INTO earn_movements
+               (id, organization_id, project_id, environment, provider, execution_model,
+                direction, position_id, status, denomination, amount_requested,
+                owner_address, vault_address, signature, signed_transaction,
+                last_valid_block_height, request_id, idempotency_fingerprint)
+             VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', 'deposit', ?, 'requested',
+                     ?, '10', ?, ?, ?, 'AQ==', '12345', ?, ?)`
+          )
+          .bind(
+            ownerMovementId,
+            ORG,
+            PROJECT_A,
+            ownerPositionId,
+            TOKEN_MINT,
+            "OwnerFeed11111111111111111111111111111111111",
+            "VaultFeedOwner11111111111111111111111111111",
+            `sig_${crypto.randomUUID()}`,
+            crypto.randomUUID(),
+            `fp_${crypto.randomUUID()}`
+          ),
+      ]);
+
+      const ids = (await movementsJson()).movements.map((m) => m.id);
+      expect(ids).toContain(mine.movement.id);
+      expect(ids).not.toContain(ownerMovementId);
+    });
+
     it("excludes vault movements when the key has no in-scope signing wallet, and still shows custodial ones", async () => {
       const { withdrawal } = await seedProgramWithdrawal();
       const deposit = await seedVaultDeposit({ walletId: WALLET_A });
@@ -509,6 +564,20 @@ describe("GET /v1/earn/movements", () => {
       expect(body.movements.map((m) => m.id)).toEqual([withdrawal.id]);
       expect(body.movements.map((m) => m.id)).not.toContain(deposit.movement.id);
     });
+  });
+
+  it("has no :id detail route — the feed is collection-only (EARN-016)", async () => {
+    // Per-movement detail lives on the family reads (/vault-deposits/:id,
+    // /vault-withdrawals/:id, /external-wallet/movements/:id), never here. A
+    // guessed id must fall through to a Hono no-match 404, not resolve against
+    // the feed handler.
+    const mine = await seedVaultDeposit();
+    const res = await app.request(
+      `/v1/earn/movements/${mine.movement.id}`,
+      { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
+      env
+    );
+    expect(res.status).toBe(404);
   });
 
   it("serves the feed with no provider credentials configured (ADR 0002 exit safety)", async () => {

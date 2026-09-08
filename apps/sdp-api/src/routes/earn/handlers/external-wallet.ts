@@ -23,7 +23,11 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
 } from "@sdp/types";
-import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
+import {
+  earnDepositStyle,
+  earnWithdrawSlippageFloor,
+  isVaultDirectDepositEnabled,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnExternalWalletTransactionRow } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -704,6 +708,15 @@ export async function createEarnExternalWalletWithdrawalTransaction(
   const position = toExternalWalletHolding(positionRow, projectId);
   if (!position) {
     throw notFound("Earn external-wallet position");
+  }
+
+  // Same provider-policy exit floor as the custody withdrawal: a non-null
+  // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
+  // derived from the withdrawal preview — never an admission gate).
+  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+    throw badRequest(
+      `minAmountOut is required for this withdrawal because ${position.provider} declares a withdrawal slippage policy.`
+    );
   }
 
   // Same owner-is-the-default normalization as the deposit build.

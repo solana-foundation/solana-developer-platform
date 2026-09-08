@@ -762,6 +762,34 @@ describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
       requestId,
     });
   });
+
+  // The policy half of the wire contract (EARN-003 / PRO-1861): a provider
+  // whose `withdrawalSlippage` policy is non-null refuses a floor-less exit
+  // with a 400, while a null-policy provider stays floor-less. Both read the
+  // REAL policy table — the provider-access mock above overrides surfacing
+  // only.
+  it("refuses a floor-less exit for a provider with a withdrawal slippage policy", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "jupiter_lend" });
+
+    const res = await postVaultWithdrawal({ positionId, shares: "5" });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("minAmountOut");
+    expect(body.error.message).toContain("jupiter_lend");
+    expect(withdrawFromVault).not.toHaveBeenCalled();
+  });
+
+  it("keeps a null-policy provider's exit floor-less (kamino)", async () => {
+    await seedAuth();
+    const positionId = await seedPosition();
+
+    const res = await postVaultWithdrawal({ positionId, shares: "5" });
+
+    expect(res.status).toBe(200);
+    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+  });
 });
 
 /**
