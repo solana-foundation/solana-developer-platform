@@ -240,6 +240,18 @@ describe("Connection-owned wallet control plane", () => {
     ).toEqual({ default_custody_wallet_id: body.data.wallet.id });
   });
 
+  it("rejects Connection wallet creation before Provider access when entitlement is revoked", async () => {
+    await setPrivyEntitlement(false);
+    const before = await walletCount();
+
+    const response = await request("", "POST", { connectionId: CONNECTION_ID });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await walletCount()).toBe(before);
+  });
+
   it("fails exact create before Provider access on assertion or runtime errors", async () => {
     const missing = await request("", "POST", { connectionId: "cconn_missing" });
     expect(missing.status).toBe(404);
@@ -362,6 +374,23 @@ describe("Connection-owned wallet control plane", () => {
       walletId: DEFAULT_WALLET_ID,
     });
     expect(disabled.status).toBe(403);
+  });
+
+  it("keeps the Connection default wallet unchanged when entitlement is revoked", async () => {
+    await setPrivyEntitlement(false);
+
+    const response = await request("/default-wallet", "POST", {
+      walletId: SECOND_WALLET_ID,
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(
+      await getDb(env)
+        .prepare("SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?")
+        .bind(CONNECTION_ID)
+        .first()
+    ).toEqual({ default_custody_wallet_id: DEFAULT_WALLET_RECORD_ID });
   });
 
   it("rejects default changes while the owning Connection is unusable", async () => {
@@ -557,4 +586,11 @@ async function walletCount(): Promise<number> {
         .first<{ count: number }>()
     )?.count ?? 0
   );
+}
+
+async function setPrivyEntitlement(entitled: boolean): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+    .bind(JSON.stringify({ providerOverrides: { custody: { privy: entitled } } }), ORGANIZATION_ID)
+    .run();
 }

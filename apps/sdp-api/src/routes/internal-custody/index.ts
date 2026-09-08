@@ -11,6 +11,10 @@ import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
 import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
+import {
+  getProviderAvailability,
+  isCustodyProviderEntitled,
+} from "@/services/provider-availability.service";
 import { getProviderCredentialInstallation } from "@/services/provider-credential-installation.service";
 import { getProviderSetupDefinition } from "@/services/provider-setup-registry";
 import {
@@ -45,11 +49,10 @@ internalCustody.get("/connections", async (c) => {
     : 0;
 
   const store = new ProviderCredentialStore(getDb(c.env));
-  const { connections, total } = await store.listProjectConnectionsPage(
-    auth.organizationId,
-    projectId,
-    { limit, offset }
-  );
+  const [{ connections, total }, availability] = await Promise.all([
+    store.listProjectConnectionsPage(auth.organizationId, projectId, { limit, offset }),
+    getProviderAvailability(c.env, getDb(c.env), auth.organizationId),
+  ]);
 
   return success(c, {
     connections: connections.map((row) => ({
@@ -58,7 +61,9 @@ internalCustody.get("/connections", async (c) => {
       label: row.credential_label,
       status: row.connection_status,
       isDefault: isCustodyConnectionRuntimeEnabled(c.env, row.provider) && row.is_selected,
-      isRuntimeExecutionAllowed: isCustodyConnectionRuntimeAvailable(c.env, row.provider, row),
+      isRuntimeExecutionAllowed:
+        isCustodyConnectionRuntimeAvailable(c.env, row.provider, row) &&
+        isCustodyProviderEntitled(availability, row.provider),
       defaultCustodyWalletId: row.default_custody_wallet_id,
       createdAt: row.created_at,
       activatedAt: row.activated_at,
