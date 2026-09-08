@@ -1,4 +1,5 @@
 import type { AssetProfile, IssuanceMetadata, Token } from "@sdp/types";
+import { getTokenAccessControlMode } from "../../access-control.utils";
 import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
@@ -203,9 +204,7 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     propertyType: readString(asset, "propertyType"),
     propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
-    accessControl:
-      readAccessControl(compliance.accessControl) ||
-      (token.requiresAllowlist ? "allowlist" : "disabled"),
+    accessControl: readAccessControl(compliance.accessControl) || getTokenAccessControlMode(token),
     capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
     signingWalletId: token.signingWalletId ?? "",

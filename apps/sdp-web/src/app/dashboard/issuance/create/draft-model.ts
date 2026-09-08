@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getTokenAccessControlMode } from "../access-control.utils";
 
 export const draftSchema = z
   .object({
@@ -59,6 +60,12 @@ export function buildDraftPayload(input: DraftState): Record<string, unknown> {
     assetCategory: isStablecoin ? "stablecoin" : "generic",
     assetType: "generic",
     issuanceMetadata: {
+      compliance: {
+        accessControl: getTokenAccessControlMode({
+          template: isStablecoin ? "stablecoin" : "custom",
+          requiresAllowlist: input.allowlist,
+        }),
+      },
       asset: {
         name: input.name.trim(),
         description: input.description.trim() || undefined,
