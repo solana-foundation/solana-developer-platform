@@ -13,3 +13,13 @@
 -- movements, and lookups always go through the instance's primary key.
 ALTER TABLE private_channel_instances
     ADD COLUMN IF NOT EXISTS draining_at TEXT;
+
+-- Guard query: are there non-terminal transfers blocking instance deletion?
+-- The deposit and withdrawal tables already carry this index (migration 0040);
+-- transfers did not, because nothing counted them by instance until the
+-- deletion gate did. It runs while holding the instance row lock, so an
+-- unindexed scan of transfer history would delay both deletion and every
+-- movement waiting on that lock.
+CREATE INDEX IF NOT EXISTS idx_private_channel_transfers_instance_status
+    ON private_channel_transfers(instance_id)
+    WHERE status IN ('pending', 'submitted');

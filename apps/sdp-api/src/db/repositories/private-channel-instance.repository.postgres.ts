@@ -144,6 +144,12 @@ export function createPostgresPrivateChannelInstanceRepository(
     async updateActive(input: UpdateActiveInstanceInput) {
       const row = await db
         .prepare(
+          // draining_at is cleared here on purpose: a deletion refused for
+          // in-flight movements leaves the drain standing, and a transfer that
+          // never produced a verdict has no reconciler to settle it. Updating
+          // the connection is the operator saying "keep this instance", which
+          // is the explicit way back from a drain that would otherwise be
+          // permanent (HOO-1011).
           `UPDATE private_channel_instances
               SET gateway_url = ?,
                   chain_rpc_url = '',
@@ -151,6 +157,7 @@ export function createPostgresPrivateChannelInstanceRepository(
                   withdraw_program_id = ?,
                   escrow_instance_addr = ?,
                   auth_url = ?,
+                  draining_at = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND organization_id = ?

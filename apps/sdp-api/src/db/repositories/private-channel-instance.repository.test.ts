@@ -271,6 +271,27 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     expect(count).toBe(0);
   });
 
+  it("updateActive clears a drain so a refused deletion is not a one-way door", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const created = await repo.createActive({
+      ...scope,
+      ...SANDBOX_DEFAULTS,
+      createdBy: TEST_USER.id,
+    });
+    if (!created) throw new Error("failed to seed instance");
+
+    await repo.beginDraining(scope);
+
+    // A private-channel transfer has no reconciler, so "retry once it settles"
+    // can never come true; updating the connection is the operator's explicit
+    // way to keep the instance instead of leaving it refusing everything.
+    const updated = await repo.updateActive({ id: created.id, ...scope, ...SANDBOX_DEFAULTS });
+    expect(updated?.draining_at).toBeNull();
+
+    const deposits = createPostgresPrivateChannelDepositRepository(getDb(env));
+    expect(await deposits.createDeposit(depositInput(created.id))).not.toBeNull();
+  });
+
   it("reactivateAndUpdate clears a drain left by a refused deletion", async () => {
     const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
     const created = await repo.createActive({
