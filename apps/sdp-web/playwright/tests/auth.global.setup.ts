@@ -4,7 +4,7 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
-import { resolveClerkTestIdentity } from "../support/clerk-admin";
+import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page }) => {
   setup.setTimeout(360_000);
@@ -12,18 +12,23 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
   const identity = await resolveClerkTestIdentity();
 
   if (env.clerkPublishableKey.startsWith("pk_live_")) {
-    const response = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.clerkSecretKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ user_id: identity.userId, expires_in_seconds: 300 }),
+    const { token } = await withTransientClerkRetry(async () => {
+      const response = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.clerkSecretKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ user_id: identity.userId, expires_in_seconds: 300 }),
+      });
+      if (!response.ok) {
+        throw Object.assign(
+          new Error(`sign_in_tokens failed: ${response.status} ${await response.text()}`),
+          { status: response.status }
+        );
+      }
+      return (await response.json()) as { token: string };
     });
-    if (!response.ok) {
-      throw new Error(`sign_in_tokens failed: ${response.status} ${await response.text()}`);
-    }
-    const { token } = (await response.json()) as { token: string };
     await page.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(
       () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
