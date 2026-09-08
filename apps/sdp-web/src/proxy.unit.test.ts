@@ -96,16 +96,19 @@ describe("rejectCrossSiteWrite", () => {
   it("leaves reads to the same-origin policy", () => {
     expect(
       rejectCrossSiteWrite(
-        write("/api/dashboard/markets/earn/movements", { origin: "https://attacker.example" }, "GET")
+        write(
+          "/api/dashboard/markets/earn/movements",
+          { origin: "https://attacker.example" },
+          "GET"
+        )
       )
     ).toBeNull();
   });
 
   it("gates playground writes but not routes outside the BFF", () => {
     expect(
-      rejectCrossSiteWrite(
-        write("/api/playground/execute", { origin: "https://attacker.example" })
-      )?.status
+      rejectCrossSiteWrite(write("/api/playground/execute", { origin: "https://attacker.example" }))
+        ?.status
     ).toBe(403);
     expect(
       rejectCrossSiteWrite(
