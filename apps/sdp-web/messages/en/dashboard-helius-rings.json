@@ -6,6 +6,23 @@
     "workspace": {
       "selectPrompt": "Select a private wallet above to see its details, operations, and activity."
     },
+    "setup": {
+      "title": "Set up Helius Rings",
+      "description": "Save the Solana RPC, Photon indexer, prover, and Ring RPC shared by every Helius ring in this project.",
+      "configuredTitle": "Rings configuration",
+      "configuredDescription": "{name} is shared by every Helius ring in this project.",
+      "adminRequired": "An organization administrator must configure Helius Rings before wallets can be used.",
+      "name": "Configuration name",
+      "rpc": "Solana RPC URL",
+      "indexer": "Photon indexer URL",
+      "prover": "Prover URL",
+      "ringRpc": "Custom Ring RPC URL (optional)",
+      "allowHttp": "Allow plain HTTP for local development",
+      "save": "Test and save configuration",
+      "saving": "Checking configuration…",
+      "loading": "Loading project configuration…",
+      "failed": "The configuration could not be saved."
+    },
     "overview": {
       "loading": "Reading shielded balance…",
       "failed": "Balance could not be read. Try again from the wallet's row.",

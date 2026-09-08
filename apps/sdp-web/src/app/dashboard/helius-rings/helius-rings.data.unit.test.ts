@@ -98,7 +98,7 @@ describe("fetchRingsWalletIdentity", () => {
   });
 
   it("passes the server's reason through instead of rewriting it", async () => {
-    const reason = "Helius Rings is enabled but HELIUS_RINGS_RPC_URL is not configured";
+    const reason = "Helius Rings setup is required for this project";
     respondWith(503, { error: { code: "SERVICE_UNAVAILABLE", message: reason } });
 
     await expect(fetchRingsWalletIdentity("hrw_1")).resolves.toEqual({ error: reason });
