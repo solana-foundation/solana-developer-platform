@@ -50,7 +50,7 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withTransientClerkRetry<T>(operation: () => Promise<T>): Promise<T> {
+export async function withTransientClerkRetry<T>(operation: () => Promise<T>): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= CLERK_TRANSIENT_RETRY_DELAYS_MS.length; attempt += 1) {

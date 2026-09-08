@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.74.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.73.0...v0.74.0) (2026-09-08)
+
+### Features
+
+* HOO-997 enforce PII scrubbing across Sentry, logs, and audit metadata ([#1406](https://github.com/solana-foundation/solana-developer-platform/pull/1406)) ([007ae68](https://github.com/solana-foundation/solana-developer-platform/commit/007ae68492038ec7e8fca07ec414419225d56c94))
+* **earn:** reconcile custody vault shares against recorded positions ([#1662](https://github.com/solana-foundation/solana-developer-platform/pull/1662)) ([77b2c48](https://github.com/solana-foundation/solana-developer-platform/commit/77b2c488a065f48245b7ea16e2c2630766c896c8))
+* **earn:** Jupiter Lend USDT ([#1657](https://github.com/solana-foundation/solana-developer-platform/pull/1657)) ([d23445a](https://github.com/solana-foundation/solana-developer-platform/commit/d23445a8c60d8e85a4c350ec6dd670e6d14b561e))
+* **api:** HOO-1000 enforce tenant isolation at the database with RLS identities ([#1447](https://github.com/solana-foundation/solana-developer-platform/pull/1447)) ([aecc1b0](https://github.com/solana-foundation/solana-developer-platform/commit/aecc1b053eb38b7fa8640a33c83903a6d7fde1b2))
+
+### Bug Fixes
+
+* make egress-allowlist refusals visible to operators ([#1659](https://github.com/solana-foundation/solana-developer-platform/pull/1659)) ([e1d9734](https://github.com/solana-foundation/solana-developer-platform/commit/e1d9734350234ea38294b8a8add2d319a0814e7d))
+* **api, web:** HOO-1017 DeepSec: authorize and deduplicate private-channel value movement ([#1542](https://github.com/solana-foundation/solana-developer-platform/pull/1542)) ([6f0c3e0](https://github.com/solana-foundation/solana-developer-platform/commit/6f0c3e04e55f6f07c69ade0485a79bef0e4aa310))
+* **api:** HOO-1003 route every private-channel probe through the egress guard ([#1543](https://github.com/solana-foundation/solana-developer-platform/pull/1543)) ([77d8bdb](https://github.com/solana-foundation/solana-developer-platform/commit/77d8bdbb2a7377a0f068972f96c5fce656d2990e))
+* **api:** stamp database identity on the Clerk onboarding middleware ([#1661](https://github.com/solana-foundation/solana-developer-platform/pull/1661)) ([52e5c9a](https://github.com/solana-foundation/solana-developer-platform/commit/52e5c9ac7ba709f489534d74a46b05f439c139c7))
+* **earn:** improve wallet empty states and balance refresh ([#1655](https://github.com/solana-foundation/solana-developer-platform/pull/1655)) ([bfc9e16](https://github.com/solana-foundation/solana-developer-platform/commit/bfc9e160534871c66293da5f7b26ac9f02d27791))
+
+### Maintenance
+
+* unbreak the Doppler login and the Surfpool duplicate-submit path ([#1682](https://github.com/solana-foundation/solana-developer-platform/pull/1682)) ([5ed3de0](https://github.com/solana-foundation/solana-developer-platform/commit/5ed3de01725001435215f7ec502a046e2f5b59b1))
+* unit tests on the self-hosted dev-VM runner, packages split out ([#1575](https://github.com/solana-foundation/solana-developer-platform/pull/1575)) ([9df9838](https://github.com/solana-foundation/solana-developer-platform/commit/9df98389c8b55f6d3297dac8c56c1d0e62516c9f))
+* **deps:** bump the solana group across 1 directory with 7 updates ([#1651](https://github.com/solana-foundation/solana-developer-platform/pull/1651)) ([6ba2d7a](https://github.com/solana-foundation/solana-developer-platform/commit/6ba2d7a59ef3594e06d75a5e17b0322289f38431))
+* **deps:** bump the minor-patch group across 1 directory with 43 updates ([#1641](https://github.com/solana-foundation/solana-developer-platform/pull/1641)) ([f7e0c64](https://github.com/solana-foundation/solana-developer-platform/commit/f7e0c64960e6c63478417c7cea9696ae099df88f))
+
 ## [0.73.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.72.0...v0.73.0) (2026-09-04)
 
 ### Features

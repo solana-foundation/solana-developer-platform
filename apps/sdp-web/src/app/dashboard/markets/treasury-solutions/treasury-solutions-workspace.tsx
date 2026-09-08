@@ -1347,7 +1347,7 @@ export function TreasurySolutionsWorkspace({
       : estimatedTreasuryApy({ positions, strategies });
 
   return (
-    <DashboardWorkspaceOverviewPanel className="px-4 pt-8 pb-12 md:px-8 xl:px-9">
+    <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
         {/* Errors pass undefined so a stale SWR success never renders as a
          * live figure: unavailable must read as unavailable, not as the last

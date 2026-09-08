@@ -13,6 +13,7 @@ import {
   type RingsWallet,
   type RingsWalletIdentity,
 } from "./helius-rings.data";
+import { RekeyWalletDialog } from "./rekey-wallet-dialog";
 
 /**
  * What the last check established. `unchecked` is distinct from any outcome:
@@ -35,7 +36,14 @@ const STATUS_BADGE: Record<RingsIdentityStatus, BadgeVariant> = {
  * RPC round trip and derives key material server-side. The verdict lives in a
  * dialog because the copy and two commitments overflowed the table cell.
  */
-export function WalletIdentityCheck({ wallet }: { wallet: RingsWallet }) {
+export function WalletIdentityCheck({
+  wallet,
+  onRekeyed,
+}: {
+  wallet: RingsWallet;
+  /** Absent where no wallet list is behind this check to refresh. */
+  onRekeyed?: () => Promise<void>;
+}) {
   const t = useTranslations();
 
   const [check, setCheck] = useState<Check>({ name: "unchecked" });
@@ -101,6 +109,13 @@ export function WalletIdentityCheck({ wallet }: { wallet: RingsWallet }) {
           {check.name === "read" ? (
             <div className="mt-4">
               <Outcome identity={check.identity} />
+              {/* `foreign` is the one verdict with a way out, and this dialog is
+                  where an operator is already looking at the two addresses. */}
+              {check.identity.status === "foreign" && onRekeyed ? (
+                <div className="mt-4">
+                  <RekeyWalletDialog wallet={wallet} onRekeyed={onRekeyed} />
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

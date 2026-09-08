@@ -137,8 +137,8 @@ const OFFRAMP_PARAMS: CounterpartyRequirementsParams = {
   counterpartyId: "cpty_behavior",
   provider: "lightspark",
   direction: "offramp",
-  cryptoToken: "USDC",
-  destinationWallet: "",
+  assetRail: "usdc.solana",
+  destinationCustodyWalletId: "",
   fiatCurrency: "USD",
 };
 
@@ -186,8 +186,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       submitPromise = rendered.result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -230,8 +230,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     act(() => {
       void result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -253,8 +253,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       submitPromise = result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -276,8 +276,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       submitPromise = result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -307,8 +307,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       submitPromise = result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -331,8 +331,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       submitPromise = result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -352,8 +352,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     act(() => result.current.setField("bankAccount.clabe", "002010077777777771"));
     act(() => {
       void result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "",
         fiatCurrency: "USD",
       });
     });
@@ -373,8 +373,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
       counterpartyId: "cpty_behavior",
       provider: "bvnk",
       direction: "onramp",
-      cryptoToken: "USDC",
-      destinationWallet: "wlt_behavior",
+      assetRail: "usdc.solana",
+      destinationCustodyWalletId: "wlt_behavior",
       fiatCurrency: "USD",
     };
     const provisioning: CounterpartyRequirements = {
@@ -392,8 +392,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       submitPromise = rendered.result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "wlt_behavior",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "wlt_behavior",
         fiatCurrency: "USD",
       });
     });
@@ -428,8 +428,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
       counterpartyId: "cpty_behavior",
       provider: "bvnk",
       direction: "onramp",
-      cryptoToken: "USDC",
-      destinationWallet: "wlt_behavior",
+      assetRail: "usdc.solana",
+      destinationCustodyWalletId: "wlt_behavior",
       fiatCurrency: "USD",
     };
     const provisioning: CounterpartyRequirements = {
@@ -452,8 +452,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let firstSubmit: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       firstSubmit = rendered.result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "wlt_behavior",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "wlt_behavior",
         fiatCurrency: "USD",
       });
     });
@@ -469,8 +469,8 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     let secondSubmit: Promise<CounterpartyRequirements> | null = null;
     act(() => {
       secondSubmit = rendered.result.current.submitRequirements({
-        cryptoToken: "USDC",
-        destinationWallet: "wlt_behavior",
+        assetRail: "usdc.solana",
+        destinationCustodyWalletId: "wlt_behavior",
         fiatCurrency: "USD",
       });
     });

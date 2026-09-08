@@ -24,6 +24,8 @@ const TRANSFER: PrivateChannelTransferRow = {
   status: "submitted",
   signature: SIGNATURE,
   failure_reason: null,
+  idempotency_key: "idem_pct_event_test",
+  idempotency_fingerprint: "fp_pct_event_test",
   created_at: "2026-07-28T10:00:00.000Z",
   updated_at: "2026-07-28T10:00:00.000Z",
 };

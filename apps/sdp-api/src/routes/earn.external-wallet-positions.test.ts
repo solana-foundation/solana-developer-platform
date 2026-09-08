@@ -272,6 +272,53 @@ describe("external-wallet position reads", () => {
     expect(summary.data.summary.totalsByToken[0]).not.toHaveProperty("tokenValue");
   });
 
+  it("summary excludes a sibling project's positions and never leaks their owner addresses (EARN-028)", async () => {
+    // The summary is project-wide, and totalsByStrategy.ownerAddresses returns
+    // raw end-user addresses to any earn:read key in the project. Its only
+    // tenant boundary is the project_id predicate, so a same-org SIBLING
+    // project's owners must never appear in this key's summary.
+    const siblingProject = "prj_external_position_sibling";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Sibling', 'external-positions-sibling', 'sandbox', 'active', ?)`
+      )
+      .bind(siblingProject, ORG, USER)
+      .run();
+
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    // OWNER_B holds a position only in the sibling project.
+    await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+      projectId: siblingProject,
+    });
+
+    const body = (await (await get("/v1/earn/external-wallet/positions/summary")).json()) as {
+      data: {
+        summary: {
+          walletCount: number;
+          positionCount: number;
+          totalsByStrategy: Array<{ ownerAddresses: string[] }>;
+        };
+      };
+    };
+
+    expect(body.data.summary.walletCount).toBe(1);
+    expect(body.data.summary.positionCount).toBe(1);
+    const allOwners = body.data.summary.totalsByStrategy.flatMap((s) => s.ownerAddresses);
+    expect(allOwners).toContain(OWNER_A);
+    expect(allOwners).not.toContain(OWNER_B);
+  });
+
   it("404s an owner whose claim belongs to another organization", async () => {
     const foreignOrg = "org_external_position_foreign";
     const foreignProject = "prj_external_position_foreign";

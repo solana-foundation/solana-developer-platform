@@ -672,11 +672,18 @@ export type SwitchSigningResponse =
 export interface SignerCheckResponse {
   walletId: string;
   walletAddress: string;
+  /** Funded fee payer address used in the simulated message; nothing is spent from it. */
   feePayer: string;
   memo: string;
+  /**
+   * The custody wallet's Ed25519 signature over the check message, base58.
+   * Verified server-side and exercised in RPC simulation only — the check
+   * never broadcasts, so this signature does not exist on chain.
+   */
   signature: string;
-  slot: number;
-  blockTime: string;
+  /** Always true: signer checks run in simulation and cannot spend sponsorship. */
+  simulated: true;
+  checkedAt: string;
 }
 
 /**

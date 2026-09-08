@@ -10,6 +10,7 @@ export function gatewayStub(overrides: Partial<RingsGatewayPort>): RingsGatewayP
     provisionIdentity: unexpected("provisionIdentity"),
     provisionRing: unexpected("provisionRing"),
     readIdentity: unexpected("readIdentity"),
+    rekeyIdentity: unexpected("rekeyIdentity"),
     syncPhoton: unexpected("syncPhoton"),
     buildOperation: unexpected("buildOperation"),
     verifyIndexed: unexpected("verifyIndexed"),
