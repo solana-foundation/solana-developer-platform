@@ -1,5 +1,6 @@
 import type { Permission } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db/client";
 import app from "@/index";
 import earnRoutes from "@/routes/earn";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
@@ -261,7 +262,7 @@ describe("scope conformance: a key missing exactly one declared scope is refused
 });
 
 describe("x-project-id is inert for API-key callers, per route (EARN-027)", () => {
-  it("a sibling-project header changes nothing", async () => {
+  it("a sibling-project header changes nothing (per-route status ratchet)", async () => {
     const raw = rawKeyBySet.get(permissionSetId(ALL_EARN_SCOPES));
     if (!raw) throw new Error("missing key");
 
@@ -272,6 +273,59 @@ describe("x-project-id is inert for API-key callers, per route (EARN-027)", () =
       });
       expect(withHeader.status, route).toBe(withoutHeader.status);
     }
+  });
+
+  it("the key still sees its PINNED project's data when the header names a sibling", async () => {
+    // The status ratchet above is coarse: unseeded GETs answer 200 for either
+    // project and POSTs 400 before their handler, so it would pass even if the
+    // key started honoring the header. This asserts the tenant boundary with
+    // project-distinct data: an owner is claimed only in the pinned project, so
+    // GET /external-wallet/movements answers 200 iff the key resolved the
+    // pinned project. Were the sibling header honored, the owner has no claim
+    // there and it would 404.
+    const raw = rawKeyBySet.get(permissionSetId(["earn:read"]));
+    if (!raw) throw new Error("missing key");
+    const owner = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+    const positionId = `earn_position_${crypto.randomUUID()}`;
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO earn_positions
+             (id, organization_id, project_id, environment, provider, kind,
+              owner_address, vault_address, share_mint, token_mint, label, activated_at)
+           VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, 'vault-xpid', 'share-xpid', 'token-xpid', 'X-Project vault', sdp_iso_now())`
+        )
+        .bind(positionId, tenant.org.id, tenant.project.id, owner),
+      db
+        .prepare(
+          `INSERT INTO earn_movements
+             (id, organization_id, project_id, environment, provider, execution_model,
+              direction, position_id, status, denomination, amount_requested,
+              owner_address, vault_address, signature, signed_transaction,
+              last_valid_block_height, request_id, idempotency_fingerprint)
+           VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', 'deposit', ?, 'requested',
+                   'token-xpid', '10', ?, 'vault-xpid', ?, 'AQ==', '12345', ?, ?)`
+        )
+        .bind(
+          `earn_vault_movement_${crypto.randomUUID()}`,
+          tenant.org.id,
+          tenant.project.id,
+          positionId,
+          owner,
+          `sig_${crypto.randomUUID()}`,
+          crypto.randomUUID(),
+          `fp_${crypto.randomUUID()}`
+        ),
+    ]);
+
+    const res = await requestAsKey(`GET /external-wallet/movements?ownerAddress=${owner}`, raw, {
+      "x-project-id": tenant.siblingProject.id,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { movements: Array<{ id: string }> } };
+    expect(body.data.movements).toHaveLength(1);
   });
 });
 

@@ -1119,18 +1119,6 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
   }
   const position = toVaultHolding(positionRow);
 
-  // The exit twin of the deposit's share floor, keyed on the provider's
-  // declared policy rather than the environment: a non-null
-  // `withdrawalSlippage` answers a floor-less body with a 400 (the wire
-  // contract the strategy row and the OpenAPI description already state).
-  // Not an admission gate — a caller-fixable 400, derived from the exit
-  // preview, so it can never trap a position.
-  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
-    throw badRequest(
-      `minAmountOut is required for this vault withdrawal because ${position.provider} declares a withdrawal slippage policy.`
-    );
-  }
-
   // The signing wallet comes from the POSITION, never the body: a withdrawal
   // returns shares to tokens in the wallet that holds them, and letting a
   // caller name a different wallet would be a transfer wearing an exit's
@@ -1200,6 +1188,33 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
     },
     idempotencyKey: requestId,
   };
+}
+
+/**
+ * The exit twin of the deposit's share floor, keyed on the provider's declared
+ * policy rather than the environment: a non-null `withdrawalSlippage` answers a
+ * floor-less body with a 400 (the wire contract the strategy row and the
+ * OpenAPI description already state). Not an admission gate — a caller-fixable
+ * 400, derived from the exit preview, so it can never trap a position.
+ *
+ * Runs as a `beforeEnforce` hook, NOT in the extractor: the gate resolves a
+ * completed idempotency replay before this, so an exact retry of a recorded
+ * floor-less withdrawal returns its recorded outcome even if the provider's
+ * floor policy later flipped to non-null. The check only ever admits genuinely
+ * new work.
+ */
+export async function assertEarnVaultWithdrawalFloor(
+  _c: AppContext,
+  extraction: PolicyGateExtraction
+): Promise<void> {
+  // SAFETY: wired only beside extractEarnVaultWithdrawalPolicyCandidate in index.ts.
+  const { position } = extraction.resolved as EarnVaultWithdrawalResolved;
+  const body = extraction.body as EarnVaultWithdrawalBody;
+  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+    throw badRequest(
+      `minAmountOut is required for this vault withdrawal because ${position.provider} declares a withdrawal slippage policy.`
+    );
+  }
 }
 
 /** Resolve both durable withdrawal-group replays and pre-execution policy replays. */
