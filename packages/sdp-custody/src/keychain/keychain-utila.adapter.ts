@@ -5,6 +5,7 @@
  * Utila provides transaction signing for existing Solana wallets in Utila vaults.
  */
 
+import { redactCredentialString } from "@sdp/redaction";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { createUtilaSigner } from "@solana/keychain-utila";
 import type { Address, TransactionSigner } from "@solana/kit";
@@ -16,7 +17,6 @@ import {
   type TransactionWithLifetime,
 } from "@solana/transactions";
 import { denormalizeUtilaWalletId } from "../provider-wallet-ids";
-import { redactCredentialString } from "../redaction";
 import type { SignRequest, SignResult } from "../signing";
 import { SigningError } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";

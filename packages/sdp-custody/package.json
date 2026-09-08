@@ -38,6 +38,7 @@
     "@types/node": "26.1.2"
   },
   "dependencies": {
+    "@sdp/redaction": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",

@@ -9,10 +9,10 @@
  * - SignatureDictionary (Record<Address, SignatureBytes>) → Map<Address, Uint8Array> for SignResult
  */
 
+import { redactCredentialString } from "@sdp/redaction";
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createSignableMessage } from "@solana/signers";
-import { redactCredentialString } from "../redaction";
 import type {
   FullSigningPort,
   GeneratedKeypair,

@@ -1,8 +1,4 @@
-import {
-  redactCredentialSecrets,
-  redactCredentialString,
-  summarizeUpstreamErrorBody,
-} from "@sdp/custody";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
 import { describe, expect, it } from "vitest";
 
 describe("credential redaction", () => {
@@ -52,9 +48,54 @@ describe("credential redaction", () => {
     expect(message).not.toContain("raw-key");
   });
 
+  it("redacts a header-style credential key in its quoted form", () => {
+    // `isCredentialKey` matches object keys by suffix, so `x-api-key` is covered
+    // when it arrives as a key. Once the same headers have been stringified —
+    // a serialized `request.headers`, a provider error quoting the request it
+    // rejected — only this pass sees them, and it has to match the same way.
+    const message = redactCredentialString(
+      'upstream rejected {"x-api-key":"sk_live_supersecret","X-Signing-Secret":"whsec_1"}'
+    );
+
+    expect(message).toContain('"x-api-key":"[REDACTED]"');
+    expect(message).toContain('"X-Signing-Secret":"[REDACTED]"');
+    expect(message).not.toContain("sk_live_supersecret");
+    expect(message).not.toContain("whsec_1");
+  });
+
+  it("keeps a safe key whose name merely ends in an allowed word", () => {
+    // The prefix group must not swallow keys that are not credentials, and must
+    // not run past the `:` into a neighbouring field's value.
+    const message = redactCredentialString(
+      '{"tokenName":"USD Coin","providerName":"bvnk","walletId":"wal_01HZY"}'
+    );
+
+    expect(message).toContain('"tokenName":"USD Coin"');
+    expect(message).toContain('"providerName":"bvnk"');
+    expect(message).toContain('"walletId":"wal_01HZY"');
+  });
+
   it("keeps plain Basic/Bearer prose intact", () => {
     expect(redactCredentialString("Basic validation failed")).toBe("Basic validation failed");
     expect(redactCredentialString("Bearer access denied")).toBe("Bearer access denied");
+  });
+
+  it("leaves counterparty PII alone, because this pass feeds client-facing errors", () => {
+    // A 4xx body goes back to the tenant that submitted the data, so a
+    // validation error has to keep naming the field that failed. PII scrubbing
+    // is the telemetry pass (`scrubTelemetry` / `scrubAuditMetadata`), not this
+    // one — see docs/security/pii-scrubbing-policy.md.
+    const redacted = redactCredentialSecrets({
+      email: "jane.doe@example.com",
+      identity: { firstName: "Jane" },
+      appSecret: "privy-secret",
+    });
+
+    expect(redacted).toEqual({
+      email: "jane.doe@example.com",
+      identity: { firstName: "Jane" },
+      appSecret: "[REDACTED]",
+    });
   });
 
   it("redacts PEM blocks", () => {
@@ -63,33 +104,5 @@ describe("credential redaction", () => {
     );
 
     expect(redacted).toBe("bad pem [REDACTED]");
-  });
-});
-
-describe("upstream error summaries", () => {
-  it("keeps identifier-shaped codes from known error fields", () => {
-    expect(summarizeUpstreamErrorBody('{"errorCode":"WALLET_NOT_FOUND"}')).toBe("WALLET_NOT_FOUND");
-    expect(summarizeUpstreamErrorBody('{"errorType":"already_exists"}')).toBe("already_exists");
-    expect(summarizeUpstreamErrorBody('{"error":{"code":"InvalidCredential"}}')).toBe(
-      "InvalidCredential"
-    );
-  });
-
-  it("prefers the descriptive status over a code that repeats the HTTP status", () => {
-    expect(
-      summarizeUpstreamErrorBody('{"error":{"code":400,"status":"INVALID_ARGUMENT"}}', 400)
-    ).toBe("INVALID_ARGUMENT");
-  });
-
-  it("drops prose, oversized values, and unparsable bodies", () => {
-    expect(summarizeUpstreamErrorBody('{"error":{"code":"Bearer sk_live_abc is invalid"}}')).toBe(
-      "unavailable"
-    );
-    expect(summarizeUpstreamErrorBody(`{"code":"${"a".repeat(65)}"}`)).toBe("unavailable");
-    expect(summarizeUpstreamErrorBody('{"message":"authorization: Bearer sk_live_abc"}')).toBe(
-      "unavailable"
-    );
-    expect(summarizeUpstreamErrorBody("<html>Bearer sk_live_abc</html>")).toBe("unavailable");
-    expect(summarizeUpstreamErrorBody('["Bearer sk_live_abc"]')).toBe("unavailable");
   });
 });

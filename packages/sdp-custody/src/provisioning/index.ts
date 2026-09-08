@@ -4,10 +4,10 @@
  * Creates custody wallets for new organizations using provider APIs.
  */
 
+import { summarizeUpstreamErrorBody } from "@sdp/redaction";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
-import { summarizeUpstreamErrorBody } from "../redaction";
 import { SigningError } from "../signing";
 import {
   coinbaseCdpRequest,

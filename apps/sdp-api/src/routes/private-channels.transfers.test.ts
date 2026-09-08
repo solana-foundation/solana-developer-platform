@@ -57,6 +57,12 @@ const API_KEY = {
   raw: "sk_test_private_channel_transfers",
   prefix: "sk_test_pct",
 };
+/** Selected-scope key bound to the other member's wallet only. */
+const SCOPED_API_KEY = {
+  id: "key_pc_transfer_scoped",
+  raw: "sk_test_private_channel_transfer_scoped",
+  prefix: "sk_test_pcts",
+};
 
 const UNSAFE_RECIPIENTS = [
   ["system", "11111111111111111111111111111111"],
@@ -84,6 +90,10 @@ function apiKeyHeaders() {
     Authorization: `Bearer ${API_KEY.raw}`,
     "Content-Type": "application/json",
   };
+}
+
+function scopedApiKeyHeaders() {
+  return { ...apiKeyHeaders(), Authorization: `Bearer ${SCOPED_API_KEY.raw}` };
 }
 
 function transferDto(overrides: Partial<PrivateChannelTransfer> = {}): PrivateChannelTransfer {
@@ -124,6 +134,12 @@ async function seedRouteState(): Promise<void> {
     expiresAt: null,
   };
   await seedCachedApiKey(env, keyHash, cachedApiKey);
+  await seedCachedApiKey(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...cachedApiKey,
+    id: SCOPED_API_KEY.id,
+    walletScope: "selected",
+    walletBindings: [{ walletId: OTHER_USER_WALLET_ID, permissions: ["payments:write"] }],
+  });
 
   await db.batch([
     db
@@ -376,9 +392,13 @@ async function seedTransfer(input: {
     .run();
 }
 
+/**
+ * The route requires `Idempotency-Key`, so the default headers carry one; the
+ * tests that care about the reservation pass their own.
+ */
 async function postTransfer(
   body: Record<string, unknown>,
-  headers: Record<string, string> = sessionHeaders()
+  headers: Record<string, string> = sessionHeaders({ "Idempotency-Key": "idem_route_transfer" })
 ) {
   return app.request(
     `/v1/private-channels/channels/${CHANNEL_ID}/transfers`,
@@ -428,10 +448,26 @@ describe("Private Channels — transfer access and routes", () => {
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
-      apiKeyHeaders()
+      { ...apiKeyHeaders(), "Idempotency-Key": "idem_route_transfer" }
     );
     expect(transfer.status).toBe(200);
     expect(createChannelTransferMock).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to move funds without an idempotency key", async () => {
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      sessionHeaders()
+    );
+
+    expect(response.status).toBe(400);
+    // Nothing is resolved, signed or broadcast: without a key there is no way to
+    // tell a retry from a second spend, so the request never starts.
+    expect(createChannelTransferMock).not.toHaveBeenCalled();
   });
 
   it("lists one entry per verified wallet in the active channel, the caller's own first", async () => {
@@ -512,7 +548,24 @@ describe("Private Channels — transfer access and routes", () => {
     }
   );
 
-  it("requires the source custody wallet to be verified by the acting member", async () => {
+  it("refuses a selected-scope API key naming an enrolled wallet it is not bound to", async () => {
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      { ...scopedApiKeyHeaders(), "Idempotency-Key": "idem_route_transfer_scoped" }
+    );
+
+    expect(response.status).toBe(403);
+    expect(JSON.stringify(await response.json())).toContain(
+      "not authorized for the requested wallet"
+    );
+    expect(createChannelTransferMock).not.toHaveBeenCalled();
+  });
+
+  it("requires the source custody wallet to be enrolled under the principal", async () => {
     const response = await postTransfer({
       walletId: UNVERIFIED_WALLET_ID,
       recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
@@ -705,6 +758,9 @@ describe("Private Channels — transfer access and routes", () => {
           pubkey: RECIPIENT_ADDRESS,
         },
         amount: "1.5",
+        // The caller's header, forwarded verbatim: the service reserves against
+        // it before anything is signed.
+        idempotencyKey: "idem_route_transfer",
         gatewayAuth: expect.objectContaining({ pcUserId: ACTOR_PC_USER_ID }),
       })
     );

@@ -2,6 +2,7 @@ import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -20,8 +21,10 @@ import {
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
+  answerEarnProgramWithdrawalConflict,
   createEarnProgram,
   createEarnProgramWithdrawal,
+  extractEarnProgramWithdrawalPolicyCandidate,
   getEarnProgram,
   getEarnProgramWithdrawal,
   listEarnProgramDeposits,
@@ -83,6 +86,22 @@ earn.use("*", projectContextMiddleware());
 earn.get("/strategies", requirePermissions("earn:read"), listEarnStrategies);
 earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStrategy);
 
+// Metered quotas for the Earn reads that fan out to a PAID upstream — the
+// provider's API on a program read, Solana RPC on a live-hydrated one. A single
+// `GET /programs` page is 2N provider round trips against a shared account, so
+// an unmetered caller spends the platform's money at whatever rate it likes.
+//
+// What is deliberately NOT metered is every money-OUT route and every EXIT
+// quote: withdrawals, vault withdrawals, the external-wallet submits, and the
+// previews an exit derives its floor from. `meteredQuota` FAILS CLOSED — a
+// counter-store outage answers 503 — and a 5xx on a customer's way out of a
+// position is precisely the failure ADR 0002 exit safety rules out. A refused
+// read costs a caller a retry; a refused exit traps funds.
+//
+// Money-IN reads carry no such rule, so the deposit quote is metered.
+const EARN_PROVIDER_READ_QUOTA = { name: "earn-provider-read", actorMax: 60, orgMax: 240 } as const;
+const EARN_CHAIN_READ_QUOTA = { name: "earn-chain-read", actorMax: 30, orgMax: 120 } as const;
+
 // B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
 // every per-owner read of this surface (positions, movements, earnings) — one
 // addressing style for one concept, and no literal segment (`summary`) can
@@ -91,11 +110,13 @@ earn.get("/strategies/:strategyId", requirePermissions("earn:read"), getEarnStra
 earn.get(
   "/external-wallet/positions/summary",
   requirePermissions("earn:read"),
+  meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletPositionSummary
 );
 earn.get(
   "/external-wallet/positions",
   requirePermissions("earn:read"),
+  meteredQuota(EARN_CHAIN_READ_QUOTA),
   listEarnExternalWalletPositions
 );
 
@@ -118,6 +139,7 @@ earn.get(
 earn.get(
   "/external-wallet/earnings",
   requirePermissions("earn:read"),
+  meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletEarnings
 );
 
@@ -155,6 +177,7 @@ earn.post(
 earn.post(
   "/vault-deposit-previews",
   requirePermissions("earn:read"),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
   validateBody(earnVaultDepositPreviewSchema),
   createEarnVaultDepositPreview
 );
@@ -225,6 +248,7 @@ earn.get(
 earn.get(
   "/vault-positions",
   requirePermissions("earn:read", "wallets:read"),
+  meteredQuota(EARN_CHAIN_READ_QUOTA),
   listEarnVaultPositions
 );
 // Chain-versus-ledger reconciliation for the custody vault claims above
@@ -236,6 +260,7 @@ earn.get(
 earn.get(
   "/vault-share-reconciliation",
   requirePermissions("earn:read", "wallets:read"),
+  meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnVaultShareReconciliation
 );
 
@@ -302,31 +327,57 @@ earn.get("/movements", requirePermissions("earn:read", "wallets:read"), listEarn
 //
 // The collection is declared BEFORE the `:programId` routes so a literal
 // segment can never be captured as an id.
-earn.get("/programs", requirePermissions("earn:read"), listEarnPrograms);
+earn.get(
+  "/programs",
+  requirePermissions("earn:read"),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
+  listEarnPrograms
+);
 earn.post(
   "/programs",
   requirePermissions("earn:write"),
   validateBody(earnProgramCreateSchema),
   createEarnProgram
 );
-earn.get("/programs/:programId", requirePermissions("earn:read"), getEarnProgram);
+earn.get(
+  "/programs/:programId",
+  requirePermissions("earn:read"),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
+  getEarnProgram
+);
 earn.put(
   "/programs/:programId",
   requirePermissions("earn:write"),
   validateBody(earnProgramRetargetSchema),
   retargetEarnProgram
 );
-earn.get("/programs/:programId/deposits", requirePermissions("earn:read"), listEarnProgramDeposits);
+earn.get(
+  "/programs/:programId/deposits",
+  requirePermissions("earn:read"),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
+  listEarnProgramDeposits
+);
 earn.post(
   "/programs/:programId/withdrawal-preview",
   requirePermissions("earn:read"),
   validateBody(earnProgramWithdrawalPreviewSchema),
   previewEarnProgramWithdrawal
 );
+// The custodial payout. `earn:write` alone used to be the whole gate: the
+// route pays a caller-supplied `destinationAddress` out of the organization's
+// provider account, so without a policy gate an org's deny rules, amount and
+// asset limits, destination controls and approval requirements never ran
+// (HOO-1559). A program has no custody wallet, so the governing profile is the
+// API key's own; the extractor also refuses a wallet-scoped key, which has no
+// wallet here to be bound against.
 earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
   validateBody(earnProgramWithdrawalCreateSchema),
+  policyGate({
+    extract: extractEarnProgramWithdrawalPolicyCandidate,
+    onIdempotencyConflict: answerEarnProgramWithdrawalConflict,
+  }),
   createEarnProgramWithdrawal
 );
 earn.get(
