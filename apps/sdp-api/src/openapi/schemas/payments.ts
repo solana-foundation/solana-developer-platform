@@ -1643,14 +1643,17 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
         "SDP counterparty ID. Provider-native customer records may be resolved or created from this counterparty.",
       example: "cpty_example",
     }),
-    destinationWallet: withOpenApi(createOnrampQuoteSchemaBase.shape.destinationWallet, {
-      description:
-        "Destination wallet (`walletId` from GET /v1/wallets) or Solana address for purchased crypto.",
-      example: "privy_wallet_123",
-    }),
-    cryptoToken: withOpenApi(createOnrampQuoteSchemaBase.shape.cryptoToken, {
-      description: "Crypto token symbol or provider currency code.",
-      example: "USDC",
+    destinationCustodyWalletId: withOpenApi(
+      createOnrampQuoteSchemaBase.shape.destinationCustodyWalletId,
+      {
+        description:
+          "Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.",
+        example: "cwlt_example",
+      }
+    ),
+    assetRail: withOpenApi(createOnrampQuoteSchemaBase.shape.assetRail, {
+      description: "Canonical SDP crypto asset rail.",
+      example: "usdc.solana",
     }),
     fiatCurrency: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatCurrency, {
       description: "Fiat currency for on-ramp.",
@@ -1671,8 +1674,8 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     example: {
       provider: "moonpay",
       counterpartyId: "cpty_example",
-      destinationWallet: "privy_wallet_123",
-      cryptoToken: "USDC",
+      destinationCustodyWalletId: "cwlt_example",
+      assetRail: "usdc.solana",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     },
