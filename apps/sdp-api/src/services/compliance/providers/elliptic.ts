@@ -127,6 +127,12 @@ function readCanonicalRiskScore(
   return "unreadable";
 }
 
+/**
+ * Elliptic's own completion word for the synchronous wallet analysis. Compared
+ * case-insensitively because the field is provider prose, not an SDP enum.
+ */
+const ELLIPTIC_COMPLETED_PROCESS_STATUSES = new Set(["complete", "completed"]);
+
 /** Top level only, same reasoning as the score: never a nested rule's word. */
 function readCanonicalStringField(
   payload: Record<string, unknown>,
@@ -256,6 +262,26 @@ export class EllipticComplianceProvider implements ComplianceProvider {
 
       const riskLevel = readCanonicalStringField(result, "risk_level");
       const processStatus = readCanonicalStringField(result, "process_status");
+
+      // A screening Elliptic itself calls unfinished is NOT a verdict, exactly
+      // as with Chainalysis: a readable score alongside a non-final
+      // process_status was still reporting `ok`, so an in-progress analysis
+      // read as a pass. The field is absent on most responses, and absence
+      // stays a completed verdict — only a stated non-final status holds
+      // (HOO-1012).
+      if (
+        processStatus !== undefined &&
+        !ELLIPTIC_COMPLETED_PROCESS_STATUSES.has(processStatus.toLowerCase())
+      ) {
+        return {
+          provider: this.name,
+          status: "pending",
+          riskScore: null,
+          providerStatus: processStatus,
+          message: `Elliptic screening is not complete (process_status: ${processStatus}).`,
+          evaluatedAt,
+        };
+      }
 
       // A null canonical score is Elliptic's documented "no risk rules
       // triggered" — a completed verdict, not an absence of one.

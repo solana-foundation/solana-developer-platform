@@ -1,16 +1,19 @@
-import type { ComplianceProviderId } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, type ComplianceProviderId } from "@sdp/types";
+import { z } from "zod";
 
 export type ComplianceIntent = "transfer_destination" | "wallet_address_addition" | "unknown";
 
-export type ComplianceProviderResult = {
-  provider: ComplianceProviderId;
-  status: "ok" | "pending" | "unavailable" | "error";
-  riskScore: number | null;
-  riskLevel?: string;
-  providerStatus?: string;
-  message?: string;
-  evaluatedAt: string;
-};
+const complianceProviderResultSchema = z.object({
+  provider: z.enum(COMPLIANCE_PROVIDERS),
+  status: z.enum(["ok", "pending", "unavailable", "error"]),
+  riskScore: z.number().nullable(),
+  riskLevel: z.string().optional(),
+  providerStatus: z.string().optional(),
+  message: z.string().optional(),
+  evaluatedAt: z.string().min(1),
+});
+
+export type ComplianceProviderResult = z.infer<typeof complianceProviderResultSchema>;
 
 export const COMPLIANCE_PROVIDER_LOGOS = {
   range: "/provider-logos/range-compliance.svg",
@@ -19,22 +22,27 @@ export const COMPLIANCE_PROVIDER_LOGOS = {
   chainalysis: "/provider-logos/chainalysis-compliance.svg",
 } as const satisfies Record<ComplianceProviderId, string>;
 
-export type AddressScreeningResult = {
-  checkedAt: string;
-  providers: ComplianceProviderResult[];
-};
-
 type AddressScreeningEnvelope = {
-  data?: {
-    screening?: {
-      checkedAt?: string;
-      providers?: ComplianceProviderResult[];
-    };
-  };
+  data?: unknown;
   error?: {
     message?: string;
   };
 };
+
+/**
+ * A screening the dashboard cannot read is not an empty screening. Defaulting
+ * a malformed or missing payload to `{ providers: [] }` turned a dropped
+ * response into a silent "nothing flagged", which is the one thing a
+ * compliance surface must never show (HOO-1012).
+ */
+const addressScreeningSchema = z.object({
+  screening: z.object({
+    checkedAt: z.string().min(1),
+    providers: z.array(complianceProviderResultSchema),
+  }),
+});
+
+export type AddressScreeningResult = z.infer<typeof addressScreeningSchema>["screening"];
 
 export class ComplianceNotEnabledError extends Error {}
 
@@ -71,8 +79,10 @@ export async function screenAddressCompliance(input: {
     throw new Error(message);
   }
 
-  return {
-    checkedAt: payload.data?.screening?.checkedAt ?? new Date().toISOString(),
-    providers: payload.data?.screening?.providers ?? [],
-  };
+  const parsed = addressScreeningSchema.safeParse(payload.data);
+  if (!parsed.success) {
+    throw new Error("Compliance response could not be read.");
+  }
+
+  return parsed.data.screening;
 }

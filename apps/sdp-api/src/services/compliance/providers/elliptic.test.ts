@@ -59,6 +59,30 @@ describe("EllipticComplianceProvider", () => {
     expect(result.status).toBe("error");
   });
 
+  it("holds a readable score whose process_status says the analysis is unfinished", async () => {
+    // The score parses, so the old code answered `ok` — an in-progress
+    // analysis reading as a pass is the ambiguity this closes.
+    mockResponse({ risk_score: 1.2, risk_level: "low", process_status: "running" });
+    const result = await provider().screenAddress(INPUT);
+    expect(result).toMatchObject({
+      status: "pending",
+      riskScore: null,
+      providerStatus: "running",
+    });
+  });
+
+  it("holds a process_status it cannot recognize rather than passing on it", async () => {
+    mockResponse({ risk_score: 1.2, process_status: "queued_for_review" });
+    const result = await provider().screenAddress(INPUT);
+    expect(result.status).toBe("pending");
+  });
+
+  it("passes a completed process_status through as the verdict it is", async () => {
+    mockResponse({ risk_score: 1.2, process_status: "complete" });
+    const result = await provider().screenAddress(INPUT);
+    expect(result).toMatchObject({ status: "ok", riskScore: 1.2, providerStatus: "complete" });
+  });
+
   it("keeps the not-in-blockchain 404 as a passed check", async () => {
     mockResponse({ message: "NotInBlockchain" }, 404);
     const result = await provider().screenAddress(INPUT);
