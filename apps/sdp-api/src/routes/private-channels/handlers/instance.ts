@@ -1,4 +1,4 @@
-import { redactCredentialSecrets } from "@sdp/custody";
+import { redactCredentialSecrets } from "@sdp/redaction";
 import {
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelInstanceEnvelope,

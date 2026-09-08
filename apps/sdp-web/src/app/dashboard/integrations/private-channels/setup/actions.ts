@@ -49,6 +49,10 @@ const authProbeResultSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), latencyMs: z.number(), error: z.string() }),
 ]);
 
+const apiFieldErrorsSchema = z.object({
+  fieldErrors: z.record(z.string(), z.array(z.string()).min(1)),
+});
+
 const connectionProbeDetailsSchema = z.object({
   gateway: gatewayHealthResultSchema,
   rpc: rpcProbeResultSchema,
@@ -280,9 +284,23 @@ function interpretApiError(action: string, error: unknown): ConnectPrivateChanne
     return interpretProbeError(probe.data);
   }
 
-  // API validation 400s carry one prettified message and no field map, so a
-  // schema mismatch that slips past the client-side parse surfaces as the
-  // server message rather than per-field errors.
+  // Egress-allowlist refusals carry per-field errors; surfacing them on the
+  // fields tells the operator WHICH URL was refused instead of a generic
+  // "Invalid connection details".
+  const rejected = apiFieldErrorsSchema.safeParse(details);
+  if (rejected.success && Object.keys(rejected.data.fieldErrors).length > 0) {
+    return {
+      ok: false,
+      kind: "validation",
+      fieldErrors: Object.fromEntries(
+        Object.entries(rejected.data.fieldErrors).map(([field, messages]) => [field, messages[0]])
+      ),
+    };
+  }
+
+  // Other API validation 400s carry one prettified message and no field map,
+  // so a schema mismatch that slips past the client-side parse surfaces as
+  // the server message rather than per-field errors.
   return { ok: false, kind: "server", message: displayMessage };
 }
 

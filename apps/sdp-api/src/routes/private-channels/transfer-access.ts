@@ -1,8 +1,8 @@
 import type { PrivateChannelInstance, PrivateChannelTransferRecipientDto } from "@sdp/types";
-import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { mapPrivateChannelInstanceRow, type PrivateChannelUserRow } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound, providerUnavailable, walletNotFound } from "@/lib/errors";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSigner } from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -14,10 +14,7 @@ import {
   getPrivateChannelVerifiedWalletRepository,
 } from "./context";
 import { requireActiveInstance } from "./helpers";
-
-const SYSTEM_PROGRAM_ADDRESS = "11111111111111111111111111111111";
-// biome-ignore lint/security/noSecrets: This is the public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+import { unsafeAddresses } from "./value-movement-access";
 
 interface TransferActorContext {
   auth: ApiKeyContext;
@@ -40,28 +37,6 @@ export interface TransferCreateContext extends TransferActorContext {
    * the custody wallet and the member's verified pubkey.
    */
   signer: Awaited<ReturnType<typeof createOrgSigner>>;
-}
-
-/**
- * Program, system and connected-instance addresses, which must never be an endpoint
- * of a member transfer.
- *
- * Reaching one should be impossible: both sides of a transfer must be a wallet that
- * passed challenge-signature verification, and none of these addresses has a private
- * key — the program ids are fixed accounts and the escrow instance is a PDA. This is
- * kept as a cheap invariant on the money path rather than a filter, so a change to
- * how wallets become verified fails loudly instead of silently allowing one.
- */
-function unsafeAddresses(instance: PrivateChannelInstance): ReadonlySet<string> {
-  return new Set([
-    SYSTEM_PROGRAM_ADDRESS,
-    TOKEN_PROGRAM_ADDRESS,
-    ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-    MEMO_PROGRAM_ADDRESS,
-    instance.escrowProgramId,
-    instance.withdrawProgramId,
-    instance.escrowInstanceAddr,
-  ]);
 }
 
 async function resolveTransferActor(
@@ -130,6 +105,9 @@ export async function resolveTransferCreateContext(
   if (!wallet) {
     throw walletNotFound();
   }
+  // Same second line as the deposit/withdrawal seam: enrolment alone would let
+  // an API key bound to one wallet spend any wallet enrolled in the project.
+  assertApiKeyWalletAccess(context.auth, wallet.walletId, ["payments:write"]);
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,

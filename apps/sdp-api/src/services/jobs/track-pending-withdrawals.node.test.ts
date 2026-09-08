@@ -187,6 +187,34 @@ describe("trackPendingWithdrawals", () => {
     );
   });
 
+  it("promotes a stale pending withdrawal that carries a burn signature and asks the gateway", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w7", status: "pending", signature: "sig7", updated_at: STALE_ISO }),
+    ]);
+    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
+
+    await trackPendingWithdrawals({} as Env);
+
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w7", status: "submitted", expectedStatus: "pending" })
+    );
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w7", status: "confirmed", expectedStatus: "submitted" })
+    );
+  });
+
+  it("guards the never-broadcast fail on an absent signature", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w8", status: "pending", signature: null, updated_at: STALE_ISO }),
+    ]);
+
+    await trackPendingWithdrawals({} as Env);
+
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w8", status: "failed", expectedSignatureAbsent: true })
+    );
+  });
+
   it("settles a confirmed withdrawal when a matching devnet transfer is found on the instance ATA", async () => {
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
       withdrawalRow({ id: "w1", status: "confirmed" }),

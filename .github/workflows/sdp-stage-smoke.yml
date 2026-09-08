@@ -60,6 +60,13 @@ jobs:
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
           doppler oidc login --scope=. --identity="${{ vars.DOPPLER_STAGE_SMOKE_IDENTITY_ID }}" --token="${oidc_jwt}"
 
+      - name: Require the full smoke to be armed
+        run: |
+          if [ "${{ vars.STAGE_SMOKE_READY }}" != "true" ]; then
+            echo "::error::STAGE_SMOKE_READY is not set - a skipped stage smoke must not vouch for prod (PRO-1856)"
+            exit 1
+          fi
+
       - name: Probe API readiness
         id: health
         run: |
@@ -72,7 +79,6 @@ jobs:
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
       - name: Build web app against the target API
-        if: vars.STAGE_SMOKE_READY == 'true'
         env:
           DOPPLER_CONFIG: stg_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
@@ -81,7 +87,6 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run GCP read-only smoke
-        if: vars.STAGE_SMOKE_READY == 'true'
         id: smoke
         env:
           DOPPLER_CONFIG: stg_ci
@@ -95,7 +100,7 @@ jobs:
         env:
           DOPPLER_PROJECT: solana-developer-platform
           DOPPLER_CONFIG: stg_ci
-          SMOKE_OUTCOME: ${{ steps.smoke.outcome == 'skipped' && steps.health.outcome || steps.smoke.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: doppler run --scope=. --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh
