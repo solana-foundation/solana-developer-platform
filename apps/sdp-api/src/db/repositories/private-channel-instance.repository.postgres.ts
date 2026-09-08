@@ -24,6 +24,17 @@ function readDrainingAt(row: Record<string, unknown>): string | null {
   throw new Error("private_channel_instances.draining_at is not a nullable text value");
 }
 
+function readDrainingToken(row: Record<string, unknown>): string | null {
+  if (!("draining_token" in row)) {
+    throw new Error("private_channel_instances row is missing draining_token");
+  }
+  const value = row.draining_token;
+  if (value === null || typeof value === "string") {
+    return value;
+  }
+  throw new Error("private_channel_instances.draining_token is not a nullable text value");
+}
+
 function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
   return {
     id: row.id as string,
@@ -37,6 +48,7 @@ function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
     auth_url: row.auth_url as string,
     is_active: row.is_active as boolean,
     draining_at: readDrainingAt(row),
+    draining_token: readDrainingToken(row),
     created_by: (row.created_by ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -126,6 +138,7 @@ export function createPostgresPrivateChannelInstanceRepository(
                   auth_url = ?,
                   is_active = TRUE,
                   draining_at = NULL,
+                  draining_token = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ?
           RETURNING *`
@@ -158,6 +171,7 @@ export function createPostgresPrivateChannelInstanceRepository(
                   escrow_instance_addr = ?,
                   auth_url = ?,
                   draining_at = NULL,
+                  draining_token = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND organization_id = ?
@@ -203,6 +217,7 @@ export function createPostgresPrivateChannelInstanceRepository(
         .prepare(
           `UPDATE private_channel_instances
               SET draining_at = COALESCE(draining_at, sdp_iso_now()),
+                  draining_token = COALESCE(draining_token, gen_random_uuid()::text),
                   updated_at = sdp_iso_now()
             WHERE organization_id = ?
               AND project_id = ?
@@ -214,12 +229,12 @@ export function createPostgresPrivateChannelInstanceRepository(
       return row ? mapRow(row) : null;
     },
 
-    async lockActiveForDeletion(scope, drainingAt) {
+    async lockActiveForDeletion(scope, drainingToken) {
       // Taken inside the deletion transaction. It waits behind any admission
       // insert already holding the row and blocks later ones, so the in-flight
       // counts read after it are stable until this transaction commits.
       //
-      // Matching draining_at is what ties the deletion to ITS OWN drain: an
+      // Matching draining_token is what ties the deletion to ITS OWN drain: an
       // operator who resumed the instance in between (updateActive clears the
       // flag) must not have it deleted out from under a request that answered
       // "resumed". No row here means the drain this deletion established is
@@ -231,15 +246,15 @@ export function createPostgresPrivateChannelInstanceRepository(
              WHERE organization_id = ?
                AND project_id = ?
                AND is_active = TRUE
-               AND draining_at IS NOT DISTINCT FROM ?
+               AND draining_token IS NOT DISTINCT FROM ?
              FOR NO KEY UPDATE`
         )
-        .bind(scope.organizationId, scope.projectId, drainingAt)
+        .bind(scope.organizationId, scope.projectId, drainingToken)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
 
-    async deleteActive(scope, drainingAt) {
+    async deleteActive(scope, drainingToken) {
       // Same drain guard as the lock above, restated in the statement that
       // actually removes the row: the delete may only ever apply to the
       // instance this request drained.
@@ -249,10 +264,10 @@ export function createPostgresPrivateChannelInstanceRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND is_active = TRUE
-              AND draining_at IS NOT DISTINCT FROM ?
+              AND draining_token IS NOT DISTINCT FROM ?
           RETURNING id`
         )
-        .bind(scope.organizationId, scope.projectId, drainingAt)
+        .bind(scope.organizationId, scope.projectId, drainingToken)
         .first<{ id: string }>();
       return row !== null;
     },

@@ -14,6 +14,21 @@
 ALTER TABLE private_channel_instances
     ADD COLUMN IF NOT EXISTS draining_at TEXT;
 
+-- Identity of ONE drain episode, so a deletion can prove the drain it is acting
+-- on is still the drain it started. A timestamp cannot carry that proof: resume
+-- and re-drain inside the same millisecond would read as the same drain, and a
+-- deletion that had already been abandoned would delete the resumed instance.
+-- The CHECK keeps the two columns from ever drifting apart — a draining
+-- instance always has a token, and a resumed one never does.
+ALTER TABLE private_channel_instances
+    ADD COLUMN IF NOT EXISTS draining_token TEXT;
+
+ALTER TABLE private_channel_instances
+    DROP CONSTRAINT IF EXISTS private_channel_instances_draining_pair;
+ALTER TABLE private_channel_instances
+    ADD CONSTRAINT private_channel_instances_draining_pair
+    CHECK ((draining_at IS NULL) = (draining_token IS NULL));
+
 -- Guard query: are there non-terminal transfers blocking instance deletion?
 -- The deposit and withdrawal tables already carry this index (migration 0040);
 -- transfers did not, because nothing counted them by instance until the

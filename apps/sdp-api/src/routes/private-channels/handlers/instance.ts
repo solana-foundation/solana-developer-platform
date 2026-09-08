@@ -340,7 +340,7 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
   // The drain this request is acting on. Everything below is guarded by it, so
   // a resume that lands in between abandons this deletion instead of having it
   // delete the instance the operator just kept.
-  const drainToken = draining.draining_at;
+  const drainToken = draining.draining_token;
   if (drainToken === null) {
     throw new AppError(
       "CONFLICT",

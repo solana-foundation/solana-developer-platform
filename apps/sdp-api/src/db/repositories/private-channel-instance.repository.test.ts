@@ -281,7 +281,7 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     if (!created) throw new Error("failed to seed instance");
 
     const draining = await repo.beginDraining(scope);
-    const drainToken = draining?.draining_at ?? null;
+    const drainToken = draining?.draining_token ?? null;
     expect(drainToken).not.toBeNull();
 
     // The operator resumes between the drain and the deletion's own lock.
@@ -291,6 +291,14 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     // halves refuse — otherwise it would delete the instance the resume just
     // told the operator it had kept.
     expect(await repo.lockActiveForDeletion(scope, drainToken)).toBeNull();
+    expect(await repo.deleteActive(scope, drainToken)).toBe(false);
+    expect(await repo.getActiveByProject(scope)).not.toBeNull();
+
+    // And a LATER drain is a different episode, so the abandoned deletion stays
+    // abandoned however quickly the instance is drained again — the token is
+    // per-drain identity, not a timestamp two drains could share.
+    const redrained = await repo.beginDraining(scope);
+    expect(redrained?.draining_token).not.toBe(drainToken);
     expect(await repo.deleteActive(scope, drainToken)).toBe(false);
     expect(await repo.getActiveByProject(scope)).not.toBeNull();
   });
