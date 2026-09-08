@@ -227,8 +227,8 @@ async function createTokenDraft(page: Page, options: CreateDraftOptions): Promis
   await expect(page.getByLabel("Token name", { exact: true })).toBeVisible();
   await page.getByLabel("Token name", { exact: true }).fill(options.name);
   await page.getByLabel("Symbol", { exact: true }).fill(options.symbol);
-  await page.getByLabel("Description", { exact: true }).fill("Created by Playwright issuance e2e.");
-  await expect(page.getByLabel("Decimals", { exact: true })).toHaveValue("6");
+  await page.getByLabel(/^Description/).fill("Created by Playwright issuance e2e.");
+  await expect(page.getByLabel(/^Decimals/)).toHaveValue("6");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   await page.getByRole("button", { name: "Continue", exact: true }).click();
