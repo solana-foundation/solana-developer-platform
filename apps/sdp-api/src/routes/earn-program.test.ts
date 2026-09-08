@@ -2337,27 +2337,6 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     ]);
   }
 
-  async function readWalletOperations() {
-    const rows = await getDb(env)
-      .prepare(
-        `SELECT id, status, operation_family, operation_type, custody_wallet_id, wallet_id,
-                asset, amount, destination
-           FROM wallet_operations ORDER BY created_at ASC, id ASC`
-      )
-      .all<{
-        id: string;
-        status: string;
-        operation_family: string;
-        operation_type: string;
-        custody_wallet_id: string | null;
-        wallet_id: string;
-        asset: string | null;
-        amount: string | null;
-        destination: string | null;
-      }>();
-    return rows.results;
-  }
-
   async function countMovements(): Promise<number> {
     const row = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS total FROM earn_movements")
@@ -2400,6 +2379,27 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     expect(res.status).toBe(403);
     expect(preview).not.toHaveBeenCalled();
   });
+
+  async function readWalletOperations() {
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id, status, operation_family, operation_type, custody_wallet_id, wallet_id,
+                asset, amount, destination
+           FROM wallet_operations ORDER BY created_at ASC, id ASC`
+      )
+      .all<{
+        id: string;
+        status: string;
+        operation_family: string;
+        operation_type: string;
+        custody_wallet_id: string | null;
+        wallet_id: string;
+        asset: string | null;
+        amount: string | null;
+        destination: string | null;
+      }>();
+    return rows.results;
+  }
 
   it("still serves an unbound key, and records the payout as a governed operation", async () => {
     await seedAuth();
@@ -2839,6 +2839,27 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
  * is refused outright and the governing profile is the API key's own.
  */
 describe("Earn program — retarget authorization (HOO-1559)", () => {
+  async function readWalletOperations() {
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id, status, operation_family, operation_type, custody_wallet_id, wallet_id,
+                asset, amount, destination
+           FROM wallet_operations ORDER BY created_at ASC, id ASC`
+      )
+      .all<{
+        id: string;
+        status: string;
+        operation_family: string;
+        operation_type: string;
+        custody_wallet_id: string | null;
+        wallet_id: string;
+        asset: string | null;
+        amount: string | null;
+        destination: string | null;
+      }>();
+    return rows.results;
+  }
+
   async function seedApiKeyControlProfileForRetarget(rules: Record<string, unknown>[]): Promise<void> {
     await getDb(env).batch([
       getDb(env)
@@ -2964,19 +2985,38 @@ describe("Earn program — retarget authorization (HOO-1559)", () => {
     // A key bound to ONE custody wallet — the shape HOO-1559 refuses outright
     // on program routes, because a program has no custody wallet for a
     // binding to name and unasserted scope would reach the whole org balance.
-    const WALLET_SCOPED_KEY = {
+    const RETARGET_SCOPED_KEY = {
       id: "key_earn_program_retarget_scoped",
-      raw: "sk_tes...retgt",
+      raw: "sk_test_earn_program_retarget_scoped",
       prefix: "sk_test_epr",
     };
-    const keyHash = await hashString(WALLET_SCOPED_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
+    const scopedKeyHash = await hashString(RETARGET_SCOPED_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, scopedKeyHash, {
       ...TEST_CACHED_API_KEY,
-      id: WALLET_SCOPED_KEY.id,
+      id: RETARGET_SCOPED_KEY.id,
       walletScope: "selected",
       signingWalletId: "privy_low_value",
       walletBindings: [{ walletId: "privy_low_value", permissions: ["*"] }],
     });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        RETARGET_SCOPED_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        "Retarget wallet-scoped key",
+        RETARGET_SCOPED_KEY.prefix,
+        scopedKeyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "active"
+      )
+      .run();
 
     const res = await requestEarn(
       "PUT",
@@ -2985,7 +3025,7 @@ describe("Earn program — retarget authorization (HOO-1559)", () => {
         allocations: VALID_ALLOCATIONS,
         requestId: "5a1e9b74-2c38-4d6f-9a02-7c4e8b1d3f59",
       },
-      { Authorization: `Bearer ${WALLET_SCOPED_KEY.raw}` }
+      { Authorization: `Bearer ${RETARGET_SCOPED_KEY.raw}` }
     );
 
     expect(res.status).toBe(403);

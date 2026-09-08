@@ -31,6 +31,7 @@ import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnWithdrawalFingerprint,
   deriveProviderRequestId,
+  normalizeForFingerprint,
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
@@ -617,15 +618,45 @@ export async function extractEarnProgramRetargetPolicyCandidate(
   assertProgramKeyIsNotWalletScoped(c, "re-target Earn programs");
 
   const auth = getAuth(c);
-  // Same two accepted key sources as the handler resolves downstream; when
-  // absent the gate's own `Idempotency-Key` handling sees `null`, which the
-  // enforcement store refuses for a governed operation — an unkeyed re-target
-  // cannot open an ungoverned one. Optional key on this route stays optional.
   const callerKey = resolveCallerIdempotencyKey(
     c,
     body.requestId,
     "apply the strategy change twice"
   );
+
+  // A retry is not a new intent, so it must not open a second governed
+  // operation — one caller key would otherwise mint an approval per attempt.
+  // Mirrors the withdrawal extractor: a key that already produced an operation
+  // answers with THAT operation (still pending approval, denied, executing),
+  // and a key reused with a different allocation is a fingerprint conflict.
+  // An approval executor is deliberately exempt: its whole job is to run the
+  // re-target the original request was held for.
+  if (callerKey !== undefined && !approvedWalletOperationId(c)) {
+    // State the fingerprint exactly as the wallet-operation envelope will
+    // carry it (`createWalletOperationRawPayload` stores the extraction's
+    // rawPayload verbatim) and normalize it the way every Earn fingerprint
+    // is normalized (`normalizeForFingerprint` sorts object keys, so
+    // allocation entries compare stably), so the prior-operation lookup
+    // compares like for like: any different allocation under the same key
+    // is a conflict, a retry of the same allocations re-answers the hold.
+    const idempotencyFingerprint = JSON.stringify(
+      normalizeForFingerprint({
+        scope: "earn_program_retarget",
+        providerWalletRef: row.provider_wallet_ref,
+        allocations: body.allocations,
+      })
+    );
+    await throwOnPriorEarnPolicyOperation(c, {
+      organizationId: auth.organizationId,
+      // Organization-scoped like the payout: migration 0084's unique index is
+      // (organization, idempotency_key), so the lookup must match that scope
+      // or a sibling project's retry would mint a second approval.
+      scope: { kind: "organization" },
+      idempotencyKey: callerKey,
+      idempotencyFingerprint,
+      operationNoun: "program retarget",
+    });
+  }
 
   return {
     candidate: {
@@ -660,6 +691,13 @@ export async function extractEarnProgramRetargetPolicyCandidate(
     body,
     resolved: { row, client, auth },
     rawPayload: {
+      idempotencyFingerprint: JSON.stringify(
+        normalizeForFingerprint({
+          scope: "earn_program_retarget",
+          providerWalletRef: row.provider_wallet_ref,
+          allocations: body.allocations,
+        })
+      ),
       allocations: body.allocations,
       ...(callerKey !== undefined && { requestId: body.requestId }),
       ...(c.req.header(IDEMPOTENCY_KEY_HEADER) !== undefined && {
