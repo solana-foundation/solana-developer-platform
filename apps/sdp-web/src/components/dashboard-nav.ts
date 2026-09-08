@@ -9,7 +9,9 @@ import {
   CoinsIcon,
   FileTextIcon,
   KeyRoundIcon,
+  LandmarkIcon,
   LayoutDashboardIcon,
+  PercentIcon,
   ReceiptTextIcon,
   RepeatIcon,
   ShieldCheckIcon,
@@ -139,9 +141,9 @@ export function getPaymentsActions(
 }
 
 /**
- * Markets sub-destinations. Treasury and Embedded Yield are Earn-backed and
- * share its gate; DvP is the first sub-module with a flag of its own, so an org
- * can have one without the other.
+ * Markets sub-destinations. Treasury Solutions is always listed; Embedded Yield
+ * is Earn-backed and shares its gate; DvP is the first sub-module with a flag of
+ * its own, so an org can have one without the other.
  */
 export function getMarketsActions(
   t: ReturnType<typeof useTranslations>,
@@ -149,15 +151,17 @@ export function getMarketsActions(
   dvpEnabled: boolean
 ): SubNavItem[] {
   return [
+    {
+      label: t("Shared.dashboardShell.treasurySolutions"),
+      href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
+      icon: LandmarkIcon,
+    },
     ...(earnEnabled
       ? [
           {
-            label: t("Shared.dashboardShell.treasurySolutions"),
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
-          },
-          {
             label: t("Shared.dashboardShell.earnProgram"),
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            icon: PercentIcon,
           },
         ]
       : []),

@@ -137,7 +137,8 @@ export function useOnchainSendWizard({
     const nextWallet = liveWallets.find((wallet) => wallet.id === walletId) ?? null;
     const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
     if (!nextAssets.some((asset) => asset.value === fields.asset)) {
-      setField("asset", nextAssets[0]?.value ?? "");
+      const firstAsset = nextAssets[0];
+      setField("asset", firstAsset === undefined ? "" : firstAsset.value);
     }
   };
 

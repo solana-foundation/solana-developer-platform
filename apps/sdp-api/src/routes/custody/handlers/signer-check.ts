@@ -1,16 +1,19 @@
 import { SigningError } from "@sdp/custody/signing";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
+import { createRpc, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getAddressEncoder,
+  getBase58Decoder,
   getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  verifySignature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getDb } from "@/db";
@@ -26,15 +29,27 @@ import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 
 // biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
-const KORA_MEMO_ALLOWED_PROGRAM_HINT =
-  "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
 
-function isKoraMemoProgramPolicyError(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("memo") &&
-    (normalized.includes("allowed list") || normalized.includes("not in the allowed list"))
+/**
+ * Whether `signature` is the custody wallet's own valid Ed25519 signature over
+ * the compiled check message. The custody adapter returning bytes is not the
+ * same as the custody adapter returning a WORKING signature, and this check
+ * exists to answer the second question.
+ */
+async function isValidWalletSignature(
+  walletAddress: Address,
+  signature: SignatureBytes,
+  messageBytes: Uint8Array
+): Promise<boolean> {
+  const publicKeyBytes = getAddressEncoder().encode(walletAddress);
+  const publicKey = await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array(publicKeyBytes),
+    "Ed25519",
+    true,
+    ["verify"]
   );
+  return verifySignature(publicKey, signature, messageBytes);
 }
 
 export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSchema>) => {
@@ -52,6 +67,11 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
   const memo = `SDP signer check ${crypto.randomUUID()}`;
 
   try {
+    // The sponsorship port supplies only the fee payer ADDRESS, so the
+    // simulated message has a funded payer. The check never calls signAndSend:
+    // a signer check is diagnostics, and diagnostics must not be able to spend
+    // sponsorship — the transaction below is verified locally and in RPC
+    // simulation, and is never broadcast.
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer, rpcTarget] = await Promise.all([
       createOrgSigner(c.env, auth.organizationId, auth.projectId, resolvedWalletId),
@@ -98,16 +118,33 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     );
 
     const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+    const walletSignature = partiallySigned.signatures[signer.address];
+    if (!walletSignature) {
+      throw new AppError(
+        "TRANSACTION_FAILED",
+        "Custody signer did not produce a signature for the check message"
+      );
+    }
+    const signatureValid = await isValidWalletSignature(
+      signer.address,
+      walletSignature,
+      new Uint8Array(partiallySigned.messageBytes)
+    );
+    if (!signatureValid) {
+      throw new AppError(
+        "TRANSACTION_FAILED",
+        "Custody signer produced an invalid signature for the check message"
+      );
+    }
+
     const txEncoder = getTransactionEncoder();
     const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-    const signature = await feePayment.signAndSend(txBytes);
-
-    const confirmation = await confirmTransaction(rpc, signature, {
-      commitment: "confirmed",
-    });
-
-    if (confirmation.err) {
-      throw new AppError("TRANSACTION_FAILED", "Memo signer check transaction failed on-chain");
+    const simulation = await simulateTransaction(rpc, txBytes);
+    if (!simulation.success) {
+      throw new AppError(
+        "TRANSACTION_FAILED",
+        `Memo signer check simulation failed: ${simulation.error ?? "unknown error"}`
+      );
     }
 
     const response: SignerCheckResponse = {
@@ -115,9 +152,9 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       walletAddress: signer.address,
       feePayer,
       memo,
-      signature,
-      slot: Number(confirmation.slot),
-      blockTime: new Date().toISOString(),
+      signature: getBase58Decoder().decode(walletSignature),
+      simulated: true,
+      checkedAt: new Date().toISOString(),
     };
 
     return success(c, response);
@@ -125,13 +162,6 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     if (error instanceof FeePaymentError) {
       if (error.code === "RATE_LIMITED") {
         throw new AppError("RATE_LIMITED", `Kora rate limit exceeded: ${error.message}`);
-      }
-
-      if (isKoraMemoProgramPolicyError(error.message)) {
-        throw new AppError(
-          "BAD_REQUEST",
-          `Kora rejected signer-check transaction: ${error.message}. ${KORA_MEMO_ALLOWED_PROGRAM_HINT}`
-        );
       }
 
       throw new AppError(
@@ -145,18 +175,10 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     }
 
     if (error instanceof Error) {
-      if (isKoraMemoProgramPolicyError(error.message)) {
-        throw new AppError(
-          "BAD_REQUEST",
-          `Kora rejected signer-check transaction: ${error.message}. ${KORA_MEMO_ALLOWED_PROGRAM_HINT}`
-        );
-      }
-
       const message = error.message.toLowerCase();
       if (
         message.includes("kora") ||
         message.includes("fee payer") ||
-        message.includes("sign and send") ||
         message.includes("internal error; reference")
       ) {
         throw new AppError(

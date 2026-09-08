@@ -13,6 +13,7 @@ export const WALLET_OPERATION_TYPES = [
   // reclaim get it back.
   "dvp_fund",
   "dvp_settle",
+  "earn_program_withdrawal",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "issuance_burn_execute",

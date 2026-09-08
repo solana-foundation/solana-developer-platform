@@ -39,7 +39,7 @@ export interface CustodyWalletOption {
 /**
  * Private wallets card: the create form, the wallets table, and row selection.
  * Owns its own create-form state; the parent only supplies the wallet list and
- * an `onCreated` callback to refresh.
+ * an `onWalletsChanged` callback to refresh.
  */
 export function PrivateWalletsCard({
   wallets,
@@ -48,7 +48,7 @@ export function PrivateWalletsCard({
   selectedWalletId,
   onSelect,
   balancesTick,
-  onCreated,
+  onWalletsChanged,
 }: {
   wallets: readonly RingsWallet[];
   custodyWallets: readonly CustodyWalletOption[];
@@ -56,7 +56,7 @@ export function PrivateWalletsCard({
   selectedWalletId: string | null;
   onSelect: (walletId: string) => void;
   balancesTick: number;
-  onCreated: () => Promise<void>;
+  onWalletsChanged: () => Promise<void>;
 }) {
   const t = useTranslations();
 
@@ -90,8 +90,8 @@ export function PrivateWalletsCard({
     } finally {
       setCreating(false);
     }
-    await onCreated();
-  }, [selectedCustodyWallet, walletName, onCreated, t]);
+    await onWalletsChanged();
+  }, [selectedCustodyWallet, walletName, onWalletsChanged, t]);
 
   return (
     <Card className="min-w-0">
@@ -190,6 +190,7 @@ export function PrivateWalletsCard({
                     custodyName={custodyLabel(wallet.sdpWalletId)}
                     onSelect={() => onSelect(wallet.id)}
                     balancesTick={balancesTick}
+                    onWalletsChanged={onWalletsChanged}
                   />
                 ))}
               </TableBody>
@@ -207,12 +208,14 @@ function PrivateWalletRow({
   custodyName,
   onSelect,
   balancesTick,
+  onWalletsChanged,
 }: {
   wallet: RingsWallet;
   selected: boolean;
   custodyName: string;
   onSelect: () => void;
   balancesTick: number;
+  onWalletsChanged: () => Promise<void>;
 }) {
   const t = useTranslations();
   return (
@@ -233,14 +236,23 @@ function PrivateWalletRow({
             <span className="text-sm text-secondary">
               {t("DashboardHeliusRings.wallets.shieldedAddressPending")}
             </span>
-            {wallet.status === "pending" ? <WalletIdentityCheck wallet={wallet} /> : null}
+            {/* Paused counts as well as pending: a re-key claims the row before
+                it rotates, so a failed rotation leaves a wallet paused with no
+                address, and this check is where an operator sees why. */}
+            {wallet.status === "pending" || wallet.status === "paused" ? (
+              <WalletIdentityCheck wallet={wallet} onRekeyed={onWalletsChanged} />
+            ) : null}
           </div>
         ) : (
           <ShieldedAddress address={wallet.shieldedAddress} />
         )}
       </TableCell>
       <TableCell className="min-w-0 align-top">
-        <ShieldedBalanceCard wallet={wallet} refreshTick={balancesTick} />
+        <ShieldedBalanceCard
+          wallet={wallet}
+          refreshTick={balancesTick}
+          onRekeyed={onWalletsChanged}
+        />
       </TableCell>
       <TableCell>
         <Badge variant={WALLET_BADGE[wallet.status]}>

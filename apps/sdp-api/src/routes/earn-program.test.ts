@@ -34,16 +34,20 @@ vi.mock("@sdp/types", async (importOriginal) => {
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
+  createPostgresPolicyRepository,
   type EarnProviderWalletRow,
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
+  WalletOperationIdempotencyConflictError,
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
+import { createTenantScope } from "@/lib/tenant-scope";
+import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_earn_program",
@@ -82,6 +86,22 @@ const TEST_PRODUCTION_PROJECT = {
   slug: "test-earn-program-project-prod",
 };
 const TEST_SESSION_ID = "ses_earn_program";
+
+/**
+ * A second sandbox project in the SAME organization, with its own key. Programs
+ * are resolved per (organization, environment), so a sibling project addresses
+ * the very same program — which is how a payout's idempotency key can arrive
+ * under two project scopes.
+ */
+const TEST_SIBLING_PROJECT = {
+  id: "prj_test_earn_program_sibling",
+  slug: "test-earn-program-project-sibling",
+};
+const TEST_SIBLING_API_KEY = {
+  id: "key_earn_program_sibling",
+  raw: "sk_test_earn_program_sibling",
+  prefix: "sk_test_eps",
+};
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
@@ -235,6 +255,49 @@ async function seedSessionAuth(): Promise<void> {
          VALUES (?, ?, ?, 'session', ?)`
       )
       .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+  ]);
+}
+
+/** Sibling sandbox project in TEST_ORG, with an api_admin key of its own. */
+async function seedSiblingProjectAuth(): Promise<void> {
+  const keyHash = await hashString(TEST_SIBLING_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_SIBLING_API_KEY.id,
+    projectId: TEST_SIBLING_PROJECT.id,
+  });
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+      )
+      .bind(
+        TEST_SIBLING_PROJECT.id,
+        TEST_ORG.id,
+        "Sibling Project",
+        TEST_SIBLING_PROJECT.slug,
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TEST_SIBLING_API_KEY.id,
+        TEST_ORG.id,
+        TEST_SIBLING_PROJECT.id,
+        TEST_USER.id,
+        "Earn Program Sibling Key",
+        TEST_SIBLING_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "active"
+      ),
   ]);
 }
 
@@ -2158,5 +2221,557 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
       expect(res.status).toBe(404);
     });
+  });
+});
+
+/**
+ * HOO-1559. `POST /programs/:programId/withdrawals` pays a caller-supplied
+ * destination out of the organization's provider account. It used to be gated
+ * on `earn:write` alone: no wallet binding was asserted and no policy ran, so
+ * a selected-scope key bound to one low-value wallet could drain the whole
+ * program to any address, and an organization's deny rules, limits, destination
+ * controls and approval requirements were never consulted.
+ *
+ * A program is a provider ACCOUNT, not a custody wallet, so there is nothing
+ * for a binding to name — a wallet-scoped key is refused outright instead —
+ * and the governing profile is the API key's own.
+ */
+describe("Earn program — withdrawal authorization (HOO-1559)", () => {
+  const WALLET_SCOPED_KEY = {
+    id: "key_earn_program_scoped",
+    raw: "sk_test_earn_program_scoped",
+    prefix: "sk_test_eps",
+  };
+
+  const withdrawBody = (extra: Record<string, unknown> = {}) => ({
+    requestId: crypto.randomUUID(),
+    amountUsd: "25.50",
+    token: "usdc",
+    destinationAddress: SOLANA_DESTINATION,
+    ...extra,
+  });
+
+  /**
+   * A key bound to ONE wallet, which is exactly the shape the old gate ignored.
+   * The binding names a custody wallet that has nothing to do with the program:
+   * that is the point — the program has no custody wallet at all.
+   */
+  async function seedWalletScopedKey(): Promise<void> {
+    const keyHash = await hashString(WALLET_SCOPED_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      id: WALLET_SCOPED_KEY.id,
+      walletScope: "selected",
+      signingWalletId: "privy_low_value",
+      walletBindings: [{ walletId: "privy_low_value", permissions: ["*"] }],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        WALLET_SCOPED_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        "Wallet-scoped key",
+        WALLET_SCOPED_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "active"
+      )
+      .run();
+  }
+
+  function requestAsWalletScopedKey(method: string, path: string, body?: Record<string, unknown>) {
+    return app.request(
+      path,
+      {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${WALLET_SCOPED_KEY.raw}`,
+        },
+        ...(body !== undefined && { body: JSON.stringify(body) }),
+      },
+      env
+    );
+  }
+
+  /** An ACTIVE control profile on the test key: profile + revision + activation. */
+  async function seedApiKeyControlProfile(params: {
+    rules: Record<string, unknown>[];
+    defaultAction?: string;
+  }): Promise<void> {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles
+             (id, organization_id, project_id, api_key_id, name, status)
+           VALUES (?, ?, ?, ?, ?, 'active')`
+        )
+        .bind("akcp_earn_program", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Earn controls"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profile_revisions
+             (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
+           VALUES (?, ?, 1, ?::jsonb, ?, ?, ?)`
+        )
+        .bind(
+          "akcpr_earn_program_1",
+          "akcp_earn_program",
+          JSON.stringify(params.rules),
+          params.defaultAction ?? "allow",
+          TEST_USER.id,
+          "2026-09-07T00:00:00.000Z"
+        ),
+      getDb(env)
+        .prepare(
+          "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
+        )
+        .bind("akcpr_earn_program_1", "2026-09-07T00:00:00.000Z", "akcp_earn_program"),
+    ]);
+  }
+
+  async function readWalletOperations() {
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT id, status, operation_family, operation_type, custody_wallet_id, wallet_id,
+                asset, amount, destination
+           FROM wallet_operations ORDER BY created_at ASC, id ASC`
+      )
+      .all<{
+        id: string;
+        status: string;
+        operation_family: string;
+        operation_type: string;
+        custody_wallet_id: string | null;
+        wallet_id: string;
+        asset: string | null;
+        amount: string | null;
+        destination: string | null;
+      }>();
+    return rows.results;
+  }
+
+  async function countMovements(): Promise<number> {
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS total FROM earn_movements")
+      .first<{ total: number }>();
+    return row?.total ?? 0;
+  }
+
+  it("refuses a wallet-scoped key on the payout, before the provider is driven", async () => {
+    await seedAuth();
+    await seedWalletScopedKey();
+    const program = await seedProgramWallet();
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+
+    const res = await requestAsWalletScopedKey(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      withdrawBody()
+    );
+
+    expect(res.status).toBe(403);
+    expect(createWithdrawal).not.toHaveBeenCalled();
+    // Nothing was intended either: the refusal precedes the ledger insert.
+    await expect(countMovements()).resolves.toBe(0);
+  });
+
+  it("refuses a wallet-scoped key on the liquidity preview it shares a chain with", async () => {
+    await seedAuth();
+    await seedWalletScopedKey();
+    const program = await seedProgramWallet();
+    const preview = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal");
+
+    const res = await requestAsWalletScopedKey(
+      "POST",
+      programPath(program.id, "/withdrawal-preview"),
+      { token: "usdc" }
+    );
+
+    expect(res.status).toBe(403);
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("still serves an unbound key, and records the payout as a governed operation", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
+      WITHDRAWAL
+    );
+
+    const res = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      withdrawBody({ requestId: "1d7f9a30-4c21-4f0e-9f66-2b8a51c7e0d4" })
+    );
+
+    expect(res.status).toBe(201);
+    // The audit row is the proof the gate ran at all: no custody wallet (a
+    // program is a provider account) and the provider wallet as the identity a
+    // destination or amount rule is read against.
+    expect(await readWalletOperations()).toMatchObject([
+      {
+        status: "evaluated",
+        operation_family: "program",
+        operation_type: "earn_program_withdrawal",
+        custody_wallet_id: null,
+        wallet_id: WALLET_REF,
+        asset: "usdc",
+        amount: "25.50",
+        destination: SOLANA_DESTINATION,
+      },
+    ]);
+  });
+
+  it("denies a destination the key's policy forbids, before the provider is driven", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    await seedApiKeyControlProfile({
+      rules: [
+        {
+          id: "destination-allowlist",
+          kind: "destination",
+          allowlist: ["11111111111111111111111111111111"],
+          action: "allow",
+        },
+      ],
+    });
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+
+    const res = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      withdrawBody({ requestId: "6c2d1b84-3f57-4a0d-9d2b-7e41f5a9c308" })
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string; details: { decision: string } } };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.details.decision).toBe("deny");
+
+    // The whole point: refused BEFORE the payout, and with no intent recorded.
+    expect(createWithdrawal).not.toHaveBeenCalled();
+    await expect(countMovements()).resolves.toBe(0);
+  });
+
+  it("holds a payout the policy requires approval for, and a retry re-answers the same hold", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    await seedApiKeyControlProfile({
+      rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
+    });
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    const body = withdrawBody({ requestId: "b5a0c9e2-8d14-4b73-9c5f-0e6a2d8f4713" });
+
+    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(held.status).toBe(202);
+
+    // A retry of a held request must answer with the SAME hold. Opening a
+    // second approval per retry would let a caller manufacture approvals, and
+    // an approver deciding one of several duplicates could pay out twice.
+    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(retried.status).toBe(202);
+
+    expect(createWithdrawal).not.toHaveBeenCalled();
+    await expect(countMovements()).resolves.toBe(0);
+    const operations = await readWalletOperations();
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ status: "pending_approval" });
+  });
+
+  it("lets only one governed operation exist per payout, across projects", async () => {
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    const program = await seedProgramWallet();
+
+    const requestId = deriveProviderRequestId(
+      ["earn_program_withdrawal", program.provider_wallet_ref],
+      "4d9a1c07-6b3e-4f52-8a7d-1c0b5e9f3a26"
+    );
+    const operation = {
+      organizationId: TEST_ORG.id,
+      custodyWalletId: null,
+      walletId: program.provider_wallet_ref,
+      operationFamily: "program" as const,
+      operationType: "earn_program_withdrawal" as const,
+      status: "pending_approval" as const,
+      idempotencyKey: requestId,
+    };
+
+    const inProject = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const inSibling = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_SIBLING_PROJECT.id })
+    );
+
+    const won = await inProject.createWalletOperation({
+      ...operation,
+      projectId: TEST_PROJECT.id,
+    });
+    expect(won).not.toBeNull();
+
+    // The concurrent case the route's prior-operation check cannot bind: both
+    // attempts see no prior record, so the database decides. A sibling project
+    // must not be able to open a second approval for one provider payout.
+    await expect(
+      inSibling.createWalletOperation({ ...operation, projectId: TEST_SIBLING_PROJECT.id })
+    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
+
+    await expect(
+      inProject.createWalletOperation({ ...operation, projectId: TEST_PROJECT.id })
+    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
+
+    const operations = await readWalletOperations();
+    expect(operations).toHaveLength(1);
+  });
+
+  it("re-answers the same hold when the retry arrives under a sibling project", async () => {
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    const program = await seedProgramWallet();
+    await seedApiKeyControlProfile({
+      rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
+    });
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    const body = withdrawBody({ requestId: "0f3a7c19-52d4-4a8e-b1c6-9d0e5f2a8b47" });
+
+    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    expect(held.status).toBe(202);
+
+    // A program is addressed per (organization, environment) and its payout
+    // ledger is keyed by organization + provider wallet + request id, so the
+    // hold must answer the same key from any project in the organization. A
+    // project-scoped lookup would miss it and open a SECOND approval for one
+    // payout — two approvers, each able to release it.
+    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
+      Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}`,
+    });
+    expect(retried.status).toBe(202);
+
+    expect(createWithdrawal).not.toHaveBeenCalled();
+    await expect(countMovements()).resolves.toBe(0);
+    const operations = await readWalletOperations();
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({ status: "pending_approval" });
+  });
+});
+
+/**
+ * The two halves of HOO-1559 that only fail once the gate exists: the
+ * ownership widening it needed, and the approval path it opened.
+ */
+describe("Earn program — governed payout, execution and blast radius (HOO-1559)", () => {
+  it("admits the program as an operation target for its OWN type only", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    const repo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const candidate = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: null,
+      walletId: program.provider_wallet_ref,
+      apiKeyId: TEST_API_KEY.id,
+      actor: null,
+      source: "test",
+      asset: "usdc",
+      amount: "1.00",
+      destination: SOLANA_DESTINATION,
+      context: {},
+      providerExtensions: {},
+      rawPayload: {},
+      idempotencyKey: null,
+    } as const;
+
+    await expect(
+      repo.createWalletOperation({
+        ...candidate,
+        operationFamily: "program",
+        operationType: "earn_program_withdrawal",
+      })
+    ).resolves.not.toBeNull();
+
+    // Another family naming the same provider wallet must NOT inherit the
+    // admission: proving ownership through an Earn link row is a statement
+    // about Earn programs, not a second way to claim any target at all.
+    await expect(
+      repo.createWalletOperation({
+        ...candidate,
+        idempotencyKey: null,
+        operationFamily: "issuance",
+        operationType: "issuance_mint_execute",
+      })
+    ).resolves.toBeNull();
+  });
+
+  /**
+   * The approval executor replays the STORED BODY — `requestId` included — and
+   * adds an `Idempotency-Key` header it minted itself when the original request
+   * carried none. This route refuses a request that sends both, so without an
+   * exemption every approved body-keyed withdrawal 400s at execution: money
+   * held by policy that could never be paid.
+   */
+  it("pays out a body-keyed withdrawal once its approval is granted", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_control_profiles
+           (id, organization_id, project_id, api_key_id, name, status)
+         VALUES (?, ?, ?, ?, ?, 'active')`
+      )
+      .bind("akcp_exec", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Approve payouts")
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_control_profile_revisions
+           (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
+         VALUES (?, ?, 1, ?::jsonb, 'allow', ?, ?)`
+      )
+      .bind(
+        "akcpr_exec_1",
+        "akcp_exec",
+        JSON.stringify([
+          {
+            id: "approve-program-withdrawals",
+            kind: "approval",
+            operationTypes: ["earn_program_withdrawal"],
+          },
+        ]),
+        TEST_USER.id,
+        "2026-09-07T00:00:00.000Z"
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
+      )
+      .bind("akcpr_exec_1", "2026-09-07T00:00:00.000Z", "akcp_exec")
+      .run();
+
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+
+    // The caller keys with body `requestId`, the form this route accepts and
+    // the vault routes reject — which is why the vault suites never caught it.
+    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+      requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
+      amountUsd: "25.50",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+    });
+    expect(held.status).toBe(202);
+    expect(createWithdrawal).not.toHaveBeenCalled();
+    const heldBody = (await held.json()) as {
+      error: { details: { approvalRequestId: string; walletOperationId: string } };
+    };
+
+    const policyRepository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await policyRepository.updateApprovalRequestStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId: heldBody.error.details.approvalRequestId,
+      status: "approved",
+      operationStatus: "executing",
+      resolvedBy: TEST_API_KEY.id,
+    });
+    // Approved and unclaimed: the recovery pass is how an approved operation
+    // reaches its route, and it is the only in-process way to drive the real
+    // executor — which is the point, since the defect lives in what the
+    // executor sends.
+    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+
+    // The payout the approval authorized actually left, exactly once.
+    expect(createWithdrawal).toHaveBeenCalledTimes(1);
+    const executed = await policyRepository.getWalletOperationById(
+      heldBody.error.details.walletOperationId
+    );
+    expect(executed).toMatchObject({ status: "completed", execution_error: null });
+  });
+});
+
+/**
+ * The provider account is shared platform-wide and a program read is a live
+ * fan-out against it — a `GET /programs` page is two provider round trips per
+ * row — so an unmetered caller spends SDP's money at whatever rate it likes.
+ *
+ * The exclusion matters as much as the quota: `meteredQuota` fails closed, and
+ * a 5xx on the way OUT of a position is the failure ADR 0002 exit safety rules
+ * out, so no money-out route and no exit quote carries one.
+ */
+describe("Earn program — metered quotas", () => {
+  it("429s a program read once the actor's quota is exhausted", async () => {
+    await seedAuth();
+    await seedProgramWallet();
+    const getWallet = stubProgramReads();
+    await seedRateLimit(
+      env,
+      `metered:earn-provider-read:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+      60
+    );
+
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+
+    expect(res.status).toBe(429);
+    expect((await res.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: "RATE_LIMITED" },
+    });
+    // Refused before the money was spent, which is the whole point.
+    expect(getWallet).not.toHaveBeenCalled();
+  });
+
+  it("never lets an exhausted quota stand between a caller and its money", async () => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    const createWithdrawal = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    const preview = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal")
+      .mockResolvedValue({ withdrawableUsd: "100.00" } as never);
+
+    // Both Earn quotas exhausted for this actor AND the whole organization.
+    for (const quota of ["earn-provider-read", "earn-chain-read"]) {
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 1000);
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
+    }
+
+    const liquidity = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
+      token: "usdc",
+    });
+    expect(liquidity.status).toBe(200);
+    expect(preview).toHaveBeenCalledTimes(1);
+
+    const withdrawal = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+      requestId: "2e8b1f47-5c93-4a2d-8e16-9d4f0a7b3c25",
+      amountUsd: "25.50",
+      token: "usdc",
+      destinationAddress: SOLANA_DESTINATION,
+    });
+    expect(withdrawal.status).toBe(201);
+    expect(createWithdrawal).toHaveBeenCalledTimes(1);
   });
 });

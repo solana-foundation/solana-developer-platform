@@ -591,7 +591,6 @@ export function DashboardShell({
   const headerTabs = pageConfig.headerTabs;
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
-  const isMarketsHeader = pageConfig.headerVariant === "markets";
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
@@ -845,14 +844,12 @@ export function DashboardShell({
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
             ].join(" ")}
           >
-            <div className={cn("shrink-0", !isMarketsHeader && "space-y-4")}>
+            <div className="shrink-0 space-y-4">
               <div
                 className={cn(
                   shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
                   shouldLockViewportScroll
-                    ? isMarketsHeader
-                      ? "px-4 pt-8 md:px-8 md:pt-10 xl:px-16 xl:pt-11"
-                      : "px-3 pt-5 md:px-6 md:pt-6"
+                    ? "px-3 pt-5 md:px-6 md:pt-6"
                     : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
                 )}
               >
@@ -864,7 +861,6 @@ export function DashboardShell({
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
-                  alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
                   showNotifications={assetProfilesEnabled && issuanceEnabled}
                 />
               </div>
@@ -883,8 +879,15 @@ export function DashboardShell({
               ) : null}
 
               {routeTabs ? (
-                <div className="mt-6 border-b border-border-default px-4 md:px-8 xl:px-16">
-                  <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                <div
+                  className={cn(
+                    "border-b border-border-default",
+                    !shouldLockViewportScroll && "-mx-3 md:-mx-6"
+                  )}
+                >
+                  <div className="flex items-end px-3 md:px-6">
+                    <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                  </div>
                 </div>
               ) : null}
             </div>

@@ -193,6 +193,7 @@ async function seedExternalWalletPosition(
     projectId: string | null;
     ownerAddress: string;
     environment: string;
+    provider: string;
   }> = {}
 ): Promise<string> {
   const id = generateEarnPositionId();
@@ -201,13 +202,14 @@ async function seedExternalWalletPosition(
       `INSERT INTO earn_positions (
          id, organization_id, project_id, environment, provider, kind,
          owner_address, vault_address, share_mint, token_mint, label, activated_at
-       ) VALUES (?, ?, ?, ?, 'kamino', 'vault_direct', ?, ?, ?, ?, 'Exit Vault', sdp_iso_now())`
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', ?, ?, ?, ?, 'Exit Vault', sdp_iso_now())`
     )
     .bind(
       id,
       TEST_ORG.id,
       overrides.projectId === undefined ? TEST_PROJECT.id : overrides.projectId,
       overrides.environment ?? "sandbox",
+      overrides.provider ?? "kamino",
       overrides.ownerAddress ?? OWNER,
       VAULT,
       SHARE_MINT,
@@ -971,6 +973,37 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
         minAmountOut: "9.5",
       })
     );
+  });
+
+  // The provider-policy exit floor (EARN-003 / PRO-1861), the external mirror
+  // of the custody rule: a non-null `withdrawalSlippage` refuses a floor-less
+  // build with a 400; kamino's null policy keeps the floor-less builds above
+  // valid.
+  it("refuses a floor-less build for a provider with a withdrawal slippage policy", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
+
+    const res = await post("withdrawal-transactions", { positionId, shares: "10" });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("minAmountOut");
+    expect(body.error.message).toContain("jupiter_lend");
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("builds the same exit once the caller supplies the policy floor", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
+
+    const res = await post("withdrawal-transactions", {
+      positionId,
+      shares: "10",
+      minAmountOut: "9.5",
+    });
+
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
   });
 });
 
