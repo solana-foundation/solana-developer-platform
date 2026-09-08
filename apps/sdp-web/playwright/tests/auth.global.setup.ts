@@ -6,10 +6,16 @@ import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
-setup("authenticate admin test user and save auth state", async ({ page }) => {
+setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
   setup.setTimeout(360_000);
   const env = getE2EEnv();
   const identity = await resolveClerkTestIdentity();
+
+  // The ticket flow runs in a manually created context: Playwright tracing only
+  // instruments fixture contexts, so the live sign-in token never enters the
+  // retain-on-failure trace that gets uploaded as a workflow artifact.
+  const ticketContext = env.ticketAuth ? await browser.newContext({ baseURL: env.baseURL }) : null;
+  const target = ticketContext ? await ticketContext.newPage() : page;
 
   if (env.ticketAuth) {
     const { token } = await withTransientClerkRetry(async () => {
@@ -29,15 +35,13 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
       }
       return (await response.json()) as { token: string };
     });
-    // Complete the ticket in-page rather than putting it in the URL: a
-    // retained failure trace would otherwise ship a live sign-in token.
-    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(
+    await target.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await target.waitForFunction(
       () => Boolean((window as unknown as { Clerk?: { client?: unknown } }).Clerk?.client),
       undefined,
       { timeout: 120_000 }
     );
-    await page.evaluate(async (ticket) => {
+    await target.evaluate(async (ticket) => {
       const clerkClient = (
         window as unknown as {
           Clerk?: {
@@ -62,12 +66,12 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
       secretKey: env.clerkSecretKey,
     });
 
-    await page.goto("/sign-in");
-    await clerk.signIn({ page, emailAddress: identity.email });
-    await clerk.loaded({ page });
+    await target.goto("/sign-in");
+    await clerk.signIn({ page: target, emailAddress: identity.email });
+    await clerk.loaded({ page: target });
   }
 
-  await page.evaluate(
+  await target.evaluate(
     async ({ organizationId }) => {
       const clerkClient = (
         window as unknown as {
@@ -86,7 +90,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
 
   await expect
     .poll(() =>
-      page.evaluate(() => {
+      target.evaluate(() => {
         return (
           window as unknown as {
             Clerk?: { organization?: { id?: string } };
@@ -97,7 +101,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
     .toBe(identity.organizationId);
 
   if (env.useExternalApi) {
-    await page.context().addCookies([
+    await target.context().addCookies([
       {
         name: "sdp_selected_project_id",
         value: env.expectedProjectId,
@@ -109,8 +113,9 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
     ]);
   }
 
-  await page.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
-  await expect(page).toHaveURL(/\/dashboard/);
+  await target.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
+  await expect(target).toHaveURL(/\/dashboard/);
   fs.mkdirSync(path.dirname(authStatePath), { recursive: true });
-  await page.context().storageState({ path: authStatePath });
+  await target.context().storageState({ path: authStatePath });
+  await ticketContext?.close();
 });
