@@ -224,9 +224,9 @@ async function createTokenDraft(page: Page, options: CreateDraftOptions): Promis
 
   // Invalid fields must not advance the wizard.
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByLabel("Token name", { exact: true })).toBeVisible();
-  await page.getByLabel("Token name", { exact: true }).fill(options.name);
-  await page.getByLabel("Symbol", { exact: true }).fill(options.symbol);
+  await expect(page.getByLabel(/^Token name(?: \(required\))?$/)).toBeVisible();
+  await page.getByLabel(/^Token name(?: \(required\))?$/).fill(options.name);
+  await page.getByLabel(/^Symbol(?: \(required\))?$/).fill(options.symbol);
   await page.getByLabel(/^Description/).fill("Created by Playwright issuance e2e.");
   await expect(page.getByLabel(/^Decimals/)).toHaveValue("6");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -238,7 +238,7 @@ async function createTokenDraft(page: Page, options: CreateDraftOptions): Promis
     "Who can update token information?",
     "Who can recover or destroy balances?",
   ]) {
-    await page.getByLabel(permission, { exact: true }).selectOption(options.treasuryWalletId);
+    await page.getByLabel(permission).selectOption(options.treasuryWalletId);
   }
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await Promise.all([

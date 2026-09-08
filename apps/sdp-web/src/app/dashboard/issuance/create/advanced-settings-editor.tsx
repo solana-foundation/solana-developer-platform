@@ -16,6 +16,12 @@ import {
   toggleTokenControl,
 } from "./token-controls-model";
 
+const CONTROL_MEANINGS: Record<string, [MessageKey, MessageKey]> = {
+  pauseTransfers: ["DashboardIssuance.ux.pauseLabel", "DashboardIssuance.ux.pauseMeaning"],
+  freezeAccounts: ["DashboardIssuance.ux.freezeLabel", "DashboardIssuance.ux.freezeMeaning"],
+  permanentDelegate: ["DashboardIssuance.ux.recoveryLabel", "DashboardIssuance.ux.recoveryMeaning"],
+};
+
 interface AdvancedSettingsEditorProps {
   category: AssetCategory | null;
   type: string | null;
@@ -66,14 +72,6 @@ export function AdvancedSettingsEditor({
     );
   };
   if (mode === "readonly") {
-    const meanings: Record<string, [MessageKey, MessageKey]> = {
-      pauseTransfers: ["DashboardIssuance.ux.pauseLabel", "DashboardIssuance.ux.pauseMeaning"],
-      freezeAccounts: ["DashboardIssuance.ux.freezeLabel", "DashboardIssuance.ux.freezeMeaning"],
-      permanentDelegate: [
-        "DashboardIssuance.ux.recoveryLabel",
-        "DashboardIssuance.ux.recoveryMeaning",
-      ],
-    };
     return (
       <section className="border-t border-border-subtle pt-5">
         <h3 className="mb-2 text-sm font-medium text-primary">
@@ -93,7 +91,7 @@ export function AdvancedSettingsEditor({
             </dd>
           </div>
           {[...included, ...primary].map((entry) => {
-            const copy = meanings[entry.key];
+            const copy = CONTROL_MEANINGS[entry.key];
             if (!copy) return null;
             return (
               <div
