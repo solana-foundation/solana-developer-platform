@@ -410,8 +410,11 @@ const createProgramBody = (extra: Record<string, unknown> = {}) => ({
 });
 
 /** The derived id the provider actually dedupes a program CREATE on. */
-const derivedCreateId = (callerKey: string, environment = "sandbox") =>
-  deriveProviderRequestId(["earn_program_create", TEST_ORG.id, environment, "ground"], callerKey);
+const derivedCreateId = (callerKey: string, environment = "sandbox", projectId = TEST_PROJECT.id) =>
+  deriveProviderRequestId(
+    ["earn_program_create", TEST_ORG.id, projectId, environment, "ground"],
+    callerKey
+  );
 
 interface ProgramEnvelope {
   id: string;
@@ -1313,7 +1316,7 @@ describe("Earn program — session callers and environment isolation", () => {
         allocations: VALID_ALLOCATIONS,
         // Environment is part of the derivation scope, so the same caller key
         // in sandbox is a different provider request.
-        requestId: derivedCreateId(callerKey, "production"),
+        requestId: derivedCreateId(callerKey, "production", TEST_PRODUCTION_PROJECT.id),
       })
     );
 
@@ -1329,6 +1332,7 @@ describe("Earn program — session callers and environment isolation", () => {
     await expect(
       repo.listProviderWallets({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
         environment: "sandbox",
         limit: 20,
         offset: 0,
@@ -2540,7 +2544,40 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     expect(operations).toHaveLength(1);
   });
 
-  it("re-answers the same hold when the retry arrives under a sibling project", async () => {
+  it("hides the program from a sibling project on every per-program route (HOO-1563)", async () => {
+    // The decision is that the project is the boundary for deposits, withdrawals
+    // and previews alike, so it is enforced where every per-program route
+    // resolves its row rather than route by route.
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    const program = await seedProgramWallet();
+    const siblingAuth = { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` };
+
+    const read = await requestEarn("GET", programPath(program.id), undefined, siblingAuth);
+    expect(read.status).toBe(404);
+
+    const deposits = await requestEarn(
+      "GET",
+      programPath(program.id, "/deposits"),
+      undefined,
+      siblingAuth
+    );
+    expect(deposits.status).toBe(404);
+
+    const preview = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawal-preview"),
+      { amountUsd: "25.50", token: "usdc" },
+      siblingAuth
+    );
+    expect(preview.status).toBe(404);
+  });
+
+  it("refuses a sibling project's key on the same program (HOO-1563)", async () => {
+    // The project is the boundary: a key scoped to a sibling project cannot
+    // reach this program at all, so it can never open a second approval for one
+    // payout. 404, not 403 — a caller who may not see the program must not
+    // learn that it exists.
     await seedAuth();
     await seedSiblingProjectAuth();
     const program = await seedProgramWallet();
@@ -2555,15 +2592,10 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
     expect(held.status).toBe(202);
 
-    // A program is addressed per (organization, environment) and its payout
-    // ledger is keyed by organization + provider wallet + request id, so the
-    // hold must answer the same key from any project in the organization. A
-    // project-scoped lookup would miss it and open a SECOND approval for one
-    // payout — two approvers, each able to release it.
-    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
+    const sibling = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
       Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}`,
     });
-    expect(retried.status).toBe(202);
+    expect(sibling.status).toBe(404);
 
     expect(createWithdrawal).not.toHaveBeenCalled();
     await expect(countMovements()).resolves.toBe(0);

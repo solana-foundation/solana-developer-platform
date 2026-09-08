@@ -25,7 +25,7 @@ import {
   type EarnMovementRow,
   type EarnMovementsRepository,
 } from "@/db/repositories/earn-movements.repository";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
@@ -88,9 +88,10 @@ export type {
  * program exists.
  *
  * Because the id is now caller-supplied, every `:programId` lookup carries its
- * own tenancy proof (`getProviderWalletById` scopes to organization AND
- * environment). The old triple lookup made a guessed id structurally
- * impossible; an addressable id does not, so the scoping is explicit.
+ * own tenancy proof: `getProviderWalletById` scopes to organization AND
+ * environment, and `requireProgram` compares the owning project on top of that
+ * (HOO-1563). The old triple lookup made a guessed id structurally impossible;
+ * an addressable id does not, so the scoping is explicit.
  *
  * Source of truth per surface (PRO-1628): balances/positions/yield/deposits
  * are NEVER persisted — every read is a live provider fetch. Withdrawals are
@@ -179,7 +180,19 @@ async function requireProgram(c: AppContext, programId: string): Promise<EarnPro
     walletId: programId,
   });
 
-  if (!row) {
+  // The project is a boundary here as it is everywhere else money moves
+  // (HOO-1563). Organization scope alone let a key scoped to project B preview
+  // and withdraw from a program provisioned under project A, while the
+  // neighbouring vault-exit and external-wallet paths already compared
+  // `project_id` before releasing funds. This is the single place every
+  // per-program route resolves its row, so deposits, withdrawals and previews
+  // all get the same answer.
+  //
+  // An EXACT match, with no null exception, for the reason `isMovementInProject`
+  // spells out: the insert writes a real project id and NULL appears only after
+  // the owning project was deleted (migration 0062), so a null is a deleted
+  // project rather than a public row.
+  if (!row || row.project_id !== requireProjectId(c)) {
     throw notFound("Earn program");
   }
 
@@ -321,17 +334,18 @@ function requireCallerIdempotencyKey(
  * would be answered with a replay of the FIRST organization's wallet — which SDP
  * would then link to the wrong tenant.
  *
- * Deliberately NOT in scope: `projectId`, because sibling projects in one
- * environment share programs and two retries arriving through different projects
- * must derive the same id (project_id is provisioning audit only). And not the
- * allocations or label — scope separates tenants, payload equality is a
+ * `projectId` IS in scope, because the project is a boundary on every
+ * per-program route (HOO-1563): a create arriving through a sibling project is
+ * a different program, not a retry of this one, and deriving the same id would
+ * replay the first project's wallet into a project that could not then reach
+ * it. Not the allocations or label — scope separates tenants, payload equality is a
  * different question, and mixing payload in would turn a retry with a corrected
  * allocation into a second program instead of a conflict.
  */
 function resolveProgramCreateRequestId(
   c: AppContext,
   requestId: string | undefined,
-  scope: { organizationId: string; environment: string; provider: string }
+  scope: { organizationId: string; projectId: string; environment: string; provider: string }
 ): string {
   const callerKey = requireCallerIdempotencyKey(
     c,
@@ -340,7 +354,13 @@ function resolveProgramCreateRequestId(
     "provision a second program the first deposit would not reach"
   );
   return deriveProviderRequestId(
-    ["earn_program_create", scope.organizationId, scope.environment, scope.provider],
+    [
+      "earn_program_create",
+      scope.organizationId,
+      scope.projectId,
+      scope.environment,
+      scope.provider,
+    ],
     callerKey
   );
 }
@@ -397,6 +417,10 @@ export const listEarnPrograms = async (c: AppContext) => {
 
   const { rows, total } = await getEarnRepository(c).listProviderWallets({
     organizationId: getAuth(c).organizationId,
+    // Listed and addressable must agree: without this the list advertises
+    // sibling projects' programs that every per-program route then 404s
+    // (HOO-1563).
+    projectId: requireProjectId(c),
     environment,
     ...(query.provider !== undefined && { provider: query.provider }),
     ...pageWindow(query),
@@ -479,6 +503,7 @@ export const createEarnProgram = async (
   // generic "missing idempotency key" that hides why the call could never work.
   const requestId = resolveProgramCreateRequestId(c, body.requestId, {
     organizationId: auth.organizationId,
+    projectId: auth.projectId,
     environment,
     provider: client.provider,
   });
@@ -830,10 +855,11 @@ export async function extractEarnProgramWithdrawalPolicyCandidate(
     // than starting a second approval.
     await throwOnPriorEarnPolicyOperation(c, {
       organizationId: auth.organizationId,
-      // Organization-scoped on purpose: the ledger's replay above is keyed by
-      // organization + provider wallet + request id, so a per-project lookup
-      // here would miss a held operation a sibling project created and mint a
-      // second approval for the same payout.
+      // Organization-scoped on purpose, matching the ledger replay above, which
+      // is keyed by organization + provider wallet + request id. Since HOO-1563
+      // a sibling project cannot reach this program at all, so the wider scope
+      // no longer carries the check by itself — it stays because the ledger key
+      // is the wider one, and a narrower lookup here could disagree with it.
       scope: { kind: "organization" },
       idempotencyKey: requestId,
       idempotencyFingerprint,

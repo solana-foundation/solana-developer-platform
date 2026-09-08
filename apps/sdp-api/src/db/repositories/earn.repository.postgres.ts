@@ -409,8 +409,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async listProviderWallets(
       input: ListEarnProviderWalletsInput
     ): Promise<ListEarnProviderWalletsResult> {
-      const conditions = ["organization_id = ?", "environment = ?"];
-      const bindings: unknown[] = [input.organizationId, input.environment];
+      const conditions = ["organization_id = ?", "project_id = ?", "environment = ?"];
+      const bindings: unknown[] = [input.organizationId, input.projectId, input.environment];
 
       if (input.provider) {
         conditions.push("provider = ?");
