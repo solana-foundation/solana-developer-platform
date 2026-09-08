@@ -393,6 +393,121 @@ function ExplorerAddressField({
   );
 }
 
+/** The custody wallet this organization put behind the trade, when it has one. */
+function SdpWalletRow({ trade }: { trade: DvpTrade }) {
+  const t = useTranslations();
+  const agentTrade = isDvpAgentTrade(trade);
+  // "Funded from" is only true when this wallet delivers a leg. On an agent
+  // trade it signs the create and pays the fee and the escrow rent and nothing
+  // else, so the row is titled by what it actually did. Keyed off `sdpWallet`
+  // rather than the side, which is why sweeping every `sdpSide` read missed it.
+  const walletLabelKey = agentTrade
+    ? ("DashboardMarkets.dvp.sdpWalletLabelAgent" as const)
+    : ("DashboardMarkets.dvp.sdpWalletLabel" as const);
+
+  if (!trade.sdpWallet) {
+    return null;
+  }
+
+  return (
+    <dl className="mt-3 border-border-subtle border-t pt-3">
+      <div>
+        <dt className="text-tertiary text-xs">
+          {t(walletLabelKey)}
+          {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
+        </dt>
+        <dd className="mt-0.5">
+          <CopyableAddress address={trade.sdpWallet.address} label={t(walletLabelKey)} />
+        </dd>
+        <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+          {t(
+            agentTrade
+              ? "DashboardMarkets.dvp.sdpWalletHintAgent"
+              : "DashboardMarkets.dvp.sdpWalletHint"
+          )}
+        </p>
+      </div>
+    </dl>
+  );
+}
+
+/**
+ * Who the trade is WITH.
+ *
+ * This page carried four addresses, both escrows, the settlement authority and
+ * your own wallet, and not the one fact that identifies the trade commercially.
+ * It is also the address somebody hands back to the other side to confirm they
+ * are looking at the same trade, so it is copyable in full like the rest.
+ */
+function CounterpartyRow({
+  cluster,
+  counterparty,
+  trade,
+}: {
+  cluster: SolanaCluster;
+  counterparty: string | null;
+  trade: DvpTrade;
+}) {
+  const t = useTranslations();
+  return (
+    <dl className="mt-3 border-border-subtle border-t pt-3">
+      {counterparty === null ? (
+        // Two parties, neither of them us, so there is no single "the other
+        // side" to name. Both are listed instead, in the order they were
+        // entered, which is the order the legs are captioned in.
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              ["DashboardMarkets.dvp.legPartyA", trade.legs.a.party],
+              ["DashboardMarkets.dvp.legPartyB", trade.legs.b.party],
+            ] as const
+          ).map(([key, party]) => (
+            <div key={key}>
+              <dt className="text-tertiary text-xs">{t(key)}</dt>
+              <dd className="mt-0.5">
+                <CopyableAddress address={party} label={t(key)} />
+              </dd>
+              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+                <a
+                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+                  href={explorerAddressUrl(party, cluster)}
+                  rel="noreferrer noopener"
+                  target="_blank"
+                >
+                  {t("DashboardMarkets.dvp.viewOnExplorer")}
+                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+                </a>
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div>
+          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.counterpartyLabel")}</dt>
+          <dd className="mt-0.5">
+            <CopyableAddress
+              address={counterparty}
+              label={t("DashboardMarkets.dvp.counterpartyLabel")}
+            />
+          </dd>
+          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
+            {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
+            <a
+              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
+              href={explorerAddressUrl(counterparty, cluster)}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              {t("DashboardMarkets.dvp.viewOnExplorer")}
+              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+            </a>
+          </p>
+        </div>
+      )}
+    </dl>
+  );
+}
+
 function TradeSummary({
   cluster,
   counterparty,
@@ -404,10 +519,6 @@ function TradeSummary({
   trade: DvpTrade;
 }) {
   const t = useTranslations();
-  const agentTrade = isDvpAgentTrade(trade);
-  const walletLabelKey = agentTrade
-    ? ("DashboardMarkets.dvp.sdpWalletLabelAgent" as const)
-    : ("DashboardMarkets.dvp.sdpWalletLabel" as const);
 
   return (
     <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
@@ -444,97 +555,9 @@ function TradeSummary({
         />
       </dl>
 
-      {/* The wallet YOU chose, which the page never showed — so the only
-          wallet-shaped address on it was the settlement authority, a system
-          account with signing power over the trade. It was read as the
-          reader's own, which is exactly the confusion to avoid. */}
-      {/* "Funded from" is only true when this wallet delivers a leg. On an
-          agent trade it signs the create and pays the fee and the escrow rent
-          and nothing else, so the row is titled by what it actually did. This
-          one is keyed off `sdpWallet` rather than the side, which is why
-          sweeping every `sdpSide` read did not reach it. */}
-      {trade.sdpWallet ? (
-        <dl className="mt-3 border-border-subtle border-t pt-3">
-          <div>
-            <dt className="text-tertiary text-xs">
-              {t(walletLabelKey)}
-              {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
-            </dt>
-            <dd className="mt-0.5">
-              <CopyableAddress address={trade.sdpWallet.address} label={t(walletLabelKey)} />
-            </dd>
-            <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-              {t(
-                agentTrade
-                  ? "DashboardMarkets.dvp.sdpWalletHintAgent"
-                  : "DashboardMarkets.dvp.sdpWalletHint"
-              )}
-            </p>
-          </div>
-        </dl>
-      ) : null}
+      <SdpWalletRow trade={trade} />
 
-      {/* Who the trade is WITH. This page carried four addresses — both
-          escrows, the settlement authority and your own wallet — and not
-          the one fact that identifies the trade commercially. It is also
-          the address somebody needs to hand back to the other side to
-          confirm they are looking at the same trade, so it is copyable in
-          full like the rest. */}
-      <dl className="mt-3 border-border-subtle border-t pt-3">
-        {counterparty === null ? (
-          // Two parties, neither of them us, so there is no single "the other
-          // side" to name. Both are listed instead, in the order they were
-          // entered, which is the order the legs are captioned in.
-          <div className="grid gap-3 sm:grid-cols-2">
-            {(
-              [
-                ["DashboardMarkets.dvp.legPartyA", trade.legs.a.party],
-                ["DashboardMarkets.dvp.legPartyB", trade.legs.b.party],
-              ] as const
-            ).map(([key, party]) => (
-              <div key={key}>
-                <dt className="text-tertiary text-xs">{t(key)}</dt>
-                <dd className="mt-0.5">
-                  <CopyableAddress address={party} label={t(key)} />
-                </dd>
-                <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                  <a
-                    className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-                    href={explorerAddressUrl(party, cluster)}
-                    rel="noreferrer noopener"
-                    target="_blank"
-                  >
-                    {t("DashboardMarkets.dvp.viewOnExplorer")}
-                    <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-                  </a>
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div>
-            <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.counterpartyLabel")}</dt>
-            <dd className="mt-0.5">
-              <CopyableAddress
-                address={counterparty}
-                label={t("DashboardMarkets.dvp.counterpartyLabel")}
-              />
-            </dd>
-            <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-              {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
-              <a
-                className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-                href={explorerAddressUrl(counterparty, cluster)}
-                rel="noreferrer noopener"
-                target="_blank"
-              >
-                {t("DashboardMarkets.dvp.viewOnExplorer")}
-                <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-              </a>
-            </p>
-          </div>
-        )}
-      </dl>
+      <CounterpartyRow cluster={cluster} counterparty={counterparty} trade={trade} />
 
       {/* Every transaction this trade produced, in the order it happened.
           The close is the one that matters and was the one not recorded. */}
