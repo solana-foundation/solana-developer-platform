@@ -1,6 +1,7 @@
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyCandidate } from "@sdp/types";
 import type { Context, MiddlewareHandler, Next } from "hono";
+import { WalletOperationIdempotencyConflictError } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -41,6 +42,13 @@ export interface PolicyGateConfig {
     idempotencyKey: string
   ) => Promise<Response | null>;
   beforeEnforce?: (c: GateContext, extraction: PolicyGateExtraction) => Promise<void>;
+  /**
+   * Answer a request whose idempotency key lost the race to a concurrent first
+   * attempt. The route's own replay answer is the right one — the winning
+   * operation is committed by the time this runs — so the hook is expected to
+   * throw the same gated response a sequential retry would get.
+   */
+  onIdempotencyConflict?: (c: GateContext, extraction: PolicyGateExtraction) => Promise<void>;
 }
 
 export interface PolicyGateContext<
@@ -128,24 +136,38 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       return next();
     }
 
-    const enforcement = await enforceWalletOperationPolicy(
-      c.env,
-      scope,
-      {
-        ...candidate,
-        legs,
-        rawPayload: {
-          ...rawPayload,
-          executionRequest: walletOperationExecutionRequest(
-            c,
-            extraction.executionRequestBody ?? body
-          ),
+    const enforce = () =>
+      enforceWalletOperationPolicy(
+        c.env,
+        scope,
+        {
+          ...candidate,
+          legs,
+          rawPayload: {
+            ...rawPayload,
+            executionRequest: walletOperationExecutionRequest(
+              c,
+              extraction.executionRequestBody ?? body
+            ),
+          },
+          idempotencyKey: operationIdempotencyKey,
         },
-        idempotencyKey: operationIdempotencyKey,
-      },
-      approvedWalletOperationId(c),
-      approvedWalletOperationAttemptId(c)
-    );
+        approvedWalletOperationId(c),
+        approvedWalletOperationAttemptId(c)
+      );
+
+    let enforcement: Awaited<ReturnType<typeof enforce>>;
+    try {
+      enforcement = await enforce();
+    } catch (error) {
+      // A conflict means a concurrent first attempt already governs this key.
+      // The route answers with THAT operation; if it has no answer to give, the
+      // conflict travels on rather than being swallowed.
+      if (error instanceof WalletOperationIdempotencyConflictError) {
+        await config.onIdempotencyConflict?.(c, extraction);
+      }
+      throw error;
+    }
 
     c.set("policyGate", { body, candidate, resolved, enforcement });
     return next();

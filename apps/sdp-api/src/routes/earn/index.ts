@@ -21,6 +21,7 @@ import {
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
+  answerEarnProgramWithdrawalConflict,
   createEarnProgram,
   createEarnProgramWithdrawal,
   extractEarnProgramWithdrawalPolicyCandidate,
@@ -373,7 +374,10 @@ earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
   validateBody(earnProgramWithdrawalCreateSchema),
-  policyGate({ extract: extractEarnProgramWithdrawalPolicyCandidate }),
+  policyGate({
+    extract: extractEarnProgramWithdrawalPolicyCandidate,
+    onIdempotencyConflict: answerEarnProgramWithdrawalConflict,
+  }),
   createEarnProgramWithdrawal
 );
 earn.get(

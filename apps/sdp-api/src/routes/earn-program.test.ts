@@ -38,6 +38,7 @@ import {
   type EarnProviderWalletRow,
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
+  WalletOperationIdempotencyConflictError,
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
@@ -2488,6 +2489,55 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const operations = await readWalletOperations();
     expect(operations).toHaveLength(1);
     expect(operations[0]).toMatchObject({ status: "pending_approval" });
+  });
+
+  it("lets only one governed operation exist per payout, across projects", async () => {
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    const program = await seedProgramWallet();
+
+    const requestId = deriveProviderRequestId(
+      ["earn_program_withdrawal", program.provider_wallet_ref],
+      "4d9a1c07-6b3e-4f52-8a7d-1c0b5e9f3a26"
+    );
+    const operation = {
+      organizationId: TEST_ORG.id,
+      custodyWalletId: null,
+      walletId: program.provider_wallet_ref,
+      operationFamily: "program" as const,
+      operationType: "earn_program_withdrawal" as const,
+      status: "pending_approval" as const,
+      idempotencyKey: requestId,
+    };
+
+    const inProject = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const inSibling = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_SIBLING_PROJECT.id })
+    );
+
+    const won = await inProject.createWalletOperation({
+      ...operation,
+      projectId: TEST_PROJECT.id,
+    });
+    expect(won).not.toBeNull();
+
+    // The concurrent case the route's prior-operation check cannot bind: both
+    // attempts see no prior record, so the database decides. A sibling project
+    // must not be able to open a second approval for one provider payout.
+    await expect(
+      inSibling.createWalletOperation({ ...operation, projectId: TEST_SIBLING_PROJECT.id })
+    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
+
+    await expect(
+      inProject.createWalletOperation({ ...operation, projectId: TEST_PROJECT.id })
+    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
+
+    const operations = await readWalletOperations();
+    expect(operations).toHaveLength(1);
   });
 
   it("re-answers the same hold when the retry arrives under a sibling project", async () => {

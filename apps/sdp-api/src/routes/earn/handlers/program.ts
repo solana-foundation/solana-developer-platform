@@ -871,6 +871,28 @@ export async function extractEarnProgramWithdrawalPolicyCandidate(
 }
 
 /**
+ * The concurrent twin of the replay check in the extractor above. Two first
+ * attempts for one payout both find no prior operation, and the unique index
+ * decides which one governs it; the loser lands here and answers with the
+ * winner's operation — the same 202/403/409 a sequential retry gets — instead
+ * of a bare conflict (HOO-1559).
+ */
+export async function answerEarnProgramWithdrawalConflict(
+  c: AppContext,
+  extraction: PolicyGateExtraction
+): Promise<void> {
+  const { auth, requestId, idempotencyFingerprint } =
+    extraction.resolved as EarnProgramWithdrawalResolved;
+  await throwOnPriorEarnPolicyOperation(c, {
+    organizationId: auth.organizationId,
+    scope: { kind: "organization" },
+    idempotencyKey: requestId,
+    idempotencyFingerprint,
+    operationNoun: "program withdrawal",
+  });
+}
+
+/**
  * True replay of an accepted withdrawal: answer with the provider's live state
  * and let the observation refresh the ledger. 200, not 201 — nothing was
  * created by this request.

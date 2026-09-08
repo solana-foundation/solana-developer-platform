@@ -42,7 +42,6 @@ import type {
   WalletOperationRow,
   WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
-
 import {
   generateApiKeyControlProfileId,
   generateApiKeyControlProfileRevisionId,
@@ -52,6 +51,7 @@ import {
   generateWalletControlProfileId,
   generateWalletControlProfileRevisionId,
   generateWalletOperationId,
+  WalletOperationIdempotencyConflictError,
 } from "./policy.repository";
 
 const WALLET_CONTROL_PROFILE_REVISION_HISTORY_LIMIT = 100;
@@ -1998,7 +1998,13 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       }
       const id = generateWalletOperationId();
 
-      await db
+      // ON CONFLICT DO NOTHING, not a plain insert: the route's prior-operation
+      // check runs before this write, so two concurrent first attempts both see
+      // no prior record and only the unique index decides which one governs the
+      // payout. The loser inserts nothing and says so, and the caller answers
+      // with the winner's operation rather than minting a second approval or
+      // failing on a raw constraint violation (HOO-1559).
+      const inserted = await db
         .prepare(
           `INSERT INTO wallet_operations (
              id,
@@ -2016,7 +2022,9 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              raw_payload,
              idempotency_key,
              status
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+           ON CONFLICT DO NOTHING
+           RETURNING id`
         )
         .bind(
           id,
@@ -2035,7 +2043,11 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           input.idempotencyKey ?? null,
           input.status ?? "created"
         )
-        .run();
+        .first<{ id: string }>();
+
+      if (inserted === null) {
+        throw new WalletOperationIdempotencyConflictError(input.operationType);
+      }
 
       return getWalletOperationByIdInternal(db, id);
     },
