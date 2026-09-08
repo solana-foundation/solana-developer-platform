@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,7 +120,15 @@ try {
             : changedSince
               ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
               : ["--filter=!@sdp/api-integration"];
-    if (split === "api" && changedSince) {
+    const apiScopedDiff = () => {
+      const files = execSync(`git diff --name-only ${changedSince}...HEAD`, {
+        encoding: "utf8",
+      })
+        .split("\n")
+        .filter(Boolean);
+      return files.length > 0 && files.every((f) => f.startsWith("apps/sdp-api/"));
+    };
+    if (split === "api" && changedSince && apiScopedDiff()) {
       await run("pnpm", [
         "--filter",
         "@sdp/api",
@@ -128,7 +136,6 @@ try {
         "vitest",
         "run",
         `--changed=${changedSince}`,
-        "--passWithNoTests",
         ...forwardedArgs,
       ]);
     } else {
