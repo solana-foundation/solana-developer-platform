@@ -1,4 +1,6 @@
 import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, type AuditLogEntry, AuditService } from "@/services/audit.service";
 import type { AppContext } from "../context";
@@ -19,12 +21,13 @@ import type { AppContext } from "../context";
  *   new money IN, which costs the caller a retry and nothing else. Replays
  *   still produce an intent/outcome pair (the handler cannot tell a replay
  *   from a first send before the service runs); the outcome says `replayed`.
- *   A deposit the service REFUSES closes its intent with a failure outcome:
- *   both deposit services throw only before any broadcast (a send error
- *   returns normally, record-before-broadcast), so an unresolved intent
- *   would page verification over money that never moved. Only the
- *   approved-operation fence leaves an intent unresolved, and that state is
- *   genuinely ambiguous and needs reconciliation.
+ *   A deposit the service REFUSES with a 4xx closes its intent with a
+ *   failure outcome: both services 4xx only before any broadcast, so an
+ *   unresolved intent would page verification over money that never moved.
+ *   Every other throw leaves the intent UNRESOLVED on purpose: the services
+ *   can throw a 5xx after a successful send (a post-broadcast ledger
+ *   transition that could not be verified), and "unresolved" is exactly the
+ *   signal that sends an operator to reconcile against the movement ledger.
  * - WITHDRAWALS log best-effort AFTER the money effect. The audit persist
  *   path fail-closes on its external checkpoint store, and a store outage
  *   that 5xxes a customer's way OUT of a position is exactly what ADR 0002
@@ -35,7 +38,10 @@ import type { AppContext } from "../context";
  *   crash between the money effect and the audit write is repaired on the
  *   retry: a replayed movement with no audit row gets one, marked
  *   `backfilledOnReplay`, so the ledger cannot stay permanently silent about
- *   a movement that exists.
+ *   a movement that exists. One-event-per-movement is enforced by the
+ *   database (migration 0083's partial unique index), so concurrent replays
+ *   racing past the existence check cannot append twice: the losing insert's
+ *   unique violation is treated as "already audited".
  */
 
 export interface EarnMovementAuditActor {
@@ -92,20 +98,29 @@ export async function completeEarnDepositAudit(
 }
 
 /**
- * Close a deposit intent whose service call THREW. Both deposit services
- * throw only before any broadcast, so this is a definitive no-money-moved
- * refusal: recorded as a failure outcome rather than left unresolved, which
- * would page audit-ledger verification over nothing. Never throws.
+ * Conclude a deposit intent whose service call THREW.
+ *
+ * A definitive caller refusal (an `AppError` with a 4xx status) is recorded
+ * as a failure outcome: both deposit services 4xx only before any broadcast,
+ * so verification must not page over money that never moved. Anything else
+ * leaves the intent UNRESOLVED on purpose: `broadcastRecordedVaultMovement`
+ * can throw a 5xx AFTER a successful send (the post-broadcast ledger
+ * transition failed to verify), where a "failure" outcome would be a
+ * materially false audit record. Unresolved is the designed signal for that
+ * ambiguity: verification pages it, and the movement ledger answers what
+ * actually happened. Never throws.
  */
-export async function failEarnDepositAudit(
+export async function concludeEarnDepositAuditOnError(
   c: AppContext,
   intent: AuditIntent,
   error: unknown
 ): Promise<void> {
+  if (!(error instanceof AppError) || error.statusCode >= 500) return;
   await new AuditService(getDb(c.env)).completeCritical(c, intent, {
     status: "failure",
     metadata: {
-      failureReason: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      failureReason: error.message.slice(0, 300),
+      failureCode: error.code,
     },
   });
 }
@@ -144,6 +159,10 @@ export async function recordEarnWithdrawalAudit(
       earnMovementEntry("withdraw", actor, entryMetadata, resourceId)
     );
   } catch (error) {
+    // Migration 0083's partial unique index is the atomic form of the
+    // existence check above: a concurrent writer already audited this
+    // movement, which is the outcome we wanted, not a failure.
+    if (isUniqueViolationDeep(error)) return;
     getLogger().error(
       {
         event: "earn_audit_write_failed",
@@ -154,4 +173,14 @@ export async function recordEarnWithdrawalAudit(
       "Earn withdrawal audit record was not persisted; the movement ledger row remains authoritative"
     );
   }
+}
+
+/** The pg error sits behind AuditPersistenceError (and possibly a tx wrapper). */
+function isUniqueViolationDeep(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (isPostgresUniqueViolation(current)) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
 }

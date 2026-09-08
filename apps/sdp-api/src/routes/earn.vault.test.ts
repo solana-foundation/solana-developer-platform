@@ -32,6 +32,7 @@ import {
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
+import { badRequest } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
@@ -1182,7 +1183,7 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
     expect(depositIntoVault).not.toHaveBeenCalled();
   });
 
-  it("closes the intent as a failure when the service refuses the deposit", async () => {
+  it("closes the intent as a failure when the service refuses the deposit with a 4xx", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
     await seedWallet({
@@ -1190,7 +1191,7 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       custodyWalletId: "cwlt_earn_vault_audit_fail",
       providerWalletId: "privy_earn_vault_audit_fail",
     });
-    depositIntoVault.mockRejectedValue(new Error("simulation failed"));
+    depositIntoVault.mockRejectedValue(badRequest("simulation failed"));
 
     const res = await postVaultDeposit({
       strategyId: strategy.id,
@@ -1198,9 +1199,9 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       amount: "10",
       requestId: crypto.randomUUID(),
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
 
-    // The service throws only pre-broadcast, so the intent closes as a
+    // A 4xx is a definitive pre-broadcast refusal, so the intent closes as a
     // failure outcome instead of paging verification as unresolved.
     const { results } = await getDb(env)
       .prepare(
@@ -1210,5 +1211,37 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
     expect(results).toHaveLength(1);
     expect(results?.[0]).toMatchObject({ status: "failure" });
     expect(String(results?.[0]?.metadata)).toContain("simulation failed");
+  });
+
+  it("leaves the intent unresolved on an ambiguous 5xx: the send may have landed", async () => {
+    // `broadcastRecordedVaultMovement` can throw AFTER a successful send (the
+    // post-broadcast ledger transition failed to verify), so a non-4xx must
+    // never be recorded as a failure outcome: unresolved is the signal that
+    // sends an operator to the movement ledger.
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit_ambig",
+      custodyWalletId: "cwlt_earn_vault_audit_ambig",
+      providerWalletId: "privy_earn_vault_audit_ambig",
+    });
+    depositIntoVault.mockRejectedValue(
+      new Error("Vault deposit was broadcast but its ledger transition could not be verified")
+    );
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit_ambig",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(500);
+
+    const { results } = await getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>();
+    expect(results ?? []).toHaveLength(0);
   });
 });

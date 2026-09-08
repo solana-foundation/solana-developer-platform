@@ -90,7 +90,7 @@ import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admis
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
-  failEarnDepositAudit,
+  concludeEarnDepositAuditOnError,
   recordEarnWithdrawalAudit,
 } from "./movement-audit";
 import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
@@ -257,10 +257,10 @@ export async function createEarnVaultDeposit(
       }
     );
   } catch (error) {
-    // The service throws only before any broadcast (a send error returns
-    // normally, record-before-broadcast), so this is a definitive refusal:
-    // close the intent instead of paging verification over it.
-    await failEarnDepositAudit(c, auditIntent, error);
+    // A 4xx is a definitive pre-broadcast refusal: close the intent instead
+    // of paging verification over it. Anything else stays UNRESOLVED (the
+    // service can 5xx after a successful send; see movement-audit.ts).
+    await concludeEarnDepositAuditOnError(c, auditIntent, error);
     throw error;
   }
 
