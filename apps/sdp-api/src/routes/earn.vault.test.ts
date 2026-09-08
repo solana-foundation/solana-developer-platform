@@ -34,6 +34,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories/policy.reposit
 import app from "@/index";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { AuditService } from "@/services/audit.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -1116,5 +1117,68 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     const res = await postVaultDepositPreview({ strategyId: "earn_strategy_missing", amount: "1" });
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
+  it("records intent and outcome around the deposit, keyed to the movement", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit",
+      custodyWalletId: "cwlt_earn_vault_audit",
+      providerWalletId: "privy_earn_vault_audit",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(200);
+
+    // The outcome row is the feed-visible event, keyed to the recorded
+    // movement and attributed to the caller's key: the identity the
+    // movement's initiatedByKeyId carries on the wire.
+    const { results } = await getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>();
+    expect(results).toHaveLength(1);
+    expect(results?.[0]).toMatchObject({
+      resource_id: "earn_vault_movement_test",
+      organization_id: TEST_ORG.id,
+      api_key_id: TEST_API_KEY.id,
+      user_id: null,
+    });
+
+    // The org audit feed can surface it (PRO-1866 "done when").
+    const feed = await new AuditService(getDb(env)).getForOrganization(TEST_ORG.id, {
+      action: "deposit",
+    });
+    expect(feed.some((entry) => entry.resourceId === "earn_vault_movement_test")).toBe(true);
+  });
+
+  it("refuses the deposit when the audit intent cannot persist: money-in fails closed", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit_down",
+      custodyWalletId: "cwlt_earn_vault_audit_down",
+      providerWalletId: "privy_earn_vault_audit_down",
+    });
+    vi.spyOn(AuditService.prototype, "log").mockRejectedValue(new Error("audit ledger locked"));
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit_down",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(500);
+    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });

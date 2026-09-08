@@ -1005,6 +1005,26 @@ no such rule, which is why the deposit quote is metered and the exit quote is
 not. Pinned by the "metered quotas" describe in `../earn-program.test.ts`,
 whose second test exhausts both counters and asserts the payout still lands.
 
+## Audit-ledger parity (PRO-1866)
+
+Every earn money write also lands a hash-chained `audit_logs` event: action
+`deposit`/`withdraw`, resourceType `earn_movement`, resourceId the movement id,
+actor identical to the movement's `created_by`/`initiated_by_key_id` (passed
+explicitly, so the two records cannot disagree). Helpers live in
+`handlers/movement-audit.ts`; the five seams are the two custody vault routes,
+the two external-wallet submits, and the program withdrawal.
+
+The failure posture follows the metered-quota asymmetry above, on purpose.
+DEPOSITS are admitted through a fail-closed `beginCritical` intent before the
+money effect: an audit outage refuses money IN, and a replay still logs a
+pair whose outcome says `replayed`. WITHDRAWALS log best-effort AFTER the
+effect and never on a replay: the audit persist path fail-closes on its
+external checkpoint store, and a store outage must not 5xx an exit (ADR 0002).
+A failed exit audit logs `earn_audit_write_failed` and the movement row stays
+the authoritative money record. Each seam's suite pins its half: parity rows
+in all four route files, fail-closed in `../earn.vault.test.ts`, fail-open in
+`../earn.vault-withdrawals.test.ts`.
+
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
