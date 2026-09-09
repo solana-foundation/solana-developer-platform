@@ -13,6 +13,7 @@
  * SDP's leg, never a reuse of it.
  */
 
+import { type Address, address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
@@ -25,7 +26,7 @@ export interface DvpSettlementWallet {
   /** `custody_wallets.id` — what the signer resolver takes. */
   custodyWalletId: string;
   /** The on-chain address, which is what the PDA seeds use. */
-  address: string;
+  address: Address;
   /**
    * `custody_wallets.wallet_id` — the PROVIDER's id for this wallet.
    *
@@ -189,7 +190,7 @@ async function readSettlementWallet(env: Env, scope: Scope): Promise<DvpSettleme
   return row
     ? {
         custodyWalletId: row.custody_wallet_id,
-        address: row.public_key,
+        address: address(row.public_key),
         providerWalletId: row.wallet_id,
       }
     : null;

@@ -12,6 +12,7 @@
  * who has never used the product.
  */
 
+import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeSide } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -105,7 +106,7 @@ export async function listInboundDvpTrades(
     {
       organizationId: request.organizationId,
       projectId: request.projectId,
-      partyAddresses: [...addressesToWallet.keys()],
+      partyAddresses: [...addressesToWallet.keys()].map((key) => address(key)),
     },
     DVP_INBOUND_LIMIT
   );

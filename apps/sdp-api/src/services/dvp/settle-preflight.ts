@@ -17,7 +17,7 @@
  * exact account to create.
  */
 
-import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import { getAccountInfo, getMinimumBalanceForRentExemption, type SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 
@@ -101,24 +101,24 @@ export function describeMissingSettleAta(key: keyof DvpSettleAtas, atas: DvpSett
   return `${atas[key]} does not exist and must be created before settling: it is ${SETTLE_ATA_DESCRIPTIONS[key]}`;
 }
 
-/**
- * Rent-exempt minimum for a token account, plus a fee allowance.
- *
- * Settling can create up to four token accounts and always pays a signature
- * fee, and all of it comes from the settlement authority. The figure is a floor
- * rather than a quote: it exists to catch an authority holding nothing, which is
- * the state every freshly provisioned one is in.
- */
-const TOKEN_ACCOUNT_RENT_LAMPORTS = 2_040_000n;
+/** A signature's worth of network fee, added to the rent for any accounts a close creates. */
 const FEE_ALLOWANCE_LAMPORTS = 50_000n;
 
 /**
  * What settling will cost the settlement authority, in lamports.
  *
- * @param accountsToCreate - How many token accounts this close must open.
+ * This is a floor, not a quote: the per-account rent is the exemption for a
+ * 165-byte account, and Token-2022 ATAs with extensions are slightly larger, so
+ * the real cost of creating one may be a few lamports higher. The figure exists
+ * to catch an authority holding nothing, which is the state every freshly
+ * provisioned one is in — not to predict the exact fee.
+ *
+ * @param accountsToCreate - How many token accounts this close has to open.
+ * @param rentPerAccount - The rent-exempt minimum for a 165-byte account, read
+ *   from the chain at preflight time.
  */
-export function estimateSettlementCostLamports(accountsToCreate: number): bigint {
-  return BigInt(accountsToCreate) * TOKEN_ACCOUNT_RENT_LAMPORTS + FEE_ALLOWANCE_LAMPORTS;
+function estimateSettlementCostLamports(accountsToCreate: number, rentPerAccount: bigint): bigint {
+  return BigInt(accountsToCreate) * rentPerAccount + FEE_ALLOWANCE_LAMPORTS;
 }
 
 /**
@@ -131,29 +131,28 @@ export function estimateSettlementCostLamports(accountsToCreate: number): bigint
  * nested two levels inside a SolanaError cause, and reached the dashboard as
  * "An internal error occurred".
  *
+ * The balance is read via `getBalance`, which returns `0n` for an account that
+ * does not exist — exactly the case this check exists for, since a freshly
+ * provisioned authority has no account yet.
+ *
  * @param rpc - Solana RPC for the trade's cluster.
  * @param authority - The settlement authority that signs and pays.
  * @param accountsToCreate - Token accounts this close has to open.
- * @returns The shortfall in lamports, or null when the balance is sufficient.
+ * @returns The authority's balance, the required floor, and the shortfall —
+ *   `0n` when the balance is sufficient.
  */
 export async function findSettlementFundingShortfall(
   rpc: SolanaRpc,
   authority: Address,
   accountsToCreate: number
-): Promise<{ balance: bigint; required: bigint; shortfall: bigint } | null> {
-  const required = estimateSettlementCostLamports(accountsToCreate);
-  const account = await getAccountInfo(rpc, authority);
-
-  // An account that is not there holds nothing, and that is the case this
-  // exists for. But a response that HAS an account and no readable lamports is
-  // an RPC anomaly, not a balance of zero — reading it as zero would refuse a
-  // settlement that would have worked. Unknown means "do not block"; the chain
-  // still enforces the real thing.
-  const lamports = account?.lamports;
-  if (account && typeof lamports !== "number" && typeof lamports !== "bigint") {
-    return null;
-  }
-
-  const balance = account ? BigInt(lamports as number | bigint) : 0n;
-  return balance >= required ? null : { balance, required, shortfall: required - balance };
+): Promise<{ balance: bigint; required: bigint; shortfall: bigint }> {
+  // 165 bytes is the base SPL token account size. Token-2022 ATAs with
+  // extensions are slightly larger, so this is a floor — the real rent for one
+  // may be a few lamports higher, and the floor semantics are deliberate.
+  const rentPerAccount = await getMinimumBalanceForRentExemption(rpc, 165);
+  const required = estimateSettlementCostLamports(accountsToCreate, rentPerAccount);
+  // A missing account reads as 0n, which is exactly the case this check exists
+  // for: a freshly provisioned authority holds nothing.
+  const balance = (await rpc.getBalance(authority, { commitment: "confirmed" }).send()).value;
+  return { balance, required, shortfall: balance >= required ? 0n : required - balance };
 }

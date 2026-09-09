@@ -1,3 +1,4 @@
+import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
 import type {
   DvpTradeInsert,
@@ -10,6 +11,14 @@ import type {
   DvpTradeStatus,
 } from "./dvp-trade.repository";
 
+/**
+ * Asserts a DB column is a string, throwing if it is missing.
+ *
+ * Used for plain-string columns only. Address and signature columns are branded
+ * with {@link address} / {@link signature} directly — those throw on malformed
+ * values, which is correct: a bad value in an address column is DB corruption
+ * and must fail loudly, not flow.
+ */
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {
     throw new Error(`DvP trade ${field} is missing`);
@@ -22,59 +31,69 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     id: assertString(row.id, "id"),
     organizationId: assertString(row.organization_id, "organization_id"),
     projectId: assertString(row.project_id, "project_id"),
-    swapDvp: assertString(row.swap_dvp, "swap_dvp"),
+    swapDvp: address(assertString(row.swap_dvp, "swap_dvp")),
 
-    settlementAuthority: assertString(row.settlement_authority, "settlement_authority"),
-    userA: assertString(row.user_a, "user_a"),
-    userB: assertString(row.user_b, "user_b"),
-    mintA: assertString(row.mint_a, "mint_a"),
-    mintB: assertString(row.mint_b, "mint_b"),
+    settlementAuthority: address(assertString(row.settlement_authority, "settlement_authority")),
+    userA: address(assertString(row.user_a, "user_a")),
+    userB: address(assertString(row.user_b, "user_b")),
+    mintA: address(assertString(row.mint_a, "mint_a")),
+    mintB: address(assertString(row.mint_b, "mint_b")),
     // Stays a string all the way out. See the note in dvp-trade.repository.ts.
     nonce: assertString(row.nonce, "nonce"),
 
-    tokenProgramA: assertString(row.token_program_a, "token_program_a"),
+    tokenProgramA: address(assertString(row.token_program_a, "token_program_a")),
     decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
     decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
-    closeSignature: typeof row.close_signature === "string" ? row.close_signature : null,
+    closeSignature: typeof row.close_signature === "string" ? signature(row.close_signature) : null,
     fundingClaimExpiryHeight:
       typeof row.funding_claim_expiry_height === "string" ? row.funding_claim_expiry_height : null,
     symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
     symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
-    tokenProgramB: assertString(row.token_program_b, "token_program_b"),
+    tokenProgramB: address(assertString(row.token_program_b, "token_program_b")),
 
     amountA: assertString(row.amount_a, "amount_a"),
     amountB: assertString(row.amount_b, "amount_b"),
     expiryTimestamp: assertString(row.expiry_timestamp, "expiry_timestamp"),
-    earliestSettlementTimestamp: (row.earliest_settlement_timestamp as string | null) ?? null,
-    userASettlementDestination: assertString(
-      row.user_a_settlement_destination,
-      "user_a_settlement_destination"
+    earliestSettlementTimestamp:
+      typeof row.earliest_settlement_timestamp === "string"
+        ? row.earliest_settlement_timestamp
+        : null,
+    userASettlementDestination: address(
+      assertString(row.user_a_settlement_destination, "user_a_settlement_destination")
     ),
-    userBSettlementDestination: assertString(
-      row.user_b_settlement_destination,
-      "user_b_settlement_destination"
+    userBSettlementDestination: address(
+      assertString(row.user_b_settlement_destination, "user_b_settlement_destination")
     ),
-    refString: (row.ref_string as string | null) ?? null,
+    refString: typeof row.ref_string === "string" ? row.ref_string : null,
 
-    escrowA: assertString(row.escrow_a, "escrow_a"),
-    escrowB: assertString(row.escrow_b, "escrow_b"),
+    escrowA: address(assertString(row.escrow_a, "escrow_a")),
+    escrowB: address(assertString(row.escrow_b, "escrow_b")),
 
-    sdpSide: (row.sdp_side as DvpTradeSide | null) ?? null,
-    tradeKind: (row.trade_kind as DvpTradeKind | null) ?? "principal",
+    sdpSide: typeof row.sdp_side === "string" ? (row.sdp_side as DvpTradeSide) : null,
+    tradeKind: assertString(row.trade_kind, "trade_kind") as DvpTradeKind,
     sdpWalletId: assertString(row.sdp_wallet_id, "sdp_wallet_id"),
 
     status: row.status as DvpTradeStatus,
-    observedAt: (row.observed_at as string | null) ?? null,
-    sdpLegFundingSignature: (row.sdp_leg_funding_signature as string | null) ?? null,
-    sdpLegFundingTx: (row.sdp_leg_funding_tx as string | null) ?? null,
-    idempotencyKey: (row.idempotency_key as string | null) ?? null,
-    idempotencyFingerprint: (row.idempotency_fingerprint as string | null) ?? null,
-    createSignature: (row.create_signature as string | null) ?? null,
-    createLastValidBlockHeight: (row.create_last_valid_block_height as string | null) ?? null,
-    escrowAAmount: (row.escrow_a_amount as string | null) ?? null,
-    escrowBAmount: (row.escrow_b_amount as string | null) ?? null,
-    escrowAFrozen: (row.escrow_a_frozen as boolean | null) ?? null,
-    escrowBFrozen: (row.escrow_b_frozen as boolean | null) ?? null,
+    observedAt: typeof row.observed_at === "string" ? row.observed_at : null,
+    sdpLegFundingSignature:
+      typeof row.sdp_leg_funding_signature === "string"
+        ? signature(row.sdp_leg_funding_signature)
+        : null,
+    sdpLegFundingTx:
+      typeof row.sdp_leg_funding_tx === "string" ? signature(row.sdp_leg_funding_tx) : null,
+    idempotencyKey: typeof row.idempotency_key === "string" ? row.idempotency_key : null,
+    idempotencyFingerprint:
+      typeof row.idempotency_fingerprint === "string" ? row.idempotency_fingerprint : null,
+    createSignature:
+      typeof row.create_signature === "string" ? signature(row.create_signature) : null,
+    createLastValidBlockHeight:
+      typeof row.create_last_valid_block_height === "string"
+        ? row.create_last_valid_block_height
+        : null,
+    escrowAAmount: typeof row.escrow_a_amount === "string" ? row.escrow_a_amount : null,
+    escrowBAmount: typeof row.escrow_b_amount === "string" ? row.escrow_b_amount : null,
+    escrowAFrozen: typeof row.escrow_a_frozen === "boolean" ? row.escrow_a_frozen : null,
+    escrowBFrozen: typeof row.escrow_b_frozen === "boolean" ? row.escrow_b_frozen : null,
     createdAt: assertString(row.created_at, "created_at"),
     updatedAt: assertString(row.updated_at, "updated_at"),
   };
@@ -271,7 +290,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async getBySwapDvp(scope: DvpTradeScope, swapDvp: string) {
+    async getBySwapDvp(scope: DvpTradeScope, swapDvp: Address) {
       const wallets = walletScopeClause(scope.sdpWalletIds);
       const row = await db
         .prepare(
@@ -284,7 +303,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async claimLegFunding(id: string, signature: string, expiryHeight: string) {
+    async claimLegFunding(id: string, signature: Signature, expiryHeight: string) {
       // Compare-and-swap: only the request that finds the column NULL may send.
       // The expiry height rides along so a claim left behind by a failure the
       // code could not classify has a point at which it is provably dead.
@@ -324,7 +343,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return (result.results ?? []).length;
     },
 
-    async releaseLegFunding(id: string, signature: string) {
+    async releaseLegFunding(id: string, signature: Signature) {
       // Only the holder may release, so a late failure cannot clear a claim a
       // different request has since taken.
       await db
@@ -337,7 +356,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .run();
     },
 
-    async recordLegFundingTx(id: string, signature: string) {
+    async recordLegFundingTx(id: string, signature: Signature) {
       // Only ever written, never cleared — the claim is what gets released, and
       // conflating the two is what made a funded leg look unfunded.
       await db
@@ -379,7 +398,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row !== null && row !== undefined;
     },
 
-    async recordClose(id: string, status: "settled" | "cancelled", signature: string) {
+    async recordClose(id: string, status: "settled" | "cancelled", signature: Signature) {
       // Only from a status where the trade was still open. A row the reconciler
       // has already moved to a terminal state was decided by something that read
       // the chain, and that beats this caller's expectation.

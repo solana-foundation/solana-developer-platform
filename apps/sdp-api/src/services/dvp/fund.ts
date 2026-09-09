@@ -79,9 +79,9 @@ export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
   const isA = side === "a";
   return {
     side,
-    mint: (isA ? trade.mintA : trade.mintB) as Address,
-    tokenProgram: (isA ? trade.tokenProgramA : trade.tokenProgramB) as Address,
-    escrow: (isA ? trade.escrowA : trade.escrowB) as Address,
+    mint: isA ? trade.mintA : trade.mintB,
+    tokenProgram: isA ? trade.tokenProgramA : trade.tokenProgramB,
+    escrow: isA ? trade.escrowA : trade.escrowB,
     amount: BigInt(isA ? trade.amountA : trade.amountB),
   };
 }
@@ -139,11 +139,11 @@ export interface DvpFundingPlan {
   /** Whose wallet signs and pays. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
   /** Takes the lock on this leg. False when somebody else already holds it. */
-  claim(signature: string, expiryHeight: string): Promise<boolean>;
+  claim(signature: Signature, expiryHeight: string): Promise<boolean>;
   /** Gives it back, when and only when nothing was broadcast. */
-  release(signature: string): Promise<void>;
+  release(signature: Signature): Promise<void>;
   /** Records the transfer once it is on the wire. */
-  recordFundingTx(signature: string): Promise<void>;
+  recordFundingTx(signature: Signature): Promise<void>;
 }
 
 /** The creating organization funding the leg it holds. The original path. */

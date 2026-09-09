@@ -85,7 +85,7 @@ export async function readEscrowState(
   escrow: Address,
   tokenProgram: Address
 ): Promise<{ amount: bigint; frozen: boolean } | null> {
-  const [account] = await fetchEncodedAccounts(rpc as never, [escrow]);
+  const [account] = await fetchEncodedAccounts(rpc, [escrow]);
   const leg = readLeg(account, { escrow, tokenProgram });
   return leg.exists ? { amount: leg.amount, frozen: leg.frozen } : null;
 }
@@ -146,11 +146,7 @@ export async function readDvpTradeObservation(
   // reads them at different slots, and a settle landing between the two calls
   // would show a closed trade beside still-funded escrows: a half-settled state
   // this program cannot actually produce.
-  const accounts = await fetchEncodedAccounts(rpc as never, [
-    swapDvp,
-    legs.a.escrow,
-    legs.b.escrow,
-  ]);
+  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
 
   return {
     tradeAccountExists: await readTradeAccountExists(accounts[0]),

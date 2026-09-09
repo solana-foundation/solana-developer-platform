@@ -109,14 +109,14 @@ export async function closeDvpTrade(
   );
 
   const atas = await deriveDvpSettleAtas({
-    userA: trade.userA as never,
-    userB: trade.userB as never,
-    userASettlementDestination: trade.userASettlementDestination as never,
-    userBSettlementDestination: trade.userBSettlementDestination as never,
-    mintA: trade.mintA as never,
-    mintB: trade.mintB as never,
-    tokenProgramA: trade.tokenProgramA as never,
-    tokenProgramB: trade.tokenProgramB as never,
+    userA: trade.userA,
+    userB: trade.userB,
+    userASettlementDestination: trade.userASettlementDestination,
+    userBSettlementDestination: trade.userBSettlementDestination,
+    mintA: trade.mintA,
+    mintB: trade.mintB,
+    tokenProgramA: trade.tokenProgramA,
+    tokenProgramB: trade.tokenProgramB,
   });
 
   const rpc = solanaRpc.createRpc(env);
@@ -127,10 +127,10 @@ export async function closeDvpTrade(
   // the first settle in a project failed in simulation with an error that named
   // neither the account nor the amount, and surfaced as "An internal error
   // occurred". Saying it plainly is the whole fix.
-  const shortfall = await findSettlementFundingShortfall(rpc, signer.address, missing.size);
-  if (shortfall) {
+  const funding = await findSettlementFundingShortfall(rpc, signer.address, missing.size);
+  if (funding.shortfall > 0n) {
     throw badRequest(
-      `DvP trade ${trade.id}: the settlement authority ${signer.address} holds ${shortfall.balance} lamports but needs about ${shortfall.required} to ${action} this trade — it pays the network fee and the rent for ${missing.size} token account(s) this close has to create. Send it at least ${shortfall.shortfall} more lamports and try again.`
+      `DvP trade ${trade.id}: the settlement authority ${signer.address} holds ${funding.balance} lamports but needs about ${funding.required} to ${action} this trade — it pays the network fee and the rent for ${missing.size} token account(s) this close has to create. Send it at least ${funding.shortfall} more lamports and try again.`
     );
   }
 

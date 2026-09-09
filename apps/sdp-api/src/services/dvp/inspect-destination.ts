@@ -66,11 +66,8 @@ export async function findDvpDestinationProblem(
     return null;
   }
 
-  const owner = account.owner as string;
-  if (
-    owner === (TOKEN_PROGRAM_ADDRESS as string) ||
-    owner === (TOKEN_2022_PROGRAM_ADDRESS as string)
-  ) {
+  const owner = account.owner;
+  if (owner === TOKEN_PROGRAM_ADDRESS || owner === TOKEN_2022_PROGRAM_ADDRESS) {
     return "token-program-owned";
   }
 

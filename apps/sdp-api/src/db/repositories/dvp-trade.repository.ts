@@ -6,56 +6,28 @@
 // derives a different SwapDvp address than the one a counterparty was told to
 // fund. Callers convert to bigint at the edge, never number.
 
+import type { DvpTradeKind, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { Address, Signature } from "@solana/kit";
 import type { RepositoryDbClient } from "./base";
 
-/** Last observed lifecycle state. A cache of a poll, never an event. */
-export type DvpTradeStatus =
-  /** Signed and recorded, broadcast outcome not yet known. The initial state. */
-  | "creating"
-  /** The create transaction was rejected before it could land. Nothing exists. */
-  | "create_failed"
-  | "created"
-  | "partially_funded"
-  | "funded"
-  | "settled"
-  | "cancelled"
-  | "rejected"
-  | "expired"
-  /** PDA is gone but which terminal path closed it is not yet known. */
-  | "closed_unknown";
-
-/** Which leg SDP holds. The other side is an arbitrary external address. */
-export type DvpTradeSide = "a" | "b";
-
-/**
- * Whether SDP is a party to the trade or only set it up.
- *
- * `principal` is the original shape and the default: SDP holds one leg in a
- * custody wallet and the counterparty is an arbitrary address.
- *
- * `agent` is the execution-desk shape — one party sets the terms and two other
- * parties do the swaps. The program always allowed it (`CreateDvp`'s only
- * signer is the payer), so this is SDP catching up to the program rather than
- * anything new on chain.
- */
-export type DvpTradeKind = "principal" | "agent";
+export type { DvpTradeKind, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
 
 export interface DvpTradeRow {
   id: string;
   organizationId: string;
   projectId: string;
-  swapDvp: string;
+  swapDvp: Address;
 
   // The PDA seed tuple. Required to re-derive the address for RecoverDvp.
-  settlementAuthority: string;
-  userA: string;
-  userB: string;
-  mintA: string;
-  mintB: string;
+  settlementAuthority: Address;
+  userA: Address;
+  userB: Address;
+  mintA: Address;
+  mintB: Address;
   nonce: string;
 
-  tokenProgramA: string;
-  tokenProgramB: string;
+  tokenProgramA: Address;
+  tokenProgramB: Address;
   /** Each leg's mint decimals, or null when unknown. Never guessed. */
   decimalsA: number | null;
   decimalsB: number | null;
@@ -65,18 +37,18 @@ export interface DvpTradeRow {
   /** Block height past which a held funding claim is provably dead. */
   fundingClaimExpiryHeight: string | null;
   /** The transaction that settled or cancelled the trade. Null while open. */
-  closeSignature: string | null;
+  closeSignature: Signature | null;
 
   amountA: string;
   amountB: string;
   expiryTimestamp: string;
   earliestSettlementTimestamp: string | null;
-  userASettlementDestination: string;
-  userBSettlementDestination: string;
+  userASettlementDestination: Address;
+  userBSettlementDestination: Address;
   refString: string | null;
 
-  escrowA: string;
-  escrowB: string;
+  escrowA: Address;
+  escrowB: Address;
 
   /**
    * Which leg SDP delivers, or NULL on an agent trade where it delivers
@@ -101,7 +73,7 @@ export interface DvpTradeRow {
    * and cleared on a released or expired claim — so it is NULL on a leg that
    * funded perfectly. Read `sdpLegFundingTx` for the transaction.
    */
-  sdpLegFundingSignature: string | null;
+  sdpLegFundingSignature: Signature | null;
   /**
    * The transfer that funded SDP's leg, kept permanently.
    *
@@ -109,12 +81,12 @@ export interface DvpTradeRow {
    * lifetimes: the lock has to disappear for the leg to be fundable again, and
    * the receipt has to survive for the page to show what happened.
    */
-  sdpLegFundingTx: string | null;
+  sdpLegFundingTx: Signature | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
   /** Hash of the terms that key was first used with. */
   idempotencyFingerprint: string | null;
-  createSignature: string | null;
+  createSignature: Signature | null;
   /**
    * Block height past which the create transaction can no longer land.
    *
@@ -205,7 +177,7 @@ export interface DvpTradeRepository {
   /** Null when the trade does not exist or belongs to another project. */
   getById(scope: DvpTradeScope, id: string): Promise<DvpTradeRow | null>;
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
-  getBySwapDvp(scope: DvpTradeScope, swapDvp: string): Promise<DvpTradeRow | null>;
+  getBySwapDvp(scope: DvpTradeScope, swapDvp: Address): Promise<DvpTradeRow | null>;
   /**
    * Open trades across every project, stalest observation first.
    *
@@ -236,9 +208,9 @@ export interface DvpTradeRepository {
    * requests would both see the shortfall and both send, over-funding the
    * escrow. Returns false when another request already holds the claim.
    */
-  claimLegFunding(id: string, signature: string, expiryHeight: string): Promise<boolean>;
+  claimLegFunding(id: string, signature: Signature, expiryHeight: string): Promise<boolean>;
   /** Releases a claim whose broadcast was definitively rejected. */
-  releaseLegFunding(id: string, signature: string): Promise<void>;
+  releaseLegFunding(id: string, signature: Signature): Promise<void>;
   /**
    * Records the transfer that funded SDP's leg, permanently.
    *
@@ -246,7 +218,7 @@ export interface DvpTradeRepository {
    * guarded the send. Without it a funded leg's only evidence is a changed
    * number, and nothing on the page points at the transaction that moved it.
    */
-  recordLegFundingTx(id: string, signature: string): Promise<void>;
+  recordLegFundingTx(id: string, signature: Signature): Promise<void>;
   /**
    * Releases funding claims that can no longer be live, and reports how many.
    *
@@ -293,7 +265,7 @@ export interface DvpTradeRepository {
   recordClose(
     id: string,
     status: "settled" | "cancelled",
-    signature: string
+    signature: Signature
   ): Promise<DvpTradeRow | null>;
   listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
   /**
@@ -342,5 +314,5 @@ export interface DvpInboundScope {
   /** Excluded from the results: trades this project created are already listed. */
   projectId: string;
   /** Public keys of the caller's custody wallets. Empty means no results. */
-  partyAddresses: string[];
+  partyAddresses: Address[];
 }

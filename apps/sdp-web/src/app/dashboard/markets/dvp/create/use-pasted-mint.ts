@@ -15,10 +15,9 @@
  * every keystroke of a 44-character base58 string would otherwise be a request.
  */
 
+import { isAddress } from "@sdp/solana";
 import { useEffect, useState } from "react";
 
-/** Long enough that a partial paste is not worth a request. */
-const MIN_ADDRESS_LENGTH = 32;
 const DEBOUNCE_MS = 350;
 
 export interface PastedMint {
@@ -77,12 +76,12 @@ export function usePastedMint(address: string): PastedMintState {
   const [lookup, setLookup] = useState<PastedMintLookup | null>(null);
 
   const trimmed = address.trim();
-  const tooShort = trimmed.length < MIN_ADDRESS_LENGTH;
+  const notAnAddress = !isAddress(trimmed);
   const answered = lookup !== null && lookup.address === trimmed;
 
   useEffect(() => {
     const wanted = address.trim();
-    if (wanted.length < MIN_ADDRESS_LENGTH) {
+    if (!isAddress(wanted)) {
       return;
     }
 
@@ -124,7 +123,7 @@ export function usePastedMint(address: string): PastedMintState {
     mint: answered ? lookup.mint : null,
     address: trimmed,
     // True from the very render the address changes, not one render later.
-    loading: !tooShort && !answered,
+    loading: !notAnAddress && !answered,
     notFound: answered ? lookup.notFound : false,
   };
 }

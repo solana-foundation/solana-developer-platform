@@ -6,30 +6,9 @@
  * 2^53. Comparisons go through BigInt, never Number.
  */
 
-export const DVP_TRADE_STATUSES = [
-  "creating",
-  "create_failed",
-  "created",
-  "partially_funded",
-  "funded",
-  "settled",
-  "cancelled",
-  "rejected",
-  "expired",
-  "closed_unknown",
-] as const;
+import type { DvpTradeKind, DvpTradeStatus } from "@sdp/types";
 
-export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
-
-/**
- * Whether this organization is a party to the trade, or only set it up.
- *
- * `principal` is the original shape and the default: one custody wallet
- * delivers a leg. `agent` means the terms were set for two other parties and
- * this organization holds neither leg — its wallet signed the create and paid
- * the escrow rent, and delivers nothing.
- */
-export type DvpTradeKind = "principal" | "agent";
+export { DVP_TRADE_STATUSES, type DvpTradeKind, type DvpTradeStatus } from "@sdp/types";
 
 /**
  * Whether the reader is a party to a trade somebody ELSE created.

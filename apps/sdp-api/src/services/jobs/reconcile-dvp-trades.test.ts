@@ -1,3 +1,4 @@
+import { getBase58Decoder } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
@@ -34,6 +35,17 @@ function observation(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * A distinct, structurally valid trade address per test id. The repository
+ * mapping brands `swap_dvp` with kit's `address()`, which base58-decodes to
+ * exactly 32 bytes — a padded placeholder string no longer passes.
+ */
+function swapDvpFor(id: string): string {
+  const bytes = new Uint8Array(32);
+  bytes.set(new TextEncoder().encode(id).subarray(0, 32));
+  return getBase58Decoder().decode(bytes);
+}
+
 async function seedTrade(id: string, status: string, overrides: Record<string, string> = {}) {
   await getDb(env)
     .prepare(
@@ -67,7 +79,7 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
       id,
       TEST_ORG.id,
       PROJECT_ID,
-      `Swap_${id}`.padEnd(43, "1"),
+      swapDvpFor(id),
       overrides.expiryTimestamp ?? String(Math.floor(Date.now() / 1000) + 3600),
       CUSTODY_WALLET_ID,
       status,

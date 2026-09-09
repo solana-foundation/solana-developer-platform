@@ -40,11 +40,25 @@ function encodeMint(extensions: ExtensionArgs[]): Uint8Array {
   );
 }
 
-/** An RPC whose only job is to answer `getAccountInfo` for the mint under test. */
+/**
+ * An RPC whose only job is to answer `getAccountInfo` for the mint under test,
+ * returning data in the base64 wire format `fetchEncodedAccount` expects.
+ */
 function rpcReturning(account: { owner: Address; data: Uint8Array } | null) {
   return {
     getAccountInfo: () => ({
-      send: async () => ({ value: account }),
+      send: async () => ({
+        value:
+          account === null
+            ? null
+            : {
+                owner: account.owner,
+                data: [Buffer.from(account.data).toString("base64"), "base64"],
+                lamports: 1n,
+                executable: false,
+                space: BigInt(account.data.length),
+              },
+      }),
     }),
   } as never;
 }
@@ -122,6 +136,30 @@ describe("validateDvpMints", () => {
     expect(problems[0]).toContain("does not exist");
   });
 
+  // A wallet or token account pasted as a mint must come back as a named 400,
+  // not a decode crash: the owner check is judged on the raw account, and only
+  // then does the extensions check attempt to decode.
+  it("refuses undecodable bytes via the owner check rather than throwing", async () => {
+    const rpc = rpcReturning({
+      owner: "11111111111111111111111111111111" as Address,
+      data: new Uint8Array([1, 2, 3]),
+    });
+
+    const problems = await validateDvpMints(rpc, leg());
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("is owned by");
+  });
+
+  it("reports no extension problems when token-2022 bytes do not decode as a mint", async () => {
+    const rpc = rpcReturning({
+      owner: TOKEN_2022_PROGRAM_ADDRESS,
+      data: new Uint8Array([1, 2, 3]),
+    });
+
+    await expect(validateDvpMints(rpc, leg())).resolves.toEqual([]);
+  });
+
   // A legacy mint carries no extensions by construction, so there is nothing to
   // decode and the deny-list cannot apply.
   it("accepts a legacy SPL mint without inspecting extensions", async () => {
@@ -134,7 +172,9 @@ describe("validateDvpMints", () => {
   // and error, which is the same contract validateDvpTerms holds itself to.
   it("reports a problem on every leg at once", async () => {
     const rpc = {
-      getAccountInfo: vi.fn().mockReturnValue({ send: async () => ({ value: null }) }),
+      getAccountInfo: vi.fn().mockReturnValue({
+        send: async () => ({ value: null }),
+      }),
     } as never;
 
     const problems = await validateDvpMints(rpc, [

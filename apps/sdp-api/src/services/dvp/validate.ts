@@ -12,6 +12,8 @@
  * built, not here.
  */
 
+import type { Address } from "@solana/kit";
+
 /** Seconds in a year, matching the program's expiry cap. */
 const ONE_YEAR_SECONDS = 365n * 24n * 60n * 60n;
 
@@ -19,11 +21,11 @@ const ONE_YEAR_SECONDS = 365n * 24n * 60n * 60n;
 const MAX_REF_STRING_BYTES = 64;
 
 export interface DvpTradeTerms {
-  userA: string;
-  userB: string;
-  settlementAuthority: string;
-  mintA: string;
-  mintB: string;
+  userA: Address;
+  userB: Address;
+  settlementAuthority: Address;
+  mintA: Address;
+  mintB: Address;
   amountA: bigint;
   amountB: bigint;
   expiryTimestamp: bigint;
@@ -33,8 +35,8 @@ export interface DvpTradeTerms {
    * Resolved delivery destinations — the party's own address when the caller
    * named none, mirroring what the program stores for an omitted one.
    */
-  userASettlementDestination: string;
-  userBSettlementDestination: string;
+  userASettlementDestination: Address;
+  userBSettlementDestination: Address;
 }
 
 /**
