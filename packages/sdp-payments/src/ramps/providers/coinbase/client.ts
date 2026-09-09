@@ -168,6 +168,16 @@ interface CoinbaseCreateOrderResponse {
   // can read, log or persist it (see createOnrampQuote).
 }
 
+/**
+ * Hosts Coinbase will never allow-list. Embedding the payment link on a local page is
+ * permitted, but the `domain` field is refused for these names, so local runs omit it.
+ */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function isLocalHost(hostname: string): boolean {
+  return LOCAL_HOSTS.has(hostname.toLowerCase());
+}
+
 /** Embedded-mode create-order body: payment details and the partner reference, never contact data. */
 type CoinbaseCreateOrderRequest = {
   paymentCurrency: string;
@@ -296,9 +306,9 @@ export class CoinbaseRampClient implements RampProvider {
    * needs the embedding domain registered in the CDP portal and a real Apple Pay run, so
    * production mode fails loudly until that is done.
    *
-   * `domain` is forwarded when the caller supplies one: Coinbase requires it to be a
+   * `domain` is forwarded when the caller supplies a real host: Coinbase requires it to be a
    * CDP-portal-registered host and rejects `localhost` in any form with "Domain is not
-   * allow listed", so local runs omit it and registered previews and prod pass their host.
+   * allow listed", so local hostnames are dropped and registered previews and prod pass theirs.
    *
    * Coinbase also returns a reusable `userAuthToken` on embedded orders. It is deliberately
    * ignored here: never logged, never returned, never stored (decision 2026-09-08), so a
@@ -327,7 +337,7 @@ export class CoinbaseRampClient implements RampProvider {
       paymentAmount: input.fiatAmount,
       partnerUserRef,
     };
-    if (input.domain !== undefined) {
+    if (input.domain !== undefined && !isLocalHost(input.domain)) {
       orderRequest.domain = input.domain;
     }
 
