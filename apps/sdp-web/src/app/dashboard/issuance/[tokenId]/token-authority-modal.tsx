@@ -1,6 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
+import { TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,8 +70,6 @@ export function TokenAuthorityModal({
   const noneConfirmationCopy = getNoneConfirmationCopy(row, t);
   const currentAuthorityWallet =
     availableWallets.find((wallet) => wallet.publicKey === currentAuthorityValue) ?? null;
-  const selectedAuthorityWallet =
-    availableWallets.find((wallet) => wallet.publicKey === newAuthority.trim()) ?? null;
 
   return (
     <Modal
@@ -105,6 +104,7 @@ export function TokenAuthorityModal({
             onSubmit={(event) => {
               event.preventDefault();
               if (isSettingNone) {
+                if (row.removalDisabledReason) return;
                 setNoneConfirmationRowId(row.id);
                 return;
               }
@@ -121,6 +121,7 @@ export function TokenAuthorityModal({
               availableWallets={availableWallets}
               isPending={isPending}
               isSettingNone={isSettingNone}
+              removalDisabledReason={row.removalDisabledReason}
               mode={mode}
               newAuthority={newAuthority}
               onNewAuthorityChange={onNewAuthorityChange}
@@ -135,7 +136,6 @@ export function TokenAuthorityModal({
                   selectedWalletValue === NONE_AUTHORITY_VALUE ? "" : selectedWalletValue
                 );
               }}
-              selectedAuthorityWallet={selectedAuthorityWallet}
               selectedWalletValue={selectedWalletValue}
               setSelectedWalletValue={setSelectedWalletValue}
               walletModeAvailable={walletModeAvailable}
@@ -145,7 +145,14 @@ export function TokenAuthorityModal({
               <Button type="button" variant="outline" onClick={dismissModal} disabled={isPending}>
                 {t("DashboardIssuance.workspace.cancel")}
               </Button>
-              <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
+              <Button
+                type="submit"
+                disabled={
+                  isPending ||
+                  Boolean(signerUnavailableReason) ||
+                  (isSettingNone && Boolean(row.removalDisabledReason))
+                }
+              >
                 {t("DashboardIssuance.authority.save")}
               </Button>
             </div>
@@ -229,7 +236,7 @@ function CurrentAuthoritySection({
       {/* Inside a modal: opening the wallet in place would tear down the reassign
           flow mid-edit, so the name opens in a new tab. */}
       <WalletIdentityBadge
-        variant="card"
+        variant="row"
         walletLink="new-tab"
         identity={toWalletIdentity(currentAuthorityWallet, currentAuthorityValue, {
           unresolvedAs: "external",
@@ -298,11 +305,11 @@ function AuthorityTargetSection({
   availableWallets,
   isPending,
   isSettingNone,
+  removalDisabledReason,
   mode,
   newAuthority,
   onNewAuthorityChange,
   onToggleMode,
-  selectedAuthorityWallet,
   selectedWalletValue,
   setSelectedWalletValue,
   walletModeAvailable,
@@ -311,11 +318,11 @@ function AuthorityTargetSection({
   availableWallets: PaymentsDashboardWallet[];
   isPending: boolean;
   isSettingNone: boolean;
+  removalDisabledReason?: string | null;
   mode: "wallet" | "custom";
   newAuthority: string;
   onNewAuthorityChange: (value: string) => void;
   onToggleMode: () => void;
-  selectedAuthorityWallet: PaymentsDashboardWallet | null;
   selectedWalletValue: string;
   setSelectedWalletValue: (value: string) => void;
   walletModeAvailable: boolean;
@@ -340,7 +347,9 @@ function AuthorityTargetSection({
               <option value="" disabled>
                 {t("DashboardIssuance.authority.selectWallet")}
               </option>
-              <option value={NONE_AUTHORITY_VALUE}>{t("DashboardIssuance.wallet.none")}</option>
+              {!removalDisabledReason ? (
+                <option value={NONE_AUTHORITY_VALUE}>{t("DashboardIssuance.wallet.none")}</option>
+              ) : null}
               {availableWallets.map((wallet) => (
                 <option key={wallet.id} value={wallet.publicKey}>
                   {getSignerWalletOptionLabel(wallet, t)}
@@ -354,14 +363,21 @@ function AuthorityTargetSection({
             <Input
               value={newAuthority}
               onChange={(event) => onNewAuthorityChange(event.currentTarget.value)}
+              className="h-11 w-full rounded-[12px] border-border-default bg-surface-raised text-sm shadow-none"
+              style={{ height: 44 }}
               placeholder={t("DashboardIssuance.authority.solanaAddress")}
               pattern={SOLANA_ADDRESS_PATTERN}
               title={t("DashboardIssuance.forms.enterSolanaAddress")}
+              aria-describedby="custom-authority-warning"
               required
-              autoFocus
             />
           </Label>
         )}
+
+        {mode === "custom" ? <CustomAuthorityWarning /> : null}
+        {removalDisabledReason ? (
+          <p className="text-sm text-secondary">{removalDisabledReason}</p>
+        ) : null}
 
         {isSettingNone ? (
           <p className="text-sm text-secondary">
@@ -369,32 +385,28 @@ function AuthorityTargetSection({
           </p>
         ) : null}
 
-        <WalletIdentityBadge
-          variant="card"
-          walletLink="new-tab"
-          identity={toWalletIdentity(selectedAuthorityWallet, null, {
-            unresolvedAs: "custom",
-            unlabeled: t("DashboardIssuance.wallet.unlabeled"),
-          })}
-        />
-        {selectedAuthorityWallet ? null : (
-          <p className="text-sm leading-[1.45] text-secondary">
-            {t("DashboardIssuance.authority.noneDescription")}
-          </p>
-        )}
-
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <p className="text-secondary">{t("DashboardIssuance.authority.controlledWalletHint")}</p>
+        <div className="flex justify-end text-sm">
           <Button
             type="button"
             variant="ghost"
-            className="h-auto px-0 text-primary"
+            className="h-auto shrink-0 self-end px-0 text-primary sm:self-auto"
             onClick={onToggleMode}
             disabled={isPending}
           >
-            {mode === "wallet"
-              ? t("DashboardIssuance.authority.useCustom")
-              : t("DashboardIssuance.authority.chooseWallet")}
+            <span className="grid">
+              <span
+                className={`col-start-1 row-start-1 ${mode === "wallet" ? "" : "invisible"}`}
+                aria-hidden={mode !== "wallet"}
+              >
+                {t("DashboardIssuance.authority.useCustom")}
+              </span>
+              <span
+                className={`col-start-1 row-start-1 ${mode === "custom" ? "" : "invisible"}`}
+                aria-hidden={mode !== "custom"}
+              >
+                {t("DashboardIssuance.authority.chooseWallet")}
+              </span>
+            </span>
           </Button>
         </div>
       </>
@@ -408,12 +420,23 @@ function AuthorityTargetSection({
         <Input
           value={newAuthority}
           onChange={(event) => onNewAuthorityChange(event.currentTarget.value)}
-          placeholder={t("DashboardIssuance.authority.solanaAddressOrNone")}
+          placeholder={t(
+            removalDisabledReason
+              ? "DashboardIssuance.authority.solanaAddress"
+              : "DashboardIssuance.authority.solanaAddressOrNone"
+          )}
+          required={Boolean(removalDisabledReason)}
           pattern={SOLANA_ADDRESS_PATTERN}
           title={t("DashboardIssuance.authority.enterAddressOrNone")}
+          aria-describedby={isSettingNone ? undefined : "custom-authority-warning"}
           autoFocus
         />
       </Label>
+
+      {!isSettingNone ? <CustomAuthorityWarning /> : null}
+      {removalDisabledReason ? (
+        <p className="text-sm text-secondary">{removalDisabledReason}</p>
+      ) : null}
 
       {authorityWalletsError ? (
         <p className="text-sm text-destructive-strongest">{authorityWalletsError}</p>
@@ -426,21 +449,21 @@ function AuthorityTargetSection({
           {t("DashboardIssuance.authority.noneFieldWarning")}
         </p>
       ) : null}
-
-      <WalletIdentityBadge
-        variant="card"
-        walletLink="new-tab"
-        identity={toWalletIdentity(selectedAuthorityWallet, newAuthority, {
-          unresolvedAs: "custom",
-          unlabeled: t("DashboardIssuance.wallet.unlabeled"),
-        })}
-      />
-      {selectedAuthorityWallet || newAuthority.trim() ? null : (
-        <p className="text-sm leading-[1.45] text-secondary">
-          {t("DashboardIssuance.authority.noneDescription")}
-        </p>
-      )}
     </>
+  );
+}
+
+function CustomAuthorityWarning() {
+  const t = useTranslations();
+  return (
+    <div
+      id="custom-authority-warning"
+      className="flex items-start gap-2 rounded-lg border border-warning-border bg-warning-bg px-3 py-2.5 text-sm leading-5 text-warning"
+      role="note"
+    >
+      <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <p>{t("DashboardIssuance.authority.customWalletWarning")}</p>
+    </div>
   );
 }
 

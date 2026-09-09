@@ -78,6 +78,7 @@ const POSTGRES_TEST_TABLES = [
   "helius_rings_events",
   "helius_rings_timelocks",
   "helius_rings_operations",
+  "helius_rings_connections",
   "helius_rings_zones",
   "helius_rings_key_refs",
   "helius_rings_wallets",

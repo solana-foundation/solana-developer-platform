@@ -21,10 +21,11 @@ describe("Markets dashboard headers", () => {
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
-      titlePosition: "left",
-      headerVariant: "markets",
       contentWidthClass: "max-w-none",
     });
+    // The canonical header: no title-position or variant overrides, so the
+    // shell renders Markets exactly like every other tabbed module.
+    expect(config.titlePosition).toBeUndefined();
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs?.tabs).toEqual([
       {
@@ -43,12 +44,38 @@ describe("Markets dashboard headers", () => {
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
-      titlePosition: "left",
-      headerVariant: "markets",
       contentWidthClass: "max-w-none",
     });
+    expect(config.titlePosition).toBeUndefined();
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs?.tabs).toHaveLength(2);
+  });
+
+  // The sidebar hides DvP behind this flag. A header tab that ignored it would
+  // put a link to the gated workspace back on screen, one row above the
+  // sidebar that just removed it.
+  it("adds the DvP tab only when the flag is on", () => {
+    const off = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t, false, false);
+    // Positional, and main appended custody/payments/policies ahead of this
+    // one, so dvpEnabled is the EIGHTH argument. Passing it fifth silently set
+    // custodyEnabled instead and left the DvP tab off.
+    const on = getDashboardPageConfig(
+      "/dashboard/markets/treasury-solutions",
+      t,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    );
+
+    expect(off.routeTabs?.tabs.map((tab) => tab.href)).not.toContain("/dashboard/markets/dvp");
+    expect(on.routeTabs?.tabs).toHaveLength(3);
+    expect(on.routeTabs?.tabs.at(-1)).toEqual({
+      href: "/dashboard/markets/dvp",
+      label: "DashboardMarkets.dvp.navLabel",
+    });
   });
 
   it("centers the Embedded Yield integration title without header tabs", () => {

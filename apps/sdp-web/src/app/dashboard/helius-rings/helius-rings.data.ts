@@ -228,6 +228,11 @@ export interface RingsShieldedBalance {
   decimals: number | null;
   /** Ring the notes are bound to; null = the default public pool. Never merged across rings. */
   ringProgramId: string | null;
+  /**
+   * Unspent notes making up this balance. More than one means the position is
+   * fragmented, which is what a merge consolidates.
+   */
+  noteCount: number;
   /** USD per whole unit, when pricing was reachable. */
   usdPrice?: number;
   /** amountRaw × usdPrice, rounded to 2dp; absent when the mint went unpriced. */
@@ -325,12 +330,13 @@ export async function fetchRingsWalletIdentity(
  * rejects anything else on a strict schema, so widening this without widening
  * that one only moves the refusal later.
  */
-export type RingsOpType = "shield" | "withdraw" | "transfer_registered";
+export type RingsOpType = "shield" | "withdraw" | "transfer_registered" | "merge";
 
 export interface PrepareRingsOperationInput {
   walletId: string;
   opType: RingsOpType;
-  asset: { mint: string; amountRaw: string };
+  /** No `amountRaw` on a merge: it consolidates whatever the notes already hold. */
+  asset: { mint: string; amountRaw?: string };
   /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
   /**

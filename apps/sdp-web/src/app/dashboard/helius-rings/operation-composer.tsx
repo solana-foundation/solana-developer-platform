@@ -21,7 +21,17 @@ type Translate = ReturnType<typeof useTranslations>;
 
 // UI tab labels map 1:1 to server op types; `transfer_registered` is what the
 // API accepts for shielded → shielded transfers within this project.
-const OP_TABS: readonly RingsOpType[] = ["shield", "withdraw", "transfer_registered"] as const;
+const OP_TABS: readonly RingsOpType[] = [
+  "shield",
+  "withdraw",
+  "transfer_registered",
+  "merge",
+] as const;
+
+/** A merge takes no amount and no recipient; it only names an asset. */
+function movesValue(opType: RingsOpType): boolean {
+  return opType !== "merge";
+}
 
 type Phase = { name: "compose" } | { name: "review"; error: string | null };
 
@@ -57,6 +67,9 @@ function draftAmountRaw(draft: ComposerDraft): string | null {
 }
 
 function isDraftComplete(draft: ComposerDraft): boolean {
+  // A merge is complete as soon as an asset is chosen: there is nothing else to
+  // fill in, and the wallet's own notes decide the rest.
+  if (!movesValue(draft.opType)) return true;
   if (draftAmountRaw(draft) === null) return false;
   // Withdraw's recipient is derived from the wallet's own custody address; only
   // private transfers still need an explicit recipient choice.
@@ -78,12 +91,16 @@ function buildSummaryRows(
       t("DashboardHeliusRings.composer.summaryOperation"),
       t(`DashboardHeliusRings.activity.opType_${draft.opType}`),
     ],
-    [
+  ];
+  if (movesValue(draft.opType)) {
+    rows.push([
       t("DashboardHeliusRings.composer.summaryAmount"),
       formatAssetAmount(amountRaw, draft.assetMint),
-    ],
-  ];
-  if (projectRings.length > 0) {
+    ]);
+  }
+  // A merge is always the default ring's: ring-bound notes are consolidated by
+  // an instruction the protocol ships no builder for.
+  if (projectRings.length > 0 && movesValue(draft.opType)) {
     rows.push([
       t("DashboardHeliusRings.composer.summaryRing"),
       draft.ring === null ? t("DashboardHeliusRings.composer.ringDefault") : draft.ring,
@@ -135,7 +152,7 @@ export function OperationComposer({
 
   const handleConfirm = useCallback(async () => {
     const amountRaw = draftAmountRaw(draft);
-    if (amountRaw === null) return;
+    if (amountRaw === null && movesValue(draft.opType)) return;
     setSubmitting(true);
     setPhase({ name: "review", error: null });
     let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
@@ -151,7 +168,12 @@ export function OperationComposer({
       prepared = await prepareRingsOperation({
         walletId: draft.walletId,
         opType: draft.opType,
-        asset: { mint: draft.assetMint, amountRaw },
+        // The API's merge arm is strict: sending an amount it has no use for
+        // would be refused rather than ignored.
+        asset: {
+          mint: draft.assetMint,
+          ...(amountRaw !== null && movesValue(draft.opType) ? { amountRaw } : {}),
+        },
         to,
         // Omitted when default: the field exists only to name a custom ring.
         ...(draft.ring ? { ring: draft.ring } : {}),
@@ -294,7 +316,10 @@ function ComposeStep({
     );
   }
 
-  const showRingSelect = projectRings.length > 0;
+  // A merge names neither an amount nor a ring: it consolidates this wallet's
+  // own default-ring notes, and their sum is the amount.
+  const showAmount = movesValue(draft.opType);
+  const showRingSelect = projectRings.length > 0 && movesValue(draft.opType);
   const anyRingActive = projectRings.some((ring) => ring.status === "active");
 
   return (
@@ -315,18 +340,22 @@ function ComposeStep({
             ))}
           </Select>
         </Field>
-        <Field label={t("DashboardHeliusRings.composer.amount")}>
-          <Input
-            inputMode="decimal"
-            value={draft.amountDecimal}
-            placeholder="1.01"
-            onChange={(event) =>
-              onPatch({
-                amountDecimal: event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"),
-              })
-            }
-          />
-        </Field>
+        {showAmount ? (
+          <Field label={t("DashboardHeliusRings.composer.amount")}>
+            <Input
+              inputMode="decimal"
+              value={draft.amountDecimal}
+              placeholder="1.01"
+              onChange={(event) =>
+                onPatch({
+                  amountDecimal: event.target.value
+                    .replace(/[^\d.]/g, "")
+                    .replace(/(\..*)\./g, "$1"),
+                })
+              }
+            />
+          </Field>
+        ) : null}
         {showRingSelect ? (
           <Field label={t("DashboardHeliusRings.composer.ring")}>
             <Select

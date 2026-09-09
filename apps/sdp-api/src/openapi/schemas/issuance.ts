@@ -880,10 +880,6 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
         "Updated image URL. For deployed tokens, this writes the on-chain `image` metadata field. Use null to clear the displayed value.",
       example: "https://example.com/token.png",
     }),
-    status: withOpenApi(updateTokenSchemaBase.shape.status, {
-      description: "Token operational status.",
-      example: "active",
-    }),
     requiresAllowlist: withOpenApi(updateTokenSchemaBase.shape.requiresAllowlist, {
       description:
         "Whether transfers are restricted to allowlisted accounts. Only accepted while the token is undeployed (pending, no mint address); returns 400 after deployment.",

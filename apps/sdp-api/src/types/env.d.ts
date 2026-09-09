@@ -33,12 +33,12 @@ export interface Env {
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
 
-  // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
-  // it overrides the request-derived origin used to build the SDP-hosted token
-  // metadata URL that gets burned into the on-chain MetadataPointer. Set this in
-  // any environment fronted by a proxy that rewrites Host/scheme, so the URI
-  // can't capture an internal, unreachable address. Falls back to the request
-  // origin when unset.
+  // Public-facing origin of this API (e.g. "https://api.example.com"). The
+  // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
+  // built from this value and nothing else — it is never derived from the
+  // incoming request, so a spoofed Host header can't pin a hostile origin into
+  // a mint. Deploys that need the SDP-hosted metadata fallback fail closed when
+  // it is unset or not a valid http(s) origin.
   PUBLIC_API_ORIGIN?: string;
 
   // Deployment mode. "managed" (default) uses tier-based provider entitlements
@@ -242,20 +242,6 @@ export interface Env {
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
 
-  // Rings upstreams, all required once Rings is enabled. Absence does not
-  // disable the gateway: it reports every component red naming what is missing.
-  HELIUS_RINGS_RPC_URL?: string;
-  HELIUS_RINGS_INDEXER_URL?: string;
-  HELIUS_RINGS_PROVER_URL?: string;
-
-  // Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up
-  // needs it; absent, submitting a ring program id fails with config_error.
-  HELIUS_RINGS_RING_RPC_URL?: string;
-
-  // Permits plain-http Rings upstreams; opt-in per environment because over
-  // plaintext an indexer response reveals which notes an identity owns.
-  HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
-
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;
@@ -322,10 +308,18 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
 
-  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
-  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  // Markets module gate (parent) and its sub-module gates (children). Each
+  // sub-module needs both; clearing MARKETS_ENABLED dark-launches them all.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+  // Atomic delivery-versus-payment settlement. The on-chain program is deployed
+  // on devnet only, so this stays off anywhere pointed at mainnet until Exo
+  // deploys there (PRO-1798).
+  DVP_ENABLED?: string;
+  // Settlement authority for DvP trades. Only this key can Settle or Cancel;
+  // the parties can only unwind. It cannot be either party or an executable
+  // account. Where it ultimately lives is still an open decision (PRO-1796).
+  DVP_SETTLEMENT_AUTHORITY?: string;
   // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.

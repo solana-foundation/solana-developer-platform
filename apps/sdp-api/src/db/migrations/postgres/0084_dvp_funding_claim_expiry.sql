@@ -1,0 +1,17 @@
+-- The block height past which a funding claim can no longer be the live one.
+--
+-- Funding takes a claim before broadcasting so two overlapping requests cannot
+-- both send. An AMBIGUOUS failure deliberately keeps that claim, because
+-- releasing it could invite a second transfer on top of one still in flight.
+--
+-- The gap was that nothing ever released it afterwards. A funding attempt that
+-- died in a way the code could not classify — an RPC returning an error shape
+-- the client could not decode, say — left the claim held forever, and every
+-- later attempt answered "this leg is already being funded". The only recovery
+-- was editing this table by hand, which is not a recovery path anyone can ship.
+--
+-- Recording the signed transaction's last-valid block height gives the sweep the
+-- same fact create already uses: past that height the transaction can never
+-- land, so a claim whose signature never appeared is dead and can be released
+-- without any risk of racing a live transfer.
+ALTER TABLE dvp_trades ADD COLUMN IF NOT EXISTS funding_claim_expiry_height TEXT;

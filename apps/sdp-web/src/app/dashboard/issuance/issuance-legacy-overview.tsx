@@ -1,9 +1,8 @@
 "use client";
 
-import { Plus, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -27,25 +26,21 @@ interface IssuanceLegacyOverviewProps {
   tokens: IssuanceTokenView[];
   search: string;
   onSearchChange: (value: string) => void;
-  onCreate: () => void;
   /** Dim the rows while the next page is in flight. */
   isRefreshing: boolean;
   tokensNotice: string | null;
   emptyResultsNotice: ReactNode;
   pagination: ReactNode;
-  createModal: ReactNode;
 }
 
 export function IssuanceLegacyOverview({
   tokens,
   search,
   onSearchChange,
-  onCreate,
   isRefreshing,
   tokensNotice,
   emptyResultsNotice,
   pagination,
-  createModal,
 }: IssuanceLegacyOverviewProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -71,13 +66,6 @@ export function IssuanceLegacyOverview({
             placeholder={t("DashboardIssuance.workspace.search")}
           />
         </div>
-        <Button
-          type="button"
-          className="h-10 rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90"
-          onClick={onCreate}
-        >
-          {t("DashboardIssuance.workspace.createDraft")}
-        </Button>
       </div>
 
       {emptyResultsNotice}
@@ -159,21 +147,9 @@ export function IssuanceLegacyOverview({
             </article>
           );
         })}
-
-        <button
-          type="button"
-          onClick={onCreate}
-          data-testid="token-add-card"
-          className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
-          aria-label={t("DashboardIssuance.workspace.addNewToken")}
-        >
-          <Plus className="h-6 w-6" />
-        </button>
       </div>
 
       {pagination}
-
-      {createModal}
     </>
   );
 }

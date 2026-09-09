@@ -1,0 +1,412 @@
+/**
+ * Policy candidates for settling and cancelling a DvP trade.
+ *
+ * A DvP trade is genuinely two-sided, which the policy engine already has a
+ * shape for: `legs` carries "per-leg evaluation views of a multi-leg operation"
+ * (`packages/sdp-policy/src/ports.ts:32`), the same machinery batch transfers
+ * use for their recipients. So both legs are evaluated on their own asset,
+ * amount and destination rather than being flattened into one.
+ *
+ * The top-level candidate describes **SDP's own leg** — what this organization
+ * is giving up, and to whom. That is what an amount or destination rule is
+ * really asking about, and picking the counterparty's leg instead would let a
+ * limit be evaded by labelling the trade the other way round.
+ */
+
+import * as solanaRpc from "@sdp/rpc/solana";
+import type { PolicyCandidate } from "@sdp/types";
+import type { Context } from "hono";
+import { getDb } from "@/db";
+import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
+import { getAuth, requireProjectId } from "@/lib/auth";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyCustodyWalletIdsForPermissions,
+} from "@/services/api-key-scope.service";
+import { legOfSide } from "@/services/dvp/fund";
+import { resolveFundableLeg } from "@/services/dvp/fund-authorization";
+import { readEscrowState } from "@/services/dvp/read-chain";
+import type { DvpCloseAction } from "@/services/dvp/settle";
+
+/** Every trade action that spends from a custody wallet. */
+export type DvpTradeAction = DvpCloseAction | "fund";
+
+import { createPolicyRepository } from "@/db/repositories";
+import { readDvpLegShortfall } from "@/services/dvp/fund";
+import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
+import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
+import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
+import type { Env } from "@/types/env";
+
+interface SettlementWalletRef {
+  custodyWalletId: string;
+  address: string;
+  /** The provider's id for the wallet, which is what `walletId` below means. */
+  providerWalletId: string;
+}
+
+/**
+ * Builds the policy candidate for closing a trade.
+ *
+ * @param c - Request context, for the acting principal.
+ * @param trade - The trade being closed.
+ * @param settlement - The wallet that will sign, which is what policy governs.
+ * @param action - settle or cancel; they are separate operation types because
+ *   an org may well allow one and not the other.
+ */
+export function buildDvpTradeActionPolicyCandidate(
+  c: Context<{ Bindings: Env }>,
+  trade: DvpTradeRow,
+  settlement: SettlementWalletRef,
+  action: DvpTradeAction,
+  /**
+   * What funding will actually move, when it is already known to be less than
+   * the leg's target. Null for settle and cancel, which move whole legs.
+   *
+   * `fundDvpTradeLeg` tops a partly funded leg up to its target rather than
+   * sending the target again (`services/dvp/fund.ts:99`), so the full amount is
+   * the wrong number to put in front of an approver: a top-up well inside an
+   * amount limit would be refused because the TARGET exceeds it, and the queue
+   * would ask a human to approve money that is not going to move.
+   *
+   * Safe as an approval basis despite being read before the transfer: an escrow
+   * only ever gains tokens while its trade is open — settle, cancel and reject
+   * each close the account — so the outstanding balance is monotonically
+   * non-increasing and this is an upper bound on the eventual transfer. Policy
+   * therefore never approves less than what moves.
+   */
+  fundingAmount: bigint | null = null
+): { candidate: PolicyCandidate; legs: PolicyCandidate[] } {
+  const auth = getAuth(c);
+  // Null on an agent trade, where SDP delivers neither leg. Compared against
+  // "a" this used to answer false for BOTH "SDP holds leg B" and "SDP holds no
+  // leg", so an agent settle built its candidate out of leg B and told policy
+  // this organization was moving tokens it does not hold. `sdpLegOf` in
+  // `services/dvp/fund.ts:71` guards the same read; this one did not.
+  const sdpSide = trade.tradeKind === "agent" ? null : trade.sdpSide;
+  const sdpAmount = fundingAmount === null ? null : fundingAmount.toString();
+
+  const base = {
+    organizationId: auth.organizationId,
+    projectId: trade.projectId,
+    custodyWalletId: settlement.custodyWalletId,
+    // The PROVIDER's wallet id, not the on-chain address. The wallet-operations
+    // ownership check matches `custody_wallets.wallet_id`
+    // (`policy.repository.postgres.ts:1044`), so an address finds no row and the
+    // operation is refused as belonging to nobody — which surfaced as
+    // "Failed to record wallet operation" on every settle, cancel and fund.
+    // `payments/handlers/ramps.ts:405-406` is the convention this now matches.
+    walletId: settlement.providerWalletId,
+    apiKeyId: auth.apiKeyId,
+    actor: walletOperationActorFromAuth(auth),
+    source: "api",
+    // The same family Earn uses for its on-chain vault operations. DvP is an
+    // interaction with a Solana program, not a payment rail, and reusing it
+    // means no migration to widen the wallet_operations family constraint.
+    operationFamily: "program" as const,
+    operationType: (action === "settle"
+      ? "dvp_settle"
+      : action === "cancel"
+        ? "dvp_cancel"
+        : "dvp_fund") as "dvp_settle" | "dvp_cancel" | "dvp_fund",
+    providerExtensions: {},
+  };
+
+  const legA: PolicyCandidate = {
+    ...base,
+    asset: trade.mintA,
+    amount: trade.amountA,
+    // Where this leg's tokens end up: delivered to the counterparty on settle,
+    // returned to the depositor on cancel, and INTO the escrow on fund. A
+    // destination rule should see the address the money actually reaches.
+    destination:
+      action === "fund"
+        ? trade.escrowA
+        : action === "settle"
+          ? trade.userBSettlementDestination
+          : trade.userA,
+    context: { dvpTradeId: trade.id, dvpLeg: "a", dvpAction: action },
+  };
+
+  const legB: PolicyCandidate = {
+    ...base,
+    asset: trade.mintB,
+    amount: trade.amountB,
+    destination:
+      action === "fund"
+        ? trade.escrowB
+        : action === "settle"
+          ? trade.userASettlementDestination
+          : trade.userB,
+    context: { dvpTradeId: trade.id, dvpLeg: "b", dvpAction: action },
+  };
+
+  // Only SDP's leg is ever overridden: the counterparty's leg describes what
+  // THEY owe, which a partial top-up on our side does not change.
+  //
+  // An agent trade has no leg of ours to override or to lead with. Leg A is the
+  // representative then — chosen, not fallen into — and both legs are evaluated
+  // below regardless, so nothing escapes policy either way.
+  const sdpLegAtTarget = sdpSide === "b" ? legB : legA;
+  const sdpLeg: PolicyCandidate =
+    sdpAmount === null ? sdpLegAtTarget : { ...sdpLegAtTarget, amount: sdpAmount };
+
+  // Funding moves ONE leg — SDP's — so the counterparty's leg is not part of
+  // the operation and must not be evaluated as though it were. Funding is
+  // refused outright on an agent trade (`services/dvp/fund.ts:119`), so the
+  // one-leg branch is only ever reached with a side.
+  const legs = action === "fund" ? [sdpLeg] : [legA, legB];
+
+  return {
+    candidate: {
+      ...sdpLeg,
+      context: {
+        dvpTradeId: trade.id,
+        dvpAction: action,
+        dvpTradeKind: trade.tradeKind,
+        dvpSdpSide: sdpSide,
+        swapDvp: trade.swapDvp,
+        // On an agent trade neither party is a counterparty OF OURS, so naming
+        // one of them as "the counterparty" would put a false fact in front of
+        // an approver. Both are named instead.
+        ...(sdpSide === null
+          ? { parties: [trade.userA, trade.userB] }
+          : { counterparty: sdpSide === "a" ? trade.userB : trade.userA }),
+      },
+    },
+    legs,
+  };
+}
+
+/**
+ * What funding should be evaluated at: the approved amount on a replay, the
+ * live shortfall otherwise.
+ *
+ * @param c - Request context, which carries the approved operation on a replay.
+ * @param trade - The trade whose SDP leg is being funded.
+ * @returns The base-unit amount to put on the policy candidate.
+ */
+async function approvedOrLiveFundingAmount(
+  c: Context<{ Bindings: Env }>,
+  trade: DvpTradeRow
+): Promise<bigint> {
+  const operationId = approvedWalletOperationId(c);
+  if (operationId) {
+    const operation = await createPolicyRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).getWalletOperationById(operationId);
+    // Only when the stored row actually carries an amount. A missing one means
+    // this is not the operation we think it is, and the field-by-field match
+    // downstream is the right place for that to fail loudly.
+    if (operation?.amount) {
+      return BigInt(operation.amount);
+    }
+  }
+  return readDvpLegShortfall(c.env, trade);
+}
+
+/**
+ * The policy-gate extractor for `POST /trades/:tradeId/{settle,cancel}`.
+ *
+ * Resolves the trade and the project's settlement wallet before the gate runs,
+ * and hands both to the handler through `resolved` so the work is not repeated
+ * after approval. Returns a null candidate when the trade does not exist —
+ * `policyGate` treats that as ungoverned and lets the handler produce the 404,
+ * rather than filing a wallet operation for a trade that is not there.
+ */
+export async function extractDvpTradeActionPolicyCandidate(
+  c: Context<{ Bindings: Env }>,
+  action: DvpTradeAction
+): Promise<PolicyGateExtraction> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const tradeId = c.req.param("tradeId") ?? "";
+
+  const trade = await createDvpTradeRepository(c.env).getById(
+    {
+      organizationId: auth.organizationId,
+      projectId,
+      // `payments:write`, not read. The routes this extractor serves require
+      // write, so filtering by read would hide the trade from a binding that
+      // holds write without read — an authorized settle would come back as
+      // "trade not found", which is both wrong and impossible to diagnose.
+      sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]),
+    },
+    tradeId
+  );
+
+  if (!trade) {
+    return {
+      candidate: null,
+      legs: [],
+      body: {},
+      resolved: { trade: null, settlement: null },
+      rawPayload: { tradeId },
+      idempotencyKey: null,
+    };
+  }
+
+  // Before the gate records anything. The trade was found through the CACHED
+  // auth snapshot, which can be up to an hour stale, so a key revoked inside
+  // that window would otherwise get an approval request filed in its name and
+  // a settlement wallet provisioned on its behalf. The handler checks this
+  // again after approval; both are needed, because only one of them runs on
+  // the approved-replay path.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, trade.sdpWalletId, [
+    "payments:write",
+  ]);
+
+  const settlement = await getOrCreateDvpSettlementWallet(c.env, {
+    organizationId: trade.organizationId,
+    projectId: trade.projectId,
+  });
+
+  // Funding tops SDP's leg up to its target, so what policy is shown has to be
+  // the shortfall rather than the target. Read here, at extraction, because
+  // this is the value the approval request stores and a human reads later.
+  //
+  // On an approved REPLAY the stored amount wins over a fresh read. The replay
+  // is checked field-by-field against the approved row with `amount` compared
+  // for exact equality (`services/policy/enforcement.service.ts:113`), and a
+  // deposit landing between approval and execution would make a fresh read
+  // smaller — so recomputing here would fail the match and strand an approved
+  // top-up behind a second approval it should never have needed.
+  //
+  // Pinning is safe in the direction that matters: an escrow only gains tokens
+  // while its trade is open, so the live shortfall funding actually sends is
+  // always at or below the amount that was approved. Policy approved a ceiling
+  // and the transfer stays under it.
+  const fundingAmount = action === "fund" ? await approvedOrLiveFundingAmount(c, trade) : null;
+
+  const { candidate, legs } = buildDvpTradeActionPolicyCandidate(
+    c,
+    trade,
+    settlement,
+    action,
+    fundingAmount
+  );
+
+  return {
+    candidate,
+    legs,
+    body: {},
+    resolved: { trade, settlement },
+    rawPayload: { tradeId: trade.id, action, swapDvp: trade.swapDvp },
+    // The trade id IS the idempotency key: a trade can only be settled or
+    // cancelled once, because the instruction closes its account.
+    idempotencyKey: `dvp_${action}_${trade.id}`,
+  };
+}
+
+export interface DvpCloseResolved {
+  trade: DvpTradeRow | null;
+  settlement: SettlementWalletRef | null;
+}
+
+/**
+ * The policy-gate extractor for a party funding its own leg (PRO-1854).
+ *
+ * Three things differ from the extractor above, and each is forced:
+ *
+ * 1. The trade is loaded WITHOUT project scope. That is the point of the
+ *    feature — the trade belongs to somebody else. The read is permitted by the
+ *    `sdp_dvp_party_read` policy (0089), which admits it only when a custody
+ *    wallet of this tenant matches a party address, so an unrelated trade id
+ *    returns nothing here regardless of what this code does.
+ * 2. Policy is evaluated against the FUNDING organization's own wallet. Their
+ *    limits and approvals govern their money; the creating org's govern theirs,
+ *    and it is not the creating org's money moving.
+ * 3. One leg, theirs. The other leg describes what the counterparty owes and is
+ *    no part of this operation.
+ */
+export async function extractDvpPartyFundingPolicyCandidate(
+  c: Context<{ Bindings: Env }>
+): Promise<PolicyGateExtraction> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const tradeId = c.req.param("tradeId") ?? "";
+
+  const absent: PolicyGateExtraction = {
+    candidate: null,
+    legs: [],
+    body: {},
+    resolved: { trade: null, settlement: null },
+    rawPayload: { tradeId },
+    idempotencyKey: null,
+  };
+
+  const trade = await createDvpTradeRepository(c.env).getByIdAsParty(tradeId);
+  if (!trade) {
+    return absent;
+  }
+
+  const fundable = await resolveFundableLeg(c.env, trade, {
+    organizationId: auth.organizationId,
+    projectId,
+    auth,
+  });
+  // Ungoverned rather than refused here: the handler produces the 403, and
+  // filing a wallet operation for a trade this caller has no leg on would put
+  // somebody else's trade in their approvals queue.
+  if (!fundable) {
+    return { ...absent, resolved: { trade, settlement: null } };
+  }
+
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, fundable.custodyWalletId, [
+    "payments:write",
+  ]);
+
+  const wallet = await getDb(c.env)
+    .prepare(
+      `SELECT w.id AS custody_wallet_id, w.public_key, w.wallet_id
+         FROM custody_wallets w
+        WHERE w.id = ? AND w.status = 'active'`
+    )
+    .bind(fundable.custodyWalletId)
+    .first<{ custody_wallet_id: string; public_key: string; wallet_id: string }>();
+  if (!wallet) {
+    return { ...absent, resolved: { trade, settlement: null } };
+  }
+
+  const leg = legOfSide(trade, fundable.side);
+  const state = await readEscrowState(solanaRpc.createRpc(c.env), leg.escrow, leg.tokenProgram);
+  const held = state?.amount ?? 0n;
+  // The shortfall, like the other extractor: funding tops a leg up, so the
+  // number an approver sees has to be the number that moves.
+  const outstanding = leg.amount > held ? leg.amount - held : 0n;
+
+  const candidate: PolicyCandidate = {
+    organizationId: auth.organizationId,
+    projectId,
+    custodyWalletId: wallet.custody_wallet_id,
+    walletId: wallet.wallet_id,
+    apiKeyId: auth.apiKeyId,
+    actor: walletOperationActorFromAuth(auth),
+    source: "api",
+    operationFamily: "program",
+    operationType: "dvp_fund",
+    providerExtensions: {},
+    asset: leg.mint,
+    amount: outstanding.toString(),
+    destination: leg.escrow,
+    context: {
+      dvpTradeId: trade.id,
+      dvpAction: "fund",
+      dvpLeg: fundable.side,
+      dvpAsParty: true,
+      swapDvp: trade.swapDvp,
+    },
+  };
+
+  return {
+    candidate,
+    legs: [candidate],
+    body: {},
+    resolved: { trade, settlement: null },
+    rawPayload: { tradeId, side: fundable.side },
+    idempotencyKey: null,
+  };
+}

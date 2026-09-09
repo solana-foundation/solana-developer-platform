@@ -25,6 +25,7 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
 } from "@solana-program/compute-budget";
 import { withZolanaErrorBridgeSync } from "./error-bridge.js";
+import { buildMerge } from "./flows/merge.js";
 import { buildRingTransferTx, buildRingWithdrawalTx } from "./flows/ring-spend.js";
 import { buildShieldTransaction } from "./flows/shield.js";
 import { buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
@@ -93,10 +94,25 @@ export async function buildRingsOperation(
         );
       }
 
-      if (operation.opType !== "withdraw" && operation.opType !== "transfer_registered") {
+      if (
+        operation.opType !== "withdraw" &&
+        operation.opType !== "transfer_registered" &&
+        operation.opType !== "merge"
+      ) {
         throw new HeliusRingsError(
           "invalid_input",
           `unsupported Rings operation type: ${operation.opType}`
+        );
+      }
+
+      // Ring-bound notes are consolidated by an instruction the protocol
+      // reserves a tag for but ships no builder for, so this is refused rather
+      // than routed. Unreachable through the route schema, which has no `ring`
+      // on the merge arm at all.
+      if (operation.opType === "merge" && operation.ringProgramId) {
+        throw new HeliusRingsError(
+          "invalid_input",
+          "ring-bound notes cannot be merged; merge the default ring's notes instead"
         );
       }
 
@@ -125,6 +141,21 @@ export async function buildRingsOperation(
 
         if (ring) {
           return await buildRingSpend(deps, input, { ring, mint, wallet, keys, owner });
+        }
+
+        if (operation.opType === "merge") {
+          // The merge builder assembles and blockhashes its own transaction, so
+          // this read only floors the recorded expiry — the shield branch's
+          // contract.
+          const floor = await deps.client.getLatestBlockhash();
+          const merged = await buildMerge(
+            { client: deps.client, wallet, keys, owner },
+            {
+              mint,
+              ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
+            }
+          );
+          return finish(merged.transaction, merged.inputNotes, floor);
         }
 
         const spend: SpendDeps = { client: deps.client, wallet, keys, owner };

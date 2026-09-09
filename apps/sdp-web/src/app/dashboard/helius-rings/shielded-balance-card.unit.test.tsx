@@ -31,6 +31,7 @@ const OBSERVED: RingsWalletSync = {
       amountRaw: "1000000000",
       decimals: 9,
       ringProgramId: null,
+      noteCount: 1,
       usdPrice: 150,
       usdValue: 150,
     },

@@ -1,12 +1,11 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
-import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Info, PlusIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo } from "react";
 import {
   WalletMetadataCopyButton,
   WalletMetaValue,
@@ -24,7 +23,6 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
-import { CreateIssuanceTokenModal } from "./create-token-modal";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
 import type { IssuanceFilterState, IssuanceListQuery } from "./issuance-list-query";
@@ -41,8 +39,7 @@ import {
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
 import { useIssuancePlaygroundTokens, useIssuanceTokenList } from "./use-issuance-token-list";
 
-// Full-page draft wizard when the Asset Profiles UI flag is on; the legacy
-// create-token-modal.tsx handles creation when it's off.
+// Every creation entry point opens the same draft form.
 const CREATE_DRAFT_PATH = "/dashboard/issuance/create";
 
 const IssuancePlayground = dynamic(
@@ -77,11 +74,9 @@ interface IssuanceWorkspaceProps {
   facets: IssuanceTokenFacets;
   templates: IssuanceTemplateOption[];
   apiKeys: IssuanceApiKeyOption[];
-  signerWallets: PaymentsDashboardWallet[];
   apiBaseUrl: string | null;
   templatesError: string | null;
   tokensNotice: string | null;
-  signerWalletsError: string | null;
 }
 
 // Classes for the scrolling overview panel (the tab shell's `overflow-y-auto` div —
@@ -351,6 +346,55 @@ function IssuanceResults({
   );
 }
 
+function useIssuancePlaygroundKey({
+  apiKeys,
+  isPlaygroundTab,
+}: {
+  apiKeys: IssuanceWorkspaceProps["apiKeys"];
+  isPlaygroundTab: boolean;
+}) {
+  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  useEffect(() => {
+    setPlaygroundApiKeys(apiKeys);
+  }, [apiKeys, setPlaygroundApiKeys]);
+
+  useEffect(() => {
+    if (isPlaygroundTab) {
+      return;
+    }
+
+    const preloadPlayground = () => {
+      void import("./issuance-playground");
+    };
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(preloadPlayground);
+      return () => window.cancelIdleCallback(idleId);
+    }
+
+    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [isPlaygroundTab]);
+
+  const selectedPlaygroundApiKey =
+    apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null;
+  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
+  const playgroundApiKeyValue = useMemo(() => {
+    if (!selectedPlaygroundApiKey) {
+      return "";
+    }
+
+    const stored = getStoredApiKeySecret({
+      apiKeyId: selectedPlaygroundApiKey.id,
+      keyPrefix: selectedPlaygroundApiKeyPrefix,
+    });
+
+    return stored ?? "";
+  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
+
+  return playgroundApiKeyValue;
+}
+
 export function IssuanceWorkspace({
   assetProfilesEnabled,
   initialQuery,
@@ -362,14 +406,11 @@ export function IssuanceWorkspace({
   apiBaseUrl,
   templatesError,
   tokensNotice,
-  signerWallets,
-  signerWalletsError,
 }: IssuanceWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const { issuanceTab } = useDashboardWorkspace();
   const router = useRouter();
-  const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
   const isPlaygroundTab = issuanceTab === "playground";
 
   // Search, filters, sort and paging are one server-side query; the hook owns it,
@@ -400,54 +441,12 @@ export function IssuanceWorkspace({
   // back to the visible rows so it is never empty while loading.
   const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? tokens;
 
-  // Asset Profiles UI flag: on → full-page wizard; off → legacy modal.
+  // All creation entry points use the simplified full-page form.
   const startTokenCreation = () => {
-    if (assetProfilesEnabled) {
-      router.push(CREATE_DRAFT_PATH);
-      return;
-    }
-    setIsCreateTokenModalOpen(true);
+    router.push(CREATE_DRAFT_PATH);
   };
 
-  useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
-
-  useEffect(() => {
-    if (isPlaygroundTab) {
-      return;
-    }
-
-    const preloadPlayground = () => {
-      void import("./issuance-playground");
-    };
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(preloadPlayground);
-      return () => window.cancelIdleCallback(idleId);
-    }
-
-    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [isPlaygroundTab]);
-
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
-  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
-  const playgroundApiKeyValue = useMemo(() => {
-    if (!selectedPlaygroundApiKey) {
-      return "";
-    }
-
-    const stored = getStoredApiKeySecret({
-      apiKeyId: selectedPlaygroundApiKey.id,
-      keyPrefix: selectedPlaygroundApiKeyPrefix,
-    });
-
-    return stored ?? "";
-  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
+  const playgroundApiKeyValue = useIssuancePlaygroundKey({ apiKeys, isPlaygroundTab });
 
   // Template options for the filter popover. Sourced from the project-wide facet
   // counts rather than the loaded rows, so the choices don't shrink to whatever
@@ -530,20 +529,10 @@ export function IssuanceWorkspace({
                 tokens={tokens}
                 search={search}
                 onSearchChange={setSearch}
-                onCreate={startTokenCreation}
                 isRefreshing={isRefreshing}
                 tokensNotice={tokensNotice}
                 emptyResultsNotice={emptyResultsNotice}
                 pagination={pagination}
-                createModal={
-                  <CreateIssuanceTokenModal
-                    open={isCreateTokenModalOpen}
-                    onOpenChange={setIsCreateTokenModalOpen}
-                    signerWallets={signerWallets}
-                    signerWalletsError={signerWalletsError}
-                    hideTrigger
-                  />
-                }
               />
             ),
           },
@@ -618,12 +607,13 @@ export function IssuanceWorkspace({
                       templateOptions={templateOptions}
                     />
                     <Button
-                      type="button"
+                      asChild
                       className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
-                      onClick={startTokenCreation}
-                      iconLeft={<PlusIcon className="h-4 w-4" />}
                     >
-                      {t("DashboardIssuance.workspace.createDraft")}
+                      <Link href={CREATE_DRAFT_PATH}>
+                        <PlusIcon className="h-4 w-4" />
+                        {t("DashboardIssuance.workspace.createDraft")}
+                      </Link>
                     </Button>
                   </div>
                 </div>

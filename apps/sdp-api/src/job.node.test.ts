@@ -41,6 +41,10 @@ vi.mock("@/cron/earn-metrics-refresh", () => ({
   runEarnMetricsRefreshTick: vi.fn(async () => {}),
 }));
 
+vi.mock("@/cron/dvp-trades", () => ({
+  DVP_TRADES_MONITOR: "sdp-api-reconcile-dvp-trades",
+}));
+
 vi.mock("@/cron/earn-vault-movements", () => ({
   EARN_VAULT_MOVEMENTS_MONITOR: "sdp-api-reconcile-earn-vault-movements",
 }));
@@ -133,6 +137,10 @@ vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
 
 vi.mock("@/services/jobs/reconcile-earn-vault-movements", () => ({
   reconcileEarnVaultMovements: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
+  reconcileDvpTrades: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/policy/approved-operation-replay", () => ({
@@ -387,6 +395,7 @@ describe("runCronJob", () => {
     expect(runs.map(([, payload]) => payload.monitor).sort()).toEqual([
       "sdp-api-managed-collect-recurring-payments",
       "sdp-api-managed-poll-rings-indexing",
+      "sdp-api-managed-reconcile-dvp-trades",
       "sdp-api-managed-reconcile-earn-vault-movements",
       "sdp-api-managed-refresh-earn-metrics",
       "sdp-api-managed-retire-workflow-secrets",

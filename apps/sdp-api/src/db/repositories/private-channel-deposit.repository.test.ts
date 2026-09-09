@@ -80,6 +80,16 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
+    await db
+      .prepare(
+        `INSERT INTO private_channel_instances (
+           id, organization_id, project_id, gateway_url,
+           escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+         ) VALUES (?, ?, ?, 'https://gateway.example',
+           'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+      )
+      .bind(TEST_INSTANCE_ID, TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
 
     repo = createPostgresPrivateChannelDepositRepository(db);
   });

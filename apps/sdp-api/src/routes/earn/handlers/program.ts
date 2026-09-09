@@ -63,6 +63,7 @@ import {
   type earnProgramWithdrawalPreviewSchema,
   earnProgramWithdrawalsListQuerySchema,
 } from "../schemas";
+import { recordEarnWithdrawalAudit } from "./movement-audit";
 import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 
@@ -909,6 +910,28 @@ async function serveEarnProgramWithdrawalReplay(
     withdrawalRef: providerReference,
   });
   await persistWithdrawalObservation(ledger, intent, withdrawal);
+  // Repair-only audit (PRO-1866): a crash between the original payout and its
+  // audit write must not leave the movement permanently unaudited; an
+  // already-audited movement writes nothing.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: resolved.auth.organizationId,
+      userId: intent.created_by,
+      apiKeyId: intent.initiated_by_key_id,
+    },
+    intent.id,
+    {
+      executionModel: "custodial",
+      programId: resolved.row.id,
+      provider: resolved.client.provider,
+      amountUsd: intent.amount_requested,
+      token: intent.payout_token,
+      destinationAddress: intent.destination_address,
+      requestId: resolved.requestId,
+    },
+    { replayed: true }
+  );
   const response: EarnProgramWithdrawalResponse = { withdrawal };
   return success(c, response, 200);
 }
@@ -1011,6 +1034,30 @@ export const createEarnProgramWithdrawal = async (
   });
 
   await persistWithdrawalObservation(ledger, intentRow, withdrawal);
+
+  // Best-effort, post-effect, and only on the fresh-payout path: the replay
+  // returns above moved no new money (PRO-1866). A fail-closed audit write
+  // would be a new way for the payout to 5xx (ADR 0002 exit safety). Actor
+  // comes from the intent row, which survives the crash-window replay whose
+  // original request carried the attribution.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: intentRow.created_by,
+      apiKeyId: intentRow.initiated_by_key_id,
+    },
+    intentRow.id,
+    {
+      executionModel: "custodial",
+      programId: row.id,
+      provider: client.provider,
+      amountUsd: body.amountUsd,
+      token: body.token,
+      destinationAddress: body.destinationAddress,
+      requestId,
+    }
+  );
 
   const response: EarnProgramWithdrawalResponse = { withdrawal };
   return success(c, response, 201);

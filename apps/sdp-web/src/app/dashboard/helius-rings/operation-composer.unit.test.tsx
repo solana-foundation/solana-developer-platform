@@ -175,3 +175,43 @@ describe("OperationComposer ring selection", () => {
     expect("ring" in (mocks.prepareRingsOperation.mock.calls[0]?.[0] ?? {})).toBe(false);
   });
 });
+
+describe("OperationComposer merge", () => {
+  it("asks for an asset alone, with no amount or ring to choose", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Merge" }));
+
+    // A merge consolidates this wallet's own default-ring notes, so neither
+    // field has a meaning to offer.
+    expect(screen.queryByPlaceholderText("1.01")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Ring" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Asset" })).toBeTruthy();
+  });
+
+  it("reviews without an amount row and sends an asset with no amountRaw", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Merge" }));
+    // No amount to type: the draft is complete as soon as the tab is chosen.
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    expect(screen.queryByText("Amount")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    // The API's merge arm is strict, so an amount it has no use for would be
+    // refused rather than ignored.
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        opType: "merge",
+        asset: { mint: "So11111111111111111111111111111111111111112" },
+      })
+    );
+    const sent = mocks.prepareRingsOperation.mock.calls[0]?.[0] ?? {};
+    expect("ring" in sent).toBe(false);
+    expect(sent.to).toBeUndefined();
+  });
+});

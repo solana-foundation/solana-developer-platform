@@ -183,6 +183,83 @@ describe("Projects Routes", () => {
       ]);
     });
 
+    it("excludes production projects when the org has no enableProductionProject setting", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+      await seedProject("prj_production_disabled", "Production", "production-disabled");
+      await getDb(env)
+        .prepare(
+          `UPDATE projects SET environment = 'production' WHERE id = 'prj_production_disabled'`
+        )
+        .run();
+
+      const res = await app.request(
+        "/v1/projects",
+        {
+          headers: { Cookie: `sdp_session=${TEST_SESSION_ID}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const ids = body.data.projects.map((project: { id: string }) => project.id);
+      expect(ids).toContain(TEST_PROJECT.id);
+      expect(ids).not.toContain("prj_production_disabled");
+    });
+
+    it("includes production projects when the org settings have enableProductionProject", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ enableProductionProject: true }), TEST_ORG.id)
+        .run();
+      await seedProject("prj_production_enabled", "Production", "production-enabled");
+      await getDb(env)
+        .prepare(
+          `UPDATE projects SET environment = 'production' WHERE id = 'prj_production_enabled'`
+        )
+        .run();
+
+      const res = await app.request(
+        "/v1/projects",
+        {
+          headers: { Cookie: `sdp_session=${TEST_SESSION_ID}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const ids = body.data.projects.map((project: { id: string }) => project.id);
+      expect(ids).toContain(TEST_PROJECT.id);
+      expect(ids).toContain("prj_production_enabled");
+    });
+
+    it("filters out the API key's own production project when the org is not enabled", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+      await getDb(env)
+        .prepare(`UPDATE projects SET environment = 'production' WHERE id = ?`)
+        .bind(TEST_PROJECT.id)
+        .run();
+
+      const res = await app.request(
+        "/v1/projects",
+        {
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.projects).toEqual([]);
+    });
+
     it("excludes archived projects by default", async () => {
       const db = getDb(env);
 

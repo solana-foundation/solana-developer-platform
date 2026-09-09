@@ -9,6 +9,7 @@ import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
+import { registerDvpPaths } from "./paths/dvp";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
@@ -66,6 +67,11 @@ const OPENAPI_TAG = {
     description:
       "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
   },
+  DVP: {
+    name: "DvP",
+    description:
+      "Atomic delivery-versus-payment trades. Internal while the swap program is devnet-only and the family is feature-flagged off.",
+  },
   EARN: {
     name: "Earn",
     description:
@@ -106,6 +112,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.EARN,
+  OPENAPI_TAG.DVP,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -165,6 +172,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerAuthPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
+  registerDvpPaths(registry);
   registerProjectPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
