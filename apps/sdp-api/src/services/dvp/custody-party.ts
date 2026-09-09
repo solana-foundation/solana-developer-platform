@@ -13,24 +13,17 @@ import type { Env } from "@/types/env";
 /**
  * Resolves the active custody wallet for a party address, re-reading from the
  * DB on every call — the single "can this caller act on this side" derivation,
- * and a stale read must not authorize a fund after an archive. Active-only via
- * `CustodyRuntimeTargets.listWallets`, which already filters `w.status`.
+ * and a stale read must not authorize a fund after an archive. An indexed
+ * point read (`idx_custody_wallets_public_key`), never a list-and-filter.
  */
 export async function custodyWalletForParty(
   env: Env,
   params: { organizationId: string; projectId: string },
   partyAddress: Address
 ): Promise<string | null> {
-  // ponytail: fetch-all-find-one — fine at tens of wallets per project; if an
-  // org ever holds thousands, index custody_wallets(public_key) and point-read.
-  const wallets = await new CustodyRuntimeTargets(getDb(env), env, new Map()).listWallets({
+  return new CustodyRuntimeTargets(getDb(env), env, new Map()).findOperationalWalletIdByAddress({
     organizationId: params.organizationId,
     projectId: params.projectId,
-    includeAllProviders: true,
+    publicKey: partyAddress,
   });
-
-  // A project can in principle hold the same address under two records; the
-  // first match is the same wallet either way, so linear find is correct.
-  const match = wallets.find((wallet) => wallet.publicKey === partyAddress);
-  return match === undefined ? null : match.id;
 }
