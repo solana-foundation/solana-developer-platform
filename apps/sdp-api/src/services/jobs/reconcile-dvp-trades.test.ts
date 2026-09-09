@@ -396,6 +396,40 @@ describe("reconcileDvpTrades", () => {
     expect(retried).toBe(true);
   });
 
+  // A transfer can land AND fail: on chain, fees consumed, zero tokens moved.
+  // Neither lock nor receipt — released like one that never landed.
+  it("releases an expired broadcast claim whose transfer landed and failed", async () => {
+    await seedTrade("dvp_failed_broadcast", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_failed_broadcast",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "900",
+    });
+    await db
+      .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
+      .bind(SIG, "dvp_failed_broadcast")
+      .run();
+    getSignatureStatusesMock.mockResolvedValue([
+      {
+        slot: 5n,
+        confirmations: 1n,
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [0, "Custom"] },
+      },
+    ]);
+
+    await reconcileDvpTrades(env);
+
+    const after = await claims.listForTrade("dvp_failed_broadcast");
+    expect(after).toHaveLength(0);
+  });
+
   // The other branch of the same check: the transfer DID land, which is a
   // genuine receipt, so the row must survive the resolving pass.
   it("keeps an expired broadcast claim whose transfer landed", async () => {

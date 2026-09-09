@@ -97,11 +97,21 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
         const [status] = await getSignatureStatuses(rpc, [claim.signature], {
           searchTransactionHistory: true,
         });
-        if (status === null) {
+        // Two ways a transfer moved nothing: it never landed (null), or it
+        // landed and FAILED (`err` set — fees consumed, zero tokens moved).
+        // Both leave the claim neither lock nor receipt, so both release it.
+        if (status === null || status.err !== null) {
           await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
           getLogger().info(
-            { tradeId: claim.tradeId, side: claim.side, signature: claim.signature },
-            "dvp reconcile: deleted broadcast funding claim whose transfer never landed"
+            {
+              event: "sdp_dvp_funding_claim_released",
+              reason: status === null ? "never_landed" : "landed_failed",
+              tradeId: claim.tradeId,
+              side: claim.side,
+              signature: claim.signature,
+              err: status === null ? null : status.err,
+            },
+            "dvp reconcile: released broadcast funding claim whose transfer moved nothing"
           );
         }
       } catch (error) {
@@ -109,7 +119,13 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
         // the chain releases a broadcast claim. It keeps its lock and the
         // next tick retries.
         getLogger().error(
-          { tradeId: claim.tradeId, side: claim.side, signature: claim.signature, error },
+          {
+            event: "sdp_dvp_funding_claim_resolution_failed",
+            tradeId: claim.tradeId,
+            side: claim.side,
+            signature: claim.signature,
+            error,
+          },
           "dvp reconcile: expired broadcast funding claim could not be resolved"
         );
       }
