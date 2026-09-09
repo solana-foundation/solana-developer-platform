@@ -22,6 +22,8 @@ const hydrateWallet = vi.fn();
 const buildRingWithdrawalTx = vi.fn();
 const buildRingTransferTx = vi.fn();
 const buildMerge = vi.fn();
+const buildRingEntryTx = vi.fn();
+const buildRingExitTx = vi.fn();
 const spendKeys = vi.fn();
 const destroyKeys = vi.fn();
 
@@ -40,6 +42,8 @@ vi.mock("./keys.js", () => ({
 vi.mock("./flows/ring-spend.js", () => ({
   buildRingWithdrawalTx: (...args: unknown[]) => buildRingWithdrawalTx(...args),
   buildRingTransferTx: (...args: unknown[]) => buildRingTransferTx(...args),
+  buildRingEntryTx: (...args: unknown[]) => buildRingEntryTx(...args),
+  buildRingExitTx: (...args: unknown[]) => buildRingExitTx(...args),
 }));
 
 vi.mock("./wallet.js", () => ({
@@ -240,21 +244,24 @@ describe("buildRingsOperation ring-bound operations", () => {
     expect(buildRingWithdrawalTx).not.toHaveBeenCalled();
   });
 
-  it("routes a ring-pinned withdrawal through the ring builder with no pinned notes", async () => {
-    hydrateWallet.mockResolvedValue({ wallet: { fake: "wallet" } });
-    buildRingWithdrawalTx.mockResolvedValue(
-      compileTransaction(
-        pipe(
-          createTransactionMessage({ version: 0 }),
-          (message) => setTransactionMessageFeePayer(address(OWNER), message),
-          (message) =>
-            setTransactionMessageLifetimeUsingBlockhash(
-              { blockhash: BLOCKHASH as Blockhash, lastValidBlockHeight: 999n },
-              message
-            )
-        )
+  /** A minimal compiled v0 transaction the mocked one-call builders return. */
+  function compiledRingTx() {
+    return compileTransaction(
+      pipe(
+        createTransactionMessage({ version: 0 }),
+        (message) => setTransactionMessageFeePayer(address(OWNER), message),
+        (message) =>
+          setTransactionMessageLifetimeUsingBlockhash(
+            { blockhash: BLOCKHASH as Blockhash, lastValidBlockHeight: 999n },
+            message
+          )
       )
     );
+  }
+
+  it("routes a ring-pinned withdrawal through the ring builder with no pinned notes", async () => {
+    hydrateWallet.mockResolvedValue({ wallet: { fake: "wallet" } });
+    buildRingWithdrawalTx.mockResolvedValue(compiledRingTx());
 
     const buildDeps = deps();
     const base = operationInput();
@@ -285,6 +292,95 @@ describe("buildRingsOperation ring-bound operations", () => {
     expect(result.inputNotes).toEqual([]);
     expect(result.lastValidBlockHeight).toBe("1000");
     expect(result.requiredSigners).toEqual([OWNER]);
+  });
+
+  function ringMoveInput(opType: "ring_exit" | "ring_entry"): BuildOperationInput {
+    const base = operationInput();
+    return {
+      ...base,
+      ring: { programId: RING_PROGRAM, lookupTable: RING_LOOKUP_TABLE },
+      operation: {
+        ...base.operation,
+        opType,
+        ringProgramId: RING_PROGRAM,
+        input: {
+          walletId: "hrw_1",
+          opType,
+          asset: {
+            mint: "So11111111111111111111111111111111111111112",
+            amountRaw: "1",
+          },
+          clientNonce: "nonce_1",
+        },
+      },
+    };
+  }
+
+  /** Material whose scope opening is observable, carrying the own address a ring exit needs. */
+  function ringMoveDeps(self: unknown) {
+    const withMaterial = vi.fn(
+      async (_request: unknown, use: (material: never) => Promise<unknown>) =>
+        use({ shieldedAddress: self } as never)
+    );
+    return { buildDeps: { ...deps(), material: { withMaterial } as never }, withMaterial };
+  }
+
+  it("routes a ring_exit through the exit builder with the wallet's own shielded address", async () => {
+    hydrateWallet.mockResolvedValue({ wallet: { fake: "wallet" } });
+    buildRingExitTx.mockResolvedValue(compiledRingTx());
+    const self = { fake: "own-shielded-address" };
+    const { buildDeps, withMaterial } = ringMoveDeps(self);
+
+    const result = await buildRingsOperation(buildDeps, ringMoveInput("ring_exit"));
+
+    expect(buildRingExitTx).toHaveBeenCalledTimes(1);
+    const [, ringInput] = buildRingExitTx.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(ringInput).toMatchObject({
+      ringProgramId: RING_PROGRAM,
+      lookupTable: RING_LOOKUP_TABLE,
+      mint: "So11111111111111111111111111111111111111112",
+      amountRaw: "1",
+    });
+    // The exit's only allowed recipient: the wallet's own address, lifted from
+    // the material scope already open for the build — never a second load.
+    expect(ringInput.recipient).toBe(self);
+    expect(withMaterial).toHaveBeenCalledTimes(1);
+    expect(result.inputNotes).toEqual([]);
+  });
+
+  it("routes a ring_entry through the entry builder without loading any recipient material", async () => {
+    hydrateWallet.mockResolvedValue({ wallet: { fake: "wallet" } });
+    buildRingEntryTx.mockResolvedValue(compiledRingTx());
+    const { buildDeps, withMaterial } = ringMoveDeps({ fake: "own-shielded-address" });
+
+    await buildRingsOperation(buildDeps, ringMoveInput("ring_entry"));
+
+    expect(buildRingEntryTx).toHaveBeenCalledTimes(1);
+    const [, ringInput] = buildRingEntryTx.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(ringInput).not.toHaveProperty("recipient");
+    expect(withMaterial).toHaveBeenCalledTimes(1);
+    expect(buildRingTransferTx).not.toHaveBeenCalled();
+    expect(buildRingWithdrawalTx).not.toHaveBeenCalled();
+  });
+
+  it("refuses a ring move missing its ring pair before the wallet read, even unpinned", async () => {
+    // A null-pinned ring move must be a config_error, never a silent fall
+    // into the default-pool spend path.
+    const base = ringMoveInput("ring_entry");
+    const { ring: _ring, ...withoutRing } = base;
+    const input = {
+      ...withoutRing,
+      operation: { ...base.operation, ringProgramId: null },
+    };
+
+    await expect(buildRingsOperation(deps(), input)).rejects.toMatchObject({
+      name: "HeliusRingsError",
+      code: "config_error",
+      message: "a ring-bound spend needs the ring's lookup table; resume ring bring-up",
+    });
+    expect(hydrateWallet).not.toHaveBeenCalled();
+    expect(buildWithdrawal).not.toHaveBeenCalled();
+    expect(buildRingEntryTx).not.toHaveBeenCalled();
   });
 });
 

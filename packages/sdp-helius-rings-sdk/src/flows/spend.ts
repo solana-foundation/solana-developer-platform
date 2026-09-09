@@ -42,7 +42,7 @@ export interface TransferInput {
 }
 
 export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Promise<SpendResult> {
-  requireProtocolSol(input.mint, "withdrawal");
+  requireProtocolSol(input.mint, "withdrawals");
 
   const recipient = address(input.recipient);
   const { asset, amount, selection, transfer: withdrawal } = arm(deps, input);
@@ -75,7 +75,7 @@ export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Pr
  * instead of a public settlement target. No interface transfer on the outer tx.
  */
 export async function buildTransfer(deps: SpendDeps, input: TransferInput): Promise<SpendResult> {
-  requireProtocolSol(input.mint, "transfer");
+  requireProtocolSol(input.mint, "transfers");
 
   const { asset, amount, selection, transfer } = arm(deps, input);
   transfer.send(input.recipient, asset, amount);

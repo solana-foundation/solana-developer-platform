@@ -1,5 +1,6 @@
 import { ClientError } from "@heliuslabs/zolana/client";
 import { InterfaceError } from "@heliuslabs/zolana/interface";
+import { RingError } from "@heliuslabs/zolana/ring";
 import { TransactionError } from "@heliuslabs/zolana/transaction";
 import { WalletError } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings";
@@ -81,6 +82,17 @@ describe("withZolanaErrorBridge", () => {
     });
 
     await expect(codeFor(wrapped)).resolves.toBe("conflict");
+  });
+
+  it("prefers the ring error a ring wrapper retained over the wrapper's own code", async () => {
+    // RING_BUILD_TRANSFER alone would be an unavailable upstream with a retry
+    // hint; the retained cause says the ring's balance is short, which no
+    // retry fixes. The live exit builder wraps exactly this way.
+    const wrapped = new RingError("RING_BUILD_TRANSFER", {
+      cause: new RingError("RING_INSUFFICIENT_BALANCE"),
+    });
+
+    await expect(codeFor(wrapped)).resolves.toBe("insufficient_balance");
   });
 
   it("rethrows anything that is not a public Zolana error", async () => {
