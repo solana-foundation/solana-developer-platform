@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, Permission } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
@@ -231,14 +231,17 @@ async function seedCustodyWallets(): Promise<void> {
  * deliberately re-reads it rather than trusting the request's auth context —
  * that context can be an hour-old KV snapshot.
  */
-async function seedWalletScopedKey(wallet: { id: string; walletId: string }): Promise<void> {
+async function seedWalletScopedKey(
+  wallet: { id: string; walletId: string },
+  permissions: Permission[] = ["*"]
+): Promise<void> {
   const db = getDb(env);
   await db
     .prepare(
       `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
        VALUES (?, ?, ?, ?)`
     )
-    .bind(`akwp_dvp_${wallet.id}`, TEST_API_KEY.id, wallet.walletId, JSON.stringify(["*"]))
+    .bind(`akwp_dvp_${wallet.id}`, TEST_API_KEY.id, wallet.walletId, JSON.stringify(permissions))
     .run();
 
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -250,7 +253,7 @@ async function seedWalletScopedKey(wallet: { id: string; walletId: string }): Pr
       {
         walletId: wallet.walletId,
         custodyWalletId: wallet.id,
-        permissions: ["*"],
+        permissions,
       },
     ],
   });
@@ -566,6 +569,26 @@ describe("DvP routes", () => {
             partyB: { address: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg" },
           })
         ),
+      },
+      env
+    );
+    expect(res.status).toBe(403);
+
+    const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
+    expect(trades.results).toHaveLength(0);
+  });
+
+  // Visibility filters on payments:read, so a write-only binding creates a
+  // trade the same key can never read back — refused like the unnamed case.
+  it("refuses a scoped key whose named party wallet has write but not read", async () => {
+    await seedWalletScopedKey(BOUND_WALLET, ["payments:write"]);
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(createBody({ partyA: { walletId: BOUND_WALLET.id } })),
       },
       env
     );

@@ -330,17 +330,21 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   // wallet and spends its rent — a revoked key must not get that far on a
   // stale snapshot.
   await assertFreshApiKeyActive(getDb(c.env), auth);
-  // A wallet-scoped key only SEES trades its bound wallets are party to, so a
-  // create naming neither would 201 and then 404 on every read and settle. A
+  // A wallet-scoped key only SEES trades its bound wallets are party to, and
+  // visibility filters on the READ scope — a binding can hold payments:write
+  // without payments:read, so the guard checks read admission, not write. A
   // `{walletId}` slot is the explicit ownership claim; a pasted address that
   // happens to be a bound wallet's is not, and the remedy is naming it.
+  const readAdmittedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
+    "payments:read",
+  ]);
   if (
-    getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]) !== null &&
-    !("walletId" in body.partyA) &&
-    !("walletId" in body.partyB)
+    readAdmittedWalletIds !== null &&
+    !("walletId" in body.partyA && readAdmittedWalletIds.includes(body.partyA.walletId)) &&
+    !("walletId" in body.partyB && readAdmittedWalletIds.includes(body.partyB.walletId))
   ) {
     throw forbidden(
-      "A wallet-scoped key must name one of its bound wallets as a party (a walletId slot) — a trade naming neither would be invisible to this key"
+      "A wallet-scoped key must name one of its wallets with payments:read as a party (a walletId slot) — the trade would otherwise be invisible to this key"
     );
   }
   const assertedWalletIds = [
