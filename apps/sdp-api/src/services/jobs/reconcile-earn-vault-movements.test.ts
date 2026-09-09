@@ -437,11 +437,13 @@ describe("reconcileEarnVaultMovements", () => {
     // RPC forgetting it — never grounds to expire it on the blockhash rule, which
     // only ever applied to a transaction that never made it on chain.
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockResolvedValue(100_000n);
     await reconcileEarnVaultMovements(env);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "confirmed" });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    // No stubbed height here on purpose: such a row can never consume one, so
+    // a stub would mask the gate that keeps its failure off the tick.
+    expect(getBlockHeight).not.toHaveBeenCalled();
   });
 
   it("fails a finalized-then-errored signature without regressing a settled row", async () => {
@@ -541,7 +543,7 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     const seeded = await seedMovement();
     getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
 
-    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/could not read chain state/);
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 status-read/);
 
     expect(tickLevel()).toBe("error");
     expect(tickPayload()).toMatchObject({
@@ -570,11 +572,145 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     getSignatureStatuses.mockResolvedValue([null]);
     getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
 
-    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/could not read chain state/);
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 block-height/);
 
     expect(tickLevel()).toBe("error");
     expect(tickPayload()).toMatchObject({ block_height_read_failures: 1, backlog: 1 });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does not read the block height when every unknown signature is already confirmed", async () => {
+    // The read is gated on rows that can CONSUME a height. A parked confirmed
+    // row (signature aged out of RPC history) is a permanent member of the
+    // claim set, so counting its unneeded read failure would page forever for
+    // a tick that did its whole job.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+    logEvent.mockClear();
+
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).resolves.toBeUndefined();
+
+    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(tickLevel()).toBe("info");
+    expect(tickPayload()).toMatchObject({
+      block_height_read_failures: 0,
+      unchanged: 1,
+      backlog: 1,
+      backlog_blockhash_bound: 0,
+      backlog_confirmed: 1,
+    });
+    // The parked row cannot pin the actionable age gauge.
+    expect(tickPayload()?.oldest_blockhash_bound_age_seconds).toBeNull();
+    expect(tickPayload()?.oldest_unsettled_age_seconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it("still fails the tick when a blockhash-bound row in the same batch needs the height", async () => {
+    // Guards against over-narrowing: one parked confirmed row must not buy
+    // immunity for a requested row that genuinely needs recovery.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+    await seedMovement();
+    logEvent.mockClear();
+
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => null)
+    );
+    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 block-height/);
+
+    expect(getBlockHeight).toHaveBeenCalled();
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({ block_height_read_failures: 1 });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails the tick when the writes fail even though both chain reads answered", async () => {
+    // Reads fine, write side down (pool exhaustion, or a send-side RPC
+    // outage): counting only read failures reported this as an ok tick, which
+    // is the exact EARN-006 shape the job exists to close.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockResolvedValue(99n);
+    broadcastVaultTransaction.mockRejectedValue(new Error("node is behind"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/per-movement failures/);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({ movement_errors: 1, settled: 0 });
+  });
+
+  it("reports the exit path on its own axis (ADR 0002)", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    expect(tickPayload()).toMatchObject({ backlog: 1, backlog_withdrawals: 1 });
+    expect(tickPayload()?.oldest_withdrawal_age_seconds).toBeGreaterThanOrEqual(0);
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "confirmed" });
+  });
+
+  it("keeps the diagnosable cause on the chain-read failure event", async () => {
+    await seedMovement();
+    getSignatureStatuses.mockRejectedValue(new Error("429 rate limited by provider"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+        error_message: "429 rate limited by provider",
+      })
+    );
+  });
+
+  it("reports exactly the backlog the next claim would take", async () => {
+    // The repository comment promises these two predicates stay in lockstep;
+    // this asserts it against the claim itself rather than a literal, so they
+    // fail together instead of drifting.
+    await seedMovement();
+    await seedMovement();
+    const settled = await seedMovement();
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => null)
+    );
+    getBlockHeight.mockResolvedValue(99n);
+    await reconcileEarnVaultMovements(env);
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+      movementId: settled.movement.id,
+      organizationId: ORG,
+      toStatus: "failed",
+      failureReason: "test setup",
+    });
+    logEvent.mockClear();
+
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => ({
+        slot: 1n,
+        confirmations: 1n,
+        err: null,
+        confirmationStatus: "confirmed",
+      }))
+    );
+    await reconcileEarnVaultMovements(env);
+
+    const claimable = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).claimUnsettledVaultMovements(256);
+    expect(tickPayload()?.backlog).toBe(claimable.length);
   });
 
   it("makes the cron run itself report error, not ok (EARN-006 end to end)", async () => {
@@ -588,7 +724,7 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
       runWithCronRunEvent("sdp-api-reconcile-earn-vault-movements", () =>
         reconcileEarnVaultMovements(env)
       )
-    ).rejects.toThrow(/could not read chain state/);
+    ).rejects.toThrow(/Earn vault reconciliation failed/);
 
     expect(logEvent).toHaveBeenCalledWith(
       "error",

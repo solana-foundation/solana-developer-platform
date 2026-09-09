@@ -156,6 +156,10 @@ export interface EarnVaultReconciliationStats {
 
 type MovementOutcome = "settled" | "failed" | "confirmed" | "resubmitted" | "unchanged";
 
+function errorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 300);
+}
+
 function emptyStats(claimed: number): EarnVaultReconciliationStats {
   return {
     claimed,
@@ -234,14 +238,28 @@ async function reconcileEnvironment(
       environment,
       rows: rows.length,
       ...describeError(error),
+      // describeError carries only the error NAME and code; without the message
+      // the alert this event feeds fires with nothing to diagnose from.
+      error_message: errorMessage(error),
     });
     stats.statusReadFailures = 1;
     stats.unchanged = rows.length;
     return stats;
   }
 
+  // Only a null-status row that is NOT already confirmed can consume the
+  // height: reconcileMovement short-circuits a confirmed row to "unchanged"
+  // before ever reading it. A confirmed signature that has aged out of RPC
+  // history is a permanent, expected member of the claim set (PRO-1716 plus
+  // the claim query's reserved confirmed quota), so gating on the RPC answer
+  // alone spent a discarded chain call every minute AND let its failure fail a
+  // tick that had done its entire job. Gate the READ, so the failure
+  // accounting below is correct by construction.
+  const needsBlockHeight = rows.some(
+    (row, index) => (statuses[index] ?? null) === null && row.status !== "confirmed"
+  );
   let currentBlockHeight: bigint | null = null;
-  if (statuses.some((status) => status === null)) {
+  if (needsBlockHeight) {
     try {
       currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
     } catch (error) {
@@ -252,6 +270,7 @@ async function reconcileEnvironment(
         event: "sdp_api_earn_vault_reconciliation_block_height_read_failed",
         environment,
         ...describeError(error),
+        error_message: errorMessage(error),
       });
       stats.blockHeightReadFailures = 1;
     }
