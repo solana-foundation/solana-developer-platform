@@ -33,17 +33,3 @@ export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
 /** Which leg of a DvP trade SDP holds. The other side is an arbitrary external address. */
 export const DVP_TRADE_SIDES = ["a", "b"] as const;
 export type DvpTradeSide = (typeof DVP_TRADE_SIDES)[number];
-
-/**
- * Whether SDP is a party to the trade or only set it up.
- *
- * `principal` is the original shape and the default: SDP holds one leg in a
- * custody wallet and the counterparty is an arbitrary address.
- *
- * `agent` is the execution-desk shape — one party sets the terms and two other
- * parties do the swaps. The program always allowed it (`CreateDvp`'s only
- * signer is the payer), so this is SDP catching up to the program rather than
- * anything new on chain.
- */
-export const DVP_TRADE_KINDS = ["principal", "agent"] as const;
-export type DvpTradeKind = (typeof DVP_TRADE_KINDS)[number];

@@ -28,7 +28,7 @@ export interface DvpCreateOption {
 }
 
 export interface DvpCreateWallet {
-  /** `custody_wallets.id` — the record id the API expects as sdpWalletId. */
+  /** `custody_wallets.id` — the record id the API takes as a party or payer walletId. */
   id: string;
   address: string;
   label: string | null;
