@@ -518,6 +518,37 @@ describe("DvP routes", () => {
     expect(res.status).toBe(400);
   });
 
+  // The defaulted payer names no wallet, so nothing downstream would re-check
+  // the key — a revoked key on a stale auth snapshot must be stopped before
+  // create provisions the settlement wallet and spends its rent.
+  it("refuses a revoked key before provisioning anything, even with no wallet named", async () => {
+    await getDb(env)
+      .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
+      .bind(TEST_API_KEY.id)
+      .run();
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(
+          createBody({
+            partyA: { address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn" },
+            partyB: { address: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg" },
+          })
+        ),
+      },
+      env
+    );
+    expect(res.status).toBe(403);
+
+    const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
+    expect(trades.results).toHaveLength(0);
+    const settlement = await getDb(env).prepare("SELECT 1 FROM dvp_settlement_wallets").all();
+    expect(settlement.results).toHaveLength(0);
+  });
+
   it("rejects a ref string longer than the program's 64-byte field", async () => {
     const res = await app.request(
       "/v1/dvp/trades",

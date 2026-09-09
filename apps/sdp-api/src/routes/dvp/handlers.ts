@@ -20,6 +20,7 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
+  assertFreshApiKeyActive,
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
@@ -324,6 +325,11 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   // (never the hour-old auth snapshot). The DEFAULTED payer — the settlement
   // wallet — is project infrastructure every trade uses and needs no per-key
   // assertion; key/wallet bindings gate caller-chosen wallets only.
+  // Liveness first, for EVERY key: with a defaulted payer and pasted-address
+  // slots no wallet is named below, yet create provisions the settlement
+  // wallet and spends its rent — a revoked key must not get that far on a
+  // stale snapshot.
+  await assertFreshApiKeyActive(getDb(c.env), auth);
   const assertedWalletIds = [
     ...(body.payerWalletId ? [body.payerWalletId] : []),
     ...("walletId" in body.partyA ? [body.partyA.walletId] : []),
@@ -397,7 +403,9 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   // Re-read the binding before anything irreversible: the gate's auth context
   // can be an hour stale, and settling with a revoked key is an irreversible
   // two-leg spend, not a read slip. The wallet asserted is the SETTLEMENT
-  // wallet — the one that signs.
+  // wallet — the one that signs; the liveness assert covers keys the
+  // wallet-scoped check skips.
+  await assertFreshApiKeyActive(getDb(c.env), getAuth(c));
   await assertFreshApiKeyCustodyWalletAccess(
     getDb(c.env),
     getAuth(c),
@@ -469,6 +477,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
+  await assertFreshApiKeyActive(getDb(c.env), auth);
   await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, rereadWalletId, [
     "payments:write",
   ]);

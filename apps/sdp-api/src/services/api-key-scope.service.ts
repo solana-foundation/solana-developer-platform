@@ -598,6 +598,40 @@ export function resolveApiKeyCustodyWalletId(
  * The request auth context may contain a one-hour KV snapshot; duplicate
  * Provider wallet IDs must become deny-only immediately for Payments writes.
  */
+/**
+ * Asserts the calling API key is still active, re-read from the database.
+ *
+ * The auth context is a KV snapshot up to an hour stale, and
+ * {@link assertFreshApiKeyCustodyWalletAccess} only runs for wallet-scoped
+ * keys against a named wallet — so a path that provisions or spends without
+ * naming one (DvP create's defaulted payer) needs this liveness check or a
+ * revoked key keeps acting for the cache window. No-op for non-key auth.
+ */
+export async function assertFreshApiKeyActive(
+  db: DatabaseClient,
+  auth: ApiKeyContext
+): Promise<void> {
+  if (auth.authType !== "api_key") {
+    return;
+  }
+  const currentKey = await db
+    .prepare(
+      `SELECT status, expires_at
+       FROM api_keys
+       WHERE id = ? AND organization_id = ?`
+    )
+    .bind(auth.apiKeyId, auth.organizationId)
+    .first<{ status: ApiKeyStatus; expires_at: string | null }>();
+  // Same predicate as ApiKeyService.verify: exists, active, not past expiry.
+  if (
+    !currentKey ||
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date())
+  ) {
+    throw new AppError("FORBIDDEN", "API key is no longer active");
+  }
+}
+
 export async function assertFreshApiKeyCustodyWalletAccess(
   db: DatabaseClient,
   auth: ApiKeyContext,
