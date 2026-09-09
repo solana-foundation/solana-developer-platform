@@ -488,6 +488,16 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.seizeConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.seizeConfirmationDescription"),
+        confirmationWarning: t("DashboardIssuance.management.seizeConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.source"), value: source },
+          { label: t("DashboardIssuance.forms.destination"), value: destination },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.transferNow"),
         submitToast: t("DashboardIssuance.management.submittingForceTransfer"),
         successToast: t("DashboardIssuance.management.forceTransferFinalized"),
@@ -535,6 +545,15 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.forceBurnConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
+        confirmationWarning: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.source"), value: source },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.forceBurnNow"),
         submitToast: t("DashboardIssuance.management.submittingForceBurn"),
         successToast: t("DashboardIssuance.management.forceBurnFinalized"),
@@ -634,6 +653,18 @@ export function useTokenOperations({
           confirmationDescription: t(
             "DashboardIssuance.management.unfreezeConfirmationDescription"
           ),
+          confirmationWarning: t("DashboardIssuance.management.unfreezeConfirmationDescription"),
+          confirmationDetails: [
+            {
+              label: t("DashboardIssuance.draftForm.token"),
+              value: `${token.name} (${token.symbol})`,
+            },
+            { label: t("DashboardIssuance.forms.walletAddress"), value: accountAddress },
+            {
+              label: t("DashboardIssuance.draftForm.network"),
+              value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+            },
+          ],
           confirmButtonLabel: t("DashboardIssuance.management.unfreezeNow"),
           submitToast: t("DashboardIssuance.management.submittingUnfreeze"),
           successToast: t("DashboardIssuance.management.unfreezeFinalized"),
@@ -656,6 +687,18 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.freezeConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.freezeConfirmationDescription"),
+        confirmationWarning: t("DashboardIssuance.management.freezeConfirmationDescription"),
+        confirmationDetails: [
+          {
+            label: t("DashboardIssuance.draftForm.token"),
+            value: `${token.name} (${token.symbol})`,
+          },
+          { label: t("DashboardIssuance.forms.walletAddress"), value: accountAddress },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.freezeNow"),
         submitToast: t("DashboardIssuance.management.submittingFreeze"),
         successToast: t("DashboardIssuance.management.freezeFinalized"),
