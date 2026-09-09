@@ -919,10 +919,13 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   same-mint deposit is reported as `sdp_api_earn_split_swap_orphaned` (warn,
   `escalated` after an hour) on every visit; a rise WITH a covering deposit into
   a different vault is conflicting evidence and stays open under
-  `sdp_api_earn_split_swap_ambiguous`, neither paged nor cleared, but only for
-  the escalation grace: an hour on with the rise still there it escalates like
-  the plain case (the event carries `covering_deposit_ids`), or one historical
-  sibling deposit would hide a live orphan indefinitely. Once the rise
+  `sdp_api_earn_split_swap_ambiguous`, never cleared and never paged as an
+  orphan: SDP never sees the swap's signature, so this state is undecidable by
+  machine, and paging it would page every legitimate wallet with other inflows.
+  An hour on it escalates under that same event (`escalated: true`, with
+  `covering_deposit_ids`), the hook for a NON-PAGING alert that puts a human on
+  it; the human's answer is the `acknowledged` resolution. The paging orphan
+  signal stays reserved for what the detector can prove. Once the rise
   is gone a covering deposit resolves it (one movement discharges at most one
   advisory, UNIQUE `resolving_movement_id`; a `failed` one never does), no rise
   is `unfunded`, and a partial rise stays open. It ALERTS and never acts: the funds are

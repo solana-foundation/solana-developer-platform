@@ -331,14 +331,17 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
     expect(tick().payload).toMatchObject({ ambiguous: 1, orphaned: 0, deposit_observed: 0 });
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
-    expect(eventsNamed("sdp_api_earn_split_swap_ambiguous")).toHaveLength(1);
+    const [ambiguous] = eventsNamed("sdp_api_earn_split_swap_ambiguous");
+    expect(ambiguous?.[1]).toMatchObject({ escalated: false });
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 
-  it("escalates an ambiguous advisory to orphaned once the rise outlives the grace", async () => {
-    // Ambiguity is a grace state, not a verdict: an hour on, tokens equal to
-    // the floor still in the wallet are the orphan condition whatever was
-    // deposited elsewhere, or one sibling deposit would hide a live orphan forever.
+  it("escalates a stale ambiguous advisory under its own event, never as an orphan", async () => {
+    // Undecidable by machine: a sibling deposit of the swapped funds plus an
+    // unrelated credit looks identical to an abandoned follow-up plus an
+    // unrelated deposit. Paging it as an orphan would page every legitimate
+    // wallet with other inflows; going silent would hide a real orphan behind
+    // one sibling deposit. So it escalates visibly for a human to judge.
     const id = await seedAdvisory(2 * HOUR);
     const sibling = await seedFollowUpMovement("confirmed", {
       vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
@@ -347,14 +350,18 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
     await detectOrphanedEarnSplitSwaps(env);
 
-    expect(tick().payload).toMatchObject({ orphaned: 1, ambiguous: 0, deposit_observed: 0 });
-    const [orphan] = eventsNamed("sdp_api_earn_split_swap_orphaned");
-    expect(orphan?.[1]).toMatchObject({
+    expect(tick().payload).toMatchObject({ ambiguous: 1, orphaned: 0, deposit_observed: 0 });
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
+    const [ambiguous] = eventsNamed("sdp_api_earn_split_swap_ambiguous");
+    expect(ambiguous?.[1]).toMatchObject({
       advisory_id: id,
       escalated: true,
       covering_deposit_ids: [sibling],
     });
-    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+    const row = await advisoryRow(id);
+    expect(row?.resolved_at).toBeNull();
+    // Escalation stamps first_flagged_at so the operator can see how long it has stood.
+    expect(row?.first_flagged_at).not.toBeNull();
   });
 
   it("still flags an orphan when the only same-mint deposit is too small to be the follow-up", async () => {

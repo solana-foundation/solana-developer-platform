@@ -55,13 +55,18 @@ import type { Env } from "@/types/env";
  *    reported every visit; with such a deposit into a DIFFERENT vault the
  *    evidence conflicts (a sibling deposit plus an unrelated credit, or an
  *    abandoned follow-up plus an unrelated deposit), so it is AMBIGUOUS: kept
- *    open and reported at warn level under its own event. Ambiguity is a GRACE
- *    STATE, not a verdict: once the advisory is past the escalation age with
- *    the rise still there, unexplained tokens equal to the floor are the orphan
- *    condition whatever was deposited elsewhere, so it escalates exactly like
- *    the plain case, carrying the covering deposit ids so the operator sees
- *    both facts. Without that bound one historical sibling deposit would hide
- *    a live orphan indefinitely. Once the rise is gone, such a deposit resolves
+ *    open and reported at warn level under its own event, and past the
+ *    escalation age it escalates UNDER THAT SAME EVENT (`escalated: true`),
+ *    never as an orphan. This is a machine-undecidable state: SDP never sees
+ *    the swap's signature (the owner signs and broadcasts it), so nothing can
+ *    tell "sibling deposit of the swapped funds plus an unrelated credit" from
+ *    "abandoned follow-up plus an unrelated deposit". Paging it as an orphan
+ *    would page every legitimate wallet with other inflows; leaving it silent
+ *    would hide a real orphan behind one historical sibling deposit. So the
+ *    escalated ambiguous event is the hook for a NON-PAGING alert that puts a
+ *    human on it, and the human's answer is the `acknowledged` resolution.
+ *    The paging orphan signal stays reserved for what the detector can prove.
+ *    Once the rise is gone, such a deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
  *    never broadcast, or the owner moved the tokens themselves) and a partial
  *    rise is indeterminate and stays open for the next visit.
@@ -293,19 +298,22 @@ async function judgeAdvisory(
     (row) => (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
   );
 
-  if (delta >= floor && coveringDeposits.length > 0 && ageMs < ESCALATE_AFTER_MS) {
+  if (delta >= floor && coveringDeposits.length > 0) {
     // Conflicting evidence: the tokens are still here AND a same-mint deposit
-    // for at least the floor landed somewhere else. Neither page nor clear,
-    // but only for the escalation grace: past it the rise wins (below).
+    // for at least the floor landed somewhere else. Undecidable by machine (see
+    // header), so it never becomes the paging orphan signal; it escalates under
+    // its own event for a human to judge and acknowledge.
+    const escalated = ageMs >= ESCALATE_AFTER_MS;
     stats.ambiguous += 1;
     await advisories.recordObservation({
       advisoryId: advisory.id,
       observedAtoms,
       followUpBuildAt,
-      flagged: false,
+      flagged: escalated,
     });
     logEvent("warn", {
       event: "sdp_api_earn_split_swap_ambiguous",
+      escalated,
       advisory_id: advisory.id,
       organization_id: advisory.organization_id,
       project_id: advisory.project_id,
@@ -317,6 +325,7 @@ async function judgeAdvisory(
       swap_min_out_atoms: advisory.swap_min_out_atoms,
       covering_deposit_ids: coveringDeposits.map((row) => row.id),
       age_seconds: Math.round(ageMs / 1000),
+      first_flagged_at: advisory.first_flagged_at,
     });
     return;
   }
@@ -350,9 +359,6 @@ async function judgeAdvisory(
       delta_atoms: delta.toString(),
       age_seconds: Math.round(ageMs / 1000),
       escalated: ageMs >= ESCALATE_AFTER_MS,
-      // Non-empty when the advisory escalated out of the ambiguous state: the
-      // deposits that explained nothing about the tokens still in the wallet.
-      covering_deposit_ids: coveringDeposits.map((row) => row.id),
       first_flagged_at: advisory.first_flagged_at,
       last_follow_up_build_at: followUpBuildAt ?? advisory.last_follow_up_build_at,
     });
