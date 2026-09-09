@@ -4,9 +4,8 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
+import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
-
-const CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS = 30_000;
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
   setup.setTimeout(360_000);
