@@ -764,6 +764,50 @@ detail reads. The job additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
 
+**The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
+threat model EARN-006). A chain read failure used to `return` cleanly, so the
+batch went unjudged while `sdp_cron_run` recorded `ok`: the only trace was an
+error log line, with no alertable event name and no backlog signal anywhere
+that money had stopped settling. Now a completed tick emits
+`sdp_api_earn_vault_reconciliation_tick` (the
+`sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
+counts plus the backlog gauges read AFTER the tick, and any failure (a status
+read, a block-height read, or a per-movement error) marks the tick
+error-level and THROWS so `runWithCronRunEvent` records `status: "error"`.
+Per-movement errors count too, deliberately: reads can answer perfectly while
+the write side is down (pool exhaustion, a send-side RPC outage), and an ok
+tick over a batch where nothing settled is the same silence. The sponsorship
+reconciler takes the identical posture, emitting its tick and then throwing
+when any item failed. Both runners absorb the throw: the managed job's
+`collect` records the failure without starving later ticks, and
+`NodeBackgroundRunner.run` attaches its own catch. Do not "helpfully" swallow
+it.
+
+Three details that look like bugs and are not:
+
+- **The block-height read is gated on rows that can CONSUME a height**: a null
+  RPC status on a row not already `confirmed`. A `confirmed` row whose
+  signature aged out of RPC history short-circuits to `unchanged` before the
+  height is read, and is a permanent member of the claim set, so gating on the
+  RPC answer alone spent a discarded call every minute and let its failure fail
+  a tick that had done its whole job.
+- **The backlog is dimensioned for the same reason.** Those parked `confirmed`
+  rows never leave the queue, so a total-only age latches and pages forever;
+  `backlog_blockhash_bound` / `oldest_blockhash_bound_age_seconds` are the
+  actionable subset, and the withdrawal split keeps the exit path visible on
+  its own axis (ADR 0002).
+- **"Completed tick" is the honest qualifier.** A rejection from the claim or
+  backlog QUERY skips the event, exactly as the sponsorship reconciler skips
+  its tick when its own candidate read fails. The run is still loud
+  (`sdp_cron_run` error, non-zero exit). Do not synthesize a fallback tick: it
+  could only carry a null backlog (invisible to a threshold rule) or a zero,
+  which reads as a drained queue and would CLEAR a firing alert mid-incident.
+  Alert on the ABSENCE of the tick instead.
+
+Pinned by the "sweep telemetry" describe in
+`../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
+`runWithCronRunEvent` test composes the real wrapper.
+
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
