@@ -499,38 +499,6 @@ function HercleInstruction({
   action?: InstructionAction;
 }) {
   const t = useTranslations();
-  if (instruction.kind === "crypto_deposit") {
-    return (
-      <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <InstructionBadges>
-            <InstructionBadge>
-              {t("DashboardPayments.manualInstructions.cryptoDeposit", {
-                currency: instruction.cryptoCurrency,
-              })}
-            </InstructionBadge>
-            <InstructionBadge>{instruction.network}</InstructionBadge>
-          </InstructionBadges>
-          {showAction && action ? <InstructionActionButton action={action} /> : null}
-        </div>
-        <PaymentInstructionField
-          label={t("DashboardPayments.manualInstructions.depositAddress")}
-          value={instruction.destinationAddress}
-        />
-        <PaymentInstructionField
-          label={t("DashboardPayments.manualInstructions.reference")}
-          value={instruction.reference}
-        />
-        <div className="rounded-xl bg-fill-subtle px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-            {t("DashboardPayments.manualInstructions.notes")}
-          </p>
-          <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
-        </div>
-      </div>
-    );
-  }
-
   const bank = instruction.bankAccount;
   return (
     <div className="space-y-4">
@@ -654,11 +622,7 @@ export function ManualInstructionsQuote({
       />
     ) : instruction.provider === "hercle" ? (
       <HercleInstruction
-        key={
-          instruction.kind === "crypto_deposit"
-            ? instruction.destinationAddress
-            : `hercle-${instruction.fiatCurrency}`
-        }
+        key={`hercle-${instruction.fiatCurrency}`}
         instruction={instruction}
         showAction={index === 0}
         action={action}

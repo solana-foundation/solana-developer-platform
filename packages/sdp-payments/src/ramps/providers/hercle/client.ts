@@ -1,4 +1,3 @@
-import { assertValidAddress } from "@sdp/solana/address";
 import type {
   Counterparty,
   HerclePaymentRampInstruction,
@@ -36,16 +35,17 @@ import type {
   ValidateCounterpartyOptions,
 } from "../../types";
 import { hercleCounterpartyRequirements } from "./counterparty";
-import { HERCLE_PAYOUT_ACCOUNT_STATUSES, type HercleSettlementStatus } from "./provider-data";
+import type { HercleSettlementStatus } from "./provider-data";
 
 /**
- * Hercle — headless fiat on/off-ramp provider (Signed Key v1 lane, /partner/v1).
+ * Hercle — headless fiat on-ramp provider (Signed Key v1 lane, /partner/v1).
  * Business counterparties become Hercle sub-accounts; every scoped call rides one
- * platform credential plus the `on-behalf-of` header. Launch corridor: EUR <-> USDC (Solana).
+ * platform credential plus the `on-behalf-of` header. Launch corridor: EUR -> USDC (Solana).
+ * There is no off-ramp (Mural's shape): the rail declares none, and the off-ramp methods refuse.
  */
 export const HERCLE_DECLARED_RAIL_SUPPORT = {
   onramp: { countrySupport: UNREPORTED_COUNTRY_SUPPORT, entityTypes: ["business"] },
-  offramp: { countrySupport: UNREPORTED_COUNTRY_SUPPORT, entityTypes: ["business"] },
+  offramp: { countrySupport: UNREPORTED_COUNTRY_SUPPORT, entityTypes: [] },
 } as const satisfies ProviderDeclaredRailSupport;
 
 interface HercleConfig {
@@ -145,13 +145,6 @@ const hercleOnrampOrderResponseSchema = z.object({
   expiresAt: z.string().optional(),
 });
 
-const hercleOfframpOrderResponseSchema = z.object({
-  orderId: z.string().min(1),
-  depositAddress: z.string().min(1),
-  reference: z.string().optional(),
-  expiresAt: z.string().optional(),
-});
-
 const hercleAccountResponseSchema = z.object({
   accountId: z.string().min(1),
   externalReference: z.string(),
@@ -164,29 +157,8 @@ const hercleVerificationResponseSchema = z.object({
   verificationUrl: z.string().optional(),
 });
 
-const herclePayoutAccountResponseSchema = z.object({
-  payoutAccountId: z.string().min(1),
-  currency: z.string(),
-  rail: z.string().optional(),
-  iban: z.string(),
-  bic: z.string(),
-  accountHolder: z.string(),
-  status: z.enum(HERCLE_PAYOUT_ACCOUNT_STATUSES),
-  registeredAt: z.string().optional(),
-});
-
 export type HercleAccountResponse = z.infer<typeof hercleAccountResponseSchema>;
 export type HercleVerificationResponse = z.infer<typeof hercleVerificationResponseSchema>;
-export type HerclePayoutAccountResponse = z.infer<typeof herclePayoutAccountResponseSchema>;
-
-export interface HercleRegisterPayoutAccountRequest {
-  currency: string;
-  /** Payment scheme; Hercle defaults it per currency when omitted (spec §6.4). */
-  rail?: string;
-  iban: string;
-  bic: string;
-  accountHolder: string;
-}
 
 /**
  * The business's acceptance of Hercle's terms, attested by SDP on its behalf (TS-KYC-01 D14). Hercle refuses to
@@ -218,15 +190,13 @@ export class HercleRampClient implements RampProvider {
   async discoverCurrencyAndRails(
     _context: RampDiscoveryContext
   ): Promise<ProviderRailSupportDistillation> {
-    const corridor = {
-      currencies: { EUR: unreportedCurrencyLimit() },
-      cryptos: ["usdc.solana", "sol.solana"],
-    } as const;
-
     return {
       snapshot: {
-        onramp: { ...corridor, cryptos: [...corridor.cryptos] },
-        offramp: { ...corridor, cryptos: [...corridor.cryptos] },
+        onramp: {
+          currencies: { EUR: unreportedCurrencyLimit() },
+          cryptos: ["usdc.solana", "sol.solana"],
+        },
+        offramp: { currencies: {}, cryptos: [] },
       },
       droppedCurrencyCodes: [],
       droppedCountryCodes: [],
@@ -336,44 +306,6 @@ export class HercleRampClient implements RampProvider {
     );
   }
 
-  /**
-   * The business's own bank account, the only payout destination Hercle's first-party rail allows.
-   * Hercle compares the holder with the registered company name and answers 422 on a mismatch, so
-   * a wrong beneficiary surfaces here, in the form, rather than as a payout that never arrives.
-   */
-  async registerPayoutAccount(
-    ctx: RampRuntimeContext,
-    accountId: string,
-    request: HercleRegisterPayoutAccountRequest
-  ): Promise<HerclePayoutAccountResponse> {
-    return this.parseWith(
-      herclePayoutAccountResponseSchema,
-      await this.request(
-        ctx,
-        "POST",
-        `/partner/v1/accounts/${encodeURIComponent(accountId)}/payout-account`,
-        { body: request }
-      ),
-      "payout account"
-    );
-  }
-
-  async getPayoutAccount(
-    ctx: RampRuntimeContext,
-    accountId: string,
-    currency: string
-  ): Promise<HerclePayoutAccountResponse> {
-    return this.parseWith(
-      herclePayoutAccountResponseSchema,
-      await this.request(
-        ctx,
-        "GET",
-        `/partner/v1/accounts/${encodeURIComponent(accountId)}/payout-account?currency=${encodeURIComponent(currency)}`
-      ),
-      "payout account"
-    );
-  }
-
   async getVerification(
     ctx: RampRuntimeContext,
     accountId: string
@@ -396,7 +328,7 @@ export class HercleRampClient implements RampProvider {
     return hercleCounterpartyRequirements(counterparty, options);
   }
 
-  // ── Rails: static launch corridor (EUR <-> USDC on Solana) ──
+  // ── Rails: static launch corridor (EUR -> USDC on Solana, on-ramp only) ──
   // Hercle's currencies endpoint ships with the ramps surface; until then the corridor
   // is an explicit tested snapshot (Stripe pattern) refreshed via this distillation.
 
@@ -411,10 +343,7 @@ export class HercleRampClient implements RampProvider {
           currencies: { EUR: unreportedCurrencyLimit() },
           cryptos: ["usdc.solana"],
         },
-        offramp: {
-          currencies: { EUR: unreportedCurrencyLimit() },
-          cryptos: ["usdc.solana"],
-        },
+        offramp: { currencies: {}, cryptos: [] },
       },
       droppedCurrencyCodes: [],
       droppedCountryCodes: [],
@@ -457,36 +386,10 @@ export class HercleRampClient implements RampProvider {
   }
 
   async estimateOfframp(
-    ctx: RampRuntimeContext,
-    input: RampEstimateOfframpInput
+    _ctx: RampRuntimeContext,
+    _input: RampEstimateOfframpInput
   ): Promise<PaymentRampEstimate> {
-    const estimate = this.parseWith(
-      hercleEstimateResponseSchema,
-      await this.request(ctx, "POST", "/partner/v1/quotes/estimate", {
-        body: {
-          direction: "offramp",
-          fiatCurrency: input.fiatCurrency,
-          cryptoAmount: input.cryptoAmount,
-          cryptoAsset: getCryptoRailAssetLabel(input.assetRail),
-          network: railNetwork(input.assetRail),
-        },
-      }),
-      "estimate"
-    );
-
-    return {
-      provider: this.id,
-      direction: "offramp",
-      fiatCurrency: input.fiatCurrency,
-      assetRail: input.assetRail,
-      fiatAmount: estimate.fiatAmount,
-      cryptoAmount: estimate.cryptoAmount,
-      exchangeRate: estimate.exchangeRate,
-      fees: { currency: input.fiatCurrency, total: estimate.fees.total },
-      minFiatAmount: estimate.minFiatAmount,
-      maxFiatAmount: estimate.maxFiatAmount,
-      expiresAt: estimate.expiresAt,
-    };
+    throw badRequest("Hercle does not offer an off-ramp.", { provider: this.id });
   }
 
   // ── Quotes (the quote is the order — deliveryMode manual_instructions) ──
@@ -540,58 +443,14 @@ export class HercleRampClient implements RampProvider {
   }
 
   async createOfframpQuote(
-    ctx: RampRuntimeContext,
-    input: RampOfframpQuoteInput
+    _ctx: RampRuntimeContext,
+    _input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
-    if (!input.fiatCurrency) {
-      throw badRequest("fiatCurrency is required for a Hercle off-ramp order.", {
-        provider: this.id,
-      });
-    }
-    const assetRail = parseCryptoRail(input.cryptoToken);
-    const cryptoAsset = getCryptoRailAssetLabel(assetRail);
-
-    const order = this.parseWith(
-      hercleOfframpOrderResponseSchema,
-      await this.request(ctx, "POST", "/partner/v1/orders/offramp", {
-        body: {
-          fiatCurrency: input.fiatCurrency,
-          cryptoAmount: input.cryptoAmount,
-          cryptoAsset,
-          network: railNetwork(assetRail),
-          // Declared source of the on-chain send: Hercle screens it and compares it with the actual sender at deposit time (TS-BANK-10.3).
-          sourceWalletAddress: input.sourceWalletAddress,
-          externalReference: input.paymentTransferId,
-        },
-        onBehalfOf: input.externalCustomerId,
-        idempotencyKey: `sdp-offramp-${input.paymentTransferId ?? `${input.externalCustomerId}-${input.cryptoAmount}`}`,
-      }),
-      "off-ramp order"
-    );
-
-    const instruction: HerclePaymentRampInstruction = {
-      provider: "hercle",
-      kind: "crypto_deposit",
-      destinationAddress: assertValidAddress(order.depositAddress),
-      cryptoCurrency: cryptoAsset,
-      network: railNetwork(assetRail),
-      reference: order.reference,
-      fiatCurrency: input.fiatCurrency,
-      instructionsNotes: `Send exactly ${input.cryptoAmount} ${cryptoAsset} on ${railNetwork(assetRail)}; Hercle converts and pays out ${input.fiatCurrency} to the registered account.`,
-    };
-
-    return {
-      id: order.orderId,
-      provider: "hercle",
-      status: "pending",
-      deliveryMode: "manual_instructions",
-      paymentInstructions: [instruction],
-      expiresAt: order.expiresAt,
-    };
+    throw badRequest("Hercle does not offer an off-ramp.", { provider: this.id });
   }
 
   /**
-   * Sandbox only. Applies the outcome a bank rail or chain would report, which Hercle
+   * Sandbox only. Applies the outcome the bank rail would report, which Hercle
    * then delivers as a normal signed settlement webhook — so the event the client sees
    * is the production one, only its trigger is simulated.
    */

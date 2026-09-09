@@ -44,7 +44,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
       .strict(),
     z
       .object({
-        provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "hercle"], {
+        provider: z.enum(["moonpay", "bvnk", "moneygram", "mural"], {
           error: "provider does not support offramp requirements",
         }),
         direction: z.literal("offramp"),

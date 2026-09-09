@@ -57,10 +57,10 @@ describe("HercleRampClient request signing", () => {
       })
     );
 
-    await client.estimateOfframp(RUNTIME, {
+    await client.estimateOnramp(RUNTIME, {
       assetRail: "usdc.solana",
       fiatCurrency: "EUR",
-      cryptoAmount: "108.5",
+      fiatAmount: "100",
     });
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -84,9 +84,9 @@ describe("HercleRampClient request signing", () => {
     const client = new HercleRampClient();
 
     await expect(
-      client.estimateOfframp(
+      client.estimateOnramp(
         { env: {}, mode: "sandbox" },
-        { assetRail: "usdc.solana", fiatCurrency: "EUR", cryptoAmount: "10" }
+        { assetRail: "usdc.solana", fiatCurrency: "EUR", fiatAmount: "10" }
       )
     ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
   });
@@ -98,67 +98,74 @@ describe("HercleRampClient request signing", () => {
     );
 
     await expect(
-      client.estimateOfframp(RUNTIME, {
+      client.estimateOnramp(RUNTIME, {
         assetRail: "usdc.solana",
         fiatCurrency: "EUR",
-        cryptoAmount: "10",
+        fiatAmount: "10",
       })
     ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
   });
 });
 
-describe("HercleRampClient off-ramp quote", () => {
-  it("builds a crypto-deposit instruction from the order response", async () => {
+describe("HercleRampClient off-ramp", () => {
+  it("declares no off-ramp corridor and refuses before any network call", async () => {
+    // Mural's shape: the rail snapshot carries no off-ramp and the quote path refuses, so the
+    // pair is never selectable and a direct call is a client error rather than a provider one.
     const client = new HercleRampClient();
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      jsonResponse({
-        orderId: "ord_123",
-        depositAddress: DEPOSIT_ADDRESS,
-        reference: "HRC-REF-9",
-        expiresAt: "2026-08-27T10:00:00Z",
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { snapshot } = await client.discoverCurrencyAndRails({} as never);
+    expect(snapshot.offramp).toEqual({ currencies: {}, cryptos: [] });
+    expect(client.declaredRailSupport.offramp.entityTypes).toEqual([]);
+
+    await expect(
+      client.createOfframpQuote(RUNTIME, {
+        cryptoToken: "usdc.solana",
+        fiatCurrency: "EUR",
+        cryptoAmount: "250",
+        sourceWalletAddress: DEPOSIT_ADDRESS,
+        externalCustomerId: "hercle-account-1",
       })
-    );
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      client.estimateOfframp(RUNTIME, {
+        assetRail: "usdc.solana",
+        fiatCurrency: "EUR",
+        cryptoAmount: "250",
+      })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
 
-    const quote = await client.createOfframpQuote(RUNTIME, {
-      cryptoToken: "usdc.solana",
-      fiatCurrency: "EUR",
-      cryptoAmount: "250",
-      sourceWalletAddress: DEPOSIT_ADDRESS,
-      externalCustomerId: "hercle-account-1",
-    });
+describe("HercleRampClient on-ramp quote", () => {
+  it("rejects unsupported crypto tokens before any network call", async () => {
+    const client = new HercleRampClient();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    expect(quote).toMatchObject({
-      id: "ord_123",
-      provider: "hercle",
-      status: "pending",
-      deliveryMode: "manual_instructions",
-      expiresAt: "2026-08-27T10:00:00Z",
-    });
-    if (!("paymentInstructions" in quote) || quote.paymentInstructions === undefined) {
-      throw new Error("expected payment instructions");
-    }
-    expect(quote.paymentInstructions[0]).toMatchObject({
-      provider: "hercle",
-      kind: "crypto_deposit",
-      destinationAddress: DEPOSIT_ADDRESS,
-      cryptoCurrency: "USDC",
-      network: "solana",
-      reference: "HRC-REF-9",
-      fiatCurrency: "EUR",
-    });
+    await expect(
+      client.createOnrampQuote(RUNTIME, {
+        cryptoToken: "doge.solana",
+        fiatCurrency: "EUR",
+        fiatAmount: "250",
+        destinationWalletAddress: DEPOSIT_ADDRESS,
+        externalCustomerId: "hercle-account-1",
+      })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("scopes the order to the sub-account via on-behalf-of", async () => {
     const client = new HercleRampClient();
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse({ orderId: "ord_124", depositAddress: DEPOSIT_ADDRESS }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({ orderId: "ord_124", fiatCurrency: "EUR", fiatAmount: "250", bankAccount: {} })
+    );
 
-    await client.createOfframpQuote(RUNTIME, {
+    await client.createOnrampQuote(RUNTIME, {
       cryptoToken: "usdc.solana",
       fiatCurrency: "EUR",
-      cryptoAmount: "250",
-      sourceWalletAddress: DEPOSIT_ADDRESS,
+      fiatAmount: "250",
+      destinationWalletAddress: DEPOSIT_ADDRESS,
       externalCustomerId: "hercle-account-1",
     });
 
@@ -168,24 +175,6 @@ describe("HercleRampClient off-ramp quote", () => {
     expect(headers.get("Idempotency-Key")).toBeTruthy();
   });
 
-  it("rejects unsupported crypto tokens before any network call", async () => {
-    const client = new HercleRampClient();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    await expect(
-      client.createOfframpQuote(RUNTIME, {
-        cryptoToken: "doge.solana",
-        fiatCurrency: "EUR",
-        cryptoAmount: "250",
-        sourceWalletAddress: DEPOSIT_ADDRESS,
-        externalCustomerId: "hercle-account-1",
-      })
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe("HercleRampClient on-ramp quote", () => {
   it("builds a fiat-funding instruction with the issued bank account", async () => {
     const client = new HercleRampClient();
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

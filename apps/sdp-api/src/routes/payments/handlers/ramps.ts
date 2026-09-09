@@ -1427,26 +1427,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":
       throw badRequest("Stripe off-ramp is not supported.");
-    case "hercle": {
-      const link = await readReadyHercleCounterpartyLink(c, counterparty);
-      if (!link) {
-        throw counterpartyNotProvisioned("hercle", "offramp");
-      }
-      quote = await RAMP_PROVIDER_CLIENTS.hercle.createOfframpQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
-        fiatCurrency: input.fiatCurrency,
-        cryptoAmount: input.cryptoAmount,
-        sourceWalletAddress,
-        // Makes the order's idempotency key unique per transfer and lets Hercle echo our id back.
-        paymentTransferId: reservedTransferId,
-        // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
-        externalCustomerId: link.accountId,
-      });
-      // The business's own account is the only payout destination Hercle allows, so it is
-      // recorded rather than selected.
-      transferProviderData = { payoutProviderAccountId: link.payoutAccount?.id };
-      break;
-    }
+    case "hercle":
+      throw badRequest("Hercle does not offer an off-ramp.");
     default: {
       const exhaustive: never = input;
       throw internalError(

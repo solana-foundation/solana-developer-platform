@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { SdpPaymentsError } from "../errors";
 import { consentField, parseCollectedFields } from "./requirements";
 
@@ -27,7 +28,13 @@ describe("consent requirement fields", () => {
 
   it("lets an optional consent be left unticked, however the client spells that", () => {
     const optional = { ...terms, required: false };
-    for (const data of [{}, { acceptTerms: "" }, { acceptTerms: "false" }, { acceptTerms: "true" }]) {
+    const spellings: CollectedFieldData[] = [
+      {},
+      { acceptTerms: "" },
+      { acceptTerms: "false" },
+      { acceptTerms: "true" },
+    ];
+    for (const data of spellings) {
       assert.doesNotThrow(() => parseCollectedFields([optional], data, "bad"));
     }
   });

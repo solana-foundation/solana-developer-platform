@@ -5,9 +5,6 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { RampDiscoveryContext, ValidateCounterpartyOptions } from "../../types";
 import { buildHercleSignature, HercleRampClient, parseCryptoRail } from "./client";
 import {
-  HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
-  HERCLE_PAYOUT_BIC_FIELD_KEY,
-  HERCLE_PAYOUT_IBAN_FIELD_KEY,
   HERCLE_PRIVACY_CONSENT_FIELD_KEY,
   HERCLE_PRIVACY_POLICY_URL,
   HERCLE_REGISTRATION_COUNTRY_FIELD_KEY,
@@ -38,7 +35,7 @@ function options(
   providerData: CounterpartyProviderData = {},
   extra: { providerCustomerReference?: string } = {}
 ): ValidateCounterpartyOptions {
-  return { direction: "offramp", providerData, ...extra };
+  return { direction: "onramp", providerData, ...extra };
 }
 
 describe("buildHercleSignature", () => {
@@ -82,11 +79,8 @@ describe("hercleCounterpartyRequirements", () => {
     const keys = requirements.fields.map((field) => field.key);
     assert.ok(keys.includes(HERCLE_REGISTRATION_NUMBER_FIELD_KEY));
     assert.ok(keys.includes(HERCLE_REGISTRATION_COUNTRY_FIELD_KEY));
-    // The payout account is collected with the registration data: fiat is first-party only, so it is
-    // the business's own account and there is nothing to choose per order.
-    assert.ok(keys.includes(HERCLE_PAYOUT_IBAN_FIELD_KEY));
-    assert.ok(keys.includes(HERCLE_PAYOUT_BIC_FIELD_KEY));
-    assert.ok(keys.includes(HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY));
+    // No bank details: Hercle offers no off-ramp, so there is no payout destination to collect.
+    assert.ok(!keys.some((key) => key.toLowerCase().includes("payout")));
     assert.ok(requirements.fields.every((field) => field.required));
 
     // The country field is the jurisdiction discriminator, so it must be a closed CH/EEA list.
@@ -123,7 +117,7 @@ describe("hercleCounterpartyRequirements", () => {
   });
 
   it("defers to the handler once the customer link exists", () => {
-    // Verification and payout state live in provider-account rows the API handler resolves; the
+    // Verification state lives in the provider-account row the API handler resolves; the
     // pure decision has nothing left to say beyond "collect" versus "linked".
     const linked = hercleCounterpartyRequirements(
       businessCounterparty(),
@@ -136,54 +130,34 @@ describe("hercleCounterpartyRequirements", () => {
 describe("hercleOnboardingRequirements", () => {
   it("surfaces the verification lifecycle with the link minted for this read", () => {
     const required = hercleOnboardingRequirements(
-      { verificationStatus: "verification_required", payoutAccountStatus: "pending" },
-      "offramp",
+      { verificationStatus: "verification_required" },
+      "onramp",
       "https://verify.example/x"
     );
     assert.deepEqual(required, {
       provider: "hercle",
-      direction: "offramp",
+      direction: "onramp",
       status: "customer_verification_required",
       verificationUrl: "https://verify.example/x",
     });
     assert.equal(
-      hercleOnboardingRequirements({ verificationStatus: "verifying" }, "offramp").status,
+      hercleOnboardingRequirements({ verificationStatus: "verifying" }, "onramp").status,
       "customer_verifying"
     );
     assert.equal(
-      hercleOnboardingRequirements({ verificationStatus: "verification_failed" }, "offramp").status,
+      hercleOnboardingRequirements({ verificationStatus: "verification_failed" }, "onramp").status,
       "customer_verification_failed"
     );
+    // Verification is the whole lifecycle: there is no payout account to wait for on an on-ramp-only rail.
     assert.equal(
-      hercleOnboardingRequirements(
-        { verificationStatus: "ready", payoutAccountStatus: "active" },
-        "offramp"
-      ).status,
+      hercleOnboardingRequirements({ verificationStatus: "ready" }, "onramp").status,
       "ready"
-    );
-  });
-
-  it("is not ready while the bank rail is still registering the payout account", () => {
-    // Hercle refuses off-ramp orders until the account is active, so the wizard must keep polling.
-    assert.equal(
-      hercleOnboardingRequirements(
-        { verificationStatus: "ready", payoutAccountStatus: "pending" },
-        "offramp"
-      ).status,
-      "funding_account_provisioning"
-    );
-    assert.equal(
-      hercleOnboardingRequirements(
-        { verificationStatus: "ready", payoutAccountStatus: "refused" },
-        "offramp"
-      ).status,
-      "unsupported"
     );
   });
 
   it("never invents a verification URL", () => {
     assert.throws(() =>
-      hercleOnboardingRequirements({ verificationStatus: "verification_required" }, "offramp")
+      hercleOnboardingRequirements({ verificationStatus: "verification_required" }, "onramp")
     );
   });
 });
@@ -236,12 +210,13 @@ describe("parseCryptoRail", () => {
     }
   });
 
-  it("declares the EUR-only launch corridor", async () => {
+  it("declares the EUR-only, on-ramp-only launch corridor", async () => {
     const { snapshot } = await new HercleRampClient().discoverCurrencyAndRails(
       {} as RampDiscoveryContext
     );
 
     assert.deepEqual(Object.keys(snapshot.onramp.currencies), ["EUR"]);
-    assert.deepEqual(Object.keys(snapshot.offramp.currencies), ["EUR"]);
+    // Mural's shape: an empty off-ramp side keeps the pair out of the catalogue altogether.
+    assert.deepEqual(snapshot.offramp, { currencies: {}, cryptos: [] });
   });
 });

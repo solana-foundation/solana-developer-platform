@@ -3219,7 +3219,7 @@ describe("Payments routes — transfers", () => {
         type: "offramp",
         direction: "outbound",
         status: overrides?.status ?? "awaiting_payment",
-        provider: "hercle",
+        provider: "bvnk",
         providerReference: "e67b1be2-2bba-40db-9571-3a3612b865ef",
         deliveryMode: "manual_instructions",
         fiatCurrency: "EUR",

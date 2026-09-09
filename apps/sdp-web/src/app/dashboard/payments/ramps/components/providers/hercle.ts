@@ -1,6 +1,5 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
-import type { SandboxTransferSimulationInput } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { HercleOnboardingPanelStatus, OnboardingCopy, SimulateActionLabels } from "./index";
 
@@ -28,12 +27,6 @@ export function getHercleOnboardingCopy(
       icon: XCircleIcon,
       iconClassName: "text-error",
     },
-    funding_account_provisioning: {
-      title: t("DashboardPayments.hercle.fundingAccountProvisioningTitle"),
-      description: t("DashboardPayments.hercle.fundingAccountProvisioningDescription"),
-      icon: Loader2Icon,
-      iconClassName: "animate-spin text-secondary",
-    },
     ready: {
       title: t("DashboardPayments.hercle.readyTitle"),
       description: t("DashboardPayments.hercle.readyDescription"),
@@ -48,16 +41,6 @@ export function getHercleProvisioningDetail(t: Translate): Record<RampDirection,
     onramp: t("DashboardPayments.hercle.onrampProvisioningDetail"),
     offramp: t("DashboardPayments.hercle.offrampProvisioningDetail"),
   };
-}
-
-/**
- * Off-ramp settlement simulation. The crypto is already on chain, but Hercle has no deposit
- * watcher yet, so the sandbox applies the outcome the chain would report and Hercle delivers
- * its normal signed settlement webhook — the event is the production one, only its trigger
- * is simulated.
- */
-export function hercleOfframpSettlementSimulation(orderId: string): SandboxTransferSimulationInput {
-  return { provider: "hercle", payload: { orderId, status: "settled" } };
 }
 
 export function getHercleSimulateLabels(t: Translate): SimulateActionLabels {

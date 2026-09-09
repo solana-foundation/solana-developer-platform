@@ -24,26 +24,12 @@ export const HERCLE_SETTLEMENT_STATUSES = [
 export type HercleSettlementStatus = (typeof HERCLE_SETTLEMENT_STATUSES)[number];
 
 /**
- * Lifecycle of the business's own payout account on Hercle's bank rail, stored verbatim as the
- * `payout_account` row's provider status. Fiat is first-party only, so this is the single account
- * every off-ramp pays to; `pending` until the rail registers it after KYB approval, and an off-ramp
- * order is refused until it is `active`.
- */
-export const HERCLE_PAYOUT_ACCOUNT_STATUSES = ["pending", "active", "refused"] as const;
-export type HerclePayoutAccountStatus = (typeof HERCLE_PAYOUT_ACCOUNT_STATUSES)[number];
-
-export function isHerclePayoutAccountStatus(value: string): value is HerclePayoutAccountStatus {
-  return (HERCLE_PAYOUT_ACCOUNT_STATUSES as readonly string[]).includes(value);
-}
-
-/**
  * What the handler resolves from the counterparty's provider-account rows before asking for the
- * requirements arm: the customer link's verification state and the payout account's rail status.
+ * requirements arm: the customer link's verification state.
  * Nothing here is PII, and the verification link is never part of it — Hercle mints it per read.
  */
 export interface HercleCustomerState {
   verificationStatus?: HercleVerificationStatus;
-  payoutAccountStatus?: HerclePayoutAccountStatus;
 }
 
 /**
@@ -73,8 +59,6 @@ export function mapHercleVerificationStatus(apiStatus: string): HercleVerificati
  * Internal lifecycle → wire requirements arm.
  * `verification_required` needs the hosted link Hercle minted for this read; without one it is a
  * provisioning bug, not a UX state — throw, never invent a URL.
- * A verified business whose payout account is still pending on the bank rail is not ready:
- * Hercle refuses off-ramp orders until it is active, so the wizard keeps polling instead.
  */
 export function hercleOnboardingRequirements(
   state: HercleCustomerState,
@@ -83,17 +67,6 @@ export function hercleOnboardingRequirements(
 ): CounterpartyRequirements {
   switch (state.verificationStatus) {
     case "ready":
-      if (state.payoutAccountStatus === "pending") {
-        return { provider: "hercle", direction, status: "funding_account_provisioning" };
-      }
-      if (state.payoutAccountStatus === "refused") {
-        return {
-          provider: "hercle",
-          direction,
-          status: "unsupported",
-          reason: "Hercle's bank could not register the business's payout account. Contact Hercle.",
-        };
-      }
       return { provider: "hercle", direction, status: "ready" };
     case "verifying":
       return { provider: "hercle", direction, status: "customer_verifying" };

@@ -1,7 +1,7 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types";
-import { DollarSignIcon, SendIcon } from "lucide-react";
+import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
@@ -9,7 +9,6 @@ import { WizardSummaryList } from "../wizard-summary-list";
 import { InstructionActionButton } from "./components/manual-instructions-quote";
 import { OfframpStepContent } from "./components/offramp-step-content";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
-import { simulateActionLabels } from "./components/providers";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
@@ -54,7 +53,6 @@ export function OfframpRail({
   });
 
   const transferState = getRampTransferState(wizard.transferStatus?.status);
-  const simulateLabels = wizard.quote ? simulateActionLabels(wizard.quote.provider, t) : null;
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const showInlineStatus =
     wizard.onTransactionStage && (hostedStage || Boolean(wizard.depositTarget));
@@ -118,20 +116,6 @@ export function OfframpRail({
               {t("DashboardPayments.goToTransaction")}
             </Link>
           </Button>
-        ) : wizard.canSimulateSettlement ? (
-          <InstructionActionButton
-            variant="default"
-            size="default"
-            action={{
-              loading: wizard.settlementSimulationLoading,
-              succeeded: wizard.settlementSimulationSucceeded,
-              onClick: () => void wizard.simulateSettlement(),
-              icon: <DollarSignIcon />,
-              idleLabel: simulateLabels?.idle ?? "",
-              busyLabel: simulateLabels?.busy ?? "",
-              doneLabel: simulateLabels?.done ?? "",
-            }}
-          />
         ) : wizard.depositTarget ? (
           <InstructionActionButton
             variant="default"

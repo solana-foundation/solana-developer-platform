@@ -835,16 +835,8 @@ export interface HercleFiatFundingInstruction {
   instructionsNotes: string;
 }
 
-/** Off-ramp: send crypto to a Hercle deposit address; Hercle converts and pays out fiat. */
-export interface HercleCryptoDepositInstruction extends CryptoDepositPaymentRampInstruction {
-  provider: "hercle";
-  fiatCurrency: RampFiatCurrency;
-  instructionsNotes: string;
-}
-
-export type HerclePaymentRampInstruction =
-  | HercleFiatFundingInstruction
-  | HercleCryptoDepositInstruction;
+/** Hercle is on-ramp only, so the fiat-funding instruction is its whole instruction set. */
+export type HerclePaymentRampInstruction = HercleFiatFundingInstruction;
 
 export type PaymentRampInstruction =
   | LightsparkPaymentRampInstruction

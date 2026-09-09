@@ -88,9 +88,6 @@ export const HERCLE_REGISTRATION_COUNTRY_FIELD_KEY = "registrationCountry";
 export const HERCLE_ADDRESS_LINE1_FIELD_KEY = "registeredAddressLine1";
 export const HERCLE_ADDRESS_CITY_FIELD_KEY = "registeredAddressCity";
 export const HERCLE_ADDRESS_POSTAL_CODE_FIELD_KEY = "registeredAddressPostalCode";
-export const HERCLE_PAYOUT_IBAN_FIELD_KEY = "payoutIban";
-export const HERCLE_PAYOUT_BIC_FIELD_KEY = "payoutBic";
-export const HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY = "payoutAccountHolder";
 export const HERCLE_TERMS_CONSENT_FIELD_KEY = "acceptHercleTerms";
 export const HERCLE_PRIVACY_CONSENT_FIELD_KEY = "acceptHerclePrivacy";
 
@@ -150,7 +147,6 @@ export function hercleOnboardingFields(): RequirementField[] {
       maxLength: 16,
       placeholder: "8001",
     },
-    ...herclePayoutAccountFields(),
     ...hercleConsentFields(),
   ];
 }
@@ -177,45 +173,6 @@ export function hercleConsentFields(): RequirementField[] {
       documentUrl: HERCLE_PRIVACY_POLICY_URL,
       required: true,
     }),
-  ];
-}
-
-/**
- * The business's own bank account, which every Hercle off-ramp pays to. Hercle's bank rail settles
- * first-party only, so the holder must be the business itself — Hercle refuses any other name at
- * registration rather than letting a payout fail at the bank. Collected once, passed straight to
- * Hercle, never stored by SDP.
- */
-export function herclePayoutAccountFields(): RequirementField[] {
-  return [
-    {
-      kind: "text",
-      key: HERCLE_PAYOUT_IBAN_FIELD_KEY,
-      label:
-        "Business bank account (IBAN) — payouts go only to an account in the business's own name",
-      required: true,
-      minLength: 15,
-      maxLength: 34,
-      placeholder: "CH93 0076 2011 6238 5295 7",
-    },
-    {
-      kind: "text",
-      key: HERCLE_PAYOUT_BIC_FIELD_KEY,
-      label: "Bank BIC / SWIFT",
-      required: true,
-      minLength: 8,
-      maxLength: 11,
-      placeholder: "UBSWCHZH80A",
-    },
-    {
-      kind: "text",
-      key: HERCLE_PAYOUT_ACCOUNT_HOLDER_FIELD_KEY,
-      label: "Account holder — must match the registered company name",
-      required: true,
-      minLength: 2,
-      maxLength: 128,
-      placeholder: "Acme Ltd",
-    },
   ];
 }
 
