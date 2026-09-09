@@ -1,6 +1,7 @@
 import { getBase58Decoder } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -55,7 +56,7 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
          token_program_a, token_program_b,
          amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, sdp_side, sdp_wallet_id, status,
+         escrow_a, escrow_b, status,
          create_last_valid_block_height
        ) VALUES (
          ?, ?, ?, ?,
@@ -72,7 +73,7 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
          '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         'a', ?, ?, ?
+         ?, ?
        )`
     )
     .bind(
@@ -81,7 +82,6 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
       PROJECT_ID,
       swapDvpFor(id),
       overrides.expiryTimestamp ?? String(Math.floor(Date.now() / 1000) + 3600),
-      CUSTODY_WALLET_ID,
       status,
       overrides.createLastValidBlockHeight ?? "1500"
     )
@@ -287,5 +287,57 @@ describe("reconcileDvpTrades", () => {
 
     expect(lost).toBeNull();
     await expect(statusOf("dvp_raced")).resolves.toMatchObject({ status: "created" });
+  });
+
+  // The claims sweep now runs through `dvp_leg_funding_claims` alone — the
+  // trade-level claim columns are gone. A claim whose signed transaction can
+  // no longer land must be released; one still inside its window must not be;
+  // and a claim with a receipt (`funding_tx` set) is a receipt, not a lock,
+  // so it must survive the sweep that clears the live ones.
+  it("releases expired funding claims and keeps live and broadcast ones", async () => {
+    await seedTrade("dvp_claim_sweep", "created");
+    await seedTrade("dvp_claim_sweep_b", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_claim_sweep",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_expired",
+      expiryHeight: "900",
+    });
+    await claims.claim({
+      tradeId: "dvp_claim_sweep",
+      side: "b",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_live",
+      expiryHeight: "2000",
+    });
+    // A funded leg: the claim CAS lost to nobody, but the transfer landed and
+    // the row now carries its receipt.
+    await claims.claim({
+      tradeId: "dvp_claim_sweep_b",
+      side: "b",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_broadcast",
+      expiryHeight: "900",
+    });
+    await db
+      .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'b'")
+      .bind("sig_broadcast", "dvp_claim_sweep_b")
+      .run();
+
+    await reconcileDvpTrades(env);
+
+    const remaining = await claims.listForTrade("dvp_claim_sweep");
+    const receipt = await claims.listForTrade("dvp_claim_sweep_b");
+    expect(remaining.map((claim) => claim.signature)).toEqual(["sig_live"]);
+    expect(receipt.map((claim) => claim.fundingTx)).toEqual(["sig_broadcast"]);
   });
 });

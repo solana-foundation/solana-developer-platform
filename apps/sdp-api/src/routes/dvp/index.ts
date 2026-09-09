@@ -10,18 +10,14 @@ import {
   cancelTrade,
   createTrade,
   fundTrade,
-  fundTradeAsParty,
   getTrade,
   inspectMint,
   listInboundTrades,
   listTrades,
   settleTrade,
 } from "./handlers";
-import {
-  extractDvpPartyFundingPolicyCandidate,
-  extractDvpTradeActionPolicyCandidate,
-} from "./policy";
-import { createDvpTradeSchema } from "./schemas";
+import { extractDvpFundPolicyCandidate, extractDvpTradeActionPolicyCandidate } from "./policy";
+import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
 
 const dvp = new Hono<{ Bindings: Env }>();
 
@@ -71,31 +67,28 @@ dvp.get("/trades", requirePermissions("wallets:read", "payments:read"), listTrad
 dvp.get("/trades/inbound", requirePermissions("wallets:read", "payments:read"), listInboundTrades);
 dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"), getTrade);
 
+// Funding ONE side of a trade — whichever side the caller names. Creator
+// funding and party funding are the same operation: the right to fund side X
+// is holding an active custody wallet whose public key equals that side's
+// party address. Bilateral trades take two calls, one claim each.
+//
+// The gate sits AFTER `validateBody`, exactly like every other body-validated
+// policy-gated route (earn vault deposits), so a malformed body is a 400 from
+// the schema rather than an extraction failure, and a denial is decided before
+// any custody or RPC access.
+dvp.post(
+  "/trades/:tradeId/fund",
+  requirePermissions("payments:write", "wallets:read"),
+  validateBody(fundDvpTradeSchema),
+  policyGate({ extract: (c) => extractDvpFundPolicyCandidate(c) }),
+  fundTrade
+);
 // Settle and cancel are the only two actions the settlement authority can take,
 // and both are irreversible: settle delivers both legs and closes the trade,
 // cancel refunds both and closes it. They go through the policy gate like any
 // other custody spend, so an organization can require approval on a transaction
 // that moves both sides of a trade at once. They are separate operation types
 // because allowing an unwind is not the same as allowing a settlement.
-// Funding SDP's own leg. The counterparty needs nothing from us to fund theirs
-// — an ordinary TransferChecked to the escrow is the whole of their
-// integration — but SDP holds the other leg, and without this the only way to
-// move it was a hand-written Payments transfer to the escrow address.
-dvp.post(
-  "/trades/:tradeId/fund",
-  requirePermissions("payments:write", "wallets:read"),
-  policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "fund") }),
-  fundTrade
-);
-// Funding a leg of a trade somebody else created. Its own route rather than a
-// mode of the one above, because the authorization rule is different: that one
-// asks who owns the trade, this one asks who holds the key to a party address.
-dvp.post(
-  "/trades/:tradeId/fund-as-party",
-  requirePermissions("payments:write", "wallets:read"),
-  policyGate({ extract: (c) => extractDvpPartyFundingPolicyCandidate(c) }),
-  fundTradeAsParty
-);
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),

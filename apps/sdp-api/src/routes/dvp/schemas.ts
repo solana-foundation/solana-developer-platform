@@ -1,3 +1,4 @@
+import { DVP_TRADE_SIDES } from "@sdp/types";
 import { address } from "@solana/kit";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
@@ -127,4 +128,20 @@ export const createDvpTradeSchema = z.object({
 
 export const listDvpTradesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+/**
+ * The fund body: which leg, and optionally which of the caller's wallets pays.
+ *
+ * @param side - Names the leg being funded. The caller must hold an active
+ *   custody wallet whose public key equals that side's party address — that is
+ *   the whole of the authorization, re-derived from the database at act time.
+ * @param walletId - Optionally names WHICH of the caller's custody wallets to
+ *   pay from. It must hold that side's party address, so naming one narrows
+ *   and never widens: a wallet that does not hold the address is refused.
+ *   Omitted, the wallet is resolved from the party address.
+ */
+export const fundDvpTradeSchema = z.object({
+  side: z.enum(DVP_TRADE_SIDES),
+  walletId: z.string().min(1).nullish(),
 });

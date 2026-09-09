@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext } from "@/middleware/policy-gate";
@@ -14,9 +14,8 @@ import {
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
+import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
-import { fundDvpTradeLegAsParty } from "@/services/dvp/fund-as-party";
-import { resolveFundableLeg } from "@/services/dvp/fund-authorization";
 import { listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import {
@@ -29,8 +28,12 @@ import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight"
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
-import type { DvpCloseResolved } from "./policy";
-import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
+import { type DvpCloseResolved, type DvpFundResolved, walletIdIfHoldsAddress } from "./policy";
+import {
+  type createDvpTradeSchema,
+  type fundDvpTradeSchema,
+  listDvpTradesQuerySchema,
+} from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -300,9 +303,15 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   // read-authorization slip, it is an irreversible spend by a revoked key.
   // Same guard Payments uses before a money-moving write, and the same one
   // create already runs.
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
-    "payments:write",
-  ]);
+  //
+  // The wallet asserted is the SETTLEMENT wallet — for settle and cancel it is
+  // the wallet that signs, and the trade row carries no wallet of its own.
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    getAuth(c),
+    resolved.settlement.custodyWalletId,
+    ["payments:write"]
+  );
 
   const result = await closeDvpTrade(c, resolved.trade, action);
 
@@ -330,29 +339,75 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 };
 
 /**
- * Funds SDP's leg. Same gate as settle and cancel — it spends from a custody
- * wallet, and once the escrow holds the tokens only settle, cancel or reclaim
- * gets them back.
+ * Funds one side of a trade — whichever side the caller's custody wallet owns.
+ *
+ * Same gate as settle and cancel — it spends from a custody wallet, and once
+ * the escrow holds the tokens only settle, cancel or reclaim gets them back.
+ * Creator funding and party funding are the same operation now: the right to
+ * fund side X is holding an active custody wallet whose public key equals
+ * `user_x`.
  */
-export const fundTrade = async (c: AppContext) => {
-  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
+export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const body = c.req.valid("json");
+  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpFundResolved>(c);
   if (!resolved.trade) {
     throw notFound("DvP trade not found");
   }
+  const trade = resolved.trade;
 
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
+  if (!resolved.funding) {
+    // Not "not found": the caller can see this trade, so pretending it does not
+    // exist would be a worse answer than the true one. It names two addresses
+    // and they hold the key to neither.
+    throw forbidden(
+      `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${body.side} party address`
+    );
+  }
+  const { side } = resolved.funding;
+  const partyAddress = side === "a" ? trade.userA : trade.userB;
+
+  // PRE-BROADCAST RE-READ — the ticket's authorization invariant. The gate's
+  // custody resolution and its auth context can both be stale: the auth
+  // snapshot is up to an hour of cached KV, and a wallet archived since the
+  // extractor resolved it would still sign. Re-derive from the database and
+  // re-assert the key's binding on the wallet that comes back — the same
+  // both-ends guard close runs. Omitted `walletId`, the re-read is the custody
+  // lookup on the side's party address; explicit, it is that the named wallet
+  // is still active in scope and still holds that address (naming narrows; a
+  // wallet that stopped holding it must not pay).
+  const rereadWalletId =
+    body.walletId !== null && body.walletId !== undefined
+      ? await walletIdIfHoldsAddress(c, body.walletId, partyAddress)
+      : await custodyWalletForParty(
+          c.env,
+          { organizationId: auth.organizationId, projectId },
+          partyAddress
+        );
+  if (rereadWalletId === null) {
+    throw forbidden(
+      `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
+    );
+  }
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, rereadWalletId, [
     "payments:write",
   ]);
 
-  const result = await fundDvpTradeLeg(c, resolved.trade);
+  const result = await fundDvpTradeLeg(c, trade, {
+    side,
+    custodyWalletId: rereadWalletId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
 
   // The tokens have moved. Waiting for the once-a-minute sweep to say so left
   // the page reading "Waiting on funds" straight after a successful transfer,
   // which is indistinguishable from it having failed.
-  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+  await observeDvpTradeNow(c.env, trade, result.signature);
 
   return success(c, {
-    tradeId: resolved.trade.id,
+    tradeId: trade.id,
     leg: result.leg,
     amount: result.amount,
     signature: result.signature,
@@ -374,50 +429,6 @@ export const cancelTrade = closeTrade("cancel");
  * this file uses. That one speaks to the organization that created the trade
  * and carries fields belonging to it.
  */
-/**
- * A party funding its own leg of a trade another organization created.
- *
- * Separate from `fundTrade` because the two answer authorization differently:
- * that one asks whether the caller owns the trade, this one asks whether the
- * caller holds the key to a party address on it. Folding them together would
- * mean one endpoint with two authorization rules and a branch deciding which
- * applies, on a route that moves money.
- */
-export const fundTradeAsParty = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
-  if (!resolved.trade) {
-    throw notFound("DvP trade not found");
-  }
-
-  // Optional, and read tolerantly because the route has never required a body.
-  // It only matters when the caller holds BOTH party addresses, which happens
-  // on an agent trade set up for one organization: without it leg A always
-  // wins and leg B can never be funded through the product.
-  const body = (await c.req.json().catch(() => ({}))) as { side?: unknown };
-  const preferredSide = body.side === "a" || body.side === "b" ? body.side : undefined;
-
-  const result = await fundDvpTradeLegAsParty(c, resolved.trade, {
-    organizationId: auth.organizationId,
-    projectId,
-    auth,
-    preferredSide,
-  });
-
-  // Same reason as the other funding path: the sweep runs once a minute and the
-  // page would otherwise read "Waiting on funds" straight after a transfer that
-  // worked, which is indistinguishable from one that did not.
-  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
-
-  return success(c, {
-    tradeId: resolved.trade.id,
-    leg: result.leg,
-    amount: result.amount,
-    signature: result.signature,
-  });
-};
-
 export const listInboundTrades = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -545,6 +556,38 @@ export const getTrade = async (c: AppContext) => {
 };
 
 /**
+ * Which side of another organization's trade this caller is party to, if any.
+ *
+ * The custody lookup decides: a side is the caller's iff an active custody
+ * wallet of theirs holds its party address. Key-scope filtering is applied by
+ * the caller, on the result, because this answers for the ORGANIZATION — the
+ * wider question — and a wallet-scoped key must not be handed a leg held by a
+ * wallet it is not bound to.
+ *
+ * @param c - Request context.
+ * @param trade - The trade, already resolved as a party read.
+ * @param projectId - The caller's project id.
+ * @returns The caller's side and the wallet that makes it theirs, or null when
+ *   neither party address is the caller's.
+ */
+async function resolveYourSide(
+  c: AppContext,
+  trade: DvpTradeRow,
+  projectId: string
+): Promise<{ side: "a" | "b"; custodyWalletId: string } | null> {
+  const org = { organizationId: getAuth(c).organizationId, projectId };
+  const walletForA = await custodyWalletForParty(c.env, org, trade.userA);
+  if (walletForA !== null) {
+    return { side: "a", custodyWalletId: walletForA };
+  }
+  const walletForB = await custodyWalletForParty(c.env, org, trade.userB);
+  if (walletForB !== null) {
+    return { side: "b", custodyWalletId: walletForB };
+  }
+  return null;
+}
+
+/**
  * The same page, for a party who is not the trade's author.
  *
  * Answers in the SHAPE the detail page already reads, with everything belonging
@@ -583,11 +626,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
     throw notFound("DvP trade not found");
   }
 
-  const fundable = await resolveFundableLeg(c.env, trade, {
-    organizationId: auth.organizationId,
-    projectId,
-    auth,
-  });
+  const fundable = await resolveYourSide(c, trade, projectId);
   if (!fundable) {
     throw notFound("DvP trade not found");
   }
