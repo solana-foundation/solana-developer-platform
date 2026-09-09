@@ -6,11 +6,11 @@
 // derives a different SwapDvp address than the one a counterparty was told to
 // fund. Callers convert to bigint at the edge, never number.
 
-import type { DvpTradeKind, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DvpTradeStatus } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { RepositoryDbClient } from "./base";
 
-export type { DvpTradeKind, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+export type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
 
 export interface DvpTradeRow {
   id: string;
@@ -34,8 +34,6 @@ export interface DvpTradeRow {
   /** Each leg's token symbol from mint metadata, or null when it carries none. */
   symbolA: string | null;
   symbolB: string | null;
-  /** Block height past which a held funding claim is provably dead. */
-  fundingClaimExpiryHeight: string | null;
   /** The transaction that settled or cancelled the trade. Null while open. */
   closeSignature: Signature | null;
 
@@ -51,37 +49,21 @@ export interface DvpTradeRow {
   escrowB: Address;
 
   /**
-   * Which leg SDP delivers, or NULL on an agent trade where it delivers
-   * neither. Nullable is load-bearing: reading a missing side as "b" is how a
-   * trade funds the wrong leg, so callers must branch on `tradeKind` rather
-   * than treat this as always present.
+   * Org-scoped attribution naming which registered counterparty this party is,
+   * or null when the party is an external address.
+   *
+   * The referenced `counterparty_accounts` row is app-enforced to be
+   * `crypto_wallet` kind, active, belong to the creator's org/project, and
+   * have its address (in `details` JSONB) equal `user_a` / `user_b`. It is
+   * never operational: custody capability derives from the custody lookup, not
+   * from this column.
    */
-  sdpSide: DvpTradeSide | null;
-  tradeKind: DvpTradeKind;
-  /**
-   * The custody wallet behind the trade. Signs the create and pays the fee and
-   * both escrows' rent for BOTH kinds; on an agent trade it delivers nothing.
-   */
-  sdpWalletId: string;
+  counterpartyAccountIdA: string | null;
+  /** Counterparty attribution for side B; see {@link counterpartyAccountIdA}. */
+  counterpartyAccountIdB: string | null;
 
   status: DvpTradeStatus;
   observedAt: string | null;
-  /**
-   * The LOCK held while SDP's leg is being funded, not a record of the funding.
-   *
-   * It is set before broadcasting so two overlapping requests cannot both send,
-   * and cleared on a released or expired claim — so it is NULL on a leg that
-   * funded perfectly. Read `sdpLegFundingTx` for the transaction.
-   */
-  sdpLegFundingSignature: Signature | null;
-  /**
-   * The transfer that funded SDP's leg, kept permanently.
-   *
-   * Separate from the claim above because a receipt and a lock want opposite
-   * lifetimes: the lock has to disappear for the leg to be fundable again, and
-   * the receipt has to survive for the page to show what happened.
-   */
-  sdpLegFundingTx: Signature | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
   /** Hash of the terms that key was first used with. */
@@ -122,10 +104,6 @@ export type DvpTradeInsert = Omit<
   | "escrowBAmount"
   | "escrowAFrozen"
   | "escrowBFrozen"
-  | "sdpLegFundingSignature"
-  // Written by `recordLegFundingTx` once a leg is actually funded.
-  | "sdpLegFundingTx"
-  | "fundingClaimExpiryHeight"
 >;
 
 export interface DvpTradeScope {
@@ -139,6 +117,10 @@ export interface DvpTradeScope {
    * reading is the repo-wide convention for wallet allowlists (see
    * `payments.repository.postgres.ts:74-80`) and getting it backwards would turn
    * a key with no usable bindings into a key that reads the whole project.
+   *
+   * A bound wallet admits the trades it is a PARTY to (`user_a` or `user_b`),
+   * not the trades it created — nothing on the row records a creator wallet,
+   * and party is the reading inbound discovery already uses.
    */
   sdpWalletIds?: string[] | null;
 }
@@ -201,36 +183,6 @@ export interface DvpTradeRepository {
    * same request, and the key is already scoped to their project.
    */
   getByIdempotencyKey(projectId: string, idempotencyKey: string): Promise<DvpTradeRow | null>;
-  /**
-   * Claims the right to fund SDP's leg, atomically.
-   *
-   * Reading the escrow and then transferring is not atomic, so two overlapping
-   * requests would both see the shortfall and both send, over-funding the
-   * escrow. Returns false when another request already holds the claim.
-   */
-  claimLegFunding(id: string, signature: Signature, expiryHeight: string): Promise<boolean>;
-  /** Releases a claim whose broadcast was definitively rejected. */
-  releaseLegFunding(id: string, signature: Signature): Promise<void>;
-  /**
-   * Records the transfer that funded SDP's leg, permanently.
-   *
-   * Written once the transaction is on the wire, so it outlives the claim that
-   * guarded the send. Without it a funded leg's only evidence is a changed
-   * number, and nothing on the page points at the transaction that moved it.
-   */
-  recordLegFundingTx(id: string, signature: Signature): Promise<void>;
-  /**
-   * Releases funding claims that can no longer be live, and reports how many.
-   *
-   * A claim is kept through an ambiguous failure on purpose — the transfer may
-   * still land. But "may still land" has an end: past the signed transaction's
-   * last-valid block height the cluster can never accept it. Before this, a
-   * claim left by an unclassifiable failure was held forever and the leg was
-   * permanently unfundable, recoverable only by editing the table by hand.
-   *
-   * @param blockHeight - Current cluster block height.
-   */
-  releaseExpiredFundingClaims(blockHeight: bigint): Promise<number>;
   /**
    * Frees a `create_failed` row's idempotency key so the same request can be
    * made again.
