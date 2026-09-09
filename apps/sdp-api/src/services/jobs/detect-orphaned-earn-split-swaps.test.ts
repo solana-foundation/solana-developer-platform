@@ -252,15 +252,15 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 
-  it("resolves deposit_observed on a confirmed follow-up deposit, and never on a failed one", async () => {
+  it("resolves deposit_observed on a confirmed follow-up deposit once the funds have left the wallet", async () => {
     const id = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("failed");
     const observed = await seedFollowUpMovement("confirmed");
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    // The swapped tokens went into the vault: the balance is back at baseline.
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
 
     await detectOrphanedEarnSplitSwaps(env);
 
-    expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(tick().payload).toMatchObject({ deposit_observed: 1, orphaned: 0 });
     expect(await advisoryRow(id)).toMatchObject({
       resolution: "deposit_observed",
@@ -284,14 +284,29 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const first = await seedAdvisory(3 * HOUR);
     const second = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("finalized");
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
 
     await detectOrphanedEarnSplitSwaps(env);
 
     const rows = [await advisoryRow(first), await advisoryRow(second)];
     expect(rows.filter((r) => r?.resolution === "deposit_observed")).toHaveLength(1);
-    // The other one still has to be judged on its own merits.
-    expect(tick().payload).toMatchObject({ deposit_observed: 1, orphaned: 1 });
+    // The other cannot borrow the same movement; with no rise left it is unfunded.
+    expect(tick().payload).toMatchObject({ deposit_observed: 1, unfunded: 1, orphaned: 0 });
+  });
+
+  it("does not let an unrelated same-mint deposit hide an orphan", async () => {
+    // A confirmed deposit exists for this owner and token, but the swapped
+    // tokens are still sitting in the wallet: the balance is the ground truth,
+    // and a movement may only explain funds that actually left.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("confirmed");
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ orphaned: 1, deposit_observed: 0 });
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(1);
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 
   it("treats an in-flight follow-up deposit as pending, not orphaned", async () => {

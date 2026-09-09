@@ -907,15 +907,19 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   answering. The insert and the baseline read are FAIL-CLOSED: money in may
   refuse, and a blind advisory could only ever page on any wallet that held
   the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
-  judges each open advisory every minute on both runners: a `confirmed` or
-  `finalized` follow-up deposit for that owner and token resolves it (one
-  movement discharges at most one advisory, UNIQUE `resolving_movement_id`; a
-  `failed` one never does); an in-flight deposit or a follow-up BUILD inside a
-  30-minute window is the partner still working; once the swap's blockhash is
-  dead and a 30-minute grace has run, the owner's balance is read with the SAME
-  call as the baseline and a rise of at least the floor is reported as
-  `sdp_api_earn_split_swap_orphaned` (warn level, `escalated` after an hour)
-  on every visit while it persists. It ALERTS and never acts: the funds are
+  judges each open advisory on both runners (every minute in-process, at the
+  Managed Reconciliation Cadence in the Cloud Run Job): an in-flight deposit or
+  an unconsumed follow-up BUILD inside a 30-minute window is the partner still
+  working; once the swap's blockhash is dead and a 30-minute grace has run, the
+  owner's balance is read with the SAME call as the baseline, and THE BALANCE IS
+  THE GROUND TRUTH: a rise of at least the floor is reported as
+  `sdp_api_earn_split_swap_orphaned` (warn level, `escalated` after an hour) on
+  every visit while it persists, whatever movements exist, because an unrelated
+  same-mint deposit elsewhere explains nothing about tokens still in the wallet.
+  Only once the rise is gone may a `confirmed`/`finalized` follow-up deposit for
+  at least the floor resolve it as `deposit_observed` (one movement discharges
+  at most one advisory, UNIQUE `resolving_movement_id`; a `failed` one never
+  does); otherwise no rise is `unfunded` and a partial rise stays open. It ALERTS and never acts: the funds are
   the owner's, and only the partner can move them. Detection writes nothing
   but back to the advisory table. Every amount it compares is atoms to atoms;
   the decimal `swap_min_out_amount` exists for display only.

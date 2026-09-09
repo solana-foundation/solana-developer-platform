@@ -1,4 +1,5 @@
 import { createRpc } from "@sdp/rpc/solana";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -29,24 +30,30 @@ import type { Env } from "@/types/env";
  *
  * The judgement, in order, per open advisory:
  *
- * 1. A follow-up DEPOSIT MOVEMENT for the same owner and deposit token, created
- *    after the advisory, that reached `confirmed`/`finalized` -> resolved
- *    `deposit_observed`. Status matters: a `failed` deposit did not move the
- *    money, and a still-`requested` one is in flight, not observed. One
- *    movement discharges at most one advisory (UNIQUE resolving_movement_id),
- *    so a reused owner wallet cannot close several with one deposit.
- * 2. A follow-up BUILD within the window, or an in-flight movement -> pending.
- *    A build proves the partner is alive and past the swap; the movement only
- *    exists once they submit, and a human second signature can take minutes.
- * 3. The swap's blockhash still live, or the advisory younger than the grace
+ * 1. The partner is demonstrably still working -> pending. Either a follow-up
+ *    deposit movement is in flight (`requested`/`submitted`), or an unconsumed
+ *    follow-up BUILD exists within the window: a build proves they are past the
+ *    swap, and the movement only exists once they submit, which can take a
+ *    human second signature and minutes.
+ * 2. The swap's blockhash still live, or the advisory younger than the grace
  *    period -> pending. Past its last valid block height the swap either landed
  *    or never will, which is when a balance means something.
- * 4. Otherwise the owner's deposit-token balance is read on the environment's
- *    cluster with the same call the build's baseline used. The swap enforces
- *    `minOut` on chain, so a landed swap raised the balance by at least
- *    `swap_min_out_atoms`: that delta is ORPHANED and is reported every visit
- *    while it persists. No rise at all is `unfunded` (the swap never broadcast,
- *    or the owner moved the tokens; nothing sits swapped-but-undeposited). A
+ * 3. The owner's deposit-token balance is read on the environment's cluster
+ *    with the same call the build's baseline used. THE BALANCE IS THE GROUND
+ *    TRUTH. The swap enforces `minOut` on chain, so a landed swap raised the
+ *    balance by at least `swap_min_out_atoms`; while that rise is still there
+ *    the funds are provably swapped-but-undeposited and the advisory is
+ *    ORPHANED, reported every visit, no matter what movements exist: an
+ *    unrelated same-mint deposit into another strategy explains nothing about
+ *    tokens that are still sitting in the wallet.
+ * 4. Only once the rise is gone does a movement get to say WHERE the funds went:
+ *    a `confirmed`/`finalized` follow-up deposit for the same owner and deposit
+ *    token, created after the advisory, for at least the floor -> resolved
+ *    `deposit_observed`. A `failed` deposit never qualifies (it moved nothing).
+ *    One movement discharges at most one advisory (UNIQUE
+ *    resolving_movement_id), so a reused owner wallet cannot close several with
+ *    one deposit. With no qualifying movement, no rise at all is `unfunded` (the
+ *    swap never broadcast, or the owner moved the tokens themselves), and a
  *    partial rise is indeterminate and stays open for the next visit.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
@@ -180,29 +187,10 @@ async function judgeAdvisory(
     createdAfter: advisory.created_at,
   };
 
-  // 1. A follow-up deposit that reached chain commitment discharges the advisory.
   const deposits = await ledger.listExternalWalletDepositsSince(scope);
-  for (const movement of deposits.filter((row) => OBSERVED_STATUSES.has(row.status))) {
-    try {
-      const resolved = await advisories.resolve({
-        advisoryId: advisory.id,
-        resolution: "deposit_observed",
-        resolvedBy: "system",
-        resolvingMovementId: movement.id,
-      });
-      if (resolved) {
-        stats.depositObserved += 1;
-        return;
-      }
-    } catch (error) {
-      // Another advisory for this owner already claimed this movement: one
-      // deposit discharges exactly one advisory. Try the next candidate.
-      if (!isPostgresUniqueViolation(error)) throw error;
-    }
-  }
 
-  // 2. The partner is demonstrably still working: a deposit in flight, or a
-  //    recent follow-up build.
+  // 1. The partner is demonstrably still working: a deposit in flight, or a
+  //    recent unconsumed follow-up build.
   if (deposits.some((row) => IN_FLIGHT_STATUSES.has(row.status))) {
     stats.followUpPending += 1;
     await advisories.recordObservation({
@@ -225,7 +213,7 @@ async function judgeAdvisory(
     return;
   }
 
-  // 3. Too early to judge: the swap can still land, or the grace has not run.
+  // 2. Too early to judge: the swap can still land, or the grace has not run.
   const ageMs = nowMs - Date.parse(advisory.created_at);
   if (
     blockHeight === null ||
@@ -236,7 +224,7 @@ async function judgeAdvisory(
     return;
   }
 
-  // 4. Judge the owner's deposit-token balance against the build-time baseline.
+  // 3. The balance is the ground truth: judge it against the build-time baseline.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
     balance = await readOwnerMintBalance(
@@ -313,6 +301,31 @@ async function judgeAdvisory(
     return;
   }
 
+  // 4. The rise is gone, so a qualifying follow-up deposit may say where the
+  //    funds went. Qualifying: chain-committed, and for at least the floor, so
+  //    an unrelated small same-mint deposit does not get the credit.
+  for (const movement of deposits.filter(
+    (row) => OBSERVED_STATUSES.has(row.status) && depositCoversFloor(row.amount_requested, advisory)
+  )) {
+    try {
+      const resolved = await advisories.resolve({
+        advisoryId: advisory.id,
+        resolution: "deposit_observed",
+        resolvedBy: "system",
+        resolvingMovementId: movement.id,
+        observedAtoms,
+      });
+      if (resolved) {
+        stats.depositObserved += 1;
+        return;
+      }
+    } catch (error) {
+      // Another advisory for this owner already claimed this movement: one
+      // deposit discharges exactly one advisory. Try the next candidate.
+      if (!isPostgresUniqueViolation(error)) throw error;
+    }
+  }
+
   if (delta <= 0n) {
     stats.unfunded += 1;
     await advisories.resolve({
@@ -333,6 +346,18 @@ async function judgeAdvisory(
     followUpBuildAt,
     flagged: false,
   });
+}
+
+/** The follow-up deposit is sized to the swap's guaranteed floor, so a qualifying one is at least that. */
+function depositCoversFloor(amountRequested: string, advisory: EarnSplitSwapAdvisoryRow): boolean {
+  try {
+    return (
+      parseDecimalAmount(amountRequested, advisory.deposit_token_decimals) >=
+      BigInt(advisory.swap_min_out_atoms)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown): string {

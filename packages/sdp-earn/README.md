@@ -507,9 +507,12 @@ refresh is update-only.
   with the same call as the build-time baseline. A rise of at least the swap's
   floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
   it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
-- **When it runs:** every minute on both schedulers, unconditionally (no earn
-  flag gate: an advisory written before an incident flag flip must keep being
-  watched), under the system database identity like every sweep.
+- **When it runs:** on both schedulers, unconditionally (no earn flag gate: an
+  advisory written before an incident flag flip must keep being watched), under
+  the system database identity like every sweep. In-process the crontab is every
+  minute (`EARN_SPLIT_SWAPS_CRON`); the managed Cloud Run Job invokes it at the
+  deployment-provided Managed Reconciliation Cadence (three minutes in
+  production), which is what bounds alert latency there.
 - **Failure behaviour:** a chain read failure emits its own error event, marks
   the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
   cron run reads error; the job's own query failing emits no tick at all.
