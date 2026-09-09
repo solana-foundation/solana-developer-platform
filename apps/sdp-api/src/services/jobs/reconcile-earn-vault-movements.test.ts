@@ -8,6 +8,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 const getSignatureStatuses = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
@@ -19,8 +20,13 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent,
+}));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
+const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
 const { reconcileEarnVaultMovementReadThrough } = await import(
   "../earn/vault-movement-reconciliation.service"
 );
@@ -462,5 +468,135 @@ describe("reconcileEarnVaultMovements", () => {
       status: "finalized",
       failure_reason: null,
     });
+  });
+});
+
+/**
+ * Sweep telemetry (PRO-1863, threat model EARN-006).
+ *
+ * The failure this pins: a chain read failure used to return cleanly, so the
+ * per-tick `sdp_cron_run` event read ok while nothing settled and no backlog
+ * signal existed anywhere.
+ */
+describe("reconcileEarnVaultMovements: sweep telemetry", () => {
+  function tickPayload(): Record<string, unknown> | undefined {
+    const call = logEvent.mock.calls.find(
+      ([, payload]) => payload?.event === "sdp_api_earn_vault_reconciliation_tick"
+    );
+    return call?.[1];
+  }
+
+  function tickLevel(): string | undefined {
+    const call = logEvent.mock.calls.find(
+      ([, payload]) => payload?.event === "sdp_api_earn_vault_reconciliation_tick"
+    );
+    return call?.[0];
+  }
+
+  it("emits an info tick with the batch outcome and an empty backlog", async () => {
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    expect(tickLevel()).toBe("info");
+    expect(tickPayload()).toMatchObject({
+      claimed: 1,
+      settled: 1,
+      failed: 0,
+      status_read_failures: 0,
+      block_height_read_failures: 0,
+      backlog: 0,
+      oldest_unsettled_age_seconds: null,
+      batch_saturated: false,
+    });
+  });
+
+  it("reports the backlog and the age of the oldest unsettled movement", async () => {
+    // `confirmed` is not settled (PRO-1716), so both rows stay in the queue and
+    // the tick has to say so: this is the number the backlog alert watches.
+    await seedMovement();
+    await seedMovement();
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => ({
+        slot: 1n,
+        confirmations: 1n,
+        err: null,
+        confirmationStatus: "confirmed",
+      }))
+    );
+
+    await reconcileEarnVaultMovements(env);
+
+    const payload = tickPayload();
+    expect(payload).toMatchObject({ claimed: 2, confirmed: 2, settled: 0, backlog: 2 });
+    expect(payload?.oldest_unsettled_age_seconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it("fails the tick loudly when the chain status read is unavailable", async () => {
+    // The EARN-006 case: an RPC outage must not read as an ok tick while every
+    // claimed movement goes unjudged.
+    const seeded = await seedMovement();
+    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/could not read chain state/);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({
+      claimed: 1,
+      settled: 0,
+      status_read_failures: 1,
+      unchanged: 1,
+      backlog: 1,
+    });
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+        environment: "sandbox",
+        rows: 1,
+      })
+    );
+    // The movement is untouched and stays claimable by the next tick.
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "requested" });
+  });
+
+  it("fails the tick when the block height needed for recovery is unavailable", async () => {
+    // Without a height the sweep can neither rebroadcast nor expire an unknown
+    // signature, so it did none of its recovery duty this tick.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/could not read chain state/);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({ block_height_read_failures: 1, backlog: 1 });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("makes the cron run itself report error, not ok (EARN-006 end to end)", async () => {
+    // The literal acceptance criterion, composed with the REAL wrapper both
+    // runners use: before this, the read failure returned cleanly and the tick
+    // event said `ok` while nothing settled.
+    await seedMovement();
+    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(
+      runWithCronRunEvent("sdp-api-reconcile-earn-vault-movements", () =>
+        reconcileEarnVaultMovements(env)
+      )
+    ).rejects.toThrow(/could not read chain state/);
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({ event: CRON_RUN_EVENT, status: "error" })
+    );
+    expect(logEvent).not.toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({ event: CRON_RUN_EVENT, status: "ok" })
+    );
   });
 });

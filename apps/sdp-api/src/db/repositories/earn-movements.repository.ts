@@ -433,6 +433,15 @@ export interface EarnMovementsRepository {
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  /**
+   * Backlog telemetry over the SAME predicate the claim uses (PRO-1863): how
+   * many vault movements remain unsettled, and how old the oldest one is. Read
+   * after a sweep tick so the reported backlog is what the tick left behind.
+   */
+  getUnsettledVaultMovementStats(): Promise<{
+    backlog: number;
+    oldestUnsettledCreatedAt: string | null;
+  }>;
 
   // ── Writes ───────────────────────────────────────────────────────────────
 
@@ -1320,6 +1329,23 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(blockhashBoundQuota, confirmedQuota, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async getUnsettledVaultMovementStats() {
+      // Keep this predicate in lockstep with claimUnsettledVaultMovements: the
+      // backlog it reports must be the same set the sweep would claim.
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*) AS backlog, MIN(created_at) AS oldest_created_at
+             FROM earn_movements
+            WHERE execution_model = 'vault_direct'
+              AND status IN ('requested', 'submitted', 'confirmed')`
+        )
+        .first<{ backlog: number | string; oldest_created_at: string | null }>();
+      return {
+        backlog: Number(row?.backlog ?? 0),
+        oldestUnsettledCreatedAt: row?.oldest_created_at ?? null,
+      };
     },
 
     async createSignedVaultDepositIntent(input) {

@@ -764,6 +764,23 @@ detail reads. The job additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
 
+**The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
+threat model EARN-006). A chain read failure used to `return` cleanly, so the
+batch went unjudged while `sdp_cron_run` recorded `ok` and no signal existed
+anywhere that money had stopped settling. Now every tick emits
+`sdp_api_earn_vault_reconciliation_tick` (the
+`sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
+counts plus `backlog` and `oldest_unsettled_age_seconds` read AFTER the tick,
+and a status or block-height read failure emits its own error event, marks the
+tick error-level, and THROWS so `runWithCronRunEvent` records `status: "error"`.
+Both runners already absorb a throw: the managed job's `collect` records the
+failure without starving later ticks, and `NodeBackgroundRunner.run` attaches
+its own catch. Do not "helpfully" swallow that throw: the backlog and
+movement-age alerts are keyed on those two fields, and an ok tick over an
+unjudged batch is the exact failure this closed. Pinned by the "sweep
+telemetry" describe in `../../services/jobs/reconcile-earn-vault-movements.test.ts`,
+whose last test composes the real `runWithCronRunEvent`.
+
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL

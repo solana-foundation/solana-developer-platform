@@ -11,6 +11,7 @@ import {
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
 import { getLogger } from "@/runtime/logger";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
   assertClusterEndpoint,
   earnClusterFor,
@@ -136,19 +137,64 @@ async function observeEarnVaultMovement(
   );
 }
 
+/**
+ * What one sweep tick did with the batch it claimed (PRO-1863). `settled` and
+ * `failed` count TRANSITIONS this tick performed, not steady state; the read
+ * failures are the counts that must make the tick read failed rather than ok.
+ */
+export interface EarnVaultReconciliationStats {
+  claimed: number;
+  settled: number;
+  failed: number;
+  confirmed: number;
+  resubmitted: number;
+  unchanged: number;
+  movementErrors: number;
+  statusReadFailures: number;
+  blockHeightReadFailures: number;
+}
+
+type MovementOutcome = "settled" | "failed" | "confirmed" | "resubmitted" | "unchanged";
+
+function emptyStats(claimed: number): EarnVaultReconciliationStats {
+  return {
+    claimed,
+    settled: 0,
+    failed: 0,
+    confirmed: 0,
+    resubmitted: 0,
+    unchanged: 0,
+    movementErrors: 0,
+    statusReadFailures: 0,
+    blockHeightReadFailures: 0,
+  };
+}
+
 /** Reconcile a claimed batch for the scheduled durable recovery job. */
 export async function reconcileEarnVaultMovementBatch(
   env: Env,
   movements: EarnMovementRow[]
-): Promise<void> {
+): Promise<EarnVaultReconciliationStats> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const byEnvironment = groupByEnvironment(movements);
+  const stats = emptyStats(movements.length);
 
   // Sequential on purpose. Each environment opens its own RPC client and polls
   // a batch of signatures, so parallel environments only multiply endpoint load.
+  // One environment's RPC outage is counted and reported, never allowed to
+  // skip the other environment's batch.
   for (const [environment, rows] of byEnvironment) {
-    await reconcileEnvironment(env, ledger, environment, rows);
+    const outcome = await reconcileEnvironment(env, ledger, environment, rows);
+    stats.settled += outcome.settled;
+    stats.failed += outcome.failed;
+    stats.confirmed += outcome.confirmed;
+    stats.resubmitted += outcome.resubmitted;
+    stats.unchanged += outcome.unchanged;
+    stats.movementErrors += outcome.movementErrors;
+    stats.statusReadFailures += outcome.statusReadFailures;
+    stats.blockHeightReadFailures += outcome.blockHeightReadFailures;
   }
+  return stats;
 }
 
 function groupByEnvironment(movements: EarnMovementRow[]) {
@@ -166,7 +212,8 @@ async function reconcileEnvironment(
   ledger: EarnMovementsLedger,
   environment: SdpEnvironment,
   rows: EarnMovementRow[]
-): Promise<void> {
+): Promise<EarnVaultReconciliationStats> {
+  const stats = emptyStats(rows.length);
   const cluster = earnClusterFor(environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const rpc = createRpc(env, { rpcUrl });
@@ -179,11 +226,18 @@ async function reconcileEnvironment(
       { searchTransactionHistory: true }
     );
   } catch (error) {
-    getLogger().error(
-      { environment, error },
-      "earn vault reconciliation: failed to read transaction statuses"
-    );
-    return;
+    // The whole batch went unjudged: nothing settles this tick and the caller
+    // must not report an ok tick (EARN-006). Structured so Loki can alert on
+    // the event name rather than a log-line substring.
+    logEvent("error", {
+      event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+      environment,
+      rows: rows.length,
+      ...describeError(error),
+    });
+    stats.statusReadFailures = 1;
+    stats.unchanged = rows.length;
+    return stats;
   }
 
   let currentBlockHeight: bigint | null = null;
@@ -191,10 +245,15 @@ async function reconcileEnvironment(
     try {
       currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
     } catch (error) {
-      getLogger().error(
-        { environment, error },
-        "earn vault reconciliation: failed to read block height"
-      );
+      // Unknown signatures cannot be rebroadcast or expired without a height,
+      // so those rows are left for the next tick; the tick still must not
+      // read ok, because the sweep could not do its recovery duty.
+      logEvent("error", {
+        event: "sdp_api_earn_vault_reconciliation_block_height_read_failed",
+        environment,
+        ...describeError(error),
+      });
+      stats.blockHeightReadFailures = 1;
     }
   }
 
@@ -203,18 +262,25 @@ async function reconcileEnvironment(
   for (const [index, movement] of rows.entries()) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
-      await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
+      const outcome = await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
         cluster,
         rpcUrl,
         currentBlockHeight,
       });
+      if (outcome === "settled") stats.settled += 1;
+      else if (outcome === "failed") stats.failed += 1;
+      else if (outcome === "confirmed") stats.confirmed += 1;
+      else if (outcome === "resubmitted") stats.resubmitted += 1;
+      else stats.unchanged += 1;
     } catch (error) {
+      stats.movementErrors += 1;
       getLogger().error(
         { movementId: movement.id, signature: movement.signature, error },
         "earn vault reconciliation: movement remains unsettled"
       );
     }
   }
+  return stats;
 }
 
 async function reconcileMovement(
@@ -223,10 +289,10 @@ async function reconcileMovement(
   movement: EarnMovementRow,
   status: SignatureStatusInfo | null,
   chain: { cluster: SolanaCluster; rpcUrl: string; currentBlockHeight: bigint | null }
-): Promise<void> {
+): Promise<MovementOutcome> {
   if (status?.err) {
     await failMovement(ledger, movement, describeVaultSimulationError(status.err).message);
-    return;
+    return "failed";
   }
   if (status?.confirmationStatus === "finalized") {
     const observedAt = new Date().toISOString();
@@ -235,21 +301,20 @@ async function reconcileMovement(
       confirmedAt: observedAt,
       settledAt: observedAt,
     });
-    return;
+    return "settled";
   }
   if (status?.confirmationStatus === "confirmed") {
-    if (movement.status === "confirmed") return;
+    if (movement.status === "confirmed") return "unchanged";
     await advanceTransaction(ledger, movement, {
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
     });
-    return;
+    return "confirmed";
   }
   if (status !== null) {
-    await markSubmitted(ledger, movement);
-    return;
+    return (await markSubmitted(ledger, movement)) ? "resubmitted" : "unchanged";
   }
-  if (movement.status === "confirmed") return;
+  if (movement.status === "confirmed") return "unchanged";
 
   const signedTransaction = movement.signed_transaction;
   const lastValidBlockHeight = movement.last_valid_block_height;
@@ -264,9 +329,9 @@ async function reconcileMovement(
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
     await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
-    return;
+    return "failed";
   }
-  if (chain.currentBlockHeight === null) return;
+  if (chain.currentBlockHeight === null) return "unchanged";
 
   await broadcastVaultTransaction(env, {
     cluster: chain.cluster,
@@ -275,14 +340,16 @@ async function reconcileMovement(
     rpcUrl: chain.rpcUrl,
   });
   await markSubmitted(ledger, movement);
+  return "resubmitted";
 }
 
 async function markSubmitted(
   ledger: EarnMovementsLedger,
   movement: EarnMovementRow
-): Promise<void> {
-  if (movement.status !== "requested") return;
+): Promise<boolean> {
+  if (movement.status !== "requested") return false;
   await advanceTransaction(ledger, movement, { toStatus: "submitted" });
+  return true;
 }
 
 async function failMovement(
