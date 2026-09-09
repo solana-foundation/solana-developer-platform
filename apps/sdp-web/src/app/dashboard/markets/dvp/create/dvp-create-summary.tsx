@@ -6,14 +6,13 @@
  * A form that moves value in two directions at once should say which way each
  * one goes, in the terms the person typed rather than the base units the chain
  * takes. The steps underneath exist because creating a trade is not the end of
- * the flow and nothing else on this page says so: the counterparty still has to
- * fund, and someone still has to settle.
+ * the flow and nothing else on this page says so: each party funds its own
+ * escrow, and someone still has to settle.
  */
 
 import { ArrowDownIcon, CheckIcon } from "lucide-react";
 import { TokenMark } from "@/components/token-mark";
 import { useTranslations } from "@/i18n/provider";
-import { shortenAddress } from "../../../payments/payments-overview.utils";
 
 function Leg({
   amount,
@@ -46,10 +45,9 @@ export function DvpCreateSummary({
   assetSymbol,
   cashMint,
   cashSymbol,
-  counterparty,
+  partyALabel,
+  partyBLabel,
   ready,
-  sdpSide,
-  agent,
 }: {
   amountA: string;
   amountB: string;
@@ -57,11 +55,10 @@ export function DvpCreateSummary({
   assetSymbol: string;
   cashMint: string | null;
   cashSymbol: string;
-  counterparty: string;
+  /** The resolved name of each slot, so the summary names real parties. */
+  partyALabel: string;
+  partyBLabel: string;
   ready: boolean;
-  sdpSide: "a" | "b";
-  /** On an agent trade there is no leg of yours to deliver or receive. */
-  agent: boolean;
 }) {
   const t = useTranslations();
   const asset = {
@@ -74,26 +71,20 @@ export function DvpCreateSummary({
     mint: cashMint,
     symbol: cashSymbol || t("DashboardMarkets.dvp.sideCash"),
   };
-  // On an agent trade neither leg is yours, so "you deliver" names nobody. The
-  // legs keep their own A-then-B order and are labelled by party instead.
-  const deliver = agent || sdpSide === "a" ? asset : cash;
-  const receive = agent || sdpSide === "a" ? cash : asset;
-  const deliverLabel = agent
-    ? t("DashboardMarkets.dvp.summaryPartyADelivers")
-    : t("DashboardMarkets.dvp.summaryYouDeliver");
-  const receiveLabel = agent
-    ? t("DashboardMarkets.dvp.summaryPartyBDelivers")
-    : t("DashboardMarkets.dvp.summaryYouReceive");
+  // Party A always delivers the asset leg and party B the cash leg; the
+  // summary names the parties the slots resolved to.
+  const deliver = asset;
+  const receive = cash;
+  const deliverLabel = partyALabel
+    ? `${t("DashboardMarkets.dvp.legPartyADelivers")} · ${partyALabel}`
+    : t("DashboardMarkets.dvp.legPartyADelivers");
+  const receiveLabel = partyBLabel
+    ? `${t("DashboardMarkets.dvp.legPartyBDelivers")} · ${partyBLabel}`
+    : t("DashboardMarkets.dvp.legPartyBDelivers");
 
   const steps = [
     t("DashboardMarkets.dvp.stepEscrows"),
-    agent
-      ? t("DashboardMarkets.dvp.stepFundAgent")
-      : t("DashboardMarkets.dvp.stepFund", {
-          counterparty: counterparty
-            ? shortenAddress(counterparty)
-            : t("DashboardMarkets.dvp.theirSide"),
-        }),
+    t("DashboardMarkets.dvp.stepFundParties"),
     t("DashboardMarkets.dvp.stepSettle"),
   ];
 
@@ -119,11 +110,7 @@ export function DvpCreateSummary({
         </div>
       ) : (
         <p className="mt-2 text-tertiary text-xs leading-relaxed">
-          {t(
-            agent
-              ? "DashboardMarkets.dvp.summaryIncompleteAgent"
-              : "DashboardMarkets.dvp.summaryIncomplete"
-          )}
+          {t("DashboardMarkets.dvp.summaryIncomplete")}
         </p>
       )}
 

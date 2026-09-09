@@ -1,9 +1,9 @@
 /**
- * The policy candidate a DvP action is judged on.
+ * The policy candidates DvP actions are judged on.
  *
  * These tests are about ONE number: the amount an approver is shown. Settle and
  * cancel move whole legs, so the leg's target is the right figure. Funding does
- * not — it tops SDP's leg up to its target — and showing the target there both
+ * not — it tops a leg up to its target — and showing the target there both
  * refuses valid top-ups that sit inside an amount limit and asks a human to
  * approve money that is never going to move.
  */
@@ -19,8 +19,12 @@ const readDvpLegShortfall = vi.hoisted(() => vi.fn());
 const approvedWalletOperationId = vi.hoisted(() => vi.fn());
 const getWalletOperationById = vi.hoisted(() => vi.fn());
 const getById = vi.hoisted(() => vi.fn());
+const getByIdAsParty = vi.hoisted(() => vi.fn());
 const assertFreshApiKeyCustodyWalletAccess = vi.hoisted(() => vi.fn());
-const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
+const readDvpSettlementWallet = vi.hoisted(() => vi.fn());
+const custodyWalletForParty = vi.hoisted(() => vi.fn());
+const findOperationalWalletById = vi.hoisted(() => vi.fn());
+const findWalletRow = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
@@ -30,24 +34,41 @@ vi.mock("@/lib/auth", async (importOriginal) => ({
 vi.mock("@/services/policy/enforcement.service", () => ({
   walletOperationActorFromAuth: () => ({ kind: "api_key", id: "ak_1" }),
 }));
-vi.mock("@/services/dvp/fund", () => ({ readDvpLegShortfall }));
+// `legOfSide` stays real (the extractor builds the leg with it); only the
+// chain read is stubbed.
+vi.mock("@/services/dvp/fund", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/dvp/fund")>();
+  return { ...actual, readDvpLegShortfall };
+});
+vi.mock("@/services/dvp/custody-party", () => ({ custodyWalletForParty }));
+vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
+  CustodyRuntimeTargets: class {
+    findOperationalWalletById = findOperationalWalletById;
+  },
+}));
 vi.mock("@/services/policy/approved-operation-replay", () => ({ approvedWalletOperationId }));
 vi.mock("@/lib/tenant-scope", () => ({ getRequestTenantScope: () => ({}) }));
-vi.mock("@/db", () => ({ getDb: () => ({}) }));
-vi.mock("@/services/dvp/settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
+vi.mock("@/db", () => ({
+  getDb: () => ({
+    prepare: () => ({ bind: () => ({ first: findWalletRow }) }),
+  }),
+}));
+vi.mock("@/services/dvp/settlement-wallet", () => ({ readDvpSettlementWallet }));
 vi.mock("@/services/api-key-scope.service", () => ({
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions: () => null,
 }));
 vi.mock("@/db/repositories", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/repositories")>()),
-  createDvpTradeRepository: () => ({ getById }),
+  createDvpTradeRepository: () => ({ getById, getByIdAsParty }),
   createPolicyRepository: () => ({ getWalletOperationById }),
 }));
 
-const { buildDvpTradeActionPolicyCandidate, extractDvpTradeActionPolicyCandidate } = await import(
-  "./policy"
-);
+const {
+  buildDvpTradeActionPolicyCandidate,
+  extractDvpTradeActionPolicyCandidate,
+  extractDvpFundPolicyCandidate,
+} = await import("./policy");
 
 const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
@@ -78,19 +99,15 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     refString: null,
     escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
     escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    sdpSide: "a" as const,
-    tradeKind: "principal" as const,
-    sdpWalletId: "cwlt_leg",
+    counterpartyAccountIdA: null,
+    counterpartyAccountIdB: null,
     status: "created",
     observedAt: null,
-    sdpLegFundingSignature: null,
-    sdpLegFundingTx: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
-    fundingClaimExpiryHeight: null,
     escrowAAmount: null,
     escrowBAmount: null,
     escrowAFrozen: null,
@@ -111,55 +128,12 @@ const settlement = {
   providerWalletId: "privy_settle_authority",
 };
 
-describe("buildDvpTradeActionPolicyCandidate", () => {
+describe("buildDvpTradeActionPolicyCandidate (close)", () => {
   beforeEach(() => {
     getAuth.mockReturnValue({ organizationId: "org_x", apiKeyId: "ak_1" });
   });
 
-  describe("funding a partly funded leg", () => {
-    // The case that reached the approvals queue with the wrong figure: the leg
-    // targets 1000 and already holds 400, funding will move 600, and 1000 is
-    // what a human was being asked to approve.
-    it("carries the shortfall, not the leg's target", () => {
-      const { candidate } = buildDvpTradeActionPolicyCandidate(
-        context,
-        trade(),
-        settlement,
-        "fund",
-        600n
-      );
-
-      expect(candidate.amount).toBe("600");
-    });
-
-    it("puts the shortfall on the evaluated leg too, not just the candidate", () => {
-      const { legs } = buildDvpTradeActionPolicyCandidate(
-        context,
-        trade(),
-        settlement,
-        "fund",
-        600n
-      );
-
-      expect(legs).toHaveLength(1);
-      expect(legs[0]?.amount).toBe("600");
-    });
-
-    it("overrides the side SDP holds when that is leg B", () => {
-      const { candidate } = buildDvpTradeActionPolicyCandidate(
-        context,
-        trade({ sdpSide: "b" }),
-        settlement,
-        "fund",
-        1500n
-      );
-
-      expect(candidate.asset).toBe(trade().mintB);
-      expect(candidate.amount).toBe("1500");
-    });
-  });
-
-  // Whole-leg actions are unchanged: the target IS what moves.
+  // Whole-leg actions: the target IS what moves.
   describe("settle and cancel", () => {
     it.each(["settle", "cancel"] as const)("evaluates %s at the leg's full target", (action) => {
       const { candidate, legs } = buildDvpTradeActionPolicyCandidate(
@@ -174,115 +148,51 @@ describe("buildDvpTradeActionPolicyCandidate", () => {
     });
   });
 
-  /**
-   * An agent trade has no SDP leg, and `sdpSide` is null on one.
-   *
-   * `trade.sdpSide === "a"` answers false for that as surely as it does for
-   * "SDP holds leg B", so the candidate was built out of leg B and told policy
-   * this organization was moving tokens it holds no key for. Settle and cancel
-   * both reach here (`routes/dvp/index.ts:77,83`); only funding is refused
-   * earlier, so this was live on the settle path.
-   */
-  describe("agent trades", () => {
-    const agentTrade = () => trade({ tradeKind: "agent" as const, sdpSide: null });
-
-    it.each(["settle", "cancel"] as const)(
-      "does not present leg B as SDP's own leg on %s",
-      (action) => {
-        const { candidate } = buildDvpTradeActionPolicyCandidate(
-          context,
-          agentTrade(),
-          settlement,
-          action
-        );
-
-        // Leg A's asset and amount, chosen, rather than leg B's by fallthrough.
-        expect(candidate.amount).toBe("1000");
-        expect(candidate.context).toMatchObject({ dvpSdpSide: null, dvpTradeKind: "agent" });
-      }
+  // There is no "our leg" to prefer any more: leg A leads as the representative
+  // — chosen, not fallen into — and naming both parties is always true.
+  it("leads with leg A as the representative and names both parties", () => {
+    const { candidate } = buildDvpTradeActionPolicyCandidate(
+      context,
+      trade(),
+      settlement,
+      "settle"
     );
 
-    // Both legs move on settle and both are refunded on cancel, so neither may
-    // escape evaluation just because neither is ours.
-    it.each(["settle", "cancel"] as const)("still evaluates both legs on %s", (action) => {
-      const { legs } = buildDvpTradeActionPolicyCandidate(
-        context,
-        agentTrade(),
-        settlement,
-        action
-      );
-
-      expect(legs.map((leg) => leg.amount)).toEqual(["1000", "2000"]);
-    });
-
-    // Naming one of two external parties "the counterparty" would put a false
-    // fact in front of whoever approves the operation.
-    it("names both parties rather than inventing a counterparty", () => {
-      const { candidate } = buildDvpTradeActionPolicyCandidate(
-        context,
-        agentTrade(),
-        settlement,
-        "settle"
-      );
-
-      expect(candidate.context).not.toHaveProperty("counterparty");
-      expect(candidate.context).toHaveProperty("parties");
-    });
+    expect(candidate.asset).toBe(trade().mintA);
+    expect(candidate.amount).toBe("1000");
+    expect(candidate.context).not.toHaveProperty("counterparty");
+    expect(candidate.context).toMatchObject({ parties: [trade().userA, trade().userB] });
   });
 
-  // A funding top-up moves ONE leg, so the counterparty's leg is not part of
-  // the operation and must not be evaluated as though it were.
-  it("evaluates only SDP's leg when funding", () => {
-    const { legs } = buildDvpTradeActionPolicyCandidate(context, trade(), settlement, "fund", 600n);
+  it("always evaluates both legs — nothing escapes policy by side", () => {
+    const { legs } = buildDvpTradeActionPolicyCandidate(context, trade(), settlement, "cancel");
 
-    expect(legs).toHaveLength(1);
+    expect(legs.map((leg) => leg.amount)).toEqual(["1000", "2000"]);
     expect(legs[0]?.asset).toBe(trade().mintA);
+    expect(legs[1]?.asset).toBe(trade().mintB);
   });
 
   // The wallet-operations ownership check matches `custody_wallets.wallet_id`
   // (`policy.repository.postgres.ts:1044`). Passing the address instead found no
-  // row, so every settle, cancel and fund failed with "Failed to record wallet
+  // row, so every settle and cancel failed with "Failed to record wallet
   // operation" — on a wallet the organization plainly owns.
-  it.each(["settle", "cancel", "fund"] as const)(
+  it.each(["settle", "cancel"] as const)(
     "identifies the signing wallet to policy by its provider id on %s",
     (action) => {
       const { candidate } = buildDvpTradeActionPolicyCandidate(
         context,
         trade(),
         settlement,
-        action,
-        action === "fund" ? 600n : null
+        action
       );
 
       expect(candidate.walletId).toBe("privy_settle_authority");
       expect(candidate.custodyWalletId).toBe("cwlt_settle");
     }
   );
-
-  it("sends a funding leg's tokens to the escrow, not to a settlement destination", () => {
-    const { candidate } = buildDvpTradeActionPolicyCandidate(
-      context,
-      trade(),
-      settlement,
-      "fund",
-      600n
-    );
-
-    expect(candidate.destination).toBe(trade().escrowA);
-  });
 });
 
-/**
- * Which amount the extractor puts on a funding candidate.
- *
- * The subtlety is the approved REPLAY. `resumeApprovedOperation` compares the
- * replayed candidate to the stored row field by field, with `amount` matched for
- * exact equality (`services/policy/enforcement.service.ts:113`). A deposit
- * landing between approval and execution shrinks a freshly-read shortfall, so
- * recomputing on replay fails that match and strands an approved top-up behind a
- * second approval it should never have needed.
- */
-describe("extractDvpTradeActionPolicyCandidate funding amount", () => {
+describe("extractDvpTradeActionPolicyCandidate (close)", () => {
   const extractContext = {
     env,
     req: { param: () => "dvp_policy_test" },
@@ -293,17 +203,101 @@ describe("extractDvpTradeActionPolicyCandidate funding amount", () => {
     getAuth.mockReturnValue({ organizationId: "org_x", apiKeyId: "ak_1" });
     requireProjectId.mockReturnValue("prj_x");
     getById.mockResolvedValue(trade());
-    getOrCreateDvpSettlementWallet.mockResolvedValue(settlement);
+    readDvpSettlementWallet.mockResolvedValue(settlement);
+    assertFreshApiKeyCustodyWalletAccess.mockResolvedValue(undefined);
+  });
+
+  // Settle and cancel move whole legs, so neither reads a shortfall at all.
+  it.each(["settle", "cancel"] as const)("does not read a shortfall for %s", async (action) => {
+    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, action);
+
+    expect(candidate?.amount).toBe("1000");
+    expect(readDvpLegShortfall).not.toHaveBeenCalled();
+  });
+
+  // The wallet asserted is the SETTLEMENT wallet, resolved before the assert —
+  // the trade row carries no wallet of its own.
+  it.each(["settle", "cancel"] as const)(
+    "asserts fresh key access on the settlement wallet for %s",
+    async (action) => {
+      await extractDvpTradeActionPolicyCandidate(extractContext, action);
+
+      expect(readDvpSettlementWallet).toHaveBeenCalled();
+      expect(assertFreshApiKeyCustodyWalletAccess).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "cwlt_settle",
+        ["payments:write"]
+      );
+    }
+  );
+});
+
+/**
+ * Which amount the fund extractor puts on the candidate.
+ *
+ * The subtlety is the approved REPLAY. `resumeApprovedOperation` compares the
+ * replayed candidate to the stored row field by field, with `amount` matched for
+ * exact equality (`services/policy/enforcement.service.ts:113`). A deposit
+ * landing between approval and execution shrinks a freshly-read shortfall, so
+ * recomputing on replay fails that match and strands an approved top-up behind
+ * a second approval it should never have needed.
+ */
+describe("extractDvpFundPolicyCandidate", () => {
+  const extractContext = (body: { side: "a" | "b"; walletId?: string | null }) =>
+    ({
+      env,
+      req: {
+        param: () => "dvp_policy_test",
+        valid: (target: string) => (target === "json" ? body : undefined),
+      },
+    }) as never;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAuth.mockReturnValue({ organizationId: "org_x", apiKeyId: "ak_1" });
+    requireProjectId.mockReturnValue("prj_x");
+    getByIdAsParty.mockResolvedValue(trade());
+    readDvpSettlementWallet.mockResolvedValue(settlement);
     assertFreshApiKeyCustodyWalletAccess.mockResolvedValue(undefined);
     approvedWalletOperationId.mockReturnValue(undefined);
     getWalletOperationById.mockResolvedValue(null);
     readDvpLegShortfall.mockResolvedValue(600n);
+    custodyWalletForParty.mockResolvedValue("cwlt_a");
+    findWalletRow.mockResolvedValue({
+      custody_wallet_id: "cwlt_a",
+      wallet_id: "privy_wallet_a",
+    });
   });
 
-  it("uses the live shortfall on a first request", async () => {
-    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, "fund");
+  it("uses the live per-side shortfall on a first request", async () => {
+    const { candidate } = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
 
     expect(candidate?.amount).toBe("600");
+    expect(readDvpLegShortfall).toHaveBeenCalledWith(expect.anything(), expect.anything(), "a");
+  });
+
+  it("reads the shortfall of the NAMED side, not a stored one", async () => {
+    await extractDvpFundPolicyCandidate(extractContext({ side: "b" }));
+
+    expect(readDvpLegShortfall).toHaveBeenCalledWith(expect.anything(), expect.anything(), "b");
+  });
+
+  it("builds the candidate from the named side's leg", async () => {
+    const { candidate, legs } = await extractDvpFundPolicyCandidate(extractContext({ side: "b" }));
+
+    expect(candidate).toMatchObject({
+      operationType: "dvp_fund",
+      asset: trade().mintB,
+      destination: trade().escrowB,
+      walletId: "privy_wallet_a",
+      custodyWalletId: "cwlt_a",
+    });
+    expect(candidate?.context).toMatchObject({ dvpLeg: "b", dvpAction: "fund" });
+    // Funding moves ONE leg: the other leg describes what the counterparty
+    // owes and is no part of this operation.
+    expect(legs).toHaveLength(1);
+    expect(legs[0]?.asset).toBe(trade().mintB);
   });
 
   // The case that would have stranded the top-up: approved at 600, another
@@ -314,7 +308,7 @@ describe("extractDvpTradeActionPolicyCandidate funding amount", () => {
     getWalletOperationById.mockResolvedValue({ amount: "600" });
     readDvpLegShortfall.mockResolvedValue(400n);
 
-    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, "fund");
+    const { candidate } = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
 
     expect(candidate?.amount).toBe("600");
     expect(readDvpLegShortfall).not.toHaveBeenCalled();
@@ -327,16 +321,106 @@ describe("extractDvpTradeActionPolicyCandidate funding amount", () => {
     approvedWalletOperationId.mockReturnValue("wop_1");
     getWalletOperationById.mockResolvedValue({ amount: null });
 
-    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, "fund");
+    const { candidate } = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
 
     expect(candidate?.amount).toBe("600");
   });
 
-  // Settle and cancel move whole legs, so neither reads the chain at all.
-  it.each(["settle", "cancel"] as const)("does not read a shortfall for %s", async (action) => {
-    const { candidate } = await extractDvpTradeActionPolicyCandidate(extractContext, action);
+  // Ungoverned rather than refused here: the handler produces the 403, and
+  // filing a wallet operation for a trade this caller has no leg on would put
+  // somebody else's trade in their approvals queue.
+  it("answers ungoverned, with the trade resolved, when no wallet holds the side's address", async () => {
+    custodyWalletForParty.mockResolvedValue(null);
 
-    expect(candidate?.amount).toBe("1000");
+    const extraction = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
+
+    expect(extraction.candidate).toBeNull();
+    expect(extraction.resolved).toEqual({
+      trade: expect.objectContaining({ id: "dvp_policy_test" }),
+      funding: null,
+    });
+    // Nothing was spent on the way out: no chain read, no key assert.
     expect(readDvpLegShortfall).not.toHaveBeenCalled();
+    expect(assertFreshApiKeyCustodyWalletAccess).not.toHaveBeenCalled();
+  });
+
+  it("answers ungoverned when the trade is unknown", async () => {
+    getByIdAsParty.mockResolvedValue(null);
+
+    const extraction = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
+
+    expect(extraction.candidate).toBeNull();
+    expect(extraction.resolved).toEqual({ trade: null, funding: null });
+  });
+
+  // An explicit `walletId` narrows and never widens: it must hold the named
+  // side's party address, and a mismatch or a miss is ungoverned so the
+  // handler can refuse with the real reason.
+  it("accepts an explicit wallet that holds the side's party address", async () => {
+    findOperationalWalletById.mockResolvedValue({
+      id: "cwlt_named",
+      publicKey: trade().userA,
+      walletId: "privy_named",
+    });
+    findWalletRow.mockResolvedValue({
+      custody_wallet_id: "cwlt_named",
+      wallet_id: "privy_named",
+    });
+
+    const { candidate, resolved } = await extractDvpFundPolicyCandidate(
+      extractContext({ side: "a", walletId: "cwlt_named" })
+    );
+
+    expect(findOperationalWalletById).toHaveBeenCalledWith(
+      expect.objectContaining({ custodyWalletId: "cwlt_named" })
+    );
+    expect(candidate?.custodyWalletId).toBe("cwlt_named");
+    expect(resolved).toEqual({
+      trade: expect.anything(),
+      funding: { side: "a", custodyWalletId: "cwlt_named" },
+    });
+  });
+
+  it.each([
+    [
+      "a wallet whose pubkey is a different address",
+      { id: "cwlt_other", publicKey: trade().userB },
+    ],
+    ["no wallet at all", null],
+  ])("refuses %s by answering ungoverned", async (_name, wallet) => {
+    findOperationalWalletById.mockResolvedValue(wallet);
+
+    const extraction = await extractDvpFundPolicyCandidate(
+      extractContext({ side: "a", walletId: "cwlt_named" })
+    );
+
+    expect(extraction.candidate).toBeNull();
+    expect(extraction.resolved).toEqual({
+      trade: expect.objectContaining({ id: "dvp_policy_test" }),
+      funding: null,
+    });
+  });
+
+  // The gate's auth context is a KV snapshot and can be up to an hour old, so
+  // a key whose `payments:write` was revoked in that window must be caught on
+  // the wallet the side RESOLVED to.
+  it("asserts fresh key access on the resolved wallet", async () => {
+    await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
+
+    expect(assertFreshApiKeyCustodyWalletAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "cwlt_a",
+      ["payments:write"]
+    );
+  });
+
+  // Top-ups are legal and both sides of a bilateral trade are separately
+  // fundable, so a trade-keyed operation key would refuse legitimate work.
+  // The (trade, side) claim CAS inside the funding path is the serialization.
+  it("carries no idempotency key", async () => {
+    const { idempotencyKey } = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
+
+    expect(idempotencyKey).toBeNull();
   });
 });

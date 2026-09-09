@@ -1,5 +1,6 @@
+import type { DvpTradeSide } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import type { DvpTrade } from "./dvp-trade";
+import type { DvpPartyRef, DvpTrade } from "./dvp-trade";
 
 /**
  * The upstream list is capped at 100 and has no cursor. Asking for a bounded
@@ -84,8 +85,8 @@ export interface DvpInboundTrade {
   id: string;
   status: string;
   swapDvp: string;
-  /** Which leg is this caller's. */
-  yourSide: "a" | "b";
+  /** Which leg is this caller's, per the API's custody lookup. */
+  yourSide: DvpTradeSide;
   legs: {
     a: DvpInboundLeg;
     b: DvpInboundLeg;
@@ -95,7 +96,11 @@ export interface DvpInboundTrade {
 }
 
 export interface DvpInboundLeg {
-  party: string;
+  /**
+   * Never attributed on inbound: which registered counterparty a party is
+   * belongs to the creating organization, so `counterparty` is always null.
+   */
+  party: DvpPartyRef;
   mint: string;
   amount: string;
   decimals: number | null;

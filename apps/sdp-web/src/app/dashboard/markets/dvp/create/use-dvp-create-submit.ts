@@ -13,7 +13,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import type { DvpPartiesRequest } from "./use-dvp-parties";
+import type { DvpPartyRef, DvpPartyWire } from "./use-dvp-parties";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 
@@ -48,15 +48,25 @@ const FNV_OFFSET = 0x6c62272e07bb014262b821756295c58dn;
 const FNV_PRIME = 0x0000000001000000000000000000013bn;
 const FNV_MASK = (1n << 128n) - 1n;
 
+/** Which reference kind named a party, for the fingerprint. */
+function partyRefKind(ref: DvpPartyRef): string {
+  if ("walletId" in ref) {
+    return "walletId";
+  }
+  if ("counterpartyAccountId" in ref) {
+    return "counterpartyAccountId";
+  }
+  return "address";
+}
+
 function createIdempotencyKey(request: DvpCreateRequest): string {
   const material = JSON.stringify([
-    request.walletId,
-    // The parties are described differently by kind, so the kind goes in too:
-    // without it an agent trade and a principal trade could hash the same.
-    request.parties.tradeKind,
-    ...(request.parties.tradeKind === "agent"
-      ? [request.parties.partyA, request.parties.partyB]
-      : [request.parties.sdpSide, request.parties.counterparty]),
+    request.payerWalletId,
+    // The party's address plus which reference kind named it: a wallet and a
+    // registered counterparty resolving to the same address are different
+    // attributions, and the fingerprint treats them as different parties.
+    `${partyRefKind(request.parties.a.ref)}:${request.parties.a.address}`,
+    `${partyRefKind(request.parties.b.ref)}:${request.parties.b.address}`,
     request.mintA,
     request.tokenProgramA ?? TOKEN_2022,
     request.mintB,
@@ -81,14 +91,19 @@ function createIdempotencyKey(request: DvpCreateRequest): string {
 }
 
 export interface DvpCreateRequest {
+  parties: { a: DvpPartyWire; b: DvpPartyWire };
+  /**
+   * The wallet that pays the fee and the escrow rent, or null for the
+   * project's settlement wallet. Omitted from the request when null — the
+   * absence IS the default.
+   */
+  payerWalletId: string | null;
   amountA: string;
   amountB: string;
   expiry: string;
   mintA: string;
   mintB: string;
   refString: string;
-  /** Who the two parties are, in whichever shape the caller chose. */
-  parties: DvpPartiesRequest;
   /** Each listed mint carries its own program; a pasted one is assumed T22. */
   tokenProgramA: string | null;
   tokenProgramB: string | null;
@@ -98,7 +113,6 @@ export interface DvpCreateRequest {
    */
   userASettlementDestination: string;
   userBSettlementDestination: string;
-  walletId: string;
 }
 
 export interface DvpCreateSubmit {
@@ -127,17 +141,11 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
           "Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({
-          sdpWalletId: request.walletId,
-          ...(request.parties.tradeKind === "agent"
-            ? {
-                tradeKind: "agent",
-                partyA: request.parties.partyA,
-                partyB: request.parties.partyB,
-              }
-            : {
-                sdpSide: request.parties.sdpSide,
-                counterparty: request.parties.counterparty,
-              }),
+          partyA: request.parties.a.ref,
+          partyB: request.parties.b.ref,
+          // Treated as the wire shape says: present only when the caller
+          // picked a payer; the project settlement wallet pays otherwise.
+          ...(request.payerWalletId ? { payerWalletId: request.payerWalletId } : {}),
           mintA: request.mintA,
           mintB: request.mintB,
           // A PASTED address is assumed Token-2022; if it is not, create

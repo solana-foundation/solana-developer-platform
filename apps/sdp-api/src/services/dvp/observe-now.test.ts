@@ -104,14 +104,4 @@ describe("observeDvpTradeIfStale", () => {
 
     expect(result.status).toBe("partially_funded");
   });
-
-  // The sweep may have moved the row first, in which case the compare-and-swap
-  // matches nothing and there is no fresher row to return.
-  it("falls back to the stored row when the write matched nothing", async () => {
-    recordObservation.mockResolvedValue(null);
-
-    const result = await observeDvpTradeIfStale(env, trade(), NOW);
-
-    expect(result.status).toBe("partially_funded");
-  });
 });

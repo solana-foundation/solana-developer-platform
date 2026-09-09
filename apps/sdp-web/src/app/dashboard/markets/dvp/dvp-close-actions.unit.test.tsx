@@ -10,44 +10,24 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { testLeg, testTrade } from "./dvp.fixtures";
 import { DvpCloseActions } from "./dvp-close-actions";
-import type { DvpTrade, DvpTradeLeg, DvpTradeStatus } from "./dvp-trade";
-
-function leg(funded: boolean): DvpTradeLeg {
-  return {
-    party: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-    tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-    decimals: 6,
-    symbol: "ATD",
-    amount: "1000",
-    escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
-    settlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    funding: { observedAmount: funded ? "1000" : "0", funded, surplus: null, frozen: false },
-  };
-}
+import type { DvpTrade, DvpTradeStatus } from "./dvp-trade";
 
 function trade(status: DvpTradeStatus, bothFunded: boolean): DvpTrade {
-  return {
-    id: "dvp_1",
+  const funding = (funded: boolean) => ({
+    observedAmount: funded ? "1000" : "0",
+    funded,
+    surplus: null,
+    frozen: false,
+  });
+  return testTrade({
     status,
-    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
-    settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
-    legs: { a: leg(bothFunded), b: leg(bothFunded) },
-    sdpSide: "a",
-    nonce: "42",
-    expiryTimestamp: "1900000000",
-    earliestSettlementTimestamp: null,
-    refString: null,
-    createSignature: null,
-    closeSignature: null,
-    sdpWallet: null,
-    settlementReadiness: null,
-    fundingSignature: null,
-    observedAt: null,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
-  };
+    legs: {
+      a: testLeg({ funding: funding(bothFunded) }),
+      b: testLeg({ funding: funding(bothFunded) }),
+    },
+  });
 }
 
 function renderActions(value: DvpTrade): string {
