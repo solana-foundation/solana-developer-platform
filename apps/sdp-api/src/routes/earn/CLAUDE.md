@@ -766,8 +766,9 @@ Never rebuild a transaction during recovery.
 
 **The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
 threat model EARN-006). A chain read failure used to `return` cleanly, so the
-batch went unjudged while `sdp_cron_run` recorded `ok` and no signal existed
-anywhere that money had stopped settling. Now a completed tick emits
+batch went unjudged while `sdp_cron_run` recorded `ok`: the only trace was an
+error log line, with no alertable event name and no backlog signal anywhere
+that money had stopped settling. Now a completed tick emits
 `sdp_api_earn_vault_reconciliation_tick` (the
 `sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
 counts plus the backlog gauges read AFTER the tick, and any failure (a status

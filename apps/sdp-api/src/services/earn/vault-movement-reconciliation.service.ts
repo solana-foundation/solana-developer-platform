@@ -139,7 +139,10 @@ async function observeEarnVaultMovement(
 
 /**
  * What one sweep tick did with the batch it claimed (PRO-1863). `settled` and
- * `failed` count TRANSITIONS this tick performed, not steady state; the read
+ * `failed` count transitions this tick ATTEMPTED, not steady state and not
+ * transitions that provably landed: the ledger's guarded CAS decides that, and
+ * `advanceTransaction` discards its result, so a row an overlapping tick or the
+ * interactive read-through advanced first is still counted here. The read
  * failures are the counts that must make the tick read failed rather than ok.
  */
 export interface EarnVaultReconciliationStats {
