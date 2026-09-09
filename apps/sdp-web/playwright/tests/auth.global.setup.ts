@@ -61,15 +61,21 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
     async ({ organizationId }) => {
       const clerkClient = (
         window as unknown as {
-          Clerk?: { setActive: (params: { organization: string }) => Promise<void> };
+          Clerk?: {
+            session?: { id?: string };
+            setActive: (params: { session?: string; organization?: string }) => Promise<void>;
+          };
         }
       ).Clerk;
 
-      if (!clerkClient) {
-        throw new Error("Clerk failed to load in Playwright global setup");
+      if (!clerkClient?.session?.id) {
+        throw new Error("Clerk session not established in Playwright global setup");
       }
 
-      await clerkClient.setActive({ organization: organizationId });
+      await clerkClient.setActive({
+        session: clerkClient.session.id,
+        organization: organizationId,
+      });
     },
     { organizationId: identity.organizationId }
   );
