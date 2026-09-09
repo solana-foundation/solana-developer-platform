@@ -11,7 +11,7 @@ import {
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
