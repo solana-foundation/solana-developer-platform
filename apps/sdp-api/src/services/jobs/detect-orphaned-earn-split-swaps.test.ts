@@ -316,12 +316,12 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     });
   });
 
-  it("does not let an unrelated same-mint deposit elsewhere clear an orphan, and does not page on it either", async () => {
+  it("holds a sibling-vault deposit plus a persisting rise as ambiguous during the escalation grace", async () => {
     // A covering deposit into a DIFFERENT vault while the swapped tokens are
     // still in the wallet: either a sibling deposit plus an unrelated credit,
-    // or an abandoned follow-up plus an unrelated deposit. Conflicting evidence
-    // stays open under its own event, never resolved and never paged.
-    const id = await seedAdvisory(2 * HOUR);
+    // or an abandoned follow-up plus an unrelated deposit. Inside the grace it
+    // stays open under its own event, neither resolved nor paged.
+    const id = await seedAdvisory(45 * MINUTE);
     await seedFollowUpMovement("confirmed", {
       vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     });
@@ -332,6 +332,28 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(tick().payload).toMatchObject({ ambiguous: 1, orphaned: 0, deposit_observed: 0 });
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
     expect(eventsNamed("sdp_api_earn_split_swap_ambiguous")).toHaveLength(1);
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("escalates an ambiguous advisory to orphaned once the rise outlives the grace", async () => {
+    // Ambiguity is a grace state, not a verdict: an hour on, tokens equal to
+    // the floor still in the wallet are the orphan condition whatever was
+    // deposited elsewhere, or one sibling deposit would hide a live orphan forever.
+    const id = await seedAdvisory(2 * HOUR);
+    const sibling = await seedFollowUpMovement("confirmed", {
+      vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ orphaned: 1, ambiguous: 0, deposit_observed: 0 });
+    const [orphan] = eventsNamed("sdp_api_earn_split_swap_orphaned");
+    expect(orphan?.[1]).toMatchObject({
+      advisory_id: id,
+      escalated: true,
+      covering_deposit_ids: [sibling],
+    });
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 

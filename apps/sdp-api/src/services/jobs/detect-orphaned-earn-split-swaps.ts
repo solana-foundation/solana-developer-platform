@@ -55,8 +55,13 @@ import type { Env } from "@/types/env";
  *    reported every visit; with such a deposit into a DIFFERENT vault the
  *    evidence conflicts (a sibling deposit plus an unrelated credit, or an
  *    abandoned follow-up plus an unrelated deposit), so it is AMBIGUOUS: kept
- *    open, reported at warn level under its own event, never paged and never
- *    silently cleared. Once the rise is gone, such a deposit resolves
+ *    open and reported at warn level under its own event. Ambiguity is a GRACE
+ *    STATE, not a verdict: once the advisory is past the escalation age with
+ *    the rise still there, unexplained tokens equal to the floor are the orphan
+ *    condition whatever was deposited elsewhere, so it escalates exactly like
+ *    the plain case, carrying the covering deposit ids so the operator sees
+ *    both facts. Without that bound one historical sibling deposit would hide
+ *    a live orphan indefinitely. Once the rise is gone, such a deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
  *    never broadcast, or the owner moved the tokens themselves) and a partial
  *    rise is indeterminate and stays open for the next visit.
@@ -288,9 +293,10 @@ async function judgeAdvisory(
     (row) => (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
   );
 
-  if (delta >= floor && coveringDeposits.length > 0) {
+  if (delta >= floor && coveringDeposits.length > 0 && ageMs < ESCALATE_AFTER_MS) {
     // Conflicting evidence: the tokens are still here AND a same-mint deposit
-    // for at least the floor landed somewhere else. Neither page nor clear.
+    // for at least the floor landed somewhere else. Neither page nor clear,
+    // but only for the escalation grace: past it the rise wins (below).
     stats.ambiguous += 1;
     await advisories.recordObservation({
       advisoryId: advisory.id,
@@ -344,6 +350,9 @@ async function judgeAdvisory(
       delta_atoms: delta.toString(),
       age_seconds: Math.round(ageMs / 1000),
       escalated: ageMs >= ESCALATE_AFTER_MS,
+      // Non-empty when the advisory escalated out of the ambiguous state: the
+      // deposits that explained nothing about the tokens still in the wallet.
+      covering_deposit_ids: coveringDeposits.map((row) => row.id),
       first_flagged_at: advisory.first_flagged_at,
       last_follow_up_build_at: followUpBuildAt ?? advisory.last_follow_up_build_at,
     });
