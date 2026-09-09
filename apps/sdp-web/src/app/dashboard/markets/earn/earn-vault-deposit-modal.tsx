@@ -149,20 +149,24 @@ function DepositQuoteSummaryRows({
 }
 
 /**
- * The confirm-step note. Names the actual fee payer: SDP when the quote says
- * this movement is sponsored, the wallet otherwise — and a swap-funded deposit
- * is always wallet-pays, whatever the quote said, because sponsorship refuses
- * swap routes.
+ * The confirm-step note. Names the actual fee payer: SDP when the STRATEGY says
+ * a movement on it is sponsored, the wallet otherwise. A swap-funded
+ * deposit is always wallet-pays, whatever the strategy said, because
+ * sponsorship refuses swap routes.
+ *
+ * Read from the strategy, never from the quote: a quote is only fetched for
+ * providers with a deposit floor, so a flag riding on it was unreadable for
+ * Kamino and the note claimed wallet-pays on every sponsored Kamino deposit.
  */
 function DepositConfirmNote({
-  quote,
+  feeSponsored,
   swapActive,
 }: {
-  quote: VaultQuoteState<EarnVaultDepositPreview>;
+  feeSponsored: boolean;
   swapActive: boolean;
 }) {
   const t = useTranslations();
-  const sponsored = quote.kind === "quoted" && quote.preview.feeSponsored === true && !swapActive;
+  const sponsored = feeSponsored && !swapActive;
   return (
     <p id="earn-vault-deposit-note" className="mt-3 text-xs leading-5 text-tertiary">
       {sponsored
@@ -1235,7 +1239,7 @@ export function EarnVaultDepositModal({
           />
         ) : null}
 
-        <DepositConfirmNote quote={quote} swapActive={swapActive} />
+        <DepositConfirmNote feeSponsored={strategy.feeSponsored} swapActive={swapActive} />
         {submitError ? (
           <p
             className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"

@@ -597,10 +597,15 @@ organization's own custody wallets.
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
   The response also carries `feeSponsored` — sponsorship INTENT
   (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
-  gate `resolveVaultSponsorship` applies at execution) — which the dashboard
-  uses for honest fee copy on the confirm step; a swap-funded deposit is
-  always wallet-pays and the client owns that override. The withdrawal
-  preview carries the same field.
+  gate `resolveVaultSponsorship` applies at execution). The withdrawal preview
+  carries the same field. **The dashboard does NOT read it from here**: a
+  preview is only fetched for providers with a quote-derived floor, so a flag
+  that travels only with a quote is unreadable for Kamino, and the confirm
+  note claimed wallet-pays on every sponsored Kamino deposit. The dashboard's
+  fee copy reads `feeSponsored` on the STRATEGY row (`mapToEarnStrategy`,
+  derived per request like `fundable`, `false` when not fundable) for
+  deposits and on the VAULT POSITION (`listEarnVaultPositions`) for exits; a
+  swap-funded deposit is always wallet-pays and the client owns that override.
   POST because the parameters are a body, like the custodial
   withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
   money-in gates.

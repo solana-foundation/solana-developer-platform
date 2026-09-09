@@ -212,9 +212,32 @@ describe("GET /v1/earn/vault-positions", () => {
         id: own.position.id,
         custodyWalletId: WALLET_A,
         label: own.position.label,
+        // Sponsorship is unset in this harness: the exit reads wallet-pays.
+        feeSponsored: false,
       }),
     ]);
     expect(readVaultPositions).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The exit's fee copy reads the position, not a quote: Kamino declares no
+   * withdrawal floor, so its exit never fetches one. The field answers the same
+   * gate `resolveVaultSponsorship` applies when the withdrawal executes.
+   */
+  it("carries the withdrawal's sponsorship intent on every position", async () => {
+    await createPosition({});
+    const original = env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED;
+    env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = "true";
+    try {
+      const response = await getPositions();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { positions: Array<{ feeSponsored: boolean }> };
+      };
+      expect(body.data.positions).toEqual([expect.objectContaining({ feeSponsored: true })]);
+    } finally {
+      env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
+    }
   });
 
   it("exposes no rows for an ambiguous selected-wallet provider id", async () => {
