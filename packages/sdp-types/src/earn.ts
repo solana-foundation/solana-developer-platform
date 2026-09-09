@@ -356,8 +356,13 @@ export interface EarnExternalWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
-  /** Exact project-scoped owners contributing to this strategy total. */
-  ownerAddresses: string[];
+  /**
+   * Exact project-scoped owners contributing to this strategy total. Present by
+   * default; ABSENT when the caller passed `includeOwnerAddresses=false`
+   * (PRO-1873). This is the end-user address book of the whole project, so an
+   * analytics consumer that only needs totals should opt out and never hold it.
+   */
+  ownerAddresses?: string[];
   walletCount: number;
   positionCount: number;
   totalsByToken: EarnExternalWalletTokenTotal[];

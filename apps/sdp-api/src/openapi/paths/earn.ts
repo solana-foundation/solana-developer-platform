@@ -4,6 +4,7 @@ import {
   earnExternalWalletEarningsQuerySchema,
   earnExternalWalletMovementParamsSchema,
   earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionSummaryQuerySchema,
   earnExternalWalletPositionsQuerySchema,
   earnStrategyIdParamsSchema,
   listEarnStrategiesQuerySchema,
@@ -199,7 +200,7 @@ function registerEarnExternalWalletPaths(
       "grouped by strategy and token. The service pages every stored claim before hydration. " +
       "A total is omitted when any contributing live value is unavailable, never reported as zero or partial.",
     security,
-    request: { headers: projectScopeHeaders },
+    request: { headers: projectScopeHeaders, query: earnExternalWalletPositionSummaryQuerySchema },
     responses: {
       200: {
         description: "Complete external-wallet position aggregate",

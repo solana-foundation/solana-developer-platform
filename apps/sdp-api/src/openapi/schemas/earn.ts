@@ -685,9 +685,15 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
   }),
   label: z.string().openapi({ example: "Allez USDC" }),
-  ownerAddresses: z.array(earnOwnerAddressSchema).openapi({
-    description: "The exact project-scoped owners contributing to this strategy total.",
-  }),
+  ownerAddresses: z
+    .array(earnOwnerAddressSchema)
+    .optional()
+    .openapi({
+      description:
+        "The exact project-scoped owners contributing to this strategy total. Present by default; " +
+        "absent when the request passed `includeOwnerAddresses=false`. This list is the project's " +
+        "end-user address book, so keys that only need totals should opt out.",
+    }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
   totalsByToken: z.array(earnExternalWalletTokenTotalSchema),

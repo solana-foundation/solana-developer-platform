@@ -1001,6 +1001,15 @@ owner-signed row can never satisfy
 (`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
 three).
 
+`GET /external-wallet/positions/summary` is the one read on this surface that
+is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresses`
+is the project's entire end-user address book (threat model EARN-028): any
+`earn:read` key becomes PII-bearing by calling it. `?includeOwnerAddresses=false`
+omits the list (omitted, never emptied, so "not requested" cannot read as "no
+owners") and keeps `walletCount`; the default stays address-bearing because the
+dashboard drives its per-owner reads off that list (PRO-1873). Partner docs
+steer analytics keys to the opt-out.
+
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
 literal segment (`positions/summary`) can collide with a path parameter, and
