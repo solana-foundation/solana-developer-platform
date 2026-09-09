@@ -1,7 +1,9 @@
 # Helius Rings — operations reference
 
-Devnet-only shielded wallets bound to SDP custody. Shield (deposit) and withdraw
-(SOL spend) are built; transfer and merge are not.
+Devnet-only shielded wallets bound to SDP custody. Shield (deposit), withdraw
+and private transfer are built for the default ring and for custom rings, and
+merge is built for the default ring. Anonymous transfers, zones and timelocks
+are not.
 
 The SDK runs in-process behind `RingsGatewayPort`. No adapter switch, no sidecar.
 
@@ -195,7 +197,7 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 | Shield (custom ring) | same; also needs a Ring RPC URL in project setup and an active ring | Ring-bound deposit through the ring program |
 | Withdraw (SOL) | same | Note selection, prove, outbox, sign, broadcast, index |
 | Withdraw / transfer (custom ring, SOL) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed |
-| Merge | not exposed | not exposed |
+| Merge (SOL, default ring) | same | Clears the on-chain merge gate, selects 2–5 notes, proves, signs, broadcasts, indexes |
 
 ## Custom rings
 
@@ -312,9 +314,52 @@ failure recorded on the row.
   holds, grouped by `ringProgramId` (`null` = the default ring). The
   groups never merge into one number: value cannot cross a ring boundary
   inside a spend, so a merged figure would overstate what any single operation
-  can move.
+  can move. Each group also carries a `noteCount`, which is what tells an
+  operator a position is fragmented and a merge would help.
 - **Auditor key.** Held by the Helius ring RPC, never by SDP; the config's
   public half is recorded on the ring row and echoed by `GET /rings`.
+- **Merge consolidates, it does not move.** A merge spends 2–5 of a wallet's
+  own notes for one asset and writes back a single note worth their sum. It
+  takes no amount and no recipient: the value is whatever the notes already
+  held. Fragmentation matters because a spend can only reach as much as its
+  own input cap allows, so a balance spread over many small notes is not
+  fully spendable in one operation until it is consolidated.
+  - **Why 5 and not 8.** The circuit pads to eight inputs
+    (`MERGE_INPUT_COUNT`), but the deployed prover refuses more than five, so
+    SDP selects its own inputs (`MERGE_MAX_INPUTS`) rather than letting the
+    SDK's auto-selector reach for eight and fail at proving. Selection is
+    smallest-first — the opposite of a spend, because the point is to retire
+    the dust that a spend's change keeps producing.
+  - **Merging is gated on chain, and SDP clears the gate.** The owner's
+    user-registry record carries a `mergingEnabled` flag, and
+    `buildRegistrationTransaction` cannot set it, so a freshly registered record
+    refuses merges with `WALLET_MERGE_DISABLED`. Turning it on is its own
+    custody-signed transaction. Provisioning sends it, so new wallets can merge
+    immediately; the merge path also reads the record first and sends it if
+    needed, so wallets registered before merge shipped heal on their next merge
+    instead of needing a migration. There is no SDP toggle for it: a merge moves
+    no value and reveals no amount, so the flag is a protocol precondition
+    rather than a policy decision.
+  - **Default ring only, for want of a builder.** The program implements a ring
+    merge — `InstructionTag.ringMergeTransact` is 16, beside the default ring's
+    `mergeTransact` at 13 — but 0.1.6-alpha exposes no builder for it: the tag
+    appears only in the tag table, the ring builders all move value (deposit,
+    entry, exit, transfer, withdrawal), and `buildMergeTransaction` takes no
+    `ringProgramId`. So the merge route accepts no `ring` and the SDK refuses a
+    ring-pinned merge. Sync still reports ring positions with their own
+    `noteCount`, so ring fragmentation is visible but not yet actionable.
+    Unblocking it is a Helius SDK ask, not program work.
+    A ring transfer to the wallet's own shielded address would consolidate, but
+    it is not the same operation: every ring transfer carries an auditor
+    message, so it would reach the ring's audit as a self-transfer, and it
+    verifies two proofs at 1.4M CU rather than the merge circuit.
+  - **What the wire policy can prove.** Less than for a spend, and by nature: a
+    merge publishes no amount and no recipient, so there is no public effect to
+    bind an approved figure to. Custody instead proves the bytes are a merge
+    (tag 13, the protocol's fixed-width 8-in/1-out layout), for this owner,
+    against this owner's locally derived user-registry record, on the expected
+    tree, with no other account reachable. Conservation of value is the
+    circuit's job, not custody's.
 
 Follow-up work, deliberately out of scope: ring → default-ring exits (the SDK
 exposes only a low-level `sendDefaultRing`), cross-ring transfers (impossible
@@ -328,6 +373,7 @@ custody-signed endpoint), and `GET /rings/:name` point reads.
 ## Diagnostics
 
 - `GET /v1/helius-rings/health` — component probes in `helius_rings_runtime_health`.
-- Dashboard — health board, balances, composer (shield + withdraw), and Activity
+- Dashboard — health board, balances with per-position note counts, composer
+  (shield, withdraw, private transfer, merge), and Activity
   with each row's action inline: execute, retry, or recheck and void for
   `manual_reconciliation_required`.

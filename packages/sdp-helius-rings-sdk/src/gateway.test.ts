@@ -130,7 +130,7 @@ describe("createRingsGateway", () => {
   it("refuses unsupported operation types at build time", async () => {
     const error = await createRingsGateway(CONFIG)
       .buildOperation({
-        operation: { opType: "merge", walletId: "hrw_1", input: {} } as never,
+        operation: { opType: "zone_create", walletId: "hrw_1", input: {} } as never,
         owner: "11111111111111111111111111111111",
       })
       .then(

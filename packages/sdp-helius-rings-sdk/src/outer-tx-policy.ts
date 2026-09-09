@@ -2,11 +2,13 @@ import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   DEFAULT_TREE_ADDRESS,
+  MERGE_INPUT_COUNT,
   SHIELDED_POOL_CPI_AUTHORITY,
   SHIELDED_POOL_PROGRAM_ID,
   SOL_INTERFACE,
   SPL_TOKEN_2022_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
+  USER_REGISTRY_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import {
@@ -33,6 +35,18 @@ const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const DEPOSIT_TAG = 11;
 const RING_DEPOSIT_TAG = 14;
 const TRANSACT_TAG = 12;
+const MERGE_TRANSACT_TAG = 13;
+/**
+ * A merge's instruction data is fixed width: the 8-in/1-out circuit shape is
+ * baked into the layout, so every field including the three root-index vectors
+ * has a constant length. Tag byte plus `encodeMergeTransactInstructionData`'s
+ * 492. A unit test pins this against the encoder.
+ */
+const MERGE_DATA_LENGTH = 1 + 492;
+/** Offsets of the three length prefixes inside that layout, tag included. */
+const MERGE_COUNT_OFFSETS = [202, 459, 476] as const;
+/** Seed of the user registry's record PDA, mirroring zolana's `RECORD_SEED`. */
+const USER_RECORD_SEED = "zolana/registry/v0";
 /** Byte 0 of a ring program's transact instruction (its own dispatch, not the pool's). */
 const RING_TRANSACT_TAG = 3;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
@@ -72,6 +86,15 @@ export type OuterTransactionPolicyIntent =
       to: string;
       /** Same contract as the transfer arm's `ring`. */
       ring?: Readonly<{ programId: string; lookupTable: string }>;
+    }>
+  | Readonly<{
+      /**
+       * Consolidating the owner's own notes. No amount and no recipient: a
+       * merge names only the asset, and the value it moves is whatever the
+       * notes it consumes already held.
+       */
+      opType: "merge";
+      mint: string;
     }>;
 
 /** Kit-neutral DTO accepted at the SDK/API major-version boundary. */
@@ -831,6 +854,77 @@ function validateComputeInstruction(
   return resolved.program;
 }
 
+/**
+ * The user registry's record for an owner. Derived locally with no RPC and no
+ * zolana import, like `derivedRingAuthAddress` — this file's independent read
+ * of the wire is the point, and this is the account that decides whose notes a
+ * merge is allowed to consume.
+ */
+async function derivedUserRecordAddress(owner: Address): Promise<Address> {
+  const [derived] = await getProgramDerivedAddress({
+    programAddress: USER_REGISTRY_PROGRAM_ID,
+    seeds: [textEncoder.encode(USER_RECORD_SEED), addressEncoder.encode(owner)],
+  });
+  return derived;
+}
+
+/**
+ * A merge: one compute instruction, then the pool's own tag-13 transact.
+ *
+ * What this can prove is narrower than a spend's, and deliberately so. A merge
+ * publishes no amount and no recipient — every value in its data is a
+ * commitment, a nullifier or a proof point — so there is no public effect to
+ * bind an approved figure to. What custody gets instead is that these bytes are
+ * a merge, for this owner, against this owner's registry record, on the
+ * expected tree, in the protocol's fixed 8-in/1-out shape, with no other
+ * account reachable. Conservation of value is the circuit's job. See
+ * docs/ops/helius-rings.md, "Semantics worth knowing".
+ */
+async function validateMerge(
+  intent: Extract<OuterTransactionPolicyIntent, { opType: "merge" }>,
+  message: DecodedMessage,
+  owner: Address,
+  tree: Address
+): Promise<void> {
+  if (message.instructions.length !== 2) mismatch();
+  if (protocolMint(intent.mint) !== PROTOCOL_NATIVE_MINT) mismatch();
+
+  const computeProgram = validateComputeInstruction(
+    message,
+    message.instructions[0] as DecodedInstruction
+  );
+  const instruction = resolvedInstruction(message, message.instructions[1] as DecodedInstruction);
+  if (instruction.program !== SHIELDED_POOL_PROGRAM_ID) mismatch();
+
+  const data = instruction.data;
+  if (data.length !== MERGE_DATA_LENGTH || data[0] !== MERGE_TRANSACT_TAG) mismatch();
+  // Nullifiers and both root-index vectors, each pinned to the circuit's
+  // padded width. Redundant with the fixed length above, and cheap: it is the
+  // shape that makes a merge a merge.
+  for (const offset of MERGE_COUNT_OFFSETS) {
+    if (data[offset] !== MERGE_INPUT_COUNT) mismatch();
+  }
+
+  const userRecord = await derivedUserRecordAddress(owner);
+  // Input and output tree are the same account twice, as the builder emits it.
+  expectAccounts(instruction.accounts, [
+    { address: tree, signer: false, writable: true },
+    { address: tree, signer: false, writable: true },
+    { address: owner, signer: true, writable: true },
+    { address: userRecord, signer: false, writable: false },
+    { address: SYSTEM_PROGRAM, signer: false, writable: false },
+    { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
+  ]);
+  expectStaticAccounts(message, [
+    owner,
+    tree,
+    userRecord,
+    SHIELDED_POOL_PROGRAM_ID,
+    SYSTEM_PROGRAM,
+    computeProgram,
+  ]);
+}
+
 function validateSpend(
   intent: SpendPolicyIntent,
   message: DecodedMessage,
@@ -909,6 +1003,11 @@ async function validate(input: OuterTransactionPolicyInput): Promise<void> {
     } else {
       await validateShield(intent, message, owner, tree);
     }
+    return;
+  }
+  if (intent.opType === "merge") {
+    validateEnvelope(message, transaction.signatures, owner);
+    await validateMerge(intent, message, owner, tree);
     return;
   }
   if (intent.ring !== undefined) {

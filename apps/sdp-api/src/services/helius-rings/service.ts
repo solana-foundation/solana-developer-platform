@@ -144,12 +144,6 @@ const QUARANTINED_WALLET_MESSAGE =
   "this rings wallet is paused because its material no longer derives the identity it was provisioned with; restore its original owner, organization, and project to derive that identity again, or re-key the wallet to abandon what it holds and start clean";
 
 function assertOperationEnabled(opType: PrivateOperationInput["opType"]): void {
-  if (opType === "merge") {
-    throw new HeliusRingsError(
-      "invalid_input",
-      "merge is temporarily disabled until fresh wallet sync can replay merged state safely"
-    );
-  }
   if (opType === "transfer_anonymous") {
     throw new HeliusRingsError("invalid_input", "anonymous transfer is not enabled in this build");
   }
@@ -1352,8 +1346,17 @@ export class HeliusRingsService {
       if (knownAssetsResult.status === "rejected") throw knownAssetsResult.reason;
       const recipient = recipientResult.value;
       const ring = ringResult.value;
+      const gateway = await this.resolveGateway(current.rings_connection_id);
 
-      const built = await (await this.resolveGateway(current.rings_connection_id)).buildOperation({
+      // Merging is gated on chain and registration cannot set it, so a wallet
+      // provisioned before merge shipped refuses every merge until this lands.
+      // It reads before it writes, so the second merge onward sends nothing.
+      // Ordered before the build because the build is what the flag refuses.
+      if (current.op_type === "merge") {
+        await gateway.ensureMergingEnabled({ walletId: current.wallet_id, owner });
+      }
+
+      const built = await gateway.buildOperation({
         operation: this.toPrivateOperation(current),
         owner,
         ...(wallet.shielded_address ? { expectedShieldedAddress: wallet.shielded_address } : {}),
@@ -1899,8 +1902,10 @@ function outerTransactionPolicyInput(
   ring: { programId: string; lookupTable: string } | null
 ): RingsOuterTransactionPolicyInput {
   const mint = requiredOuterPolicyField(operation.asset_mint);
-  const amountRaw = requiredOuterPolicyField(operation.amount_raw);
-  const common = { mint, amountRaw };
+  // Only the value-moving arms carry an amount. A merge has none to carry: it
+  // consolidates the wallet's own notes, so demanding one here would refuse
+  // every merge over a column the row is right to leave NULL.
+  const common = () => ({ mint, amountRaw: requiredOuterPolicyField(operation.amount_raw) });
   const ringSpend = ring ? { ring } : {};
 
   switch (operation.op_type) {
@@ -1910,7 +1915,7 @@ function outerTransactionPolicyInput(
         owner,
         intent: {
           opType: "shield",
-          ...common,
+          ...common(),
           expectedShieldedAddress: requiredOuterPolicyField(shieldedAddress),
           ...(operation.ring_program_id ? { ringProgramId: operation.ring_program_id } : {}),
         },
@@ -1921,7 +1926,7 @@ function outerTransactionPolicyInput(
         owner,
         intent: {
           opType: "withdraw",
-          ...common,
+          ...common(),
           to: requiredOuterPolicyField(operation.to_addr),
           ...ringSpend,
         },
@@ -1932,9 +1937,15 @@ function outerTransactionPolicyInput(
         owner,
         intent: {
           opType: "transfer_registered",
-          ...common,
+          ...common(),
           ...ringSpend,
         },
+      };
+    case "merge":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: { opType: "merge", mint },
       };
     default:
       throw new HeliusRingsError(

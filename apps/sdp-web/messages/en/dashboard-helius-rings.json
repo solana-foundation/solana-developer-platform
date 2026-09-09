@@ -31,7 +31,8 @@
       "unpriced": "—",
       "privateBalanceLabel": "Private balance",
       "defaultRing": "Default ring",
-      "customRing": "Custom ring {id}"
+      "customRing": "Custom ring {id}",
+      "noteCount": "{count} notes"
     },
     "health": {
       "title": "Health",
@@ -165,10 +166,12 @@
       "description_shield": "Move funds from the custody wallet into this private wallet.",
       "description_withdraw": "Move funds back to the backing custody wallet.",
       "description_transfer_registered": "Send funds privately to another private wallet in this project.",
+      "description_merge": "Combine this wallet's smaller notes into one. Moves no funds.",
       "operation": "Operation",
       "opTab_shield": "Shield",
       "opTab_withdraw": "Withdraw",
       "opTab_transfer_registered": "Private transfer",
+      "opTab_merge": "Merge",
       "recipientPrivateWallet": "Recipient private wallet",
       "recipientPrivateWalletPlaceholder": "Select a private wallet",
       "privateTransferNoRecipients": "No other provisioned private wallets in this project to transfer to.",

@@ -78,11 +78,41 @@ describe("syncRingsWallet", () => {
     });
 
     // Value cannot cross a ring boundary inside a spend, so nothing merges.
+    // `noteCount` is per position for the same reason: the ring's 5 spans two
+    // notes, and only a per-position count can say a merge would help there.
     expect(balances).toEqual([
-      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "100", ringProgramId: null },
-      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "5", ringProgramId: RING_PROGRAM },
-      { mint: USDC, symbol: "UNKNOWN", decimals: 0, amountRaw: "7", ringProgramId: RING_PROGRAM },
-      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "200", ringProgramId: OTHER_RING },
+      {
+        mint: SDP_SOL,
+        symbol: "SOL",
+        decimals: 9,
+        amountRaw: "100",
+        ringProgramId: null,
+        noteCount: 1,
+      },
+      {
+        mint: SDP_SOL,
+        symbol: "SOL",
+        decimals: 9,
+        amountRaw: "5",
+        ringProgramId: RING_PROGRAM,
+        noteCount: 2,
+      },
+      {
+        mint: USDC,
+        symbol: "UNKNOWN",
+        decimals: 0,
+        amountRaw: "7",
+        ringProgramId: RING_PROGRAM,
+        noteCount: 1,
+      },
+      {
+        mint: SDP_SOL,
+        symbol: "SOL",
+        decimals: 9,
+        amountRaw: "200",
+        ringProgramId: OTHER_RING,
+        noteCount: 1,
+      },
     ]);
   });
 
@@ -100,7 +130,14 @@ describe("syncRingsWallet", () => {
     // The protocol spells native SOL as the system program and SDP spells it as
     // wrapped SOL. Returning the protocol's would miss every allowlist lookup.
     expect(result.balances).toEqual([
-      { mint: SDP_SOL, symbol: "SOL", decimals: 9, amountRaw: "2500000000", ringProgramId: null },
+      {
+        mint: SDP_SOL,
+        symbol: "SOL",
+        decimals: 9,
+        amountRaw: "2500000000",
+        ringProgramId: null,
+        noteCount: 1,
+      },
     ]);
   });
 
@@ -117,6 +154,7 @@ describe("syncRingsWallet", () => {
       decimals: 0,
       amountRaw: "42",
       ringProgramId: null,
+      noteCount: 1,
     });
   });
 
@@ -127,9 +165,12 @@ describe("syncRingsWallet", () => {
       { spent: false, utxo: { asset: PROTOCOL_SOL, amount: 1n } },
     ]);
 
-    const { report } = await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
+    const { report, balances } = await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
 
     expect(report.storedNotes).toBe(2);
+    // The same two notes, counted again per position: one number is the
+    // wallet's total and the other is what makes a merge worth offering.
+    expect(balances[0]?.noteCount).toBe(2);
   });
 
   it.each([

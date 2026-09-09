@@ -1,14 +1,18 @@
+import type { Bytes32, Bytes64 } from "@heliuslabs/zolana";
 import { getAssociatedTokenAddress } from "@heliuslabs/zolana/addresses";
 import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
+import { getMergeTransactInstruction, type SignerAccount } from "@heliuslabs/zolana/instructions";
 import {
   DEFAULT_TREE_ADDRESS,
   DepositAsset,
   depositInstruction,
+  MERGE_INPUT_COUNT,
   SHIELDED_POOL_CPI_AUTHORITY,
   SHIELDED_POOL_PROGRAM_ID,
   SOL_INTERFACE,
   SPL_TOKEN_2022_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
+  USER_REGISTRY_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
 import {
   buildRingDepositTransaction,
@@ -30,6 +34,7 @@ import {
   getBase64Codec,
   getCompiledTransactionMessageDecoder,
   getCompiledTransactionMessageEncoder,
+  getProgramDerivedAddress,
   getTransactionDecoder,
   getTransactionEncoder,
   type Instruction,
@@ -538,6 +543,69 @@ function addLookupIndex(
   );
 }
 
+// --- merge fixtures ---------------------------------------------------------
+
+/** What the gate hardcodes, restated here so upstream drift breaks the build. */
+const MERGE_TAG = 13;
+const MERGE_DATA_LENGTH = 493;
+const MERGE_COUNT_OFFSETS = [202, 459, 476];
+
+function fill(length: number, value: number): Uint8Array {
+  return Uint8Array.from({ length }, () => value);
+}
+
+async function userRecordAddress(owner: Address): Promise<Address> {
+  const [derived] = await getProgramDerivedAddress({
+    programAddress: USER_REGISTRY_PROGRAM_ID,
+    seeds: [new TextEncoder().encode("zolana/registry/v0"), getAddressEncoder().encode(owner)],
+  });
+  return derived;
+}
+
+/**
+ * A merge built by zolana's own instruction encoder, so the shape the gate
+ * accepts is the shape the SDK actually emits rather than one restated here.
+ */
+async function mergeInstruction(
+  overrides: Readonly<{
+    userRecord?: Address;
+    inputTree?: Address;
+    outputTree?: Address;
+  }> = {}
+): Promise<Instruction> {
+  return getMergeTransactInstruction({
+    inputTree: overrides.inputTree ?? DEFAULT_TREE_ADDRESS,
+    outputTree: overrides.outputTree ?? DEFAULT_TREE_ADDRESS,
+    payer: { address: OWNER } as SignerAccount,
+    userRecord: overrides.userRecord ?? (await userRecordAddress(OWNER)),
+    data: {
+      expiryUnixTs: 0n,
+      proof: {
+        a: fill(32, 1) as Bytes32,
+        b: fill(64, 2) as Bytes64,
+        c: fill(32, 3) as Bytes32,
+      },
+      outputUtxoHash: fill(32, 4) as Bytes32,
+      eddsaOwner: false,
+      privateTxHash: fill(32, 5) as Bytes32,
+      nullifiers: Array.from({ length: MERGE_INPUT_COUNT }, () => fill(32, 6) as Bytes32),
+      utxoTreeRootIndexes: Array.from({ length: MERGE_INPUT_COUNT }, () => 0),
+      nullifierTreeRootIndexes: Array.from({ length: MERGE_INPUT_COUNT }, () => 0),
+    },
+  });
+}
+
+function mergePolicy(
+  outerUnsignedTxBase64: string,
+  overrides: Partial<Extract<OuterTransactionPolicyInput["intent"], { opType: "merge" }>> = {}
+): OuterTransactionPolicyInput {
+  return {
+    outerUnsignedTxBase64,
+    owner: OWNER,
+    intent: { opType: "merge", mint: SDP_SOL, ...overrides },
+  };
+}
+
 async function expectPolicyRejection(input: OuterTransactionPolicyInput): Promise<void> {
   await expect(validateOuterTransaction(input)).rejects.toMatchObject({
     name: "HeliusRingsError",
@@ -1006,6 +1074,106 @@ describe("validateOuterTransaction", () => {
       ],
     ])("rejects %s", async (_case, buildInput) => {
       await expectPolicyRejection(buildInput());
+    });
+  });
+
+  describe("merge", () => {
+    it("pins the merge wire's fixed shape to what zolana encodes", async () => {
+      const instruction = await mergeInstruction();
+      const data = instruction.data as Uint8Array;
+
+      // The gate reads this layout by offset and refuses anything else, so its
+      // constants have to fail here if the circuit's padding ever changes.
+      expect(data).toHaveLength(MERGE_DATA_LENGTH);
+      expect(data[0]).toBe(MERGE_TAG);
+      for (const offset of MERGE_COUNT_OFFSETS) {
+        expect(data[offset]).toBe(MERGE_INPUT_COUNT);
+      }
+    });
+
+    it("accepts a merge against the owner's own registry record", async () => {
+      await expect(
+        validateOuterTransaction(mergePolicy(spendWire(await mergeInstruction())))
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      [
+        "another owner's registry record",
+        async () =>
+          mergePolicy(
+            spendWire(await mergeInstruction({ userRecord: await userRecordAddress(OTHER) }))
+          ),
+      ],
+      [
+        "an unrelated account in the record slot",
+        async () => mergePolicy(spendWire(await mergeInstruction({ userRecord: OTHER }))),
+      ],
+      [
+        "an unexpected input tree",
+        async () => mergePolicy(spendWire(await mergeInstruction({ inputTree: OTHER }))),
+      ],
+      [
+        "an output tree that differs from the input tree",
+        async () => mergePolicy(spendWire(await mergeInstruction({ outputTree: OTHER }))),
+      ],
+      [
+        "a non-SOL requested mint",
+        async () => mergePolicy(spendWire(await mergeInstruction()), { mint: MINT }),
+      ],
+      [
+        "a truncated merge body",
+        async () => {
+          const instruction = await mergeInstruction();
+          return mergePolicy(
+            spendWire({
+              ...instruction,
+              data: (instruction.data as Uint8Array).slice(0, MERGE_DATA_LENGTH - 1),
+            })
+          );
+        },
+      ],
+      [
+        "a transact tag wearing a merge body",
+        async () => {
+          const instruction = await mergeInstruction();
+          const data = Uint8Array.from(instruction.data as Uint8Array);
+          data[0] = TRANSACT_TAG;
+          return mergePolicy(spendWire({ ...instruction, data }));
+        },
+      ],
+      [
+        "a merge missing its compute-budget instruction",
+        async () => mergePolicy(encodeTransaction([await mergeInstruction()])),
+      ],
+      [
+        "an extra account riding along",
+        async () => {
+          const instruction = await mergeInstruction();
+          return mergePolicy(
+            spendWire({
+              ...instruction,
+              accounts: [
+                ...(instruction.accounts ?? []),
+                { address: OTHER, role: AccountRole.WRITABLE },
+              ],
+            })
+          );
+        },
+      ],
+    ])("rejects %s", async (_case, buildInput) => {
+      await expectPolicyRejection(await buildInput());
+    });
+
+    it("rejects a merge whose fee payer is not the approved owner", async () => {
+      const instruction = await mergeInstruction();
+
+      // The envelope check owns this, but a merge names the owner twice — as
+      // payer and through the record PDA — so it is worth pinning here.
+      await expectPolicyRejection({
+        ...mergePolicy(spendWire(instruction)),
+        owner: OTHER,
+      });
     });
   });
 

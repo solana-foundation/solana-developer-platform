@@ -2,6 +2,8 @@ import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import {
   type BuildOperationInput,
   type BuildOperationResult,
+  type EnsureMergingEnabledInput,
+  type EnsureMergingEnabledResult,
   HeliusRingsError,
   type ProvisionIdentityInput,
   type ProvisionIdentityResult,
@@ -28,6 +30,7 @@ import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";
 import { verifyRingsIndexed } from "./indexed.js";
 import type { ShieldedMaterialSource } from "./material.js";
+import { ensureRingsMergingEnabled } from "./merging.js";
 import { provisionRingsIdentity, rekeyRingsIdentity } from "./provision.js";
 import { provisionCustomRing } from "./provision-ring.js";
 import { syncRingsWallet } from "./sync.js";
@@ -185,6 +188,21 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             projectId: config.projectId,
           },
           { walletId: input.walletId, owner: input.sdpAddress }
+        )
+      );
+    },
+
+    async ensureMergingEnabled(
+      input: EnsureMergingEnabledInput
+    ): Promise<EnsureMergingEnabledResult> {
+      return withZolanaErrorBridge(async () =>
+        ensureRingsMergingEnabled(
+          {
+            client: await client(),
+            signTransaction: config.signTransaction,
+            submitTransaction: config.submitTransaction,
+          },
+          { owner: input.owner }
         )
       );
     },

@@ -36,7 +36,7 @@ export const createProjectRingSchema = z.object({
  * flow nothing can build has already consumed a policy evaluation and possibly
  * a human approval, and it tells the caller far less than a 400 does.
  */
-const ENABLED_OP_TYPES = ["shield", "withdraw", "transfer_registered"] as const;
+const ENABLED_OP_TYPES = ["shield", "withdraw", "transfer_registered", "merge"] as const;
 
 /**
  * Base units, as a string.
@@ -125,6 +125,24 @@ export const prepareRingsOperationSchema = z
         /** Recipient's canonical shielded address; the service resolves it to a same-tenant wallet. */
         to: z.string().min(1),
         ring,
+      }),
+      z.strictObject({
+        ...operationFields,
+        opType: z.literal("merge"),
+        /**
+         * No amount and no recipient: a merge consolidates the wallet's own
+         * notes for one asset, and the value it writes back is whatever those
+         * notes already held. Naming an amount would imply a choice the caller
+         * does not get.
+         */
+        asset: z.strictObject({
+          mint: z.literal(SDP_NATIVE_MINT, {
+            error: "only SOL merges are supported",
+          }),
+        }),
+        // No `ring`: ring-bound notes are consolidated by an instruction the
+        // protocol reserves a tag for but ships no builder for, so a merge is
+        // always the default ring's.
       }),
     ],
     {

@@ -588,6 +588,7 @@ describe("Helius Rings routes", () => {
             decimals: 9,
             symbol: "SOL",
             ringProgramId: null,
+            noteCount: 3,
           },
         ],
         history: [],
@@ -612,7 +613,7 @@ describe("Helius Rings routes", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         data: {
-          balances: Array<{ mint: string; amountRaw: string }>;
+          balances: Array<{ mint: string; amountRaw: string; noteCount: number }>;
           degraded: boolean;
           observedAt: string;
         };
@@ -620,6 +621,9 @@ describe("Helius Rings routes", () => {
 
       expect(body.data).toMatchObject({ degraded: true, observedAt: observed.observedAt });
       expect(body.data.balances[0]?.amountRaw).toBe("18446744073709551615");
+      // Rides through the USD enrichment, which spreads each balance rather
+      // than rebuilding it; the dashboard reads this to offer a merge.
+      expect(body.data.balances[0]?.noteCount).toBe(3);
       // The stored identity is pinned so a derivation mismatch fails rather
       // than answering with someone else's balances.
       expect(seen[0]).toMatchObject({
