@@ -3116,6 +3116,63 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("signs with the key's default wallet when the token names none and several are bound", async () => {
+        // Several bindings are only ambiguous without a default. The key names
+        // one, and the shared resolver already authorizes it — refusing here
+        // would strand a key that has a perfectly good signer.
+        const db = getDb(env);
+        await db
+          .prepare(
+            "UPDATE issued_tokens SET abl_list_address = ?, signing_wallet_id = NULL WHERE id = ?"
+          )
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        await seedCachedApiKey(env, apiKeyHash, {
+          ...TEST_PROJECT_CACHED_KEY,
+          walletScope: "selected",
+          signingWalletId: "wal_default",
+          signingWalletIds: ["wal_default", "wal_other"],
+          walletBindings: [
+            { walletId: "wal_default", permissions: ["tokens:write"] },
+            { walletId: "wal_other", permissions: ["tokens:write"] },
+          ],
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(201);
+          expect(createOrgSignerSpy).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.any(String),
+            expect.any(String),
+            "wal_default"
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          await seedCachedApiKey(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
+        }
+      });
+
       it("signs with the wallet the key is bound to when the token names none", async () => {
         // The token carries no signing wallet, so the unguarded call fell back
         // to the project default. Under a scoped key the bound wallet is the

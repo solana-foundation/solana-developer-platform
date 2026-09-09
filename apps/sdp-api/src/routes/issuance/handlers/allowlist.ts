@@ -7,10 +7,7 @@ import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import {
-  getAllowedApiKeyWalletIds,
-  resolveApiKeySigningWalletId,
-} from "@/services/api-key-scope.service";
+import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
@@ -185,20 +182,21 @@ function resolveAllowlistSigningWalletId(
     return resolveApiKeySigningWalletId(auth, signingWalletId, ["tokens:write"]);
   }
 
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
-  if (allowedWalletIds === null) {
-    return null;
+  try {
+    return resolveApiKeySigningWalletId(auth, null, ["tokens:write"]);
+  } catch (error) {
+    // The shared resolver answers "specify a walletId" when several bindings and
+    // no default leave the signer ambiguous, and this route carries no walletId
+    // parameter. Only that answer is rewritten: a key with an authorized default
+    // signs with it, and every other refusal already names its own cause.
+    if (error instanceof AppError && error.code === "BAD_REQUEST") {
+      throw new AppError(
+        "FORBIDDEN",
+        "Token has no signing wallet; set one before changing its control list"
+      );
+    }
+    throw error;
   }
-  if (allowedWalletIds.length === 1) {
-    return resolveApiKeySigningWalletId(auth, allowedWalletIds[0], ["tokens:write"]);
-  }
-
-  // The generic resolver would answer "specify a walletId" here, which this
-  // route has no parameter for. Name the fix the caller can actually apply.
-  throw new AppError(
-    "FORBIDDEN",
-    "Token has no signing wallet; set one before changing its control list"
-  );
 }
 
 export const listAllowlist = async (c: AppContext) => {
