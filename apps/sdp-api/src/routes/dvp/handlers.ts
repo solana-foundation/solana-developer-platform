@@ -461,7 +461,8 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
       : await custodyWalletForParty(
           c.env,
           { organizationId: auth.organizationId, projectId },
-          partyAddress
+          partyAddress,
+          getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
         );
   if (rereadWalletId === null) {
     throw forbidden(
@@ -633,11 +634,11 @@ async function resolveYourSide(
   projectId: string
 ): Promise<{ side: "a" | "b"; custodyWalletId: string } | null> {
   const org = { organizationId: getAuth(c).organizationId, projectId };
-  const walletForA = await custodyWalletForParty(c.env, org, trade.userA);
+  const walletForA = await custodyWalletForParty(c.env, org, trade.userA, null);
   if (walletForA !== null) {
     return { side: "a", custodyWalletId: walletForA };
   }
-  const walletForB = await custodyWalletForParty(c.env, org, trade.userB);
+  const walletForB = await custodyWalletForParty(c.env, org, trade.userB, null);
   if (walletForB !== null) {
     return { side: "b", custodyWalletId: walletForB };
   }

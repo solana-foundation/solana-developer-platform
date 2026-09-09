@@ -407,22 +407,17 @@ export class CustodyRuntimeTargets {
   }
 
   /**
-   * The active custody wallet holding an on-chain address, as an indexed point
-   * read (`idx_custody_wallets_public_key`) over both ownership paths — never a
-   * list-and-filter. Filters mirror {@link listWallets}: active wallet, active
-   * config in the org (project or org-level) or active connection in the
-   * project. A project can hold the same address under two records; any match
-   * is the same wallet, so the oldest wins deterministically.
-   *
-   * @returns The `custody_wallets.id`, or null when no active wallet in scope
-   *   holds the address.
+   * Every active custody wallet holding an on-chain address, oldest first —
+   * an indexed read (`idx_custody_wallets_public_key`) over both ownership
+   * paths with the same active/org/project filters as {@link listWallets}.
+   * Multiple records can hold one address, so callers pick.
    */
-  async findOperationalWalletIdByAddress(params: {
+  async findOperationalWalletIdsByAddress(params: {
     organizationId: string;
     projectId: string;
     publicKey: string;
-  }): Promise<string | null> {
-    const row = await this.db.queryOne<{ id: string }>(
+  }): Promise<string[]> {
+    const rows = await this.db.queryMany<{ id: string }>(
       `SELECT w.id
          FROM custody_wallets w
          LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
@@ -436,8 +431,7 @@ export class CustodyRuntimeTargets {
             (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
                AND conn.status = 'active')
           )
-        ORDER BY w.created_at ASC
-        LIMIT 1`,
+        ORDER BY w.created_at ASC`,
       [
         params.publicKey,
         params.organizationId,
@@ -446,7 +440,7 @@ export class CustodyRuntimeTargets {
         params.projectId,
       ]
     );
-    return row === null ? null : row.id;
+    return rows.map((row) => row.id);
   }
 
   async findOwnedWalletForMutation(params: {

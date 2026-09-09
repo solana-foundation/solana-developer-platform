@@ -259,7 +259,8 @@ export async function extractDvpFundPolicyCandidate(
       : await custodyWalletForParty(
           c.env,
           { organizationId: auth.organizationId, projectId },
-          partyAddress
+          partyAddress,
+          getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
         );
 
   // Ungoverned (candidate null) so the handler produces the 403: filing an

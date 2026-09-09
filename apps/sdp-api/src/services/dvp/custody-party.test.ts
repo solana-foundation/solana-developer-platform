@@ -86,7 +86,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      null
     );
 
     expect(result).toBe("cwlt_party");
@@ -96,7 +97,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-      address(UNKNOWN_ADDRESS)
+      address(UNKNOWN_ADDRESS),
+      null
     );
 
     expect(result).toBeNull();
@@ -106,7 +108,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: OTHER_ORG_ID, projectId: "prj_other_org" },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      null
     );
 
     expect(result).toBeNull();
@@ -116,10 +119,56 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      null
     );
 
     expect(result).toBeNull();
+  });
+
+  describe("duplicate active records for one address", () => {
+    beforeEach(async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_party_dup', ?, 'w2', ?, 'active')`
+        )
+        .bind(CUSTODY_CONFIG_ID, PARTY_ADDRESS)
+        .run();
+    });
+
+    it("prefers the duplicate the key's allowlist admits", async () => {
+      const result = await custodyWalletForParty(
+        env,
+        { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
+        address(PARTY_ADDRESS),
+        ["cwlt_party_dup"]
+      );
+
+      expect(result).toBe("cwlt_party_dup");
+    });
+
+    it("returns the oldest for an unrestricted caller", async () => {
+      const result = await custodyWalletForParty(
+        env,
+        { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
+        address(PARTY_ADDRESS),
+        null
+      );
+
+      expect(result).toBe("cwlt_party");
+    });
+
+    it("returns null for a key whose allowlist admits neither", async () => {
+      const result = await custodyWalletForParty(
+        env,
+        { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
+        address(PARTY_ADDRESS),
+        []
+      );
+
+      expect(result).toBeNull();
+    });
   });
 
   it("returns null for an archived wallet with a matching address", async () => {
@@ -131,7 +180,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      null
     );
 
     expect(result).toBeNull();
