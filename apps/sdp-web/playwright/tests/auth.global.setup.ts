@@ -6,7 +6,6 @@ import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
-/** `setActive` returns before Clerk has refreshed the session token. */
 const CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS = 30_000;
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
@@ -93,8 +92,6 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
             }
           ).Clerk?.organization?.id;
         }),
-      // expect.poll does not inherit the test timeout; its own default is 5s,
-      // which a warm run clears and a cold CI runner does not.
       { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
     )
     .toBe(identity.organizationId);
