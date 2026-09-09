@@ -9,9 +9,11 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const getBlockHeight = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
+const getSignatureStatusesMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  getSignatureStatuses: getSignatureStatusesMock,
 }));
 vi.mock("@/services/dvp/read-chain", () => ({ readDvpTradeObservation }));
 
@@ -20,6 +22,13 @@ const { reconcileDvpTrades } = await import("./reconcile-dvp-trades");
 const PROJECT_ID = "prj_dvp_job_test";
 const CUSTODY_CONFIG_ID = "cust_dvp_job_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_job_test";
+
+/** A real base58 64-byte signature, so the resolving job's validation accepts it. */
+const SIG =
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+
+/** The RPC's answer for a transfer that landed: any confirmation status. */
+const LANDED_STATUS = [{ slot: 5n, confirmations: 1n, confirmationStatus: "confirmed", err: null }];
 
 function leg(amount: bigint, frozen = false) {
   return { exists: true, amount, frozen };
@@ -103,6 +112,9 @@ describe("reconcileDvpTrades", () => {
     env.MARKETS_ENABLED = "true";
     env.DVP_ENABLED = "true";
     getBlockHeight.mockResolvedValue(1_000n);
+    // Default: broadcast claims check out on chain as landed, so existing
+    // receipt rows survive. Tests that exercise a dead broadcast override.
+    getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
     readDvpTradeObservation.mockResolvedValue(observation());
 
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -318,19 +330,20 @@ describe("reconcileDvpTrades", () => {
       expiryHeight: "2000",
     });
     // A funded leg: the claim CAS lost to nobody, but the transfer landed and
-    // the row now carries its receipt.
+    // the row now carries its receipt. Expired AND broadcast, so the resolving
+    // pass checks it on chain — the default answer is landed, so it survives.
     await claims.claim({
       tradeId: "dvp_claim_sweep_b",
       side: "b",
       organizationId: TEST_ORG.id,
       projectId: PROJECT_ID,
       custodyWalletId: CUSTODY_WALLET_ID,
-      signature: "sig_broadcast",
+      signature: SIG,
       expiryHeight: "900",
     });
     await db
       .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'b'")
-      .bind("sig_broadcast", "dvp_claim_sweep_b")
+      .bind(SIG, "dvp_claim_sweep_b")
       .run();
 
     await reconcileDvpTrades(env);
@@ -338,6 +351,75 @@ describe("reconcileDvpTrades", () => {
     const remaining = await claims.listForTrade("dvp_claim_sweep");
     const receipt = await claims.listForTrade("dvp_claim_sweep_b");
     expect(remaining.map((claim) => claim.signature)).toEqual(["sig_live"]);
-    expect(receipt.map((claim) => claim.fundingTx)).toEqual(["sig_broadcast"]);
+    expect(receipt.map((claim) => claim.fundingTx)).toEqual([SIG]);
+  });
+
+  // The bug this resolves: an RPC-accepted transfer that DROPS — blockhash
+  // expires, transfer never lands — leaves a claim that is neither a live lock
+  // nor a real receipt. `releaseExpired` never touches it (broadcast) and
+  // `claim()`'s ON CONFLICT refuses every retry, so the leg 409s forever.
+  // Past last-valid height the chain's answer is final: no status found means
+  // it can never land, and the row must go.
+  it("releases an expired broadcast claim whose transfer never landed", async () => {
+    await seedTrade("dvp_dead_broadcast", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_dead_broadcast",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "900",
+    });
+    await db
+      .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
+      .bind(SIG, "dvp_dead_broadcast")
+      .run();
+    getSignatureStatusesMock.mockResolvedValue([null]);
+
+    await reconcileDvpTrades(env);
+
+    const after = await claims.listForTrade("dvp_dead_broadcast");
+    expect(after).toHaveLength(0);
+    // The leg is claimable again — the whole point of the fix.
+    const retried = await claims.claim({
+      tradeId: "dvp_dead_broadcast",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "800",
+    });
+    expect(retried).toBe(true);
+  });
+
+  // The other branch of the same check: the transfer DID land, which is a
+  // genuine receipt, so the row must survive the resolving pass.
+  it("keeps an expired broadcast claim whose transfer landed", async () => {
+    await seedTrade("dvp_landed_broadcast", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_landed_broadcast",
+      side: "b",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "900",
+    });
+    await db
+      .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'b'")
+      .bind(SIG, "dvp_landed_broadcast")
+      .run();
+
+    await reconcileDvpTrades(env);
+
+    const after = await claims.listForTrade("dvp_landed_broadcast");
+    expect(after).toHaveLength(1);
+    expect(after[0]?.fundingTx).toBe(SIG);
   });
 });

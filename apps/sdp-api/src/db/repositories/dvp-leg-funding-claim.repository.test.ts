@@ -118,6 +118,30 @@ function claimInput(org: string, side: "a" | "b", signature: string) {
   };
 }
 
+/** A second trade, for rows that need a (trade, side) slot beyond TRADE_ID's two. */
+async function insertTrade(id: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO dvp_trades (
+         id, organization_id, project_id, swap_dvp, settlement_authority,
+         user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
+         decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
+         user_a_settlement_destination, user_b_settlement_destination,
+         escrow_a, escrow_b, status
+       ) VALUES (?, 'org_claim_agent', 'prj_org_claim_agent', 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
+         '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY', ?, ?,
+         'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
+         'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE', '42',
+         'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+         'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', 6, 6, '1000', '2000',
+         '1900000000', ?, ?, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
+         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created')
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(id, ADDRESS_A, ADDRESS_B, ADDRESS_A, ADDRESS_B)
+    .run();
+}
+
 describe("DvpLegFundingClaimRepository", () => {
   let repo: DvpLegFundingClaimRepository;
 
@@ -234,6 +258,78 @@ describe("DvpLegFundingClaimRepository", () => {
       });
 
       expect(await repo.releaseExpired(900n)).toBe(0);
+    });
+  });
+
+  /**
+   * A broadcast claim is a receipt AND a lock in one row: `releaseExpired`
+   * keeps it because the transfer may still land, but past last-valid height
+   * the chain's answer is final. These methods are what the reconciler uses
+   * to ask — a dead broadcast must not lock the leg forever.
+   */
+  describe("resolving expired broadcast claims", () => {
+    it("lists only broadcast claims past their last-valid height", async () => {
+      await insertTrade("dvp_claim_trade_b");
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_brd_dead"), expiryHeight: "500" });
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_brd_dead");
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "b", "sig_brd_live"), expiryHeight: "5000" });
+        await repo.recordFundingTx(TRADE_ID, "b", "sig_brd_live");
+        // Expired but never broadcast: `releaseExpired`'s domain, not this one.
+        await repo.claim({
+          tradeId: "dvp_claim_trade_b",
+          side: "a",
+          organizationId: PARTY_A_ORG,
+          projectId: `prj_${PARTY_A_ORG}`,
+          custodyWalletId: walletId(PARTY_A_ORG),
+          signature: "sig_not_broadcast",
+          expiryHeight: "500",
+        });
+      });
+
+      const listed = await repo.listExpiredBroadcast(900n);
+
+      expect(listed.map((claim) => claim.signature)).toEqual(["sig_brd_dead"]);
+    });
+
+    it("deletes the matching broadcast claim and never an unbroadcast lock", async () => {
+      await insertTrade("dvp_claim_trade_b");
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_target"), expiryHeight: "500" });
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_target");
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "b", "sig_other"), expiryHeight: "500" });
+        await repo.recordFundingTx(TRADE_ID, "b", "sig_other");
+        await repo.claim({
+          tradeId: "dvp_claim_trade_b",
+          side: "a",
+          organizationId: PARTY_A_ORG,
+          projectId: `prj_${PARTY_A_ORG}`,
+          custodyWalletId: walletId(PARTY_A_ORG),
+          signature: "sig_unbroadcast",
+          expiryHeight: "500",
+        });
+      });
+
+      // A delete naming a signature it never checked must miss.
+      await repo.deleteBroadcastClaim(TRADE_ID, "b", "sig_wrong");
+      // An unbroadcast lock is never this path's to delete.
+      await repo.deleteBroadcastClaim("dvp_claim_trade_b", "a", "sig_unbroadcast");
+
+      const untouched = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+      expect(untouched.map((claim) => claim.signature).sort()).toEqual(["sig_other", "sig_target"]);
+      const unbroadcast = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade("dvp_claim_trade_b")
+      );
+      expect(unbroadcast.map((claim) => claim.signature)).toEqual(["sig_unbroadcast"]);
+
+      await repo.deleteBroadcastClaim(TRADE_ID, "a", "sig_target");
+
+      const afterTarget = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+      expect(afterTarget.map((claim) => claim.signature)).toEqual(["sig_other"]);
     });
   });
 

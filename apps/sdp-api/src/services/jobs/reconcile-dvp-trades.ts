@@ -11,8 +11,8 @@
  * an authority. `observed_at` is part of the answer.
  */
 
-import { createRpc } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
+import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
+import { type Address, assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
@@ -79,6 +79,47 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   } catch (error) {
     // Never fatal to the sweep. Observing trades is the job; this is repair.
     getLogger().error({ error }, "dvp reconcile: failed to release expired funding claims");
+  }
+
+  // One row, two meanings: `funding_tx` set turns the claim from a lock into a
+  // receipt, which is exactly why the sweep above refuses to touch it — a
+  // transfer on the wire may still land. But past the signed transaction's
+  // last-valid height it either landed or provably never will, and only the
+  // chain can tell which: getSignatureStatuses with history search answers it,
+  // where the status cache alone could not. This is the one place an RPC read
+  // decides a DB deletion — the chain's answer is final here.
+  try {
+    const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
+    const expiredBroadcast = await claims.listExpiredBroadcast(blockHeight);
+    for (const claim of expiredBroadcast) {
+      try {
+        assertIsSignature(claim.signature);
+        const [status] = await getSignatureStatuses(rpc, [claim.signature], {
+          searchTransactionHistory: true,
+        });
+        if (status === null) {
+          await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
+          getLogger().info(
+            { tradeId: claim.tradeId, side: claim.side, signature: claim.signature },
+            "dvp reconcile: deleted broadcast funding claim whose transfer never landed"
+          );
+        }
+      } catch (error) {
+        // Never delete on a failed read: only a definitive "not found" from
+        // the chain releases a broadcast claim. It keeps its lock and the
+        // next tick retries.
+        getLogger().error(
+          { tradeId: claim.tradeId, side: claim.side, signature: claim.signature, error },
+          "dvp reconcile: expired broadcast funding claim could not be resolved"
+        );
+      }
+    }
+  } catch (error) {
+    // Never fatal to the sweep, for the same reason as the release above.
+    getLogger().error(
+      { error },
+      "dvp reconcile: failed to resolve expired broadcast funding claims"
+    );
   }
 
   // Sequential on purpose. A batch of 64 fanned out with Promise.all would put
