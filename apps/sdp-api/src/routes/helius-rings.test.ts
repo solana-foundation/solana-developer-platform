@@ -12,10 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 /**
  * The one seam these tests reach through; everything else runs for real. Left
@@ -27,8 +30,11 @@ vi.mock("@/services/helius-rings/gateway", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/helius-rings/gateway")>();
   return {
     ...actual,
-    resolveRingsGateway: (...args: Parameters<typeof actual.resolveRingsGateway>) =>
-      (gatewayOverride.current as RingsGatewayPort | null) ?? actual.resolveRingsGateway(...args),
+    resolvePersistedRingsGateway: (
+      ...args: Parameters<typeof actual.resolvePersistedRingsGateway>
+    ) =>
+      (gatewayOverride.current as RingsGatewayPort | null) ??
+      actual.resolvePersistedRingsGateway(...args),
   };
 });
 
@@ -148,7 +154,50 @@ function authHeaders() {
   };
 }
 
-function post(path: string, body: unknown) {
+async function seedRingsConnection(): Promise<void> {
+  const db = getDb(env);
+  const connections = new HeliusRingsConnectionStore(db);
+  if (await connections.findDefault(TEST_ORG.id, TEST_PROJECT.id)) return;
+
+  const credentialId = "pcred_hr_route";
+  const connectionId = "hrconn_hr_route";
+  const credential = await new ProviderCredentialStore(db).insertCredential({
+    id: credentialId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    provider: "helius_rings",
+    label: "Route test",
+    scope: "project",
+    source: "stored",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "test-only" },
+    displayMetadata: {},
+    version: 1,
+    rotatedFromId: null,
+    idempotencyKey: connectionId,
+    idempotencyFingerprint: connectionId,
+    createdBy: TEST_USER.id,
+  });
+  await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+    credentialId,
+  ]);
+  await connections.insert({
+    id: connectionId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    name: "Route test",
+    providerCredentialId: credentialId,
+    providerCredentialScopeKey: credential.scope_key,
+    allowInsecureHttp: false,
+    displayMetadata: {},
+    makeDefault: true,
+    createdBy: TEST_USER.id,
+  });
+}
+
+async function post(path: string, body: unknown) {
+  if (path.startsWith("/v1/helius-rings/operations") && gatewayOverride.current) {
+    await seedRingsConnection();
+  }
   return app.request(
     path,
     { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
@@ -183,6 +232,39 @@ describe("Helius Rings routes", () => {
     expect(body.data.health.rpc).toBe("red");
     expect(body.data.health.prover).toBe("red");
     expect(body.data.health.photon).toBe("red");
+  });
+
+  it("GET /setup-status asks for project setup without exposing management to API keys", async () => {
+    const res = await app.request("/v1/helius-rings/setup-status", { headers: authHeaders() }, env);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: {
+        configured: false,
+        source: "none",
+        canManage: false,
+        allowInsecureHttpAllowed: true,
+        defaultConnection: null,
+      },
+    });
+  });
+
+  it("ignores retired endpoint environment variables", async () => {
+    const retiredEnv = {
+      ...env,
+      HELIUS_RINGS_RPC_URL: "https://rpc.invalid",
+      HELIUS_RINGS_INDEXER_URL: "https://indexer.invalid",
+      HELIUS_RINGS_PROVER_URL: "https://prover.invalid",
+      HELIUS_RINGS_RING_RPC_URL: "https://ring.invalid",
+    } as Env;
+
+    const res = await app.request(
+      "/v1/helius-rings/setup-status",
+      { headers: authHeaders() },
+      retiredEnv
+    );
+    await expect(res.json()).resolves.toMatchObject({
+      data: { configured: false, source: "none", defaultConnection: null },
+    });
   });
 
   describe("project rings", () => {
@@ -281,6 +363,10 @@ describe("Helius Rings routes", () => {
   describe("operations", () => {
     beforeEach(async () => {
       await provisionRouteWallet();
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("config_error", "Helius Rings setup is required"));
+      gatewayOverride.current = gateway;
     });
 
     it("prepares an operation through real policy and fails honestly at the port", async () => {
@@ -301,8 +387,8 @@ describe("Helius Rings routes", () => {
         };
       };
 
-      // Default policy is implicit allow, so the operation advances to the port
-      // call, which the unconfigured gateway refuses.
+      // Default policy is implicit allow, so the operation advances to the
+      // configured gateway and records its domain failure.
       expect(body.data.operation.state).toBe("failed");
       expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
         code: "config_error",

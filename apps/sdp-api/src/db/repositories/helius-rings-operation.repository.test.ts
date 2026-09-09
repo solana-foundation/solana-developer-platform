@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -18,6 +20,7 @@ const OTHER_PROJECT_ID = "prj_hro_repo_other";
 let repo: HeliusRingsOperationRepository;
 let walletRepo: HeliusRingsWalletRepository;
 let walletId: string;
+let defaultConnectionId: string;
 
 const scope = {
   organizationId: TEST_ORG.id,
@@ -29,6 +32,7 @@ function shieldIntent(
 ): ReserveHeliusRingsIntentInput {
   return {
     ...scope,
+    ringsConnectionId: defaultConnectionId,
     walletId,
     opType: "shield",
     intentKey: "sha256:shield-1",
@@ -52,6 +56,43 @@ async function setUpdatedAt(id: string, updatedAt: string): Promise<void> {
     .prepare("UPDATE helius_rings_operations SET updated_at = ? WHERE id = ?")
     .bind(updatedAt, id)
     .run();
+}
+
+async function insertRingsConnection(tag: string) {
+  const db = getDb(env);
+  const credentialId = `pcred_operation_${tag}`;
+  const connectionId = `hrconn_operation_${tag}`;
+  const credential = await new ProviderCredentialStore(db).insertCredential({
+    id: credentialId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    provider: "helius_rings",
+    label: tag,
+    scope: "project",
+    source: "stored",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: `opaque-${tag}` },
+    displayMetadata: {},
+    version: 1,
+    rotatedFromId: null,
+    idempotencyKey: connectionId,
+    idempotencyFingerprint: connectionId,
+    createdBy: TEST_USER.id,
+  });
+  await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+    credentialId,
+  ]);
+  return new HeliusRingsConnectionStore(db).insert({
+    id: connectionId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    name: tag,
+    providerCredentialId: credentialId,
+    providerCredentialScopeKey: credential.scope_key,
+    allowInsecureHttp: false,
+    displayMetadata: {},
+    makeDefault: false,
+    createdBy: TEST_USER.id,
+  });
 }
 
 describe("HeliusRingsOperationRepository (postgres)", () => {
@@ -94,6 +135,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;
+    defaultConnectionId = (await insertRingsConnection("default")).id;
   });
 
   describe("reserveIntent", () => {
@@ -108,6 +150,31 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         intent_key: "sha256:shield-1",
         amount_raw: "1000000",
         failure_code: null,
+      });
+    });
+
+    it("pins an active connection on a newly reserved operation", async () => {
+      const connection = await insertRingsConnection("active");
+
+      const result = await repo.reserveIntent(shieldIntent({ ringsConnectionId: connection.id }));
+
+      expect(result.operation.rings_connection_id).toBe(connection.id);
+    });
+
+    it("refuses to pin a connection after it is deactivated", async () => {
+      const connection = await insertRingsConnection("deactivated");
+      await getDb(env).execute(
+        `UPDATE helius_rings_connections
+            SET status = 'deactivated', deactivated_at = sdp_iso_now()
+          WHERE id = ?`,
+        [connection.id]
+      );
+
+      await expect(
+        repo.reserveIntent(shieldIntent({ ringsConnectionId: connection.id }))
+      ).rejects.toMatchObject({
+        code: "config_error",
+        message: "The selected Helius Rings connection is no longer active",
       });
     });
 
