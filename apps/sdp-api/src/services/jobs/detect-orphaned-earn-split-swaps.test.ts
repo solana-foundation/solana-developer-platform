@@ -136,8 +136,11 @@ async function seedFollowUpBuild(ageMs = 0): Promise<string> {
   return id;
 }
 
-/** A follow-up deposit MOVEMENT for the owner, advanced to `status`. */
-async function seedFollowUpMovement(status: string): Promise<string> {
+/** A follow-up deposit MOVEMENT for the owner, advanced to `status`. Defaults to the intended follow-up shape: this vault, exactly the floor. */
+async function seedFollowUpMovement(
+  status: string,
+  shape: { vaultAddress?: string; amount?: string } = {}
+): Promise<string> {
   const buildId = await seedFollowUpBuild();
   const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
     organizationId: ORG,
@@ -150,12 +153,12 @@ async function seedFollowUpMovement(status: string): Promise<string> {
     projectId: PROJECT,
     environment: "sandbox",
     provider: "kamino",
-    vaultAddress: built.vault_address,
+    vaultAddress: shape.vaultAddress ?? built.vault_address,
     ownerAddress: built.owner_address,
     shareMint: built.share_mint,
     tokenMint: built.token_mint,
     label: built.label,
-    requestedAmount: built.amount_requested,
+    requestedAmount: shape.amount ?? built.amount_requested,
     signature: `sig_${crypto.randomUUID()}`,
     signedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
     lastValidBlockHeight: "100",
@@ -294,18 +297,52 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(tick().payload).toMatchObject({ deposit_observed: 1, unfunded: 1, orphaned: 0 });
   });
 
-  it("does not let an unrelated same-mint deposit hide an orphan", async () => {
-    // A confirmed deposit exists for this owner and token, but the swapped
-    // tokens are still sitting in the wallet: the balance is the ground truth,
-    // and a movement may only explain funds that actually left.
+  it("resolves on the intended follow-up even when an unrelated credit keeps the balance high", async () => {
+    // Same vault, exactly the floor, chain-committed: that IS the follow-up, and
+    // whatever else sits in the wallet is not this swap's output. Paging here
+    // would be a persistent false alert on any wallet with other inflows.
     const id = await seedAdvisory(2 * HOUR);
-    await seedFollowUpMovement("confirmed");
+    const followUp = await seedFollowUpMovement("confirmed");
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
     await detectOrphanedEarnSplitSwaps(env);
 
-    expect(tick().payload).toMatchObject({ orphaned: 1, deposit_observed: 0 });
-    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(1);
+    expect(readOwnerMintBalance).not.toHaveBeenCalled();
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
+    expect(tick().payload).toMatchObject({ deposit_observed: 1, orphaned: 0 });
+    expect(await advisoryRow(id)).toMatchObject({
+      resolution: "deposit_observed",
+      resolving_movement_id: followUp,
+    });
+  });
+
+  it("does not let an unrelated same-mint deposit elsewhere clear an orphan, and does not page on it either", async () => {
+    // A covering deposit into a DIFFERENT vault while the swapped tokens are
+    // still in the wallet: either a sibling deposit plus an unrelated credit,
+    // or an abandoned follow-up plus an unrelated deposit. Conflicting evidence
+    // stays open under its own event, never resolved and never paged.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("confirmed", {
+      vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ ambiguous: 1, orphaned: 0, deposit_observed: 0 });
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
+    expect(eventsNamed("sdp_api_earn_split_swap_ambiguous")).toHaveLength(1);
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("still flags an orphan when the only same-mint deposit is too small to be the follow-up", async () => {
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("confirmed", { amount: "1" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ orphaned: 1, ambiguous: 0 });
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 

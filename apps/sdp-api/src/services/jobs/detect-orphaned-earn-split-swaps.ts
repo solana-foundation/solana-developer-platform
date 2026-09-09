@@ -38,23 +38,28 @@ import type { Env } from "@/types/env";
  * 2. The swap's blockhash still live, or the advisory younger than the grace
  *    period -> pending. Past its last valid block height the swap either landed
  *    or never will, which is when a balance means something.
- * 3. The owner's deposit-token balance is read on the environment's cluster
- *    with the same call the build's baseline used. THE BALANCE IS THE GROUND
- *    TRUTH. The swap enforces `minOut` on chain, so a landed swap raised the
- *    balance by at least `swap_min_out_atoms`; while that rise is still there
- *    the funds are provably swapped-but-undeposited and the advisory is
- *    ORPHANED, reported every visit, no matter what movements exist: an
- *    unrelated same-mint deposit into another strategy explains nothing about
- *    tokens that are still sitting in the wallet.
- * 4. Only once the rise is gone does a movement get to say WHERE the funds went:
- *    a `confirmed`/`finalized` follow-up deposit for the same owner and deposit
- *    token, created after the advisory, for at least the floor -> resolved
- *    `deposit_observed`. A `failed` deposit never qualifies (it moved nothing).
- *    One movement discharges at most one advisory (UNIQUE
- *    resolving_movement_id), so a reused owner wallet cannot close several with
- *    one deposit. With no qualifying movement, no rise at all is `unfunded` (the
- *    swap never broadcast, or the owner moved the tokens themselves), and a
- *    partial rise is indeterminate and stays open for the next visit.
+ * 3. THE INTENDED FOLLOW-UP IS DEFINITIVE. The split answer sizes the follow-up
+ *    to exactly the swap floor into exactly this vault, so a `confirmed`/
+ *    `finalized` deposit by this owner, after the advisory, into this vault for
+ *    exactly `swap_min_out_atoms` is the follow-up and resolves the advisory
+ *    `deposit_observed` whatever else the wallet holds: an unrelated same-mint
+ *    credit that arrived in the meantime is not this swap's output. One
+ *    movement discharges at most one advisory (UNIQUE resolving_movement_id),
+ *    so a reused owner wallet cannot close several with one deposit.
+ * 4. Otherwise the owner's deposit-token balance is read on the environment's
+ *    cluster with the same call the build's baseline used, and the balance is
+ *    the ground truth. The swap enforces `minOut` on chain, so a landed swap
+ *    raised the balance by at least the floor. While that rise is still there:
+ *    with NO other chain-committed same-mint deposit for at least the floor the
+ *    funds are provably swapped-but-undeposited and the advisory is ORPHANED,
+ *    reported every visit; with such a deposit into a DIFFERENT vault the
+ *    evidence conflicts (a sibling deposit plus an unrelated credit, or an
+ *    abandoned follow-up plus an unrelated deposit), so it is AMBIGUOUS: kept
+ *    open, reported at warn level under its own event, never paged and never
+ *    silently cleared. Once the rise is gone, such a deposit resolves
+ *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
+ *    never broadcast, or the owner moved the tokens themselves) and a partial
+ *    rise is indeterminate and stays open for the next visit.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
  * counted, emits its own error event, marks the tick error-level and THROWS so
@@ -79,6 +84,7 @@ export interface EarnSplitSwapDetectionStats {
   followUpPending: number;
   pending: number;
   orphaned: number;
+  ambiguous: number;
   indeterminate: number;
   unfunded: number;
   balanceReadFailures: number;
@@ -101,6 +107,7 @@ export async function detectOrphanedEarnSplitSwaps(
     followUpPending: 0,
     pending: 0,
     orphaned: 0,
+    ambiguous: 0,
     indeterminate: 0,
     unfunded: 0,
     balanceReadFailures: 0,
@@ -152,6 +159,7 @@ export async function detectOrphanedEarnSplitSwaps(
     follow_up_pending: stats.followUpPending,
     pending: stats.pending,
     orphaned: stats.orphaned,
+    ambiguous: stats.ambiguous,
     indeterminate: stats.indeterminate,
     unfunded: stats.unfunded,
     balance_read_failures: stats.balanceReadFailures,
@@ -224,7 +232,19 @@ async function judgeAdvisory(
     return;
   }
 
-  // 3. The balance is the ground truth: judge it against the build-time baseline.
+  // 3. The intended follow-up: same vault, exactly the floor, chain-committed.
+  //    Definitive whatever else the wallet holds, so it is judged before the
+  //    balance read (and spares the RPC call).
+  const floor = BigInt(advisory.swap_min_out_atoms);
+  const committed = deposits.filter((row) => OBSERVED_STATUSES.has(row.status));
+  const exactFollowUps = committed.filter(
+    (row) =>
+      row.vault_address === advisory.vault_address &&
+      depositAtoms(row.amount_requested, advisory) === floor
+  );
+  if (await resolveWithMovement(advisories, advisory, exactFollowUps, null, stats)) return;
+
+  // 4. The balance is the ground truth: judge it against the build-time baseline.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
     balance = await readOwnerMintBalance(
@@ -264,7 +284,36 @@ async function judgeAdvisory(
 
   const observedAtoms = balance.atoms.toString();
   const delta = balance.atoms - BigInt(advisory.baseline_deposit_token_atoms);
-  const floor = BigInt(advisory.swap_min_out_atoms);
+  const coveringDeposits = committed.filter(
+    (row) => (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
+  );
+
+  if (delta >= floor && coveringDeposits.length > 0) {
+    // Conflicting evidence: the tokens are still here AND a same-mint deposit
+    // for at least the floor landed somewhere else. Neither page nor clear.
+    stats.ambiguous += 1;
+    await advisories.recordObservation({
+      advisoryId: advisory.id,
+      observedAtoms,
+      followUpBuildAt,
+      flagged: false,
+    });
+    logEvent("warn", {
+      event: "sdp_api_earn_split_swap_ambiguous",
+      advisory_id: advisory.id,
+      organization_id: advisory.organization_id,
+      project_id: advisory.project_id,
+      environment: advisory.environment,
+      owner_address: advisory.owner_address,
+      deposit_token_mint: advisory.deposit_token_mint,
+      vault_address: advisory.vault_address,
+      delta_atoms: delta.toString(),
+      swap_min_out_atoms: advisory.swap_min_out_atoms,
+      covering_deposit_ids: coveringDeposits.map((row) => row.id),
+      age_seconds: Math.round(ageMs / 1000),
+    });
+    return;
+  }
 
   if (delta >= floor) {
     stats.orphaned += 1;
@@ -301,29 +350,10 @@ async function judgeAdvisory(
     return;
   }
 
-  // 4. The rise is gone, so a qualifying follow-up deposit may say where the
-  //    funds went. Qualifying: chain-committed, and for at least the floor, so
-  //    an unrelated small same-mint deposit does not get the credit.
-  for (const movement of deposits.filter(
-    (row) => OBSERVED_STATUSES.has(row.status) && depositCoversFloor(row.amount_requested, advisory)
-  )) {
-    try {
-      const resolved = await advisories.resolve({
-        advisoryId: advisory.id,
-        resolution: "deposit_observed",
-        resolvedBy: "system",
-        resolvingMovementId: movement.id,
-        observedAtoms,
-      });
-      if (resolved) {
-        stats.depositObserved += 1;
-        return;
-      }
-    } catch (error) {
-      // Another advisory for this owner already claimed this movement: one
-      // deposit discharges exactly one advisory. Try the next candidate.
-      if (!isPostgresUniqueViolation(error)) throw error;
-    }
+  // 5. The rise is gone, so a covering same-mint deposit may say where the
+  //    funds went (at least the floor, so a small unrelated one gets no credit).
+  if (await resolveWithMovement(advisories, advisory, coveringDeposits, observedAtoms, stats)) {
+    return;
   }
 
   if (delta <= 0n) {
@@ -348,16 +378,45 @@ async function judgeAdvisory(
   });
 }
 
-/** The follow-up deposit is sized to the swap's guaranteed floor, so a qualifying one is at least that. */
-function depositCoversFloor(amountRequested: string, advisory: EarnSplitSwapAdvisoryRow): boolean {
+/** A movement's decimal deposit amount in the advisory's atoms, or null when unparseable. */
+function depositAtoms(amountRequested: string, advisory: EarnSplitSwapAdvisoryRow): bigint | null {
   try {
-    return (
-      parseDecimalAmount(amountRequested, advisory.deposit_token_decimals) >=
-      BigInt(advisory.swap_min_out_atoms)
-    );
+    return parseDecimalAmount(amountRequested, advisory.deposit_token_decimals);
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * Resolve `deposit_observed` with the first candidate not already claimed by
+ * another advisory: one movement discharges exactly one advisory, and the
+ * UNIQUE on resolving_movement_id is what enforces it under concurrency.
+ */
+async function resolveWithMovement(
+  advisories: ReturnType<typeof createPostgresEarnSplitSwapAdvisoriesRepository>,
+  advisory: EarnSplitSwapAdvisoryRow,
+  candidates: Array<{ id: string }>,
+  observedAtoms: string | null,
+  stats: EarnSplitSwapDetectionStats
+): Promise<boolean> {
+  for (const movement of candidates) {
+    try {
+      const resolved = await advisories.resolve({
+        advisoryId: advisory.id,
+        resolution: "deposit_observed",
+        resolvedBy: "system",
+        resolvingMovementId: movement.id,
+        observedAtoms,
+      });
+      if (resolved) {
+        stats.depositObserved += 1;
+        return true;
+      }
+    } catch (error) {
+      if (!isPostgresUniqueViolation(error)) throw error;
+    }
+  }
+  return false;
 }
 
 function errorMessage(error: unknown): string {

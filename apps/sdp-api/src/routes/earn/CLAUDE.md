@@ -911,15 +911,18 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   Managed Reconciliation Cadence in the Cloud Run Job): an in-flight deposit or
   an unconsumed follow-up BUILD inside a 30-minute window is the partner still
   working; once the swap's blockhash is dead and a 30-minute grace has run, the
-  owner's balance is read with the SAME call as the baseline, and THE BALANCE IS
-  THE GROUND TRUTH: a rise of at least the floor is reported as
-  `sdp_api_earn_split_swap_orphaned` (warn level, `escalated` after an hour) on
-  every visit while it persists, whatever movements exist, because an unrelated
-  same-mint deposit elsewhere explains nothing about tokens still in the wallet.
-  Only once the rise is gone may a `confirmed`/`finalized` follow-up deposit for
-  at least the floor resolve it as `deposit_observed` (one movement discharges
-  at most one advisory, UNIQUE `resolving_movement_id`; a `failed` one never
-  does); otherwise no rise is `unfunded` and a partial rise stays open. It ALERTS and never acts: the funds are
+  intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
+  deposit into this vault for exactly the floor (which is how `followUp.amount`
+  is sized) resolves it as `deposit_observed` whatever else the wallet holds.
+  Otherwise the owner's balance is read with the SAME call as the baseline and
+  is the ground truth: a rise of at least the floor with no other covering
+  same-mint deposit is reported as `sdp_api_earn_split_swap_orphaned` (warn,
+  `escalated` after an hour) on every visit; a rise WITH a covering deposit into
+  a different vault is conflicting evidence and stays open under
+  `sdp_api_earn_split_swap_ambiguous`, neither paged nor cleared. Once the rise
+  is gone a covering deposit resolves it (one movement discharges at most one
+  advisory, UNIQUE `resolving_movement_id`; a `failed` one never does), no rise
+  is `unfunded`, and a partial rise stays open. It ALERTS and never acts: the funds are
   the owner's, and only the partner can move them. Detection writes nothing
   but back to the advisory table. Every amount it compares is atoms to atoms;
   the decimal `swap_min_out_amount` exists for display only.
