@@ -20,13 +20,19 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  resolveApiKeySigningWalletId,
+} from "@/services/api-key-scope.service";
+import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createRpcTransportForTarget } from "@/services/rpc-egress";
-import { createOrgSigner } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
+import { findAuthorizedOperationalWallet } from "./wallets";
 
 // biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
@@ -68,6 +74,19 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
   const memo = `SDP signer check ${crypto.randomUUID()}`;
 
   try {
+    const wallet = await findAuthorizedOperationalWallet(c, resolvedWalletId, ["wallets:write"]);
+    if (!wallet) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+    // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
+    // The exact signer repeats its runtime guard; a default change cannot select another wallet.
+    await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
+      auth.organizationId,
+      auth.projectId ?? undefined,
+      wallet.id
+    );
+
     // The sponsorship port supplies only the fee payer ADDRESS, so the
     // simulated message has a funded payer. The check never calls signAndSend:
     // a signer check is diagnostics, and diagnostics must not be able to spend
@@ -75,7 +94,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // simulation, and is never broadcast.
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer, rpcTarget] = await Promise.all([
-      createOrgSigner(c.env, auth.organizationId, auth.projectId, resolvedWalletId),
+      createOrgSignerForCustodyWallet(c.env, auth.organizationId, auth.projectId, wallet.id),
       feePayment.getFeePayer(),
       resolveRpcTarget({
         env: c.env,

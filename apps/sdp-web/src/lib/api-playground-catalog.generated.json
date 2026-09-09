@@ -477,7 +477,7 @@
       {
         "id": "check-wallet-signer",
         "operationId": "checkWalletSigner",
-        "title": "Check signer via memo transaction",
+        "title": "Check signer via simulated memo transaction",
         "method": "POST",
         "path": "/v1/wallets/signer-check",
         "pathFields": [],
@@ -499,8 +499,8 @@
             "feePayer": "So11111111111111111111111111111111111111112",
             "memo": "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
             "signature": "sig_example",
-            "slot": 123456789,
-            "blockTime": "2026-02-20T00:00:00.000Z"
+            "simulated": true,
+            "checkedAt": "2026-02-20T00:00:00.000Z"
           },
           "meta": {
             "requestId": "req_example",
@@ -8303,7 +8303,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
+            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
             "required": true
           }
         ],
