@@ -68,6 +68,16 @@ Things that will bite:
   inside the same transaction that inserts the movement, so one built
   transaction can never ledger twice; that consume is written HERE, with the
   single ledger writer, not in the built-transactions repository.
+- **`earn_split_swap_advisories` is advisory state, never a movement**
+  (PRO-1864, migration 0091). A row records that a split-swap build handed a
+  partner a standalone swap; the detector that reads it writes nothing but
+  back to this table and never touches `earn_movements`. Its amount columns
+  carry ONE declared unit each: the floor and both balance samples are
+  deposit-mint ATOMS with the decimals recorded beside them, and the two
+  `*_amount` columns are display-only decimal strings. Compare atoms to atoms.
+  `listExternalWalletDepositsSince` on the movements repository is its
+  status-aware follow-up read: a `failed` deposit must not discharge an
+  advisory.
 
 The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
 Architecture and the migration inventory are in

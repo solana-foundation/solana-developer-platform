@@ -610,7 +610,7 @@ const earnExternalWalletDepositSwapSplitSchema = z
   .openapi({
     description:
       "Answered instead of a built transaction when the composed swap + deposit cannot fit " +
-      "one Solana packet (1,232 bytes) even on a compact route. Nothing was persisted.",
+      "one Solana packet (1,232 bytes) even on a compact route. No submit-capable build or movement was persisted; SDP retained only a recovery advisory.",
   });
 
 export const earnExternalWalletDepositTransactionResponse = successResponseSchema(

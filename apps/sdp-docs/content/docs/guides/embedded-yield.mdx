@@ -237,6 +237,8 @@ Pass `sourceTokenMint` (USDC, USDG, PYUSD or USDT on your cluster) to accept a s
 
 If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
 
+Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP does record that it handed the swap out, and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. Demonstrating split-swap recovery in sandbox is part of the production certification checklist.
+
 ## Idempotency, in one place
 
 | Call | Rule |

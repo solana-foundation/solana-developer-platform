@@ -606,10 +606,13 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
  * swap-funded deposit could not fit in ONE Solana transaction (the packet
  * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
- * instructions). Nothing is persisted for this answer: SDP hands back an
- * unsigned SWAP-ONLY transaction for the owner to sign and broadcast itself,
- * plus the exact follow-up deposit to build once the swap lands. The follow-up
- * build then takes the ordinary single-transaction path.
+ * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
+ * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
+ * itself, plus the exact follow-up deposit to build once the swap lands. The
+ * follow-up build then takes the ordinary single-transaction path. SDP does
+ * record an advisory that the split was handed out, and flags owners whose
+ * swap landed without a follow-up deposit (PRO-1864); recovery stays the
+ * partner's duty.
  */
 export interface EarnExternalWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
@@ -618,9 +621,9 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
     /**
      * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
      * the owner, or the original request's `feePayer` (which then co-signs
-     * this transaction too). The partner broadcasts it itself — it moves only
+     * this transaction too). The partner broadcasts it itself; it moves only
      * the owner's own funds between the owner's own token accounts, so SDP
-     * records nothing for it.
+     * records no movement for it, only the orphan-detection advisory.
      */
     transaction: string;
     /** Block height after which these exact bytes can no longer land. */

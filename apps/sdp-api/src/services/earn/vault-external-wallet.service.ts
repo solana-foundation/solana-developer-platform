@@ -23,6 +23,10 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnSplitSwapAdvisoriesRepository,
+  generateEarnSplitSwapAdvisoryId,
+} from "@/db/repositories/earn-split-swap-advisories.repository";
 import { badRequest, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnExternalWalletDepositFingerprint,
@@ -44,8 +48,10 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
   prependSwapLegToVaultPlan,
   RETRY_SWAP_MAX_ACCOUNTS,
+  requireWellKnownMintDecimals,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
+import { readOwnerMintBalance } from "./owner-token-balance";
 import { createVaultDeadline } from "./vault-deadline";
 import { requireAcceptedPlan } from "./vault-deposit.service";
 import {
@@ -87,6 +93,8 @@ export interface ExternalWalletDepositBuildInput {
   projectId: string;
   environment: SdpEnvironment;
   provider: EarnProviderId;
+  /** Catalogue row id, so a split-swap advisory can name the strategy (PRO-1864). */
+  strategyId: string;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
   /** The external wallet that will sign and own the shares. */
@@ -165,9 +173,10 @@ export type ExternalWalletDepositBuildResult =
   | {
       /**
        * The composed swap + deposit could not fit one Solana packet, even
-       * after re-routing for compactness. Nothing was persisted. The caller
-       * gets an unsigned SWAP-ONLY transaction to sign and broadcast itself,
-       * then requests an ordinary (unswapped) build for `swap.minOutAmount`.
+       * after re-routing for compactness. No submit-capable build or movement
+       * was persisted; only the recovery advisory was. The caller gets an
+       * unsigned SWAP-ONLY transaction to sign and broadcast itself, then
+       * requests an ordinary (unswapped) build for `swap.minOutAmount`.
        */
       kind: "swap_required";
       swap: JupiterSwapLeg;
@@ -352,20 +361,29 @@ export async function buildExternalWalletDepositTransaction(
   }
   if (!attempt.fit) {
     // Split flow: the swap alone, compiled through the same simulate-and-size
-    // seam, for the owner to sign and broadcast itself. Deliberately NOT
-    // persisted and carrying no request memo — it moves the owner's own funds
-    // between the owner's own accounts, records no SDP movement, and its
-    // follow-up deposit build takes the ordinary path.
+    // seam, for the owner to sign and broadcast itself. It carries no request
+    // memo and records NO movement: it moves the owner's own funds between the
+    // owner's own accounts, and the follow-up deposit build takes the ordinary
+    // path. What it DOES record is an ADVISORY (PRO-1864, EARN-026): the
+    // standalone swap is the one transaction this flow hands out that SDP never
+    // sees again, so without a row here a partner that broadcast it and crashed
+    // left the customer's funds swapped-but-undeposited with nothing for a
+    // detector to even look for.
     const swapLeg = attempt.swapLeg;
-    return {
-      kind: "swap_required",
-      swap: swapLeg,
-      swapTransaction: await compileStandaloneSwapTransaction(env, {
+    const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
+    const depositTokenDecimals = requireWellKnownMintDecimals(input.tokenMint, "deposit token");
+    // The baseline is read in parallel with the compile, so it costs the
+    // partner's blockhash window nothing extra, and under the same deadline.
+    // FAIL-CLOSED alongside the insert: a blind advisory could only ever page
+    // on any wallet that happened to hold the deposit token, and money IN may
+    // refuse; the partner simply builds again.
+    const [swapTransaction, baseline] = await Promise.all([
+      compileStandaloneSwapTransaction(env, {
         cluster,
         deadline,
         rpcUrl,
         ownerAddress: input.ownerAddress,
-        sourceTokenMint: input.swap?.sourceTokenMint ?? input.tokenMint,
+        sourceTokenMint,
         depositTokenMint: input.tokenMint,
         swapLeg,
         // The split swap is one of the transactions this flow hands out, so
@@ -373,7 +391,37 @@ export async function buildExternalWalletDepositTransaction(
         // broadcasts it, exactly like the deposit it precedes.
         fee,
       }),
-    };
+      deadline.run("Reading the split-swap baseline balance", () =>
+        readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
+      ),
+    ]);
+    if (baseline.decimals !== null && baseline.decimals !== depositTokenDecimals) {
+      throw internalError(
+        `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`
+      );
+    }
+    await createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env)).create({
+      id: generateEarnSplitSwapAdvisoryId(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      environment: input.environment,
+      provider: input.provider,
+      strategyId: input.strategyId,
+      vaultAddress: input.providerReference,
+      ownerAddress: input.ownerAddress,
+      sourceTokenMint,
+      depositTokenMint: input.tokenMint,
+      depositTokenDecimals,
+      swapSourceAmount: swapLeg.sourceAmount,
+      swapMinOutAmount: swapLeg.minOutAmount,
+      swapMinOutAtoms: swapLeg.minOutAtoms,
+      swapLastValidBlockHeight: swapTransaction.lastValidBlockHeight,
+      feePayer: feePayer ?? null,
+      baselineDepositTokenAtoms: baseline.atoms.toString(),
+      createdBy: input.userId ?? null,
+      initiatedByKeyId: input.apiKeyId ?? null,
+    });
+    return { kind: "swap_required", swap: swapLeg, swapTransaction };
   }
 
   const { unsigned, plan, depositAmount, minSharesOut, swapLeg } = attempt;
