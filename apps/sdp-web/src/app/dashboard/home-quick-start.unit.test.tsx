@@ -9,6 +9,7 @@ import { quickStartKey, setQuickStart } from "@/lib/dashboard-quick-start";
 import { HomeWorkspace } from "./home-workspace";
 
 const workspace = vi.hoisted(() => ({
+  initialQuickStartStep: "api-key",
   dashboardCacheScope: { userId: "home_user", orgId: "home_org" },
   selectedProjectId: "home_project",
   dashboardAccess: { capabilities: { canManageApiKeys: true, canManageCustody: true } },
@@ -40,9 +41,20 @@ function ui(totalBalanceError: string | null = null) {
     </I18nProvider>
   );
 }
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  workspace.sdpEnvironment = "sandbox";
+});
 
 describe("home after quick start", () => {
+  it("keeps the balance and first-wallet surface in production without the sandbox guide", () => {
+    workspace.sdpEnvironment = "production";
+    setQuickStart(progressKey, "api-key");
+    const view = render(ui());
+    expect(view.getByText("Total Balance")).toBeTruthy();
+    expect(view.getByRole("link", { name: "Create a wallet" })).toBeTruthy();
+  });
+
   it("shows balances immediately on completion with a first-wallet action and no tutorials", () => {
     setQuickStart(progressKey, "api-key");
     const view = render(ui());

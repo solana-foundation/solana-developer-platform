@@ -551,8 +551,14 @@ export function HomeWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
-  const { dashboardAccess, flags, dashboardCacheScope, selectedProjectId, initialQuickStartStep } =
-    useDashboardWorkspace();
+  const {
+    dashboardAccess,
+    flags,
+    dashboardCacheScope,
+    selectedProjectId,
+    initialQuickStartStep,
+    sdpEnvironment,
+  } = useDashboardWorkspace();
   const progressKey = quickStartKey(dashboardCacheScope, selectedProjectId);
   const quickStartFinished = useSyncExternalStore(
     subscribeQuickStart,
@@ -622,6 +628,7 @@ export function HomeWorkspace({
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
         {heroState.kind !== "populated" &&
+        sdpEnvironment === "sandbox" &&
         !quickStartFinished &&
         initialQuickStartStep !== null &&
         dashboardAccess.capabilities.canManageApiKeys ? null : (
