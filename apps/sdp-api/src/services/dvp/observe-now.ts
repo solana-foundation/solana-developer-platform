@@ -12,8 +12,8 @@
  */
 
 import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
-import type { Address, Signature } from "@solana/kit";
-import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
+import type { Signature } from "@solana/kit";
+import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { deriveDvpTradeState } from "./observe";
@@ -53,10 +53,10 @@ export async function observeDvpTradeNow(
     const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
     const observation = await readDvpTradeObservation(
       rpc,
-      trade.swapDvp as Address,
+      trade.swapDvp,
       {
-        a: { escrow: trade.escrowA as Address, tokenProgram: trade.tokenProgramA as Address },
-        b: { escrow: trade.escrowB as Address, tokenProgram: trade.tokenProgramB as Address },
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB },
       },
       blockHeight
     );
@@ -114,10 +114,10 @@ export async function observeDvpTradeWithoutRecording(
     const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
     const observation = await readDvpTradeObservation(
       rpc,
-      trade.swapDvp as Address,
+      trade.swapDvp,
       {
-        a: { escrow: trade.escrowA as Address, tokenProgram: trade.tokenProgramA as Address },
-        b: { escrow: trade.escrowB as Address, tokenProgram: trade.tokenProgramB as Address },
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB },
       },
       blockHeight
     );
@@ -142,7 +142,7 @@ export async function observeDvpTradeWithoutRecording(
 }
 
 /** Statuses that can still change on chain without anyone telling us. */
-const OPEN_STATUSES: ReadonlySet<string> = new Set([
+const OPEN_STATUSES: ReadonlySet<DvpTradeStatus> = new Set([
   "created",
   "partially_funded",
   "funded",

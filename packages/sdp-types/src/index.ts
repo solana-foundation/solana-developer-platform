@@ -9,6 +9,7 @@ export * from "./audit";
 export * from "./counterparties";
 export * from "./countries";
 export * from "./custody";
+export * from "./dvp";
 export * from "./earn";
 export * from "./generated/ramp.generated";
 export * from "./jupiter-lend-programs";

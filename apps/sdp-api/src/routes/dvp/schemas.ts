@@ -1,18 +1,18 @@
-import { isAddress } from "@sdp/solana/address";
+import { DVP_TRADE_SIDES } from "@sdp/types";
+import { address } from "@solana/kit";
 import { z } from "zod";
+import { solanaAddressSchema } from "@/routes/payments/schemas";
 
 /**
- * A base58 Solana address.
+ * A base58 Solana address, decoded not pattern-matched.
  *
- * Decoded, not pattern-matched. The character class and length range admit
- * strings that are not 32 bytes once decoded, and those got through here only
- * to throw inside kit's `address()` further in — a 500 for what is plainly a
- * bad request. `isAddress` is what the rest of the API validates with
- * (`routes/payments/schemas.ts:32`).
+ * Reuses the payments address schema (trim preprocess + 32–44 length window +
+ * `isAddress`) and layers `Address` output branding on top via a transform, so
+ * values arrive at the service layer already branded. `address()` cannot throw
+ * here: the payments schema has already validated with the same check, so the
+ * transform only narrows the type.
  */
-const solanaAddressSchema = z
-  .string()
-  .refine((value) => isAddress(value), "must be a base58 Solana address");
+const dvpAddressSchema = solanaAddressSchema("address").transform((value) => address(value));
 
 /**
  * A u64 as a decimal string.
@@ -57,10 +57,10 @@ const dvpTradeTermsShape = {
    */
   sdpWalletId: z.string().min(1),
 
-  mintA: solanaAddressSchema,
-  tokenProgramA: solanaAddressSchema,
-  mintB: solanaAddressSchema,
-  tokenProgramB: solanaAddressSchema,
+  mintA: dvpAddressSchema,
+  tokenProgramA: dvpAddressSchema,
+  mintB: dvpAddressSchema,
+  tokenProgramB: dvpAddressSchema,
 
   amountA: u64StringSchema,
   amountB: u64StringSchema,
@@ -81,8 +81,8 @@ const dvpTradeTermsShape = {
    * exactly the shape a forged trade takes, so surfaces that show a trade to a
    * counterparty must say when these are set rather than render them quietly.
    */
-  userASettlementDestination: solanaAddressSchema.nullish(),
-  userBSettlementDestination: solanaAddressSchema.nullish(),
+  userASettlementDestination: dvpAddressSchema.nullish(),
+  userBSettlementDestination: dvpAddressSchema.nullish(),
 
   /**
    * Opaque client reference, at most 64 bytes. Unauthenticated: anyone's forged
@@ -102,9 +102,9 @@ const createPrincipalDvpTradeSchema = z.object({
   /** Omitted is principal, so existing callers keep working unchanged. */
   tradeKind: z.literal("principal").optional(),
   /** Which leg SDP delivers. The counterparty takes the other. */
-  sdpSide: z.enum(["a", "b"]),
+  sdpSide: z.enum(DVP_TRADE_SIDES),
   /** The other party. Any address; SDP holds no key for it and it signs nothing. */
-  counterparty: solanaAddressSchema,
+  counterparty: dvpAddressSchema,
 });
 
 /**
@@ -123,9 +123,9 @@ const createAgentDvpTradeSchema = z.object({
   ...dvpTradeTermsShape,
   tradeKind: z.literal("agent"),
   /** Delivers leg A. An arbitrary address; signs nothing here. */
-  partyA: solanaAddressSchema,
+  partyA: dvpAddressSchema,
   /** Delivers leg B. Likewise. */
-  partyB: solanaAddressSchema,
+  partyB: dvpAddressSchema,
 });
 
 /**

@@ -19,21 +19,13 @@
  * in `@sdp/dvp` are for.
  */
 
-import {
-  DVP_SWAP_PROGRAM_ADDRESS,
-  findSwapDvpEscrowAta,
-  findSwapDvpPda,
-  getCreateDvpInstruction,
-} from "@sdp/dvp";
+import { findDvpNonceTombstonePda, findSwapDvpPda, getCreateDvpInstruction } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   type Address,
-  address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
-  getAddressEncoder,
-  getProgramDerivedAddress,
   getSignatureFromTransaction,
   getTransactionEncoder,
   isSolanaError,
@@ -46,6 +38,7 @@ import {
   some,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeSide } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -58,9 +51,6 @@ import { randomDvpNonce } from "./nonce";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
 
-/** Seed prefix of the per-trade nonce tombstone (`NONCE_TOMBSTONE_SEED`). */
-const NONCE_TOMBSTONE_SEED = "nonce";
-
 /** The two parties, however the caller chose to describe them. */
 export type DvpTradeParties =
   | {
@@ -69,7 +59,7 @@ export type DvpTradeParties =
       /** Which leg SDP delivers. The counterparty takes the other one. */
       sdpSide: DvpTradeSide;
       /** The other party. An arbitrary address; we hold no key for it. */
-      counterparty: string;
+      counterparty: Address;
     }
   | {
       /**
@@ -81,8 +71,8 @@ export type DvpTradeParties =
        * trade funds the wrong leg.
        */
       tradeKind: "agent";
-      partyA: string;
-      partyB: string;
+      partyA: Address;
+      partyB: Address;
     };
 
 export type CreateDvpTradeInput = DvpTradeParties & {
@@ -94,11 +84,11 @@ export type CreateDvpTradeInput = DvpTradeParties & {
    */
   sdpWalletId: string;
   /** Asset leg mint and its token program. */
-  mintA: string;
-  tokenProgramA: string;
+  mintA: Address;
+  tokenProgramA: Address;
   /** Cash leg mint and its token program. */
-  mintB: string;
-  tokenProgramB: string;
+  mintB: Address;
+  tokenProgramB: Address;
   amountA: bigint;
   amountB: bigint;
   expiryTimestamp: bigint;
@@ -113,8 +103,8 @@ export type CreateDvpTradeInput = DvpTradeParties & {
    * caller asked for this address, which happens to be the party" stay
    * distinguishable in the fingerprint.
    */
-  userASettlementDestination: string | null;
-  userBSettlementDestination: string | null;
+  userASettlementDestination: Address | null;
+  userBSettlementDestination: Address | null;
   /** Caller's Idempotency-Key, when they sent one. */
   idempotencyKey: string | null;
 };
@@ -172,15 +162,6 @@ function wellKnownSymbol(mint: string): string | null {
   return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? null;
 }
 
-/** Derives the per-trade nonce tombstone, seeds `[b"nonce", swap_dvp]`. */
-async function findNonceTombstone(swapDvp: Address): Promise<Address> {
-  const [tombstone] = await getProgramDerivedAddress({
-    programAddress: DVP_SWAP_PROGRAM_ADDRESS,
-    seeds: [new TextEncoder().encode(NONCE_TOMBSTONE_SEED), getAddressEncoder().encode(swapDvp)],
-  });
-  return tombstone;
-}
-
 /**
  * The two party addresses, from whichever shape the caller described.
  *
@@ -190,11 +171,11 @@ async function findNonceTombstone(swapDvp: Address): Promise<Address> {
  */
 function resolveTradeParties(input: CreateDvpTradeInput, signer: Address): [Address, Address] {
   if (input.tradeKind === "agent") {
-    return [address(input.partyA), address(input.partyB)];
+    return [input.partyA, input.partyB];
   }
   return [
-    input.sdpSide === "a" ? signer : address(input.counterparty),
-    input.sdpSide === "b" ? signer : address(input.counterparty),
+    input.sdpSide === "a" ? signer : input.counterparty,
+    input.sdpSide === "b" ? signer : input.counterparty,
   ];
 }
 
@@ -222,7 +203,7 @@ async function assertNamedDestinationsUsable(
   const problems = (
     await Promise.all(
       named.map(async (entry) =>
-        (await findDvpDestinationProblem(rpc, address(entry.value)))
+        (await findDvpDestinationProblem(rpc, entry.value))
           ? describeDvpDestinationProblem(entry.field)
           : null
       )
@@ -271,10 +252,10 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     }
   }
 
-  const mintA = address(input.mintA);
-  const mintB = address(input.mintB);
-  const tokenProgramA = address(input.tokenProgramA);
-  const tokenProgramB = address(input.tokenProgramB);
+  const mintA = input.mintA;
+  const mintB = input.mintB;
+  const tokenProgramA = input.tokenProgramA;
+  const tokenProgramB = input.tokenProgramB;
 
   // Mints first, because this needs nothing but the caller's payload. The terms
   // check below cannot run until the signer's address is known, and resolving
@@ -326,12 +307,10 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // own address, so mirroring that now means nothing downstream has to branch
   // on null — `settle-preflight` can derive an ATA from a column that is always
   // populated.
-  const destinationA = input.userASettlementDestination
-    ? address(input.userASettlementDestination)
-    : userA;
-  const destinationB = input.userBSettlementDestination
-    ? address(input.userBSettlementDestination)
-    : userB;
+  const destinationA =
+    input.userASettlementDestination === null ? userA : input.userASettlementDestination;
+  const destinationB =
+    input.userBSettlementDestination === null ? userB : input.userBSettlementDestination;
 
   await assertNamedDestinationsUsable(rpc, input);
 
@@ -363,7 +342,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   const nonce = randomDvpNonce();
 
   const [swapDvp] = await findSwapDvpPda({
-    settlementAuthority: address(settlementAuthority),
+    settlementAuthority,
     userA,
     userB,
     mintA,
@@ -371,16 +350,16 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     nonce,
   });
   const [nonceTombstone, [escrowA], [escrowB]] = await Promise.all([
-    findNonceTombstone(swapDvp),
-    findSwapDvpEscrowAta({ swapDvp, mint: mintA, tokenProgram: tokenProgramA }),
-    findSwapDvpEscrowAta({ swapDvp, mint: mintB, tokenProgram: tokenProgramB }),
+    findDvpNonceTombstonePda(swapDvp),
+    findAssociatedTokenPda({ owner: swapDvp, mint: mintA, tokenProgram: tokenProgramA }),
+    findAssociatedTokenPda({ owner: swapDvp, mint: mintB, tokenProgram: tokenProgramB }),
   ]);
 
   const instruction = getCreateDvpInstruction({
     payer: signer,
     swapDvp,
     nonceTombstone,
-    settlementAuthority: address(settlementAuthority),
+    settlementAuthority,
     userA,
     userB,
     mintA,
@@ -397,12 +376,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     // Null when the caller named none, which the program records as the party's
     // own address — the default every flow in PRO-1830 wants. An execution desk
     // settling into an account other than the one it funded from passes them.
-    userASettlementDestination: input.userASettlementDestination
-      ? address(input.userASettlementDestination)
-      : null,
-    userBSettlementDestination: input.userBSettlementDestination
-      ? address(input.userBSettlementDestination)
-      : null,
+    userASettlementDestination: input.userASettlementDestination,
+    userBSettlementDestination: input.userBSettlementDestination,
     earliestSettlementTimestamp:
       input.earliestSettlementTimestamp === null ? none() : some(input.earliestSettlementTimestamp),
   });

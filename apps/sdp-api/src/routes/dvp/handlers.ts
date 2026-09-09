@@ -25,10 +25,7 @@ import {
   observeDvpTradeWithoutRecording,
 } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
-import {
-  estimateSettlementCostLamports,
-  findSettlementFundingShortfall,
-} from "@/services/dvp/settle-preflight";
+import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
@@ -477,19 +474,16 @@ async function readSettlementReadiness(
     if (!settlement) {
       return null;
     }
+    const rpc = solanaRpc.createRpc(c.env);
     // Four accounts is settlement's worst case, which is the number worth
     // quoting: telling somebody they are ready and then asking for more mid-flow
     // is worse than asking for the ceiling once.
-    const shortfall = await findSettlementFundingShortfall(
-      solanaRpc.createRpc(c.env),
-      settlement.address as Address,
-      4
-    );
+    const funding = await findSettlementFundingShortfall(rpc, settlement.address, 4);
     return {
       address: settlement.address,
-      balance: shortfall ? shortfall.balance.toString() : "0",
-      required: (shortfall?.required ?? estimateSettlementCostLamports(4)).toString(),
-      funded: shortfall === null,
+      balance: funding.balance.toString(),
+      required: funding.required.toString(),
+      funded: funding.shortfall === 0n,
     };
   } catch {
     return null;

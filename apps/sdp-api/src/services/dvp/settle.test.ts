@@ -9,7 +9,7 @@
  */
 
 import { getSettleDvpInstruction } from "@sdp/dvp";
-import type { Address } from "@solana/kit";
+import { address } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
@@ -18,6 +18,8 @@ import { env } from "@/test/helpers/env";
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const getAccountInfo = vi.hoisted(() => vi.fn());
+const getMinimumBalanceForRentExemption = vi.hoisted(() => vi.fn());
+const getBalanceValue = vi.hoisted(() => vi.fn());
 const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 
@@ -27,8 +29,13 @@ vi.mock("@/services/policy/approved-operation-replay", () => ({
 }));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({}),
+  createRpc: () => ({
+    getBalance: () => ({
+      send: async () => ({ value: getBalanceValue() }),
+    }),
+  }),
   getAccountInfo,
+  getMinimumBalanceForRentExemption,
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,
@@ -48,15 +55,15 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     id: "dvp_settle_test",
     organizationId: "org_x",
     projectId: "prj_x",
-    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
-    settlementAuthority: SETTLEMENT_AUTHORITY,
-    userA: USER_A,
-    userB: USER_B,
-    mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-    mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+    swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
+    settlementAuthority: address(SETTLEMENT_AUTHORITY),
+    userA: address(USER_A),
+    userB: address(USER_B),
+    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
+    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
     nonce: "42",
-    tokenProgramA: T22,
-    tokenProgramB: T22,
+    tokenProgramA: address(T22),
+    tokenProgramB: address(T22),
     decimalsA: 6,
     decimalsB: 6,
     symbolA: "ATD",
@@ -65,11 +72,11 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     amountB: "2000",
     expiryTimestamp: "1800003600",
     earliestSettlementTimestamp: null,
-    userASettlementDestination: USER_A,
-    userBSettlementDestination: USER_B,
+    userASettlementDestination: address(USER_A),
+    userBSettlementDestination: address(USER_B),
     refString: null,
-    escrowA: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
-    escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+    escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
+    escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
     sdpSide: "a" as const,
     tradeKind: "principal" as const,
     sdpWalletId: "cwlt_leg",
@@ -112,6 +119,9 @@ describe("closeDvpTrade", () => {
     getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
       address === feePayer ? { lamports: 1_000_000_000 } : { owner: T22, data: new Uint8Array(165) }
     );
+    getMinimumBalanceForRentExemption.mockResolvedValue(2_040_000n);
+    // The fee payer is solvent unless a test says otherwise.
+    getBalanceValue.mockReturnValue(1_000_000_000n);
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockResolvedValue("sig");
   });
@@ -218,30 +228,30 @@ describe("closeDvpTrade", () => {
     const row = trade();
     const { deriveDvpSettleAtas } = await import("./settle-preflight");
     const atas = await deriveDvpSettleAtas({
-      userA: row.userA as Address,
-      userB: row.userB as Address,
-      userASettlementDestination: row.userASettlementDestination as Address,
-      userBSettlementDestination: row.userBSettlementDestination as Address,
-      mintA: row.mintA as Address,
-      mintB: row.mintB as Address,
-      tokenProgramA: row.tokenProgramA as Address,
-      tokenProgramB: row.tokenProgramB as Address,
+      userA: row.userA,
+      userB: row.userB,
+      userASettlementDestination: row.userASettlementDestination,
+      userBSettlementDestination: row.userBSettlementDestination,
+      mintA: row.mintA,
+      mintB: row.mintB,
+      tokenProgramA: row.tokenProgramA,
+      tokenProgramB: row.tokenProgramB,
     });
 
     const instruction = getSettleDvpInstruction({
       settlementAuthority: signer,
-      swapDvp: row.swapDvp as Address,
-      mintA: row.mintA as Address,
-      mintB: row.mintB as Address,
-      dvpAtaA: row.escrowA as Address,
-      dvpAtaB: row.escrowB as Address,
+      swapDvp: row.swapDvp,
+      mintA: row.mintA,
+      mintB: row.mintB,
+      dvpAtaA: row.escrowA,
+      dvpAtaB: row.escrowB,
       userADestinationAtaB: atas.userADestinationAtaB,
       userBDestinationAtaA: atas.userBDestinationAtaA,
       userAAtaA: atas.userAAtaA,
       userBAtaB: atas.userBAtaB,
-      tokenProgramA: row.tokenProgramA as Address,
-      tokenProgramB: row.tokenProgramB as Address,
-      memoProgram: "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address,
+      tokenProgramA: row.tokenProgramA,
+      tokenProgramB: row.tokenProgramB,
+      memoProgram: address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
       legAExtrasCount: 0,
     });
 
@@ -265,6 +275,7 @@ describe("closeDvpTrade", () => {
       getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
         address === feePayer ? { lamports: 0 } : null
       );
+      getBalanceValue.mockReturnValue(0n);
     });
 
     it("refuses before spending a signature, naming the account and the shortfall", async () => {
@@ -294,15 +305,12 @@ describe("closeDvpTrade", () => {
       expect(figure(cancelCost as string)).toBeLessThan(figure(settleCost as string));
     });
 
-    // An unreadable balance is an RPC anomaly, not a balance of zero. Treating
-    // it as zero would refuse a settlement that would have worked.
-    it("does not block when the balance cannot be read", async () => {
-      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
-        address === feePayer ? {} : { owner: T22, data: new Uint8Array(165) }
-      );
-
-      await expect(closeDvpTrade(context, trade(), "settle")).resolves.toBeDefined();
-      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    // A missing account reads as 0n from getBalance, which is the case this
+    // check exists for: a freshly provisioned authority holds nothing, and
+    // settlement must be refused before a signature is spent.
+    it("blocks when the authority holds nothing", async () => {
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(/holds 0 lamports/);
+      expect(sendTransaction).not.toHaveBeenCalled();
     });
   });
 });

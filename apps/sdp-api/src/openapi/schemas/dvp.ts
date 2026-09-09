@@ -8,6 +8,7 @@
  * names an escrow address that does not exist.
  */
 
+import { DVP_TRADE_KINDS, DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
 import {
   createDvpTradeSchema as createDvpTradeSchemaBase,
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
@@ -29,24 +30,11 @@ export const createDvpTradeRequestSchema = withOpenApi(createDvpTradeSchemaBase,
 
 export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase;
 
-const dvpTradeStatusSchema = z
-  .enum([
-    "creating",
-    "create_failed",
-    "created",
-    "partially_funded",
-    "funded",
-    "settled",
-    "cancelled",
-    "rejected",
-    "expired",
-    "closed_unknown",
-  ])
-  .openapi({
-    description:
-      "Last observed lifecycle state. The program emits no events and funding never invokes it, so this is a cache of a poll rather than an event log. `creating` means the create transaction was signed and recorded but its outcome is not yet known. `closed_unknown` means the on-chain account is gone but which terminal path closed it has not been determined.",
-    example: "created",
-  });
+const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
+  description:
+    "Last observed lifecycle state. The program emits no events and funding never invokes it, so this is a cache of a poll rather than an event log. `creating` means the create transaction was signed and recorded but its outcome is not yet known. `closed_unknown` means the on-chain account is gone but which terminal path closed it has not been determined.",
+  example: "created",
+});
 
 const dvpTradeLegSchema = z
   .object({
@@ -108,11 +96,11 @@ export const dvpTradeSchema = z
       description: "The only key that can settle, cancel or reject this trade.",
     }),
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
-    tradeKind: z.enum(["principal", "agent"]).openapi({
+    tradeKind: z.enum(DVP_TRADE_KINDS).openapi({
       description:
         "Whether this organization is a party to the trade. `principal`: a custody wallet delivers one leg. `agent`: the terms were set for two other parties and this organization delivers neither leg, though its wallet signs the create and pays the escrow rent.",
     }),
-    sdpSide: z.enum(["a", "b"]).nullable().openapi({
+    sdpSide: z.enum(DVP_TRADE_SIDES).nullable().openapi({
       description:
         "Which leg the SDP custody wallet delivers, or null on an agent trade where it delivers neither. Always present on a principal trade.",
     }),
@@ -165,7 +153,7 @@ export const dvpInboundTradeSchema = z
     settlementAuthority: z.string().openapi({
       description: "The only key that can settle, cancel or reject this trade. Not yours.",
     }),
-    yourSide: z.enum(["a", "b"]).openapi({
+    yourSide: z.enum(DVP_TRADE_SIDES).openapi({
       description: "The leg naming an address you hold the key to, and the only one you may fund.",
     }),
     yourParty: z.string().openapi({

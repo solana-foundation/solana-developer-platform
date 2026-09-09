@@ -1,3 +1,4 @@
+import { address, signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -12,6 +13,15 @@ const CUSTODY_CONFIG_ID = "cust_dvp_repo_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_repo_test";
 const OTHER_CUSTODY_WALLET_ID = "cwlt_dvp_repo_other";
 
+// Valid base58 signature strings (64 bytes encoded) for the signature-branded
+// repository columns. Each is distinct so the claim/release compare-and-swap
+// does not conflate them.
+const SIG_CLAIM = "2".repeat(88);
+const SIG_SECOND = "3".repeat(88);
+const SIG_CLOSE = "4".repeat(88);
+const SIG_FUND = "5".repeat(88);
+const SIG_RETRY = "6".repeat(88);
+
 // Deliberately above Number.MAX_SAFE_INTEGER (9007199254740991). The nonce is a
 // PDA seed, so if anything in the storage path routes it through a JS number it
 // rounds here, and the trade's SwapDvp address stops matching the one the
@@ -24,15 +34,15 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     id: "dvp_trade_test_1",
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
-    settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
-    userA: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    userB: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
-    mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-    mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+    swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
+    settlementAuthority: address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY"),
+    userA: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
+    userB: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
+    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
+    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
     nonce: BIG_NONCE,
-    tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-    tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    tokenProgramA: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+    tokenProgramB: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
     decimalsA: 6,
     decimalsB: 6,
     symbolA: "ATD",
@@ -41,11 +51,11 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     amountB: "2000",
     expiryTimestamp: "1800003600",
     earliestSettlementTimestamp: null,
-    userASettlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    userBSettlementDestination: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+    userASettlementDestination: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
+    userBSettlementDestination: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
     refString: null,
-    escrowA: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
-    escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+    escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
+    escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
     sdpSide: "a" as const,
     tradeKind: "principal" as const,
     sdpWalletId: CUSTODY_WALLET_ID,
@@ -218,10 +228,10 @@ describe("DvpTradeRepository (postgres)", () => {
 
   it("lists a project's trades, newest first", async () => {
     await repo.create(
-      tradeInsert({ id: "dvp_a", swapDvp: "SwapA11111111111111111111111111111111111111" })
+      tradeInsert({ id: "dvp_a", swapDvp: address("SwapA11111111111111111111111111111111111111") })
     );
     await repo.create(
-      tradeInsert({ id: "dvp_b", swapDvp: "SwapB11111111111111111111111111111111111111" })
+      tradeInsert({ id: "dvp_b", swapDvp: address("SwapB11111111111111111111111111111111111111") })
     );
 
     const listed = await repo.listByProject(scope, 10);
@@ -248,7 +258,7 @@ describe("DvpTradeRepository (postgres)", () => {
       repo.create(
         tradeInsert({
           id: "dvp_trade_test_2",
-          swapDvp: "SwapZ11111111111111111111111111111111111111",
+          swapDvp: address("SwapZ11111111111111111111111111111111111111"),
           idempotencyKey: "key-1",
         })
       )
@@ -277,7 +287,7 @@ describe("DvpTradeRepository (postgres)", () => {
         repo.create(
           tradeInsert({
             id: "dvp_trade_test_2",
-            swapDvp: "SwapZ11111111111111111111111111111111111111",
+            swapDvp: address("SwapZ11111111111111111111111111111111111111"),
             idempotencyKey: "key-1",
           })
         )
@@ -317,10 +327,10 @@ describe("DvpTradeRepository (postgres)", () => {
   // Partial index: unkeyed trades all carry NULL and must not collide.
   it("allows any number of trades with no key", async () => {
     await repo.create(
-      tradeInsert({ id: "dvp_n1", swapDvp: "SwapN11111111111111111111111111111111111111" })
+      tradeInsert({ id: "dvp_n1", swapDvp: address("SwapN11111111111111111111111111111111111111") })
     );
     await repo.create(
-      tradeInsert({ id: "dvp_n2", swapDvp: "SwapN21111111111111111111111111111111111111" })
+      tradeInsert({ id: "dvp_n2", swapDvp: address("SwapN21111111111111111111111111111111111111") })
     );
 
     await expect(repo.listByProject(scope, 10)).resolves.toHaveLength(2);
@@ -341,12 +351,15 @@ describe("DvpTradeRepository (postgres)", () => {
   describe("wallet scope", () => {
     const bothTrades = async () => {
       await repo.create(
-        tradeInsert({ id: "dvp_mine", swapDvp: "SwapA11111111111111111111111111111111111111" })
+        tradeInsert({
+          id: "dvp_mine",
+          swapDvp: address("SwapA11111111111111111111111111111111111111"),
+        })
       );
       await repo.create(
         tradeInsert({
           id: "dvp_theirs",
-          swapDvp: "SwapB11111111111111111111111111111111111111",
+          swapDvp: address("SwapB11111111111111111111111111111111111111"),
           sdpWalletId: OTHER_CUSTODY_WALLET_ID,
         })
       );
@@ -380,7 +393,7 @@ describe("DvpTradeRepository (postgres)", () => {
 
       await expect(repo.getById(bound, "dvp_theirs")).resolves.toBeNull();
       await expect(
-        repo.getBySwapDvp(bound, "SwapB11111111111111111111111111111111111111")
+        repo.getBySwapDvp(bound, address("SwapB11111111111111111111111111111111111111"))
       ).resolves.toBeNull();
       await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
     });
@@ -398,7 +411,7 @@ describe("DvpTradeRepository (postgres)", () => {
     async function claimedTrade(expiryHeight: string) {
       const created = await repo.create(tradeInsert());
       await repo.resolveCreate(created.id, "created");
-      await repo.claimLegFunding(created.id, "sig_claim", expiryHeight);
+      await repo.claimLegFunding(created.id, signature(SIG_CLAIM), expiryHeight);
       return created.id;
     }
 
@@ -418,7 +431,7 @@ describe("DvpTradeRepository (postgres)", () => {
 
       await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
       await expect(repo.getById(scope, id)).resolves.toMatchObject({
-        sdpLegFundingSignature: "sig_claim",
+        sdpLegFundingSignature: SIG_CLAIM,
       });
     });
 
@@ -427,12 +440,12 @@ describe("DvpTradeRepository (postgres)", () => {
       const id = await claimedTrade("100");
       await repo.releaseExpiredFundingClaims(200n);
 
-      await expect(repo.claimLegFunding(id, "sig_second", "400")).resolves.toBe(true);
+      await expect(repo.claimLegFunding(id, signature(SIG_SECOND), "400")).resolves.toBe(true);
     });
 
     it("does not touch a claim on a trade that has closed", async () => {
       const id = await claimedTrade("100");
-      await repo.recordClose(id, "settled", "sig_close");
+      await repo.recordClose(id, "settled", signature(SIG_CLOSE));
 
       await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
     });
@@ -451,14 +464,14 @@ describe("DvpTradeRepository (postgres)", () => {
     it("keeps the transaction after the claim that guarded it is swept", async () => {
       const created = await repo.create(tradeInsert());
       await repo.resolveCreate(created.id, "created");
-      await repo.claimLegFunding(created.id, "sig_fund", "100");
-      await repo.recordLegFundingTx(created.id, "sig_fund");
+      await repo.claimLegFunding(created.id, signature(SIG_FUND), "100");
+      await repo.recordLegFundingTx(created.id, signature(SIG_FUND));
 
       await repo.releaseExpiredFundingClaims(200n);
 
       await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
         sdpLegFundingSignature: null,
-        sdpLegFundingTx: "sig_fund",
+        sdpLegFundingTx: SIG_FUND,
       });
     });
 
@@ -467,11 +480,13 @@ describe("DvpTradeRepository (postgres)", () => {
     it("does not hold the claim open", async () => {
       const created = await repo.create(tradeInsert());
       await repo.resolveCreate(created.id, "created");
-      await repo.claimLegFunding(created.id, "sig_fund", "100");
-      await repo.recordLegFundingTx(created.id, "sig_fund");
+      await repo.claimLegFunding(created.id, signature(SIG_FUND), "100");
+      await repo.recordLegFundingTx(created.id, signature(SIG_FUND));
       await repo.releaseExpiredFundingClaims(200n);
 
-      await expect(repo.claimLegFunding(created.id, "sig_retry", "400")).resolves.toBe(true);
+      await expect(repo.claimLegFunding(created.id, signature(SIG_RETRY), "400")).resolves.toBe(
+        true
+      );
     });
 
     it("is null on a trade whose leg was never funded", async () => {

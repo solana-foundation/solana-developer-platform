@@ -19,10 +19,15 @@
  * 2. The mint carries none of the four extensions the program refuses.
  */
 
-import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
+import type { SolanaRpc } from "@sdp/rpc/solana";
+import { type Account, type Address, type EncodedAccount, fetchEncodedAccount } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { getMintDecoder, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import {
+  decodeMint,
+  fetchMaybeMint,
+  type Mint,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 
 /**
  * Extensions `validate_mint_extensions` rejects with `BlockedMintExtension`
@@ -38,7 +43,7 @@ import { getMintDecoder, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/toke
  * Everything else is allowed — including `PermanentDelegate`,
  * `DefaultAccountState`, `TransferHook` and `Pausable`.
  */
-const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
+export const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
   "TransferFeeConfig",
   "InterestBearingConfig",
   // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
@@ -76,7 +81,11 @@ export async function validateDvpMints(
 ): Promise<string[]> {
   const problems: string[] = [];
 
-  const accounts = await Promise.all(legs.map((leg) => getAccountInfo(rpc, leg.mint)));
+  // Encoded fetch, not `fetchMaybeMint`: that decodes eagerly, so bytes that are
+  // not a mint would throw before the owner check ran — turning "you pasted a
+  // non-mint address" from a named 400 into a 500. Existence and ownership are
+  // judged on the raw account; decoding happens only for the extensions check.
+  const accounts = await Promise.all(legs.map((leg) => fetchEncodedAccount(rpc, leg.mint)));
 
   for (const [index, leg] of legs.entries()) {
     if (!SUPPORTED_TOKEN_PROGRAMS.has(leg.tokenProgram)) {
@@ -85,7 +94,7 @@ export async function validateDvpMints(
     }
 
     const account = accounts[index];
-    if (!account) {
+    if (!account.exists) {
       problems.push(`${leg.label} ${leg.mint} does not exist on this cluster`);
       continue;
     }
@@ -93,9 +102,9 @@ export async function validateDvpMints(
     // The owner IS the token program. Trusting the caller's declared program
     // over the account's actual owner is what would publish an escrow address
     // derived under the wrong program.
-    if (account.owner !== leg.tokenProgram) {
+    if (account.programAddress !== leg.tokenProgram) {
       problems.push(
-        `${leg.label} ${leg.mint} is owned by ${account.owner}, not the declared token program ${leg.tokenProgram}`
+        `${leg.label} ${leg.mint} is owned by ${account.programAddress}, not the declared token program ${leg.tokenProgram}`
       );
       continue;
     }
@@ -106,7 +115,7 @@ export async function validateDvpMints(
       continue;
     }
 
-    const blocked = readBlockedExtensions(account.data);
+    const blocked = readBlockedExtensions(account);
     for (const extension of blocked) {
       problems.push(
         `${leg.label} ${leg.mint} carries the ${extension} extension, which DvP settlement refuses`
@@ -123,18 +132,20 @@ export async function validateDvpMints(
  * `TransferChecked` takes decimals and the token program verifies them against
  * the mint, so passing a guess would fail the transfer rather than move a wrong
  * quantity — but reading them is still the only way to send at all.
+ *
+ * Returns null when the mint is missing or its bytes do not decode as a mint.
+ * This is a pre-flight, not a gate: the program still verifies the decimals
+ * against the mint on transfer, so a parse failure here costs only a round
+ * trip, not a wrong quantity.
+ *
+ * @param rpc - Solana RPC to read the mint from.
+ * @param mint - The mint address.
+ * @returns The mint's decimals, or null when the mint is missing or undecodable.
  */
 export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number | null> {
-  const account = await getAccountInfo(rpc, mint);
-  if (!account) {
-    return null;
-  }
-  const bytes = toBytes(account.data);
-  if (!bytes) {
-    return null;
-  }
   try {
-    return getMintDecoder().decode(bytes).decimals;
+    const account = await fetchMaybeMint(rpc, mint);
+    return account.exists ? account.data.decimals : null;
   } catch {
     return null;
   }
@@ -148,30 +159,19 @@ export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<n
  * useful 400; if it cannot read the mint, the program still enforces the same
  * rule and the trade fails there instead. Refusing a trade because our parser
  * tripped would be worse than the round trip we are saving.
+ *
+ * @param account - A fetched, existing account owned by Token-2022.
+ * @returns The blocked extension names present, empty when none.
  */
-function readBlockedExtensions(data: unknown): string[] {
-  const bytes = toBytes(data);
-  if (!bytes) {
-    return [];
-  }
+function readBlockedExtensions(account: EncodedAccount): string[] {
+  let mint: Account<Mint>;
   try {
-    const mint = getMintDecoder().decode(bytes);
-    const extensions = mint.extensions.__option === "Some" ? mint.extensions.value : [];
-    return extensions
-      .map((extension) => extension.__kind)
-      .filter((kind) => BLOCKED_MINT_EXTENSIONS.has(kind));
+    mint = decodeMint(account);
   } catch {
     return [];
   }
-}
-
-/** `getAccountInfo` returns base64-encoded data as a `[data, encoding]` pair. */
-function toBytes(data: unknown): Uint8Array | null {
-  if (data instanceof Uint8Array) {
-    return data;
-  }
-  if (Array.isArray(data) && typeof data[0] === "string") {
-    return Uint8Array.from(Buffer.from(data[0], "base64"));
-  }
-  return null;
+  const extensions = mint.data.extensions.__option === "Some" ? mint.data.extensions.value : [];
+  return extensions
+    .map((extension) => extension.__kind)
+    .filter((kind) => BLOCKED_MINT_EXTENSIONS.has(kind));
 }

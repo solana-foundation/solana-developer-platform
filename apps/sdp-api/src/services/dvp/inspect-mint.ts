@@ -14,25 +14,11 @@
  * eligibility answer the form would otherwise only discover by submitting.
  */
 
-import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { getMintDecoder, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-
-/**
- * Extensions DvP settlement refuses, mirroring `BLOCKED_MINT_EXTENSIONS` in
- * `./mints`. Kept as its own copy rather than exported across, because that one
- * guards a create that is already committed to and this one only informs a
- * form; they answer to the same program rule but must be free to disagree about
- * how loudly to fail.
- */
-const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
-  "TransferFeeConfig",
-  "InterestBearingConfig",
-  // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
-  "ScaledUiAmountConfig",
-  "NonTransferable",
-]);
+import { fetchMaybeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { BLOCKED_MINT_EXTENSIONS } from "./mints";
 
 export interface DvpMintInspection {
   mint: string;
@@ -51,20 +37,6 @@ export interface DvpMintInspection {
   blockedBy: string | null;
 }
 
-function toBytes(data: unknown): Uint8Array | null {
-  if (data instanceof Uint8Array) {
-    return data;
-  }
-  if (Array.isArray(data) && typeof data[0] === "string") {
-    try {
-      return Uint8Array.from(Buffer.from(data[0], "base64"));
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 /**
  * Reads a mint and reports what the create form needs.
  *
@@ -80,38 +52,29 @@ export async function inspectDvpMint(
   rpc: SolanaRpc,
   mint: Address
 ): Promise<DvpMintInspection | null> {
-  const account = await getAccountInfo(rpc, mint);
-  if (!account) {
+  let account: Awaited<ReturnType<typeof fetchMaybeMint>>;
+  try {
+    account = await fetchMaybeMint(rpc, mint);
+  } catch {
+    return null;
+  }
+
+  if (!account.exists) {
     return null;
   }
 
   // Only the two token programs own mints. Anything else at this address is not
   // a mint, and decoding it anyway would produce a confident wrong answer.
-  const owner = account.owner as string;
-  if (
-    owner !== (TOKEN_PROGRAM_ADDRESS as string) &&
-    owner !== (TOKEN_2022_PROGRAM_ADDRESS as string)
-  ) {
-    return null;
-  }
-
-  const bytes = toBytes(account.data);
-  if (!bytes) {
-    return null;
-  }
-
-  let decoded: ReturnType<ReturnType<typeof getMintDecoder>["decode"]>;
-  try {
-    decoded = getMintDecoder().decode(bytes);
-  } catch {
+  const owner = account.programAddress;
+  if (owner !== TOKEN_PROGRAM_ADDRESS && owner !== TOKEN_2022_PROGRAM_ADDRESS) {
     return null;
   }
 
   // A legacy mint carries no extensions by construction, so there is neither
   // metadata to read nor a blocked extension to find.
   const extensions =
-    owner === (TOKEN_2022_PROGRAM_ADDRESS as string) && decoded.extensions.__option === "Some"
-      ? decoded.extensions.value
+    owner === TOKEN_2022_PROGRAM_ADDRESS && account.data.extensions.__option === "Some"
+      ? account.data.extensions.value
       : [];
 
   const blockedBy =
@@ -119,16 +82,18 @@ export async function inspectDvpMint(
       .map((extension) => extension.__kind)
       .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind)) ?? null;
 
-  const metadata = extensions.find((extension) => extension.__kind === "TokenMetadata") as
-    | { name?: string; symbol?: string }
-    | undefined;
+  const metadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
+  const name =
+    metadata && metadata.__kind === "TokenMetadata" ? metadata.name.trim() || null : null;
+  const symbol =
+    metadata && metadata.__kind === "TokenMetadata" ? metadata.symbol.trim() || null : null;
 
   return {
     mint,
     tokenProgram: owner,
-    decimals: decoded.decimals,
-    name: metadata?.name?.trim() || null,
-    symbol: metadata?.symbol?.trim() || null,
+    decimals: account.data.decimals,
+    name,
+    symbol,
     eligible: blockedBy === null,
     blockedBy,
   };

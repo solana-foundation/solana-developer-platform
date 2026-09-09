@@ -1,3 +1,4 @@
+import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { type DvpTradeTerms, validateDvpTerms } from "./validate";
 
@@ -5,11 +6,11 @@ const NOW = 1_800_000_000;
 
 function terms(overrides: Partial<DvpTradeTerms> = {}): DvpTradeTerms {
   return {
-    userA: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    userB: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
-    settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
-    mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-    mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+    userA: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
+    userB: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
+    settlementAuthority: address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY"),
+    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
+    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
     amountA: 1_000n,
     amountB: 2_000n,
     expiryTimestamp: BigInt(NOW + 3600),
@@ -17,8 +18,8 @@ function terms(overrides: Partial<DvpTradeTerms> = {}): DvpTradeTerms {
     refString: null,
     // Already resolved by the time terms are checked: create substitutes each
     // party's own address for an omitted destination, mirroring the program.
-    userASettlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    userBSettlementDestination: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+    userASettlementDestination: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
+    userBSettlementDestination: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
     ...overrides,
   };
 }
@@ -102,8 +103,8 @@ describe("validateDvpTerms", () => {
   // that funded the leg is legitimate and must stay accepted.
   it("accepts destinations that differ from their parties", () => {
     const t = terms({
-      userASettlementDestination: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
-      userBSettlementDestination: "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh",
+      userASettlementDestination: address("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC"),
+      userBSettlementDestination: address("BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh"),
     });
 
     expect(validateDvpTerms(t, NOW)).toEqual([]);

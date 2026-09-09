@@ -7,7 +7,7 @@
  */
 
 import { getCancelDvpInstruction, getSettleDvpInstruction } from "@sdp/dvp";
-import type { Address, Instruction, TransactionSigner } from "@solana/kit";
+import { type Address, address, type Instruction, type TransactionSigner } from "@solana/kit";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { DvpSettleAtas } from "./settle-preflight";
@@ -18,7 +18,7 @@ import type { DvpSettleAtas } from "./settle-preflight";
  * silent denial of service on an otherwise valid trade.
  */
 // biome-ignore lint/security/noSecrets: the SPL Memo program id, a public constant.
-export const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
+export const MEMO_PROGRAM_ADDRESS = address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 /**
  * Creates any of Settle's four required token accounts that are missing.
@@ -38,20 +38,10 @@ export function buildMissingAtaInstructions(
   missing: ReadonlySet<keyof DvpSettleAtas>
 ): Instruction[] {
   const specs: ReadonlyArray<[keyof DvpSettleAtas, Address, Address, Address]> = [
-    [
-      "userADestinationAtaB",
-      trade.userASettlementDestination as Address,
-      trade.mintB as Address,
-      trade.tokenProgramB as Address,
-    ],
-    [
-      "userBDestinationAtaA",
-      trade.userBSettlementDestination as Address,
-      trade.mintA as Address,
-      trade.tokenProgramA as Address,
-    ],
-    ["userAAtaA", trade.userA as Address, trade.mintA as Address, trade.tokenProgramA as Address],
-    ["userBAtaB", trade.userB as Address, trade.mintB as Address, trade.tokenProgramB as Address],
+    ["userADestinationAtaB", trade.userASettlementDestination, trade.mintB, trade.tokenProgramB],
+    ["userBDestinationAtaA", trade.userBSettlementDestination, trade.mintA, trade.tokenProgramA],
+    ["userAAtaA", trade.userA, trade.mintA, trade.tokenProgramA],
+    ["userBAtaB", trade.userB, trade.mintB, trade.tokenProgramB],
   ];
 
   return specs
@@ -83,17 +73,17 @@ export function buildSettleInstruction(
 ): Instruction {
   return getSettleDvpInstruction({
     settlementAuthority,
-    swapDvp: trade.swapDvp as Address,
-    mintA: trade.mintA as Address,
-    mintB: trade.mintB as Address,
-    dvpAtaA: trade.escrowA as Address,
-    dvpAtaB: trade.escrowB as Address,
+    swapDvp: trade.swapDvp,
+    mintA: trade.mintA,
+    mintB: trade.mintB,
+    dvpAtaA: trade.escrowA,
+    dvpAtaB: trade.escrowB,
     userADestinationAtaB: atas.userADestinationAtaB,
     userBDestinationAtaA: atas.userBDestinationAtaA,
     userAAtaA: atas.userAAtaA,
     userBAtaB: atas.userBAtaB,
-    tokenProgramA: trade.tokenProgramA as Address,
-    tokenProgramB: trade.tokenProgramB as Address,
+    tokenProgramA: trade.tokenProgramA,
+    tokenProgramB: trade.tokenProgramB,
     memoProgram: MEMO_PROGRAM_ADDRESS,
     legAExtrasCount: 0,
   });
@@ -112,15 +102,15 @@ export function buildCancelInstruction(
 ): Instruction {
   return getCancelDvpInstruction({
     settlementAuthority,
-    swapDvp: trade.swapDvp as Address,
-    mintA: trade.mintA as Address,
-    mintB: trade.mintB as Address,
-    dvpAtaA: trade.escrowA as Address,
-    dvpAtaB: trade.escrowB as Address,
+    swapDvp: trade.swapDvp,
+    mintA: trade.mintA,
+    mintB: trade.mintB,
+    dvpAtaA: trade.escrowA,
+    dvpAtaB: trade.escrowB,
     userAAtaA: atas.userAAtaA,
     userBAtaB: atas.userBAtaB,
-    tokenProgramA: trade.tokenProgramA as Address,
-    tokenProgramB: trade.tokenProgramB as Address,
+    tokenProgramA: trade.tokenProgramA,
+    tokenProgramB: trade.tokenProgramB,
     memoProgram: MEMO_PROGRAM_ADDRESS,
     legAExtrasCount: 0,
   });

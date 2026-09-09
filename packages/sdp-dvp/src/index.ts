@@ -60,7 +60,7 @@ export {
   type ParsedDvpSwapProgramInstruction,
   parseDvpSwapProgramInstruction,
 } from "./generated/programs";
-
+export { findDvpNonceTombstonePda } from "./pdas";
 export { getSafeI64Encoder, getSafeU64Encoder } from "./safeNumberCodecs";
 export {
   assertSwapDvpTerms,

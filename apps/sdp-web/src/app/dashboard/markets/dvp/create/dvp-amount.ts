@@ -6,9 +6,18 @@
  * you get a trade off by three orders of magnitude. So the form takes the human
  * amount wherever the mint's decimals are known, and converts here.
  *
- * All string arithmetic, never `Number`. A u64 exceeds 2^53, and a float would
- * quietly round the amount of an asset leg.
+ * Thin adapters over `@sdp/solana/amount`: the conversion, malformed check and
+ * precision check are all delegated, so this file stays about the contract the
+ * form holds (the `AmountResult` tagged union), not about string decimal
+ * arithmetic.
  */
+
+import {
+  decimalScale,
+  formatDecimalAmount,
+  isDecimalString,
+  parseDecimalAmount,
+} from "@sdp/solana/amount";
 
 export type AmountResult =
   | { ok: true; baseUnits: string }
@@ -23,20 +32,16 @@ export type AmountResult =
  */
 export function toBaseUnits(input: string, decimals: number): AmountResult {
   const trimmed = input.trim();
-  if (!/^\d*(\.\d*)?$/.test(trimmed) || trimmed === "" || trimmed === ".") {
+  if (!isDecimalString(trimmed)) {
     return { ok: false, reason: "malformed" };
   }
 
-  const [whole, fraction = ""] = trimmed.split(".");
-  if (fraction.length > decimals) {
+  if (decimalScale(trimmed) > decimals) {
     // Silently truncating would move a different amount than the one on screen.
     return { ok: false, reason: "too-precise" };
   }
 
-  const padded = `${whole}${fraction.padEnd(decimals, "0")}`;
-  // Strip leading zeros without turning "0" into "".
-  const normalized = padded.replace(/^0+(?=\d)/, "");
-  return { ok: true, baseUnits: normalized === "" ? "0" : normalized };
+  return { ok: true, baseUnits: parseDecimalAmount(trimmed, decimals).toString() };
 }
 
 /**
@@ -46,11 +51,5 @@ export function toBaseUnits(input: string, decimals: number): AmountResult {
  * @param decimals - The mint's decimals.
  */
 export function fromBaseUnits(baseUnits: string, decimals: number): string {
-  if (decimals === 0) {
-    return baseUnits;
-  }
-  const padded = baseUnits.padStart(decimals + 1, "0");
-  const whole = padded.slice(0, padded.length - decimals);
-  const fraction = padded.slice(padded.length - decimals).replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : whole;
+  return formatDecimalAmount(baseUnits, decimals);
 }
