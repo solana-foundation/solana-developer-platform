@@ -15,6 +15,15 @@ const supportedNonRegistrySpecifiers =
   /^(?:workspace:\*|catalog:|file:|link:|git\+|github:|https?:)/;
 const catalogSpecifier = /^catalog:(?:[0-9A-Za-z._-]+)?$/;
 const solanaEarnPackage = /^@solana\/earn(?:-|$)/;
+const solanaEarnAlias = /^npm:(@solana\/earn(?:-[0-9A-Za-z._-]+)?)(?:@(.+))?$/;
+
+function solanaEarnRegistrySpecifier(name, specifier) {
+  const alias = solanaEarnAlias.exec(specifier);
+
+  if (alias) return alias[2] ?? "";
+  if (solanaEarnPackage.test(name)) return specifier;
+  return undefined;
+}
 
 export function isPinnedVersion(specifier) {
   return exactVersion.test(specifier) || supportedNonRegistrySpecifiers.test(specifier);
@@ -25,10 +34,11 @@ export function validateManifest(manifest, manifestPath) {
 
   for (const field of dependencyFields) {
     for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
+      const earnRegistrySpecifier = solanaEarnRegistrySpecifier(name, specifier);
       if (
-        solanaEarnPackage.test(name) &&
+        earnRegistrySpecifier !== undefined &&
         !catalogSpecifier.test(specifier) &&
-        !exactVersion.test(specifier)
+        !exactVersion.test(earnRegistrySpecifier)
       ) {
         violations.push(
           `${manifestPath}: ${field}.${name} must use an exact registry version or catalog: ` +
@@ -36,6 +46,7 @@ export function validateManifest(manifest, manifestPath) {
         );
         continue;
       }
+      if (earnRegistrySpecifier !== undefined) continue;
       // Semver ranges are conventional for ordinary peer dependencies. Earn peers are handled by
       // the stricter source policy above, while non-peer dependency fields keep the repo-wide exact
       // version policy.

@@ -85,6 +85,29 @@ test("rejects mutable Solana Earn peer dependency sources", () => {
   }
 });
 
+test("classifies npm aliases by their target package", () => {
+  const violations = validateManifest(
+    {
+      dependencies: {
+        "earn-core": "npm:@solana/earn-core@0.1.0",
+      },
+      peerDependencies: {
+        "earn-kit": "npm:@solana/earn-kit@^0.1.0",
+        "earn-transactions": "npm:@solana/earn-transactions@latest",
+        "renamed-react": "npm:react@^19",
+      },
+    },
+    "packages/example/package.json"
+  );
+
+  assert.deepEqual(violations, [
+    "packages/example/package.json: peerDependencies.earn-kit must use an exact registry version or catalog: " +
+      "(found npm:@solana/earn-kit@^0.1.0).",
+    "packages/example/package.json: peerDependencies.earn-transactions must use an exact registry version or catalog: " +
+      "(found npm:@solana/earn-transactions@latest).",
+  ]);
+});
+
 test("rejects ranges in pnpm catalogs", () => {
   const violations = validatePnpmCatalog(
     "catalog:\n  '@solana/kit': ^6.5.0\n  '@solana/rpc': 6.8.0\n",
