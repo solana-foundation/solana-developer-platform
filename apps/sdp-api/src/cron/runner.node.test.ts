@@ -10,6 +10,7 @@ import {
 import { DVP_TRADES_CRON } from "./dvp-trades";
 import { EARN_CATALOGUE_SYNC_CRON } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
+import { EARN_SPLIT_SWAPS_CRON } from "./earn-split-swaps";
 import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
@@ -77,6 +78,11 @@ vi.mock("./earn-vault-movements", () => ({
 vi.mock("./dvp-trades", () => ({
   DVP_TRADES_CRON: "* * * * *",
   runDvpTradeReconciliation: vi.fn(),
+}));
+
+vi.mock("./earn-split-swaps", () => ({
+  EARN_SPLIT_SWAPS_CRON: "* * * * *",
+  runEarnSplitSwapDetection: vi.fn(),
 }));
 
 vi.mock("./pending-transfers", async (importOriginal) => {
@@ -182,7 +188,7 @@ describe("startCron", () => {
   // proof-of-life no-ops, so every configuration schedules all 13 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 13;
+  const ALL_TASKS = 14;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -212,6 +218,7 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[10][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
     expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
     expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
+    expect(scheduleMock.mock.calls[13][0]).toBe(EARN_SPLIT_SWAPS_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {

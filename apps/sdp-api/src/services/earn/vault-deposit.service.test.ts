@@ -1309,6 +1309,7 @@ describe("depositIntoVault — swap-funded (Jupiter)", () => {
       sourceAmount: "10",
       quotedAmount: "9.99",
       minOutAmount: "9.95",
+      minOutAtoms: "9950000",
       priceImpactPct: "0.0001",
       routeLabels: ["Whirlpool"],
       slippageBps: 50,

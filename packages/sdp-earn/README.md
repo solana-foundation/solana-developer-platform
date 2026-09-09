@@ -386,7 +386,10 @@ apps/sdp-api/src/
                                    signer shape, PRO-1722) and
                                    earn_external_wallet_transactions (the
                                    built-unsigned-transaction store its submit
-                                   step verifies against).
+                                   step verifies against); 0091 adds
+                                   earn_split_swap_advisories (PRO-1864, the
+                                   orphan-detection record for split swaps:
+                                   advisory state, never a movement).
                                    The mechanism-split tables above take no
                                    reads and no writes any more; a later
                                    migration drops them.
@@ -493,6 +496,24 @@ refresh is update-only.
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
+
+### Orphaned split-swap detection (`services/jobs/detect-orphaned-earn-split-swaps.ts`)
+
+- **What it does:** judges every open `earn_split_swap_advisories` row (written
+  when an external-wallet swap-funded deposit had to split) against the chain:
+  a confirmed/finalized follow-up deposit resolves it, an in-flight deposit or
+  recent follow-up build is the partner still working, and past the swap's
+  blockhash plus a 30-minute grace the owner's deposit-token balance is read
+  with the same call as the build-time baseline. A rise of at least the swap's
+  floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
+  it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
+- **When it runs:** every minute on both schedulers, unconditionally (no earn
+  flag gate: an advisory written before an incident flag flip must keep being
+  watched), under the system database identity like every sweep.
+- **Failure behaviour:** a chain read failure emits its own error event, marks
+  the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
+  cron run reads error; the job's own query failing emits no tick at all.
+- **Cadence:** `EARN_SPLIT_SWAPS_CRON` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue are deleted, scoped to the
   cluster sub-shelf the responding lane is the truth for. Operator-paused or

@@ -602,6 +602,7 @@ export async function createEarnExternalWalletDepositTransaction(
     projectId,
     environment,
     provider,
+    strategyId: strategy.id,
     providerReference: strategy.provider_reference,
     ownerAddress: body.ownerAddress,
     ...(feePayer === undefined ? {} : { feePayer }),

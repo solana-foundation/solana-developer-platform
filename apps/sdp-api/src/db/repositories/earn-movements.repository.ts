@@ -377,6 +377,23 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
+  /**
+   * Every external-wallet DEPOSIT movement for one owner and deposit token
+   * created strictly after a moment, oldest first (PRO-1864). The orphaned
+   * split-swap detector reads these with their STATUS: a `failed` deposit must
+   * not discharge an advisory, and a still-`requested` one is in flight, not
+   * observed. Matches on the deposit token rather than the vault on purpose: a
+   * partner may legitimately deposit the swapped tokens into a sibling
+   * strategy of the same token, and the funds reached a vault either way.
+   */
+  listExternalWalletDepositsSince(params: {
+    organizationId: string;
+    projectId: string | null;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+    depositTokenMint: string;
+    createdAfter: string;
+  }): Promise<EarnMovementRow[]>;
   /** One external-wallet movement under the same four scoping rules, or null. */
   getExternalWalletMovement(params: {
     organizationId: string;
@@ -1102,6 +1119,33 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
         .first<{ present: number }>();
       return Boolean(row);
+    },
+
+    async listExternalWalletDepositsSince(params) {
+      // idx_earn_movements_external_wallet_owner drives the range scan; the
+      // direction/denomination predicates filter on the heap.
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+            WHERE organization_id = ?
+              AND project_id IS NOT DISTINCT FROM ?
+              AND environment = ?
+              AND owner_address = ?
+              AND direction = 'deposit'
+              AND denomination = ?
+              AND created_at > ?
+            ORDER BY created_at ASC, id ASC`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.ownerAddress,
+          params.depositTokenMint,
+          params.createdAfter
+        )
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
     },
 
     async listExternalWalletMovements(params) {

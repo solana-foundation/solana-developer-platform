@@ -1127,6 +1127,8 @@ Pass `sourceTokenMint` (USDC, USDG, PYUSD or USDT on your cluster) to accept a s
 
 If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
 
+Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP does record that it handed the swap out, and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. Demonstrating split-swap recovery in sandbox is part of the production certification checklist.
+
 ## Idempotency, in one place
 
 | Call | Rule |
@@ -5775,7 +5777,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `POST` | `/v1/wallets/default-wallet` | Set default wallet |
 | `POST` | `/v1/wallets/initialize` | Initialize wallet signing |
 | `GET` | `/v1/wallets/public-key` | Get wallet public key |
-| `POST` | `/v1/wallets/signer-check` | Check signer via simulated memo transaction |
+| `POST` | `/v1/wallets/signer-check` | Check signer via memo transaction |
 | `POST` | `/v1/wallets/switch` | Switch wallet signing provider |
 | `GET` | `/v1/wallets/switch-options` | List switch provider options |
 
@@ -5947,23 +5949,19 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 ### Earn
 Source: https://platform.solana.com/docs/reference/api/earn
 
-> The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.
+> Caller-signed external-wallet vault deposit and exit transactions.
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/earn/external-wallet/deposit-transactions` | Build an unsigned external-wallet deposit transaction |
 | `POST` | `/v1/earn/external-wallet/deposits` | Submit a signed external-wallet deposit |
-| `GET` | `/v1/earn/external-wallet/earnings` | Get one external wallet's balance and earnings |
+| `GET` | `/v1/earn/external-wallet/earnings/{ownerAddress}` | Get one external wallet's balance and earnings |
 | `GET` | `/v1/earn/external-wallet/movements` | List one external wallet's activity |
 | `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
-| `GET` | `/v1/earn/external-wallet/positions` | List one external wallet's positions |
+| `GET` | `/v1/earn/external-wallet/positions/{ownerAddress}` | List one external wallet's positions |
 | `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
-| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | Preview an external-wallet exit |
 | `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
-| `GET` | `/v1/earn/strategies` | List yield strategies |
-| `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
-| `POST` | `/v1/earn/vault-deposit-previews` | Preview a direct vault deposit |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

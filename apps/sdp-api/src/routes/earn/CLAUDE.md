@@ -579,7 +579,8 @@ organization's own custody wallets.
   external-wallet build answers the SPLIT contract —
   `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
   unsigned swap-only transaction the owner signs and broadcasts itself
-  (persisting nothing), followed by an ordinary unswapped build for
+  (persisting no consumable build, but an orphan-detection ADVISORY, see the
+  external-wallet section), followed by an ordinary unswapped build for
   `followUp.amount`. Jupiter routes MAINNET only: on devnet the mints are
   pinned per cluster but Jupiter answers "not tradable", surfaced as a 400.
 - `POST /vault-deposit-previews` — the deposit QUOTE: what the vault's own
@@ -897,6 +898,27 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   answer carries `feePayer` through `followUp` and compiles the standalone
   swap with the same payer. This is the CALLER's wallet co-signing, not Kora:
   SDP-side sponsorship for caller-signed movements stays PRO-1744.
+- **The split answer records an ADVISORY, never a movement** (PRO-1864, threat
+  model EARN-026). The standalone swap is the one transaction this flow hands
+  out that SDP never sees again, so the service's split branch writes an
+  `earn_split_swap_advisories` row (owner, strategy, the swap floor in ATOMS
+  with the mint's decimals, the swap's last valid block height, and the
+  owner's deposit-token balance read at build time as a baseline) before
+  answering. The insert and the baseline read are FAIL-CLOSED: money in may
+  refuse, and a blind advisory could only ever page on any wallet that held
+  the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
+  judges each open advisory every minute on both runners: a `confirmed` or
+  `finalized` follow-up deposit for that owner and token resolves it (one
+  movement discharges at most one advisory, UNIQUE `resolving_movement_id`; a
+  `failed` one never does); an in-flight deposit or a follow-up BUILD inside a
+  30-minute window is the partner still working; once the swap's blockhash is
+  dead and a 30-minute grace has run, the owner's balance is read with the SAME
+  call as the baseline and a rise of at least the floor is reported as
+  `sdp_api_earn_split_swap_orphaned` (warn level, `escalated` after an hour)
+  on every visit while it persists. It ALERTS and never acts: the funds are
+  the owner's, and only the partner can move them. Detection writes nothing
+  but back to the advisory table. Every amount it compares is atoms to atoms;
+  the decimal `swap_min_out_amount` exists for display only.
 - `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
   `{transactionId, signedTransaction}` plus a REQUIRED `Idempotency-Key`
   (body `requestId` rejected). The submit proves the bytes are a transaction

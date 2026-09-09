@@ -11,6 +11,7 @@
 
 import { type ScheduledTask, schedule } from "node-cron";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
+import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
 import { runWithSystemDatabaseIdentity } from "@/db";
 import {
   isAssetProfilesEnabled,
@@ -297,6 +298,16 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // so a bare tick would read zero open trades, find no funding, and go on
   // reporting success while a counterparty's escrowed deposit sat unnoticed.
   tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
+
+  // Orphaned split-swap detection (PRO-1864). Advisory and read-only against
+  // the ledger, but cross-tenant like every sweep, so it takes the system
+  // identity through scheduleSystemTask: under 0081's forced row-level
+  // security an identity-less tick would read zero open advisories and report
+  // a clean sweep over swaps it never looked at. Registered unconditionally:
+  // an advisory written before an incident flag flip must keep being watched.
+  tasks.push(
+    scheduleSystemTask(EARN_SPLIT_SWAPS_CRON, "cron:earn-split-swaps", runEarnSplitSwapDetection)
+  );
 
   return {
     stop() {

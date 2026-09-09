@@ -472,6 +472,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       sourceAmount: "25",
       quotedAmount: "24.99",
       minOutAmount: "24.8",
+      minOutAtoms: "24800000",
       priceImpactPct: "0.0001",
       routeLabels: ["Whirlpool"],
       slippageBps: 50,
@@ -621,6 +622,12 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         amount: "24.8",
         minSharesOut: "24.5",
       });
+      // The service records the split-swap advisory (PRO-1864) and names the
+      // strategy on it, so the route must hand the catalogue id through.
+      expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ strategyId: strategy.id })
+      );
     });
 
     it("carries the fee payer through the split's follow-up contract", async () => {
