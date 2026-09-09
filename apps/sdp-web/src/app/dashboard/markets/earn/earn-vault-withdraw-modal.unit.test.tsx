@@ -34,6 +34,7 @@ const position: EarnVaultPosition = {
   shareMint: "So11111111111111111111111111111111111111112",
   createdAt: "2026-08-21T00:00:00.000Z",
   closedAt: null,
+  feeSponsored: false,
   shares: "10",
   withdrawableShares: "6",
   tokenValue: "10.5",
@@ -94,6 +95,21 @@ describe("EarnVaultWithdrawModal", () => {
 
     expect((screen.getByLabelText("Shares") as HTMLInputElement).value).toBe("6");
     expect(screen.getByText(/6 withdrawable of 10 total/)).toBeTruthy();
+  });
+
+  it("names SDP as the fee payer when the position says the exit is sponsored", () => {
+    // From the position, never the quote: Kamino declares no exit floor, so no
+    // quote is fetched and a flag riding on it could never surface here.
+    renderModal(vi.fn(), { ...position, feeSponsored: true });
+
+    expect(screen.getByText("The custody wallet signs. SDP covers the network fee.")).toBeTruthy();
+    expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps the wallet-pays note for an unsponsored exit", () => {
+    renderModal();
+
+    expect(screen.getByText("The custody wallet signs and pays the network fee.")).toBeTruthy();
   });
 
   it("disables Max when the withdrawable balance is unavailable", () => {
