@@ -73,6 +73,8 @@ const entryPoints = {
   server: "src/server.ts",
   job: "src/job.ts",
   migrate: "scripts/migrate-postgres.mjs",
+  // Manual, audited sponsorship controls for infra-managed operator jobs.
+  "sponsorship-budget": "scripts/sponsorship-budget.ts",
   // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
   "custody-backfill": "scripts/migrate-custody-encryption.ts",
   // configure.js generates a self-hosted .env in the terminal from the prebuilt image.

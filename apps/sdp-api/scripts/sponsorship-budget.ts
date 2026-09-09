@@ -4,6 +4,7 @@ import {
   type SponsorshipNetwork,
 } from "../src/db/repositories/sponsorship-budget.repository";
 import { getProcessEnv } from "../src/lib/runtime-env";
+import { closeAllRedisClients } from "../src/runtime/kv-redis";
 import { SponsorshipBudgetRedis } from "../src/runtime/sponsorship-budget-redis";
 import {
   isPolicyControlInSync,
@@ -37,7 +38,7 @@ async function persistGlobalEnabled(enabled: boolean) {
   const env = getProcessEnv();
   const repository = new SponsorshipBudgetRepository(getDb(env));
   const network = parseNetwork();
-  const policy = await repository.setPolicyEnabled({
+  let policy = await repository.setPolicyEnabled({
     network,
     scopeType: "global",
     scopeId: null,
@@ -46,15 +47,16 @@ async function persistGlobalEnabled(enabled: boolean) {
     reason: requireArg("reason"),
   });
   if (!policy) {
-    const current = (await repository.listPolicies(network)).find(
-      (candidate) => candidate.scopeType === "global" && candidate.scopeId === null
-    );
-    if (!current) {
+    policy =
+      (await repository.listPolicies(network)).find(
+        (candidate) => candidate.scopeType === "global" && candidate.scopeId === null
+      ) ?? null;
+    if (!policy) {
       throw new Error("No matching policy exists; use `set` with explicit limits first");
     }
-    console.log(JSON.stringify(current, null, 2));
-    return;
   }
+  // A prior attempt may have persisted Postgres but failed to sync Redis.
+  // Repeating the command must repair that split without another revision.
   await new SponsorshipBudgetRedis(env).syncPolicy(policy);
   console.log(JSON.stringify(policy, null, 2));
 }
@@ -125,4 +127,6 @@ runWithSystemDatabaseIdentity("script:sponsorship-budget", main)
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   })
-  .finally(closeDatabasePools);
+  .finally(async () => {
+    await Promise.all([closeDatabasePools(), closeAllRedisClients()]);
+  });
