@@ -89,12 +89,15 @@ export function AssetManagementWorkspace({
     token,
     assetProfile,
     metadataSignerSelection: ops.metadataSignerSelection,
+    draftWallets: ops.authorityWalletsError ? [] : ops.authorityWallets,
   });
   const draftDeploymentBlockerKey = getDraftDeploymentBlocker(
     form.draft.authorityWalletIds,
     form.draft.signingWalletId
   );
-  const draftDeploymentBlocker = draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null;
+  const draftDeploymentBlocker =
+    form.errors.authorityWalletIds ??
+    (draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null);
   const showSection = useCallback(
     (section: AssetManagementTab) => {
       setOpenSections((current) => ({ ...current, [section]: true }));

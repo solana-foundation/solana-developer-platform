@@ -7329,6 +7329,84 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it.each([false, true])(
+        "preserves a concurrent draft wallet update (explicit deploy override: %s)",
+        async (explicit) => {
+          const initialWallet = await seedIssuanceActivityWallet(
+            "wal_before_patch",
+            TEST_SOLANA_ADDRESSES.wallet1
+          );
+          const updatedWallet = await seedIssuanceActivityWallet(
+            "wal_after_patch",
+            TEST_SOLANA_ADDRESSES.wallet2
+          );
+          const token = await seedIssuedToken({
+            id: "tok_deploy_wallet_update_race",
+            mintAddress: null,
+            status: "pending",
+            signingCustodyWalletId: initialWallet.custodyWalletId,
+            signingWalletId: initialWallet.walletId,
+            requiresAllowlist: false,
+          });
+          const headers = {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          };
+          // SAFETY: this external SDK fixture provides the fields the deploy handler consumes.
+          const createToken = vi
+            .spyOn(MosaicService.prototype, "createToken")
+            .mockResolvedValue(mockDeployResult as never);
+          const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+          signer.mockClear();
+          const originalCreateTransaction = TokenService.prototype.createTransaction;
+          // Schedule a real authorized PATCH in the pre-claim await window; keep
+          // transaction creation and the deployment claim on the real database.
+          const schedulingBarrier = vi
+            .spyOn(TokenService.prototype, "createTransaction")
+            .mockImplementationOnce(async function (this: TokenService, input) {
+              const patch = await app.request(
+                `/v1/issuance/tokens/${token.id}`,
+                {
+                  method: "PATCH",
+                  headers,
+                  body: JSON.stringify({ signingCustodyWalletId: updatedWallet.custodyWalletId }),
+                },
+                env
+              );
+              expect(patch.status).toBe(200);
+              expect((await patch.json()).data.token.signingCustodyWalletId).toBe(
+                updatedWallet.custodyWalletId
+              );
+              return originalCreateTransaction.call(this, input);
+            });
+          try {
+            const response = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy`,
+              {
+                method: "POST",
+                headers,
+                body: JSON.stringify(
+                  explicit ? { signingCustodyWalletId: initialWallet.custodyWalletId } : {}
+                ),
+              },
+              env
+            );
+            expect(response.status).toBe(explicit ? 200 : 409);
+            const stored = await app.request(`/v1/issuance/tokens/${token.id}`, { headers }, env);
+            expect((await stored.json()).data.token.signingCustodyWalletId).toBe(
+              explicit ? initialWallet.custodyWalletId : updatedWallet.custodyWalletId
+            );
+            if (!explicit) {
+              expect(createToken).not.toHaveBeenCalled();
+              expect(signer).not.toHaveBeenCalled();
+            }
+          } finally {
+            schedulingBarrier.mockRestore();
+            createToken.mockRestore();
+          }
+        }
+      );
+
       it("uses the exact wallet from the request instead of the draft selection", async () => {
         const draftWallet = await seedIssuanceActivityWallet(
           "wal_direct_deploy_draft",

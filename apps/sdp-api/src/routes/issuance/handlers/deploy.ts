@@ -403,18 +403,22 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   // created — which would otherwise leave the DB identity permanently out of
   // sync with the immutable mint. `beginTokenDeploy` re-reads post-claim, so we
   // mint from the now-frozen values.
-  const claimedToken = await tokenService.beginTokenDeploy(tokenId, {
-    custodyWalletId: deploymentWallet.custodyWalletId,
-    providerWalletId: deploymentWallet.providerWalletId,
-  });
+  const claimedToken = await tokenService.beginTokenDeploy(
+    tokenId,
+    {
+      custodyWalletId: deploymentWallet.custodyWalletId,
+      providerWalletId: deploymentWallet.providerWalletId,
+    },
+    body.signingCustodyWalletId === undefined ? requestedCustodyWalletId : undefined
+  );
   if (!claimedToken) {
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
-      error: "Token is already being deployed or was deployed",
+      error: "Token deployment state or selected wallet changed",
     });
     throw new AppError(
       "CONFLICT",
-      "Token is already being deployed or was deployed; re-fetch and retry"
+      "Token deployment state or selected wallet changed; re-fetch and retry"
     );
   }
   token = claimedToken;

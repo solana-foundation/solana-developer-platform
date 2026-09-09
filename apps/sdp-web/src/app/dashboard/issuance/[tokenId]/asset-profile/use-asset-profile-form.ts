@@ -13,7 +13,12 @@ import {
   type SignerSelectionState,
 } from "../token-management-workspace.utils";
 import { updateAssetProfileAction } from "./actions";
-import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mapping";
+import {
+  areDraftsEquivalent,
+  type DraftAuthorityWallet,
+  normalizeDraftWalletAssignments,
+  profileToDraftState,
+} from "./asset-profile-mapping";
 
 /**
  * Edit-in-place form state for the asset management workspace: one draft
@@ -25,10 +30,12 @@ export function useAssetProfileForm({
   token,
   assetProfile: initialAssetProfile,
   metadataSignerSelection,
+  draftWallets,
 }: {
   token: Token;
   assetProfile: AssetProfile;
   metadataSignerSelection: SignerSelectionState;
+  draftWallets: readonly DraftAuthorityWallet[];
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -41,8 +48,17 @@ export function useAssetProfileForm({
     }
   }, [initialAssetProfile, assetProfile.updatedAt]);
 
-  const baseline = useMemo(() => profileToDraftState(assetProfile, token), [assetProfile, token]);
-  const [draft, setDraft] = useState<DraftState>(baseline);
+  const storedBaseline = useMemo(
+    () => profileToDraftState(assetProfile, token),
+    [assetProfile, token]
+  );
+  const [storedDraft, setDraft] = useState<DraftState>(storedBaseline);
+  const baseline = token.mintAddress
+    ? storedBaseline
+    : normalizeDraftWalletAssignments(storedBaseline, draftWallets);
+  const draft = token.mintAddress
+    ? storedDraft
+    : normalizeDraftWalletAssignments(storedDraft, draftWallets);
   const [baselineKey, setBaselineKey] = useState(assetProfile.updatedAt);
   // Re-hydrate the form when the underlying profile changes (post-save or after
   // a router.refresh picked up someone else's update) — but never mid-edit.
@@ -79,6 +95,15 @@ export function useAssetProfileForm({
   const supplyLocked = isSupplyLockedOnChain(token);
 
   const errors = getAssetDetailsErrors(draft, t);
+  if (
+    !token.mintAddress &&
+    draft.authorityWalletIds &&
+    Object.values(draft.authorityWalletIds).some(
+      (id) => !draftWallets.some((wallet) => wallet.id === id)
+    )
+  ) {
+    errors.authorityWalletIds = t("DashboardIssuance.signer.select");
+  }
   if (token.mintAddress) {
     // A deployed token's historical deployment wallet is read-only here.
     delete errors.signingWalletId;

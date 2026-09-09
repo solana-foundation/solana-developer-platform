@@ -1219,10 +1219,14 @@ export class TokenService {
    */
   async beginTokenDeploy(
     tokenId: string,
-    wallet: { custodyWalletId: string; providerWalletId: string } | null
+    wallet: { custodyWalletId: string; providerWalletId: string } | null,
+    expectedCustodyWalletId?: string
   ): Promise<Token | null> {
     const now = new Date().toISOString();
     const tenant = this.tenantMutationScope();
+    // Implicit deployment must not overwrite a wallet selected by a concurrent PATCH.
+    const walletCondition =
+      expectedCustodyWalletId === undefined ? "" : " AND signing_custody_wallet_id = ?";
     const rowsAffected = await this.db
       .prepare(
         `UPDATE issued_tokens
@@ -1230,7 +1234,7 @@ export class TokenService {
              signing_custody_wallet_id = COALESCE(?, signing_custody_wallet_id),
              signing_wallet_id = COALESCE(?, signing_wallet_id),
              updated_at = ?
-         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL`
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL${walletCondition}`
       )
       // Legacy confirm claims without replacing the identity that prepare saved.
       .bind(
@@ -1238,7 +1242,8 @@ export class TokenService {
         wallet?.providerWalletId ?? null,
         now,
         tokenId,
-        ...tenant.values
+        ...tenant.values,
+        ...(expectedCustodyWalletId === undefined ? [] : [expectedCustodyWalletId])
       )
       .run();
 

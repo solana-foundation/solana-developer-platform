@@ -1,4 +1,4 @@
-import type { AssetProfile, IssuanceMetadata, Token } from "@sdp/types";
+import type { AssetProfile, IssuanceMetadata, PaymentsDashboardWallet, Token } from "@sdp/types";
 import { getTokenAccessControlMode } from "../../access-control.utils";
 import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
@@ -219,6 +219,27 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     metadataUri: token.uri ?? "",
     customFields: readCustomFields(customer),
     publicFields,
+  };
+}
+
+export type DraftAuthorityWallet = Pick<PaymentsDashboardWallet, "id" | "walletId">;
+
+/** Legacy assignments are normalized for editing only; persistence stays behind Save. */
+export function normalizeDraftWalletAssignments(
+  draft: DraftState,
+  wallets: readonly DraftAuthorityWallet[]
+): DraftState {
+  if (!draft.authorityWalletIds) return draft;
+  return {
+    ...draft,
+    authorityWalletIds: Object.fromEntries(
+      Object.entries(draft.authorityWalletIds).map(([role, id]) => {
+        if (wallets.some((wallet) => wallet.id === id)) return [role, id];
+        const matches = wallets.filter((wallet) => wallet.walletId === id);
+        // Keep unresolved evidence so validation requires an explicit selection.
+        return [role, matches.length === 1 ? matches[0].id : id];
+      })
+    ),
   };
 }
 

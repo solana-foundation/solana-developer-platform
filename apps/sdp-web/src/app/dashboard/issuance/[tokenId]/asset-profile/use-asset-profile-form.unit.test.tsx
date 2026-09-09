@@ -113,6 +113,145 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useAssetProfileForm", () => {
+  it("normalizes a legacy draft after wallets load and persists exact assignments only on Save", async () => {
+    const pendingToken = {
+      ...token,
+      mintAddress: null,
+      status: "pending" as const,
+      signingCustodyWalletId: "cwlt_a",
+    };
+    const legacyProfile = {
+      ...assetProfile,
+      issuanceMetadata: {
+        ...assetProfile.issuanceMetadata,
+        custom: {
+          customer: {
+            authorityWalletIds: {
+              "mint-authority": "provider_a",
+              "metadata-authority": "provider_a",
+            },
+          },
+        },
+      },
+    };
+    const wallets = [{ id: "cwlt_a", walletId: "provider_a" }];
+    const initialWallets: typeof wallets = [];
+    const rendered = renderHook(
+      ({ draftWallets }) =>
+        useAssetProfileForm({
+          token: pendingToken,
+          assetProfile: legacyProfile,
+          metadataSignerSelection,
+          draftWallets,
+        }),
+      { wrapper, initialProps: { draftWallets: initialWallets } }
+    );
+    rendered.rerender({ draftWallets: wallets });
+    expect(rendered.result.current.draft.authorityWalletIds).toEqual({
+      "mint-authority": "cwlt_a",
+      "metadata-authority": "cwlt_a",
+    });
+    expect(rendered.result.current.dirty).toBe(false);
+    expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+
+    act(() => rendered.result.current.updateDraft({ description: "Keep my edit" }));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({
+          signingCustodyWalletId: "cwlt_a",
+          description: "Keep my edit",
+        }),
+        rebuiltMetadata: expect.objectContaining({
+          custom: expect.objectContaining({
+            customer: expect.objectContaining({
+              authorityWalletIds: { "mint-authority": "cwlt_a", "metadata-authority": "cwlt_a" },
+            }),
+          }),
+        }),
+      })
+    );
+    expect(
+      legacyProfile.issuanceMetadata.custom.customer.authorityWalletIds["mint-authority"]
+    ).toBe("provider_a");
+  });
+
+  it.each(["missing", "ambiguous"] as const)(
+    "requires selection for a %s legacy assignment without losing edits",
+    async (state) => {
+      const pendingToken = {
+        ...token,
+        mintAddress: null,
+        status: "pending" as const,
+        signingCustodyWalletId: "cwlt_a",
+      };
+      const legacyProfile = {
+        ...assetProfile,
+        issuanceMetadata: {
+          ...assetProfile.issuanceMetadata,
+          custom: { customer: { authorityWalletIds: { "mint-authority": "provider_a" } } },
+        },
+      };
+      const wallet = { id: "cwlt_a", walletId: "provider_a" };
+      const candidates = state === "missing" ? [] : [wallet, { ...wallet, id: "cwlt_b" }];
+      const rendered = renderHook(
+        ({ draftWallets }) =>
+          useAssetProfileForm({
+            token: pendingToken,
+            assetProfile: legacyProfile,
+            metadataSignerSelection,
+            draftWallets,
+          }),
+        { wrapper, initialProps: { draftWallets: candidates } }
+      );
+      expect(rendered.result.current.errors.authorityWalletIds).toBeDefined();
+      act(() => rendered.result.current.updateDraft({ description: "Keep these draft edits" }));
+      await act(() => rendered.result.current.save());
+      expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+
+      rendered.rerender({ draftWallets: [wallet] });
+      act(() =>
+        rendered.result.current.updateDraft({ authorityWalletIds: { "mint-authority": "cwlt_a" } })
+      );
+      expect(rendered.result.current.draft.description).toBe("Keep these draft edits");
+      await act(() => rendered.result.current.save());
+      expect(mocks.updateAssetProfile).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("keeps an exact assignment when another row has the same Provider ID", () => {
+    const pendingToken = {
+      ...token,
+      mintAddress: null,
+      status: "pending" as const,
+      signingCustodyWalletId: "cwlt_a",
+    };
+    const profile = {
+      ...assetProfile,
+      issuanceMetadata: {
+        ...assetProfile.issuanceMetadata,
+        custom: { customer: { authorityWalletIds: { "mint-authority": "cwlt_a" } } },
+      },
+    };
+    const rendered = renderHook(
+      () =>
+        useAssetProfileForm({
+          token: pendingToken,
+          assetProfile: profile,
+          metadataSignerSelection,
+          draftWallets: [
+            { id: "cwlt_a", walletId: "shared" },
+            { id: "cwlt_b", walletId: "shared" },
+          ],
+        }),
+      { wrapper }
+    );
+    expect(rendered.result.current.draft.authorityWalletIds).toEqual({
+      "mint-authority": "cwlt_a",
+    });
+    expect(rendered.result.current.errorCount).toBe(0);
+  });
+
   it("saves with live wallet B while retaining the historical deployment wallet A", async () => {
     const historicalToken = { ...token, signingCustodyWalletId: "cwlt_deployment_a" };
     const liveWallet = {
@@ -131,6 +270,7 @@ describe("useAssetProfileForm", () => {
     const rendered = renderHook(
       () =>
         useAssetProfileForm({
+          draftWallets: [],
           token: historicalToken,
           assetProfile,
           metadataSignerSelection: selection,
@@ -155,6 +295,7 @@ describe("useAssetProfileForm", () => {
     const rendered = renderHook(
       () =>
         useAssetProfileForm({
+          draftWallets: [],
           token: pendingToken,
           assetProfile,
           metadataSignerSelection: {
@@ -179,7 +320,7 @@ describe("useAssetProfileForm", () => {
 
   it("saves an unrelated edit to a deployed legacy permanent-delegate token", async () => {
     const rendered = renderHook(
-      () => useAssetProfileForm({ token, assetProfile, metadataSignerSelection }),
+      () => useAssetProfileForm({ draftWallets: [], token, assetProfile, metadataSignerSelection }),
       { wrapper }
     );
 
@@ -209,7 +350,13 @@ describe("useAssetProfileForm", () => {
       defaultWalletId: "",
     };
     const rendered = renderHook(
-      () => useAssetProfileForm({ token, assetProfile, metadataSignerSelection: selection }),
+      () =>
+        useAssetProfileForm({
+          draftWallets: [],
+          token,
+          assetProfile,
+          metadataSignerSelection: selection,
+        }),
       { wrapper }
     );
     act(() => rendered.result.current.updateDraft({ description: "Updated metadata" }));
@@ -229,7 +376,13 @@ describe("useAssetProfileForm", () => {
   it("keeps the deployment-wallet requirement for an undeployed token", async () => {
     const pendingToken = { ...token, mintAddress: null, status: "pending" as const };
     const rendered = renderHook(
-      () => useAssetProfileForm({ token: pendingToken, assetProfile, metadataSignerSelection }),
+      () =>
+        useAssetProfileForm({
+          draftWallets: [],
+          token: pendingToken,
+          assetProfile,
+          metadataSignerSelection,
+        }),
       {
         wrapper,
       }
@@ -253,7 +406,12 @@ describe("useAssetProfileForm", () => {
     };
     const rendered = renderHook(
       ({ selection }) =>
-        useAssetProfileForm({ token, assetProfile, metadataSignerSelection: selection }),
+        useAssetProfileForm({
+          draftWallets: [],
+          token,
+          assetProfile,
+          metadataSignerSelection: selection,
+        }),
       {
         wrapper,
         initialProps: { selection: multiple },
