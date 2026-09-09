@@ -514,6 +514,100 @@ describe("Custody wallet scope routes", () => {
     }
   );
 
+  it.each([
+    { actor: "session", connectionStatus: "active", configScope: "project" },
+    { actor: "api_key", connectionStatus: "active", configScope: "project" },
+    { actor: "selected_key", connectionStatus: "active", configScope: "project" },
+    { actor: "session", connectionStatus: "deactivated", configScope: "project" },
+    { actor: "session", connectionStatus: "active", configScope: "organization" },
+  ])(
+    "refuses a signer check for $actor with a $configScope Config and inactive duplicate in a $connectionStatus Connection",
+    async ({ actor, connectionStatus, configScope }) => {
+      if (configScope === "project") {
+        await getDb(env)
+          .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+          .bind(TEST_PROJECT.id, PRIVY_CONFIG_ID)
+          .run();
+      }
+      await seedActiveConnectionWallet(
+        "inactive_duplicate",
+        "privy_wallet_a",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+        .bind("cwlt_scope_inactive_duplicate")
+        .run();
+      if (connectionStatus === "deactivated") {
+        await getDb(env)
+          .prepare(
+            "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?"
+          )
+          .bind("cconn_scope_inactive_duplicate")
+          .run();
+      }
+      if (actor === "selected_key") {
+        await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+          walletId: "privy_wallet_a",
+          permissions: ["wallets:write"],
+        });
+        await seedCachedKey({
+          signingWalletId: "privy_wallet_a",
+          walletBindings: [
+            {
+              walletId: "privy_wallet_a",
+              custodyWalletId: "cwlt_scope_privy_a",
+              permissions: ["wallets:write"],
+            },
+          ],
+        });
+      }
+      env.PRIVY_BYOK_ENABLED = "true";
+
+      const response = await requestSignerCheck(
+        { walletId: "privy_wallet_a" },
+        actor === "session" ? "session" : "api_key"
+      );
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "CONFLICT", message: "Custody wallet ownership is ambiguous" },
+      });
+      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(simulateTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps signer-check Config selection when an inactive Config has the same Provider ID", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+           VALUES ('cfg_signer_retired', ?, ?, 'privy', 'not-read', 'inactive')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_signer_retired', 'cfg_signer_retired', 'privy_wallet_a', ?, 'inactive')`
+        )
+        .bind(TEST_SOLANA_ADDRESSES.wallet2),
+    ]);
+
+    const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "session");
+
+    expect(response.status).toBe(200);
+    expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      "cwlt_scope_privy_a"
+    );
+  });
+
   it.each(["read-only", "revoked", "expired"])(
     "refuses %s signer-check authorization despite a cached write grant",
     async (state) => {

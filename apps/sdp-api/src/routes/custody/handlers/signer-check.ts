@@ -18,7 +18,7 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -26,6 +26,7 @@ import {
   assertFreshApiKeyCustodyWalletAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createRpcTransportForTarget } from "@/services/rpc-egress";
@@ -79,6 +80,17 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+    // Keep the legacy selector's retained-Connection checks; inventory hides inactive rows.
+    const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
+      kind: "wallet",
+      organizationId: auth.organizationId,
+      projectId: auth.projectId ?? undefined,
+      walletId: resolvedWalletId,
+    });
+    // A retained project Connection must not disappear into the org-Config inventory fallback.
+    if (target?.kind === "connection" && target.connectionId !== wallet.custodyConnectionId) {
+      throw conflict("Custody wallet ownership is ambiguous");
+    }
     // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
     // The exact signer repeats its runtime guard; a default change cannot select another wallet.
     await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
