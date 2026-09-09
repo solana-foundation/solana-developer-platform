@@ -40,10 +40,12 @@ import compliance from "@/routes/compliance";
 import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
+import dvp from "@/routes/dvp";
 import earn from "@/routes/earn";
 import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
+import internalHeliusRings from "@/routes/internal-helius-rings";
 import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
@@ -104,6 +106,7 @@ function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
     case 403:
     case 404:
     case 409:
+    case 413:
     case 429:
     case 500:
     case 501:
@@ -359,6 +362,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/earn", earn);
+  v1.route("/dvp", dvp);
   v1.route("/places", places);
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
@@ -381,6 +385,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
   app.route("/internal/dashboard/rpc", internalRpc);
+  app.route("/internal/dashboard/helius-rings", internalHeliusRings);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

@@ -406,6 +406,43 @@ export class CustodyRuntimeTargets {
     return wallets.find((wallet) => wallet.id === params.custodyWalletId) ?? null;
   }
 
+  /**
+   * Every active custody wallet holding an on-chain address, oldest first —
+   * an indexed read (`idx_custody_wallets_public_key`) over both ownership
+   * paths with the same active/org/project filters as {@link listWallets}.
+   * Multiple records can hold one address, so callers pick.
+   */
+  async findOperationalWalletIdsByAddress(params: {
+    organizationId: string;
+    projectId: string;
+    publicKey: string;
+  }): Promise<string[]> {
+    const rows = await this.db.queryMany<{ id: string }>(
+      `SELECT w.id
+         FROM custody_wallets w
+         LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+         LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+        WHERE w.public_key = ?
+          AND w.status = 'active'
+          AND (
+            (cfg.id IS NOT NULL AND cfg.organization_id = ? AND cfg.status = 'active'
+               AND (cfg.project_id = ? OR cfg.project_id IS NULL))
+            OR
+            (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
+               AND conn.status = 'active')
+          )
+        ORDER BY w.created_at ASC`,
+      [
+        params.publicKey,
+        params.organizationId,
+        params.projectId,
+        params.organizationId,
+        params.projectId,
+      ]
+    );
+    return rows.map((row) => row.id);
+  }
+
   async findOwnedWalletForMutation(params: {
     organizationId: string;
     projectId?: string;
@@ -1392,18 +1429,37 @@ export class CustodyRuntimeTargets {
   }
 }
 
+/**
+ * Every purpose a stored wallet may carry.
+ *
+ * Derived from the union rather than restated as switch cases, and that is the
+ * point: this parser THROWS on anything it does not recognise, so a purpose
+ * added to the type and written to a row took the entire wallet list down for
+ * the project with "Unknown custody wallet purpose" — the list, the pickers
+ * that read it, and every screen built on top.
+ *
+ * As a `satisfies` record, adding a purpose to `CustodyWalletPurpose` without
+ * adding it here is a compile error rather than a runtime outage.
+ */
+const KNOWN_WALLET_PURPOSES = {
+  root: true,
+  mint_authority: true,
+  freeze_authority: true,
+  fee_payer: true,
+  transfer: true,
+  dvp_settlement_authority: true,
+} as const satisfies Record<CustodyWalletPurpose, true>;
+
 function parseWalletPurpose(purpose: string | null): CustodyWalletPurpose | null {
-  switch (purpose) {
-    case null:
-    case "root":
-    case "mint_authority":
-    case "freeze_authority":
-    case "fee_payer":
-    case "transfer":
-      return purpose;
-    default:
-      throw internalError("Unknown custody wallet purpose");
+  if (purpose === null) {
+    return null;
   }
+  if (purpose in KNOWN_WALLET_PURPOSES) {
+    return purpose as CustodyWalletPurpose;
+  }
+  // Still a throw: an unrecognised purpose is untrusted data in a signing path,
+  // and guessing at it would let a row nobody wrote decide how a wallet is used.
+  throw internalError("Unknown custody wallet purpose");
 }
 
 function walletBelongsToTarget(

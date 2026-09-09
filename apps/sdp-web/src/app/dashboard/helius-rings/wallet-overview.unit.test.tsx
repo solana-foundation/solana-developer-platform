@@ -42,8 +42,14 @@ const RINGS: ProjectRing[] = [
   },
 ];
 
-function balance(ringProgramId: string | null, amountRaw: string, usdValue?: number) {
-  return { mint: SOL, symbol: "SOL", amountRaw, decimals: 9, ringProgramId, usdValue };
+function balance(
+  ringProgramId: string | null,
+  amountRaw: string,
+  usdValue?: number,
+  /** One note is the consolidated case, which renders no fragmentation hint. */
+  noteCount = 1
+) {
+  return { mint: SOL, symbol: "SOL", amountRaw, decimals: 9, ringProgramId, usdValue, noteCount };
 }
 
 function sync(balances: RingsWalletSync["balances"], totalUsd?: number | null): RingsWalletSync {
@@ -75,6 +81,21 @@ describe("WalletOverview", () => {
     expect(await screen.findByText("$225.00")).toBeTruthy();
     expect(screen.getByText("$150.00")).toBeTruthy();
     expect(mocks.syncRingsWallet).toHaveBeenCalledExactlyOnceWith("hrw_treasury");
+  });
+
+  it("shows a note count only for a fragmented position", async () => {
+    mocks.syncRingsWallet.mockResolvedValue({
+      sync: sync(
+        [balance(null, "1000000000", 150, 4), balance(TREASURY_RING, "500000000", 75)],
+        225
+      ),
+    });
+    renderOverview(RINGS);
+
+    // The fragmented position says how many notes it spans, which is what makes
+    // the composer's Merge tab legible. The consolidated one stays quiet.
+    expect(await screen.findByText("4 notes")).toBeTruthy();
+    expect(screen.queryByText("1 notes")).toBeNull();
   });
 
   it("names each ring group by its recorded name and falls back to a truncated id", async () => {

@@ -32,7 +32,10 @@ export function protocolMint(sdpMintValue: string): string {
  * depth behind the route schema's SOL-only literal; the wire policy asserts
  * the same rule independently on the bytes.
  */
-export function requireProtocolSol(mint: string, opType: "withdrawal" | "transfer"): void {
+export function requireProtocolSol(
+  mint: string,
+  opType: "withdrawal" | "transfer" | "merge"
+): void {
   if (protocolMint(mint) !== PROTOCOL_NATIVE_MINT) {
     throw new HeliusRingsError("invalid_input", `only SOL ${opType}s are supported in this build`);
   }

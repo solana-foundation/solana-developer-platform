@@ -93,7 +93,7 @@ export function DashboardBottomNav({
       data-dashboard-bottom-nav="true"
       // pb keeps the row clear of the iOS home indicator without padding it on
       // devices that have none.
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border-default bg-[var(--sdp-shell-bg)] pb-[env(safe-area-inset-bottom)] xl:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border-default bg-[var(--sdp-shell-bg)] pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul className="flex items-stretch gap-1 px-2 py-1.5">
         {items.map((item) => {

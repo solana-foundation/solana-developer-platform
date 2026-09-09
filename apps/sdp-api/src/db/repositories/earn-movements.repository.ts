@@ -433,6 +433,28 @@ export interface EarnMovementsRepository {
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  /**
+   * Backlog telemetry over the SAME predicate the claim uses (PRO-1863): how
+   * many vault movements remain unsettled, and how old the oldest one is. Read
+   * after a sweep tick so the reported backlog is what the tick left behind.
+   *
+   * Dimensioned, because the flat total is not alertable. A `confirmed` row
+   * whose signature ages out of RPC history is a PERMANENT member of this set
+   * (PRO-1716 gives `confirmed` no exit but `finalized`, and the sweep must
+   * neither expire nor rebroadcast it), so a total-only age would latch and
+   * page forever. `blockhashBound` is the actionable subset the sweep can
+   * still act on, and the withdrawal split keeps the exit path visible on its
+   * own (ADR 0002).
+   */
+  getUnsettledVaultMovementStats(): Promise<{
+    backlog: number;
+    backlogBlockhashBound: number;
+    backlogConfirmed: number;
+    backlogWithdrawals: number;
+    oldestUnsettledCreatedAt: string | null;
+    oldestBlockhashBoundCreatedAt: string | null;
+    oldestWithdrawalCreatedAt: string | null;
+  }>;
 
   // ── Writes ───────────────────────────────────────────────────────────────
 
@@ -1320,6 +1342,49 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(blockhashBoundQuota, confirmedQuota, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async getUnsettledVaultMovementStats() {
+      // Keep this predicate in lockstep with claimUnsettledVaultMovements: the
+      // backlog it reports must be the same set the sweep would claim. Bound by
+      // the "reports exactly the rows the next claim would take" test in
+      // services/jobs/reconcile-earn-vault-movements.test.ts, which seeds one
+      // row in every reachable status and asserts this count against the
+      // claimed id SET rather than a literal, so the two fail together instead
+      // of drifting silently.
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*) AS backlog,
+                  COUNT(*) FILTER (WHERE status IN ('requested', 'submitted')) AS backlog_blockhash_bound,
+                  COUNT(*) FILTER (WHERE status = 'confirmed') AS backlog_confirmed,
+                  COUNT(*) FILTER (WHERE direction = 'withdrawal') AS backlog_withdrawals,
+                  MIN(created_at) AS oldest_created_at,
+                  MIN(created_at) FILTER (WHERE status IN ('requested', 'submitted'))
+                    AS oldest_blockhash_bound_created_at,
+                  MIN(created_at) FILTER (WHERE direction = 'withdrawal')
+                    AS oldest_withdrawal_created_at
+             FROM earn_movements
+            WHERE execution_model = 'vault_direct'
+              AND status IN ('requested', 'submitted', 'confirmed')`
+        )
+        .first<{
+          backlog: number | string;
+          backlog_blockhash_bound: number | string;
+          backlog_confirmed: number | string;
+          backlog_withdrawals: number | string;
+          oldest_created_at: string | null;
+          oldest_blockhash_bound_created_at: string | null;
+          oldest_withdrawal_created_at: string | null;
+        }>();
+      return {
+        backlog: Number(row?.backlog ?? 0),
+        backlogBlockhashBound: Number(row?.backlog_blockhash_bound ?? 0),
+        backlogConfirmed: Number(row?.backlog_confirmed ?? 0),
+        backlogWithdrawals: Number(row?.backlog_withdrawals ?? 0),
+        oldestUnsettledCreatedAt: row?.oldest_created_at ?? null,
+        oldestBlockhashBoundCreatedAt: row?.oldest_blockhash_bound_created_at ?? null,
+        oldestWithdrawalCreatedAt: row?.oldest_withdrawal_created_at ?? null,
+      };
     },
 
     async createSignedVaultDepositIntent(input) {

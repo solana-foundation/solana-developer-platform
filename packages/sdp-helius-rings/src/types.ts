@@ -99,6 +99,12 @@ export interface AssetBalance {
    * boundary inside a spend, so a merged number would overstate every position.
    */
   ringProgramId: string | null;
+  /**
+   * Unspent notes making up this balance. One note is the consolidated ideal;
+   * many means the position is fragmented, which is what a merge fixes and
+   * what caps how much of the balance a single spend can reach.
+   */
+  noteCount: number;
 }
 
 export interface PrivateHistoryEntry {

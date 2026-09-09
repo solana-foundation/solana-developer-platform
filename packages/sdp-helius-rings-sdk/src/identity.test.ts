@@ -183,7 +183,7 @@ describe("readRingsIdentityStatus", () => {
     }
 
     it("carries exactly the four documented fields and nothing else", async () => {
-      const result = await readWith(await honestRecord({ mergingEnabled: true }));
+      const result = await readWith(await honestRecord());
 
       // `bump`, `mergingEnabled` and the raw account data all live one spread
       // away, so the field set is asserted whole.
@@ -196,13 +196,13 @@ describe("readRingsIdentityStatus", () => {
     });
 
     it.each([
-      ["ours", async () => honestRecord({ mergingEnabled: true })],
+      ["ours", async () => honestRecord()],
       [
         "foreign",
         async () => {
           const theirs = await publishedKeys(FOREIGN);
           return {
-            ...(await honestRecord({ mergingEnabled: true })),
+            ...(await honestRecord()),
             nullifierPublicKey: theirs.nullifierPublicKey,
             viewingPublicKey: theirs.viewingPublicKey,
           };

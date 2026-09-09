@@ -17,6 +17,7 @@ import {
   type ShieldedMaterial,
   type ShieldedMaterialSource,
 } from "./material.js";
+import { ensureRingsMergingEnabled } from "./merging.js";
 
 /**
  * Registers a shielded identity on chain.
@@ -89,13 +90,20 @@ export async function provisionRingsIdentity(
       }
       assertRecordMatchesMaterial(confirmed, material, input.owner);
 
+      // Registration cannot carry the merging flag, so a freshly published
+      // record refuses merges until this lands. Doing it here means the wallet
+      // is complete when provisioning returns rather than on its first merge.
+      if (!confirmed.mergingEnabled) {
+        const enabled = await ensureRingsMergingEnabled(deps, { owner: input.owner });
+        if (enabled.signature) signatures.push(enabled.signature);
+      }
+
       return {
         identity: {
           shieldedAddress: canonicalShieldedIdentity(material.shieldedAddress),
           owner: input.owner,
         },
         registrationSignatures: signatures,
-        mergingEnabled: confirmed.mergingEnabled,
         materialTag: "live",
       };
     }
@@ -170,7 +178,6 @@ export async function rekeyRingsIdentity(
           owner: input.owner,
         },
         registrationSignatures: signatures,
-        mergingEnabled: confirmed.mergingEnabled,
         materialTag: "live",
       };
     }

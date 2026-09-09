@@ -16,6 +16,7 @@
  * Ships dormant: early-returns unless the feature flag is on.
  */
 
+import { getDb } from "@/db";
 import {
   createHeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
@@ -111,7 +112,6 @@ export async function pollRingsIndexing(
     return;
   }
 
-  const now = dependencies.now ?? (() => new Date());
   const createService: ServiceFor =
     dependencies.createService ?? ((tenant) => createHeliusRingsService(env, tenant));
   const serviceFor = (operation: HeliusRingsOperationRow) =>
@@ -123,8 +123,14 @@ export async function pollRingsIndexing(
   const repository = createHeliusRingsOperationRepository(env);
   const logger = getLogger();
 
-  const readSignatureStatus = dependencies.readSignatureStatus ?? readRingsSignatureStatus;
-
+  // Both chain reads judge tenant operations — expiry escalation and
+  // manual-reconciliation outcomes — so they must come from the
+  // platform-trusted Helius endpoint (the readers' built-in fallback), never
+  // from a tenant-owned connection. Tenant endpoints serve only the
+  // operations pinned to them.
+  const readSignatureStatus =
+    dependencies.readSignatureStatus ??
+    ((input: { env: Env; signature: string }) => readRingsSignatureStatus(input));
   const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({ env });
   if (blockHeight === null) {
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
@@ -137,7 +143,13 @@ export async function pollRingsIndexing(
   }
 
   await completeIndexedFailures(repository, serviceFor, logger);
-  await advanceInFlight(repository, serviceFor, logger, now(), { env, readSignatureStatus });
+  const sweepNow = dependencies.now?.() ?? (await readDatabaseNow(env));
+  await advanceInFlight(repository, serviceFor, logger, sweepNow, { env, readSignatureStatus });
+}
+
+async function readDatabaseNow(env: Env): Promise<Date> {
+  const row = await getDb(env).queryOne<{ now: string }>("SELECT sdp_iso_now() AS now");
+  return new Date(row?.now ?? Date.now());
 }
 
 /** What the two passes that can give up on a signature need to consult the chain. */
@@ -257,7 +269,10 @@ async function advanceInFlight(
   chain: ChainCheck
 ): Promise<void> {
   const inFlight = await repository.listInFlightOperations({
-    staleBefore: now.toISOString(),
+    // `updated_at` and the application clock both have millisecond precision.
+    // Include rows written in this exact millisecond; the destructive paths
+    // below still enforce their own grace period.
+    staleBefore: new Date(now.getTime() + 1).toISOString(),
     limit: MAX_PER_RUN,
   });
   const timeoutCutoff = now.getTime() - RINGS_INDEXING_TIMEOUT_MS;

@@ -98,19 +98,28 @@ describe("operations route loading states", () => {
     expect([...markup.matchAll(/data-loading-card="issuance-token"/g)]).toHaveLength(6);
   });
 
-  it("reserves the settled issuance-detail tab rail geometry", () => {
-    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-    const tabList = markup.match(
-      /<div class="([^"]*)" data-loading-tab-list="issuance-detail">([\s\S]*?)<\/div><div class="space-y-4 pt-1">/
-    );
-    const [, tabListClasses = "", tabPlaceholders = ""] = tabList ?? [];
+  it("uses the asset-profile overview skeleton by default for navigation", () => {
+    const markup = renderToStaticMarkup(<IssuancePageSkeleton />);
 
-    expect(tabList).not.toBeNull();
-    expect(tabListClasses).toContain("overflow-x-auto");
-    // 7, not 6: the settled rail renders the compliance tab for admins (and for
-    // non-admins on control-list tokens), which is the common case the skeleton
-    // reserves for. Non-admins settle at 6 and lose one placeholder's width.
-    expect(tabPlaceholders.match(/shrink-0/g)).toHaveLength(7);
+    expect(markup).toContain('data-testid="issuance-grid-skeleton"');
+    expect(markup).not.toContain("min-h-[340px]");
+  });
+
+  it("matches the simplified issuance creation flow", () => {
+    const markup = renderToStaticMarkup(<IssuanceCreateLoading />);
+
+    expect(markup.match(/data-loading-card="issuance-classification"/g)).toHaveLength(2);
+    expect(markup).not.toContain("data-loading-summary-rail");
+    expect(markup).toContain("max-w-xl");
+  });
+
+  it("matches the single-column detail sections instead of the retired tab rail", () => {
+    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
+    expect(markup).not.toContain("data-loading-tab-list");
+    expect(markup).toContain("data-loading-header-stats");
+    expect(markup.match(/data-loading-section=/g)).toHaveLength(4);
+    expect(markup).toContain('data-loading-section="operations"');
+    expect(markup).toContain('data-loading-section="permissions"');
   });
 
   it("reserves the settled issuance-detail header shell, mark and actions", () => {
@@ -118,19 +127,19 @@ describe("operations route loading states", () => {
 
     // The 44px mark beside the name and ticker chip, in the settled header's card.
     expect(markup).toMatch(/size-11[^"]*rounded-full/);
-    expect(markup).toContain("h-8 w-52 max-w-full");
+    expect(markup).toContain("h-7 w-40 max-w-full sm:h-8 sm:w-52");
     expect(markup).toContain("h-5 w-16 rounded-md");
     // The two action buttons in the top-right corner.
     expect(markup.match(/h-8 w-\d+ rounded-lg/g)).toHaveLength(2);
   });
 
-  it("reserves both identifier rows in the issuance-detail header", () => {
+  it("reserves only the public mint address in the issuance-detail header", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
 
     expect(markup).toContain('data-loading-meta-line="issuance-detail"');
-    // Mint and token id, each elided to one line with its own copy button.
+    // The internal token ID is no longer part of this screen.
     expect(markup).toContain("data-loading-address-row");
-    expect(markup).toContain("data-loading-token-id-row");
+    expect(markup).not.toContain("data-loading-token-id-row");
   });
 
   it("preserves the responsive and sticky geometry of the final routes", () => {
@@ -145,7 +154,7 @@ describe("operations route loading states", () => {
     // form leaves a gap that never fills.
     expect(markup).not.toContain("data-loading-settings-form");
     expect(markup).toContain("data-loading-settings-members");
-    expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(2);
     expect(markup.match(/data-loading-action-bar/g)).toHaveLength(3);
   });
 

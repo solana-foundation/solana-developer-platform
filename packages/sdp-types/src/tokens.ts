@@ -422,6 +422,8 @@ export interface CreateTokenRequest {
  * PATCH /v1/issuance/tokens/:id
  */
 export interface UpdateTokenRequest {
+  /** Deployment wallet; editable only before deployment. */
+  signingWalletId?: string;
   name?: string;
   description?: string | null;
   uri?: string | null;

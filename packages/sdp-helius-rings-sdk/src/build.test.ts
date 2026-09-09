@@ -21,11 +21,16 @@ const buildWithdrawal = vi.fn();
 const hydrateWallet = vi.fn();
 const buildRingWithdrawalTx = vi.fn();
 const buildRingTransferTx = vi.fn();
+const buildMerge = vi.fn();
 const spendKeys = vi.fn();
 const destroyKeys = vi.fn();
 
 vi.mock("./flows/spend.js", () => ({
   buildWithdrawal: (...args: unknown[]) => buildWithdrawal(...args),
+}));
+
+vi.mock("./flows/merge.js", () => ({
+  buildMerge: (...args: unknown[]) => buildMerge(...args),
 }));
 
 vi.mock("./keys.js", () => ({
@@ -280,5 +285,85 @@ describe("buildRingsOperation ring-bound operations", () => {
     expect(result.inputNotes).toEqual([]);
     expect(result.lastValidBlockHeight).toBe("1000");
     expect(result.requiredSigners).toEqual([OWNER]);
+  });
+});
+
+describe("buildRingsOperation merge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    spendKeys.mockReturnValue({ destroy: destroyKeys });
+    hydrateWallet.mockResolvedValue({ wallet: { fake: "wallet" } });
+  });
+
+  function mergeInput(overrides: Partial<BuildOperationInput> = {}): BuildOperationInput {
+    const base = operationInput();
+    return {
+      ...base,
+      operation: {
+        ...base.operation,
+        opType: "merge",
+        input: {
+          walletId: "hrw_1",
+          opType: "merge",
+          // No amountRaw: a merge writes back whatever its notes already held.
+          asset: { mint: "So11111111111111111111111111111111111111112" },
+          clientNonce: "nonce_1",
+        },
+      },
+      ...overrides,
+    };
+  }
+
+  it("records the merged notes and floors the expiry on the pre-build blockhash", async () => {
+    buildMerge.mockResolvedValue({
+      transaction: compileTransaction(
+        pipe(
+          createTransactionMessage({ version: 0 }),
+          (message) => setTransactionMessageFeePayer(address(OWNER), message),
+          (message) =>
+            setTransactionMessageLifetimeUsingBlockhash(
+              { blockhash: BLOCKHASH as Blockhash, lastValidBlockHeight: 999n },
+              message
+            )
+        )
+      ),
+      inputNotes: ["note_1", "note_2"],
+    });
+
+    const buildDeps = deps();
+    const result = await buildRingsOperation(buildDeps, mergeInput({ pinnedInputs: ["note_1"] }));
+
+    expect(buildWithdrawal).not.toHaveBeenCalled();
+    const [, input] = buildMerge.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(input).toMatchObject({
+      mint: "So11111111111111111111111111111111111111112",
+      pinnedInputs: ["note_1"],
+    });
+    // The commitments come back so the operation can pin them; a rebuild then
+    // consolidates the same notes.
+    expect(result.inputNotes).toEqual(["note_1", "note_2"]);
+    // The builder blockhashes its own transaction, so the recorded expiry
+    // floors on the earlier read rather than the one inside it.
+    expect(result.lastValidBlockHeight).toBe("1000");
+  });
+
+  it("refuses a ring-pinned merge before the wallet read", async () => {
+    const buildDeps = deps();
+    const base = mergeInput();
+    const input = {
+      ...base,
+      ring: { programId: RING_PROGRAM, lookupTable: RING_LOOKUP_TABLE },
+      operation: { ...base.operation, ringProgramId: RING_PROGRAM },
+    };
+
+    // The protocol reserves a tag for a ring merge but ships no builder, so
+    // this is refused rather than routed. Unreachable through the route schema.
+    await expect(buildRingsOperation(buildDeps, input)).rejects.toMatchObject({
+      name: "HeliusRingsError",
+      code: "invalid_input",
+      message: "ring-bound notes cannot be merged; merge the default ring's notes instead",
+    });
+    expect(hydrateWallet).not.toHaveBeenCalled();
+    expect(buildMerge).not.toHaveBeenCalled();
   });
 });

@@ -2701,4 +2701,21 @@ describe("MoonPay ramp webhook", () => {
     );
     expect(res.status).toBe(401);
   });
+
+  it("refuses an oversized body before verifying its signature", async () => {
+    // The handler buffers the whole body to check the HMAC, so an unbounded
+    // body is unauthenticated work on this instance's memory. 413 rather than
+    // the 401 an unsigned request would otherwise get proves the refusal
+    // happens before the handler is reached.
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/moonpay",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Moonpay-Signature-V2": "t=1,s=deadbeef" },
+        body: "x".repeat(1024 * 1024 + 1),
+      },
+      env
+    );
+    expect(res.status).toBe(413);
+  });
 });
