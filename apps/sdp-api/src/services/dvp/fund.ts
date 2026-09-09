@@ -1,16 +1,4 @@
-/**
- * Moving SDP's own leg into escrow.
- *
- * The counterparty funds their leg with an ordinary `TransferChecked` and needs
- * nothing from us — that is the design, and it is what makes DvP easy to
- * integrate. But SDP holds the other leg, and until this existed nothing moved
- * it: completing a trade meant leaving DvP and sending a Payments transfer to
- * the escrow address by hand.
- *
- * The transfer itself is unremarkable. What matters is everything it refuses to
- * do, because each refusal prevents a hazard the trade cannot recover from.
- */
-
+/** Moving one side of a trade into escrow, from the custody wallet that owns that side's party address. */
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,
@@ -28,12 +16,9 @@ import {
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { findAssociatedTokenPda, getTransferCheckedInstruction } from "@solana-program/token-2022";
 import type { Context } from "hono";
-import {
-  createDvpTradeRepository,
-  type DvpTradeRow,
-  type DvpTradeSide,
-  type DvpTradeStatus,
-} from "@/db/repositories";
+import { getDb } from "@/db";
+import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
+import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { badRequest, conflict } from "@/lib/errors";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -41,7 +26,7 @@ import type { Env } from "@/types/env";
 import { readMintDecimals } from "./mints";
 import { readEscrowState } from "./read-chain";
 
-/** Statuses from which SDP's leg can still be funded. */
+/** Statuses from which a leg can still be funded. */
 const FUNDABLE: ReadonlySet<DvpTradeStatus> = new Set(["created", "partially_funded"]);
 
 export interface DvpFundResult {
@@ -54,7 +39,7 @@ export interface DvpFundResult {
 /** The addresses and target for one leg of a trade. */
 interface DvpSdpLeg {
   /** Which leg it is, carried out of the null check so callers need not redo it. */
-  side: "a" | "b";
+  side: DvpTradeSide;
   mint: Address;
   tokenProgram: Address;
   escrow: Address;
@@ -62,18 +47,7 @@ interface DvpSdpLeg {
 }
 
 /**
- * Resolves SDP's own leg of a trade.
- *
- * One place decides which side is ours, because the shortfall the approvals
- * queue displays and the shortfall the transfer sends have to be the same
- * number derived the same way.
- */
-/**
- * One leg of a trade by side, with no claim about who holds it.
- *
- * `sdpLegOf` answers "which leg is ours"; this answers "what is leg B", which
- * is the question a party funding its own leg has. Split so neither caller has
- * to know the other's rule.
+ * One leg of a trade by side; the custody lookup decides who may fund it.
  */
 export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
   const isA = side === "a";
@@ -86,53 +60,25 @@ export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
   };
 }
 
-function sdpLegOf(trade: DvpTradeRow): DvpSdpLeg {
-  // Guarded, not defaulted. `sdpSide` is null on an agent trade, and reading a
-  // missing side as "b" would fund a leg SDP holds no key for and does not owe.
-  // The caller refuses agent trades before reaching here; this is the second
-  // lock on the same door.
-  if (trade.sdpSide === null) {
-    throw badRequest(
-      `DvP trade ${trade.id} has no SDP leg to fund: it was created as an agent trade, so both legs are funded by their own parties.`
-    );
-  }
-  return legOfSide(trade, trade.sdpSide);
-}
-
 /**
- * How much of SDP's leg is still outstanding, per the chain right now.
- *
- * Exported for the policy extractor: an approver has to be shown the amount
- * that will actually move, and funding sends the shortfall rather than the
- * target. Returns 0n for a leg that is already at or above its target.
- *
- * @param env - API process environment, for the RPC.
- * @param trade - The trade whose SDP leg is being funded.
- * @returns The outstanding base-unit amount, never negative.
+ * The outstanding base-unit shortfall of one leg, per the chain now. Exported
+ * for the policy extractor — the approver is shown what will actually move.
  */
-export async function readDvpLegShortfall(env: Env, trade: DvpTradeRow): Promise<bigint> {
-  const leg = sdpLegOf(trade);
+export async function readDvpLegShortfall(
+  env: Env,
+  trade: DvpTradeRow,
+  side: DvpTradeSide
+): Promise<bigint> {
+  const leg = legOfSide(trade, side);
   const state = await readEscrowState(solanaRpc.createRpc(env), leg.escrow, leg.tokenProgram);
   const held = state?.amount ?? 0n;
   return held >= leg.amount ? 0n : leg.amount - held;
 }
 
 /**
- * Funds SDP's leg of a trade from the custody wallet that holds it.
- *
- * @param c - Request context, for the approved-operation effect fence.
- * @param trade - The trade whose SDP leg should be funded.
- * @returns The broadcast signature and what moved.
- */
-/**
- * Who signs a funding transfer, and where its lock lives.
- *
- * Extracted so the creating organization funding its own leg and a named party
- * funding theirs run the SAME code from the escrow read to the receipt. Every
- * safety property below — the pre-read, the shortfall, the frozen refusal, the
- * re-read before signing, the claim, the approval fence, the ambiguous-failure
- * rule — is identical for both, and none of it is specific to who is paying.
- * Two copies would be two places for those to drift.
+ * Who signs a funding transfer, and where its lock lives. One plan shape for
+ * every funder — creator and counterparty run the same safety properties, so
+ * they cannot drift apart.
  */
 export interface DvpFundingPlan {
   leg: DvpSdpLeg;
@@ -146,43 +92,66 @@ export interface DvpFundingPlan {
   recordFundingTx(signature: Signature): Promise<void>;
 }
 
-/** The creating organization funding the leg it holds. The original path. */
-export function sdpFundingPlan(env: Env, trade: DvpTradeRow): DvpFundingPlan {
-  const repository = createDvpTradeRepository(env);
+/**
+ * The funding plan for one side of a trade: leg, funder's wallet, and a claim
+ * on `dvp_leg_funding_claims` keyed (trade, side) and owned by the FUNDING
+ * org — opposite legs are different rows, so they never share a lock.
+ */
+export function fundingPlan(
+  env: Env,
+  trade: DvpTradeRow,
+  side: DvpTradeSide,
+  signer: { organizationId: string; projectId: string; custodyWalletId: string }
+): DvpFundingPlan {
+  const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   return {
-    leg: sdpLegOf(trade),
-    signer: {
-      organizationId: trade.organizationId,
-      projectId: trade.projectId,
-      custodyWalletId: trade.sdpWalletId,
-    },
+    leg: legOfSide(trade, side),
+    signer,
     claim: (signature, expiryHeight) =>
-      repository.claimLegFunding(trade.id, signature, expiryHeight),
-    release: (signature) => repository.releaseLegFunding(trade.id, signature),
-    recordFundingTx: (signature) => repository.recordLegFundingTx(trade.id, signature),
+      claims.claim({
+        tradeId: trade.id,
+        side,
+        organizationId: signer.organizationId,
+        projectId: signer.projectId,
+        custodyWalletId: signer.custodyWalletId,
+        signature,
+        expiryHeight,
+      }),
+    release: (signature) => claims.release(trade.id, side, signature),
+    recordFundingTx: (signature) => claims.recordFundingTx(trade.id, side, signature),
   };
 }
 
+/**
+ * Funds one side from the caller's already-resolved custody wallet. Mechanical
+ * by design: the custody lookup and re-read belong to the caller, so they run
+ * at the right point relative to the policy gate.
+ */
 export async function fundDvpTradeLeg(
   c: Context<{ Bindings: Env }>,
-  trade: DvpTradeRow
-): Promise<DvpFundResult> {
-  // Before the status check: an agent trade is never fundable from here at any
-  // status, and saying why beats "created and can no longer be funded".
-  if (trade.tradeKind === "agent") {
-    throw badRequest(
-      `DvP trade ${trade.id} is an agent trade. SDP holds neither leg, so each party funds its own escrow with an ordinary transfer.`
-    );
+  trade: DvpTradeRow,
+  params: {
+    side: DvpTradeSide;
+    custodyWalletId: string;
+    organizationId: string;
+    projectId: string;
   }
-
-  return executeDvpFunding(c, trade, sdpFundingPlan(c.env, trade));
+): Promise<DvpFundResult> {
+  return executeDvpFunding(
+    c,
+    trade,
+    fundingPlan(c.env, trade, params.side, {
+      organizationId: params.organizationId,
+      projectId: params.projectId,
+      custodyWalletId: params.custodyWalletId,
+    })
+  );
 }
 
 /**
  * Reads the escrow, sends the shortfall, and records what happened.
  *
- * Shared by every funder. The plan decides which leg, who signs and where the
- * lock lives; nothing below asks who is paying.
+ * Shared by every funder; nothing below asks who is paying.
  */
 export async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,

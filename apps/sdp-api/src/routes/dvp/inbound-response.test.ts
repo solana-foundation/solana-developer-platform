@@ -22,6 +22,15 @@ const SECRET_PROJECT = "prj_the_agent_desk";
 const SECRET_WALLET = "cwlt_the_agent_desk";
 const SECRET_IDEMPOTENCY = "idem_the_agent_desk";
 
+const USER_A = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
+const USER_B = "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk";
+
+/** The caller's custody map: it holds side B's address, matching `side: "b"`. */
+const CALLER_ADDRESSES = new Map<string, string>([
+  [USER_B, "cwlt_the_viewer"],
+  ["9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY", "cwlt_another_of_theirs"],
+]);
+
 function inbound(): DvpInboundTrade {
   const trade = {
     id: "dvp_inbound_1",
@@ -30,8 +39,8 @@ function inbound(): DvpInboundTrade {
     status: "created",
     swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
     settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
-    userA: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
-    userB: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
+    userA: USER_A,
+    userB: USER_B,
     mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
     tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -48,15 +57,14 @@ function inbound(): DvpInboundTrade {
     escrowBAmount: null,
     escrowAFrozen: false,
     escrowBFrozen: false,
-    userASettlementDestination: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
-    userBSettlementDestination: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
+    userASettlementDestination: USER_A,
+    userBSettlementDestination: USER_B,
     nonce: "42",
     expiryTimestamp: "1900000000",
     earliestSettlementTimestamp: null,
     refString: SECRET_REF,
-    sdpSide: null,
-    tradeKind: "agent",
-    sdpWalletId: SECRET_WALLET,
+    counterpartyAccountIdA: null,
+    counterpartyAccountIdB: null,
     idempotencyKey: SECRET_IDEMPOTENCY,
     createdAt: "2026-09-07T00:00:00.000Z",
     updatedAt: "2026-09-07T00:00:00.000Z",
@@ -68,16 +76,16 @@ function inbound(): DvpInboundTrade {
 
 describe("toDvpInboundResponse", () => {
   it("tells the party which leg is theirs and which address matched", () => {
-    const response = toDvpInboundResponse(inbound());
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
 
     expect(response.yourSide).toBe("b");
-    expect(response.yourParty).toBe("C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk");
+    expect(response.yourParty).toBe(USER_B);
   });
 
   // The escrow address is the entire integration for a party: without it there
   // is nothing they can act on and discovery is pointless.
   it("gives them the escrow to pay and the amount owed", () => {
-    const response = toDvpInboundResponse(inbound());
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
 
     expect(response.legs.b.escrow).toBe("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y");
     expect(response.legs.b.amount).toBe("250000000");
@@ -87,11 +95,30 @@ describe("toDvpInboundResponse", () => {
   // Everything above is on chain already. A party holding the PDA can decode
   // all of it, so withholding it would protect nothing and break the feature.
   it("passes through the terms, which are public on chain anyway", () => {
-    const response = toDvpInboundResponse(inbound());
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
 
     expect(response.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
     expect(response.legs.a.mint).toBe("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1");
     expect(response.expiryTimestamp).toBe("1900000000");
+  });
+
+  // The same party-object shape the creator's view uses — except attribution:
+  // which registered counterparty a party is belongs to the creating
+  // organization and never crosses to a party viewer, so it is null even
+  // though the property is present.
+  it("answers each leg's party as a derived object, custodied from the caller's own wallets", () => {
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
+
+    expect(response.legs.a.party).toEqual({
+      address: USER_A,
+      counterparty: null,
+      custodied: false,
+    });
+    expect(response.legs.b.party).toEqual({
+      address: USER_B,
+      counterparty: null,
+      custodied: true,
+    });
   });
 
   /**
@@ -107,18 +134,8 @@ describe("toDvpInboundResponse", () => {
     ["the creating org's custody wallet", SECRET_WALLET],
     ["the idempotency key", SECRET_IDEMPOTENCY],
   ])("does not disclose %s", (_label, secret) => {
-    const json = JSON.stringify(toDvpInboundResponse(inbound()));
+    const json = JSON.stringify(toDvpInboundResponse(inbound(), CALLER_ADDRESSES));
 
     expect(json).not.toContain(secret);
-  });
-
-  // Whether their settlement authority holds enough SOL is an operational fact
-  // about somebody else's deployment, and it is not on chain in this trade.
-  it("says nothing about the other organization's settlement readiness", () => {
-    const response = toDvpInboundResponse(inbound()) as unknown as Record<string, unknown>;
-
-    expect(response.settlementReadiness).toBeUndefined();
-    expect(response.sdpWallet).toBeUndefined();
-    expect(response.refString).toBeUndefined();
   });
 });

@@ -4,7 +4,8 @@
  * The interesting cases are the ones the status word alone gets wrong.
  * "Partially funded" is the same string whether you owe a leg or are waiting on
  * someone else, and telling an operator to fund a leg they already funded is
- * how you get an over-funded escrow.
+ * how you get an over-funded escrow. The parties' standing comes from the
+ * derived `kind` and each leg's `custodied`, never re-derived client-side.
  *
  * Asserts on the rendered English rather than translation keys, so a key that
  * exists in the component but not in the catalogue fails here.
@@ -14,62 +15,58 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { OTHER_ADDRESS, OWN_ADDRESS, testLeg, testTrade } from "./dvp.fixtures";
 import { DvpNextStep } from "./dvp-next-step";
-import type { DvpTrade, DvpTradeLeg, DvpTradeStatus } from "./dvp-trade";
-
-function leg(funded: boolean | null): DvpTradeLeg {
-  return {
-    party: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-    tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-    decimals: 6,
-    symbol: "ATD",
-    amount: "1000",
-    escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
-    settlementDestination: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
-    funding:
-      funded === null
-        ? null
-        : { observedAmount: funded ? "1000" : "0", funded, surplus: null, frozen: false },
-  };
-}
+import type { DvpTradeStatus } from "./dvp-trade";
 
 function trade({
   status,
-  sdpSide = "a",
-  ours = false,
-  theirs = false,
+  kind = "principal",
+  custodied = "none",
+  fundedA = "unset",
+  fundedB = "unset",
+  yourSide,
 }: {
   status: DvpTradeStatus;
-  sdpSide?: "a" | "b";
-  ours?: boolean | null;
-  theirs?: boolean | null;
-}): DvpTrade {
-  const ourLeg = leg(ours);
-  const theirLeg = leg(theirs);
-  return {
-    id: "dvp_1",
+  kind?: "principal" | "agent" | "bilateral";
+  /** Which sides the caller holds custody of, per the wire. */
+  custodied?: "a" | "b" | "both" | "none";
+  fundedA?: boolean | null | "unset";
+  fundedB?: boolean | null | "unset";
+  yourSide?: "a" | "b";
+}): ReturnType<typeof testTrade> {
+  const fundingFor = (value: boolean | null | "unset") =>
+    value === "unset"
+      ? null
+      : value === null
+        ? null
+        : { observedAmount: value ? "1000" : "0", funded: value, surplus: null, frozen: false };
+  return testTrade({
     status,
-    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
-    settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
-    legs: sdpSide === "a" ? { a: ourLeg, b: theirLeg } : { a: theirLeg, b: ourLeg },
-    sdpSide,
-    nonce: "42",
-    expiryTimestamp: "1900000000",
-    earliestSettlementTimestamp: null,
-    refString: null,
-    createSignature: null,
-    closeSignature: null,
-    sdpWallet: null,
-    settlementReadiness: null,
-    fundingSignature: null,
-    observedAt: null,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
-  };
+    kind,
+    yourSide,
+    legs: {
+      a: testLeg({
+        party: {
+          address: custodied === "a" || custodied === "both" ? OWN_ADDRESS : OTHER_ADDRESS,
+          counterparty: null,
+          custodied: custodied === "a" || custodied === "both",
+        },
+        funding: fundingFor(fundedA),
+      }),
+      b: testLeg({
+        party: {
+          address: custodied === "b" || custodied === "both" ? OWN_ADDRESS : OTHER_ADDRESS,
+          counterparty: null,
+          custodied: custodied === "b" || custodied === "both",
+        },
+        funding: fundingFor(fundedB),
+      }),
+    },
+  });
 }
 
-function renderStep(value: DvpTrade): string {
+function renderStep(value: ReturnType<typeof testTrade>): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DvpNextStep trade={value} />
@@ -77,9 +74,9 @@ function renderStep(value: DvpTrade): string {
   );
 }
 
-describe("DvpNextStep", () => {
+describe("DvpNextStep — principal", () => {
   it("tells you to fund your leg when neither side has", () => {
-    const html = renderStep(trade({ status: "created" }));
+    const html = renderStep(trade({ status: "created", custodied: "a" }));
 
     expect(html).toContain("Your leg is not funded yet");
     expect(html).toContain("The counterparty funds theirs");
@@ -88,42 +85,106 @@ describe("DvpNextStep", () => {
   // Same status word, opposite instruction. Getting this backwards would tell
   // someone to fund a leg they already funded, which over-funds the escrow.
   it("waits on the counterparty once your leg is funded", () => {
-    const html = renderStep(trade({ status: "partially_funded", ours: true }));
+    const html = renderStep(trade({ status: "partially_funded", custodied: "a", fundedA: true }));
 
     expect(html).toContain("Waiting on the counterparty");
     expect(html).not.toContain("Your leg is not funded yet");
   });
 
   it("says the counterparty has already paid when only your leg is missing", () => {
-    const html = renderStep(trade({ status: "partially_funded", theirs: true }));
+    const html = renderStep(trade({ status: "partially_funded", custodied: "a", fundedB: true }));
 
     expect(html).toContain("The counterparty has already funded");
   });
 
-  // Which leg is "ours" flips with the side. Reading the wrong one would invert
-  // the advice for every trade where SDP holds the cash.
-  it("reads the right leg as yours when you hold side B", () => {
-    const html = renderStep(trade({ status: "partially_funded", sdpSide: "b", ours: true }));
+  // Which leg is "ours" flips with the custodied side. Reading the wrong one
+  // would invert the advice for every trade where the caller holds the cash.
+  it("reads the right leg as yours when the caller holds side B", () => {
+    const html = renderStep(trade({ status: "partially_funded", custodied: "b", fundedB: true }));
 
     expect(html).toContain("Waiting on the counterparty");
   });
 
   it("offers settlement once both legs are funded", () => {
-    const html = renderStep(trade({ status: "funded", ours: true, theirs: true }));
+    const html = renderStep(
+      trade({ status: "funded", custodied: "a", fundedA: true, fundedB: true })
+    );
 
     expect(html).toContain("Ready to settle");
   });
+});
 
+describe("DvpNextStep — bilateral", () => {
+  it("says both legs are yours and to fund them", () => {
+    const html = renderStep(trade({ status: "created", kind: "bilateral", custodied: "both" }));
+
+    expect(html).toContain("Both legs are yours");
+    expect(html).toContain("Fund each one below");
+  });
+
+  it("still points at the outstanding leg when one of yours is funded", () => {
+    const html = renderStep(
+      trade({
+        status: "partially_funded",
+        kind: "bilateral",
+        custodied: "both",
+        fundedA: true,
+      })
+    );
+
+    expect(html).toContain("Both legs are yours");
+  });
+
+  it("offers settlement once both of your legs are funded", () => {
+    const html = renderStep(
+      trade({
+        status: "funded",
+        kind: "bilateral",
+        custodied: "both",
+        fundedA: true,
+        fundedB: true,
+      })
+    );
+
+    expect(html).toContain("Ready to settle");
+  });
+});
+
+describe("DvpNextStep — agent", () => {
+  it("waits on both parties, saying you hold neither leg", () => {
+    const html = renderStep(trade({ status: "created", kind: "agent" }));
+
+    expect(html).toContain("Waiting on both parties");
+    expect(html).toContain("You hold neither leg");
+  });
+});
+
+describe("DvpNextStep — party view", () => {
+  it("does not tell a party of another org's trade they hold neither leg", () => {
+    const html = renderStep(
+      trade({ status: "created", kind: "agent", custodied: "b", yourSide: "b" })
+    );
+
+    expect(html).toContain("Your leg is not funded yet");
+    expect(html).not.toContain("You hold neither leg");
+  });
+});
+
+describe("DvpNextStep — terminal states", () => {
   it("explains a trade that is past its expiry", () => {
-    expect(renderStep(trade({ status: "expired" }))).toContain("Past its expiry");
+    expect(renderStep(trade({ status: "expired", custodied: "a" }))).toContain("Past its expiry");
   });
 
   it("says nothing was created when the create failed", () => {
-    expect(renderStep(trade({ status: "create_failed" }))).toContain("never created");
+    expect(renderStep(trade({ status: "create_failed", custodied: "a" }))).toContain(
+      "never created"
+    );
   });
 
   it("says the create has not landed yet", () => {
-    expect(renderStep(trade({ status: "creating" }))).toContain("Waiting for the create to land");
+    expect(renderStep(trade({ status: "creating", custodied: "a" }))).toContain(
+      "Waiting for the create to land"
+    );
   });
 
   // A closed trade has no next step, and inventing one would be worse than the

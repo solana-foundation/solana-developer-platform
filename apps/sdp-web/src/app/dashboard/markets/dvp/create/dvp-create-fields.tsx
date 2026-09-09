@@ -7,6 +7,8 @@
  * without scrolling past the other seven.
  */
 
+import { SegmentedControl } from "@solana/design-system/segmented-control";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { TokenMark } from "@/components/token-mark";
 import { Input } from "@/components/ui/input";
@@ -15,9 +17,18 @@ import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { shortenAddress } from "../../../payments/payments-overview.utils";
 import { fromBaseUnits, toBaseUnits } from "./dvp-amount";
-import type { DvpCreateOption } from "./dvp-create.data";
+import type {
+  DvpCreateCounterpartyAccount,
+  DvpCreateOption,
+  DvpCreateWallet,
+} from "./dvp-create.data";
 import { CUSTOM } from "./use-dvp-create-form";
+import type { DvpPartySlot, DvpPartySlotMode } from "./use-dvp-parties";
+
+/** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
+const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** Mirrors MAX_REF_STRING_BYTES in `services/dvp/validate.ts`. */
 const MAX_REF_BYTES = 64;
@@ -306,176 +317,145 @@ export function AmountField({
 }
 
 /**
- * Which leg you deliver, as two cards rather than a dropdown.
+ * The three ways to name one party, as a segmented tab bar.
  *
- * It is the one choice on this form that reverses the direction of everything
- * else, and a collapsed dropdown shows the consequence of only the option you
- * already picked. Both are on screen, and each says what it means for you.
+ * The reference type is the only thing that differs between the two slots —
+ * picking ANY option fills the slot. The tabs keep all three visible so the
+ * choice reads as one control group rather than as three separate fields.
  */
+const SLOT_TABS = [
+  { mode: "wallet", labelKey: "DashboardMarkets.dvp.partySlotOurWallets" },
+  { mode: "counterparty", labelKey: "DashboardMarkets.dvp.partySlotCounterparties" },
+  { mode: "address", labelKey: "DashboardMarkets.dvp.partySlotPasteAddress" },
+] as const satisfies readonly { mode: DvpPartySlotMode; labelKey: MessageKey }[];
+
 /**
- * Whether this organization is a party to the trade, or only setting it up.
+ * One party slot: tabs to choose the reference kind, then the picker for it.
  *
- * An execution agent setting up the on-chain swap details and having two
- * counterparties do the swaps is the more common arrangement, and the program
- * always allowed it — CreateDvp's only signer is the payer — so this exposes a
- * shape that was already there rather than adding one.
- *
- * Same card grammar as the side chooser directly below it, because the two
- * questions are asked one after the other and reading as one control is the
- * point.
+ * Controlled: the slot value comes from the form's zod values and every change
+ * replaces the whole slot object, so a slot never holds a value from a
+ * reference kind it is not currently showing.
  */
-export function TradeKindChoice({
+export function PartySlotPicker({
+  counterpartyAccounts,
+  hint,
+  id,
+  label,
   onChange,
-  value,
+  slot,
+  wallets,
 }: {
-  onChange: (next: "principal" | "agent") => void;
-  value: "principal" | "agent";
+  counterpartyAccounts: DvpCreateCounterpartyAccount[];
+  hint: ReactNode;
+  id: string;
+  label: string;
+  onChange: (next: DvpPartySlot) => void;
+  slot: DvpPartySlot;
+  wallets: DvpCreateWallet[];
 }) {
   const t = useTranslations();
-  const options = [
-    {
-      kind: "principal" as const,
-      title: t("DashboardMarkets.dvp.kindPrincipalTitle"),
-      detail: t("DashboardMarkets.dvp.kindPrincipalDetail"),
-    },
-    {
-      kind: "agent" as const,
-      title: t("DashboardMarkets.dvp.kindAgentTitle"),
-      detail: t("DashboardMarkets.dvp.kindAgentDetail"),
-    },
-  ];
+
+  const addressLooksWrong =
+    slot.mode === "address" && slot.address.trim().length > 0 && !BASE58_ADDRESS.test(slot.address);
 
   return (
-    <fieldset className="grid gap-1.5">
-      <legend className="mb-1.5 font-medium text-primary text-sm">
-        {t("DashboardMarkets.dvp.fieldTradeKind")}
-      </legend>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {options.map((option) => {
-          const selected = value === option.kind;
-          return (
-            <label
-              className={cn(
-                "flex cursor-pointer gap-3 rounded-2xl border p-4 transition-colors",
-                "focus-within:ring-2 focus-within:ring-border-strong",
-                selected
-                  ? "border-primary bg-fill-subtle"
-                  : "border-border-default bg-surface-raised hover:bg-fill-subtle"
-              )}
-              key={option.kind}
+    <Field
+      hint={addressLooksWrong ? t("DashboardMarkets.dvp.fieldPartyAddressInvalid") : hint}
+      htmlFor={id}
+      label={label}
+    >
+      <div className="grid gap-3">
+        <SegmentedControl
+          aria-label={label}
+          items={SLOT_TABS.map((tab) => ({ value: tab.mode, label: t(tab.labelKey) }))}
+          onValueChange={(next) => {
+            if (next !== slot.mode) {
+              // Switching reference kinds starts the slot empty in that kind.
+              onChange(
+                next === "wallet"
+                  ? { mode: "wallet", walletId: "" }
+                  : next === "counterparty"
+                    ? { mode: "counterparty", counterpartyAccountId: "" }
+                    : { mode: "address", address: "" }
+              );
+            }
+          }}
+          value={slot.mode}
+        />
+        {slot.mode === "wallet" ? (
+          wallets.length === 0 ? (
+            // An empty picker with no explanation reads as a broken control;
+            // the notice says why there is nothing to choose and where to fix
+            // it, and the paste tab remains available either way.
+            <p className="rounded-lg border border-border-subtle bg-surface-sunken px-3 py-2 text-tertiary text-xs">
+              {t("DashboardMarkets.dvp.noWalletsTitle")}{" "}
+              <Link className="text-primary underline underline-offset-2" href="/dashboard/wallets">
+                {t("DashboardMarkets.dvp.noWalletsAction")}
+              </Link>
+            </p>
+          ) : (
+            <Select
+              ariaLabel={label}
+              onValueChange={(next) => onChange({ mode: "wallet", walletId: next ?? "" })}
+              value={slot.walletId}
             >
-              <input
-                checked={selected}
-                className="sr-only"
-                name="dvp-trade-kind"
-                onChange={() => onChange(option.kind)}
-                type="radio"
-                value={option.kind}
-              />
-              <span
-                aria-hidden
-                className={cn(
-                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
-                  selected ? "border-primary" : "border-border-strong"
-                )}
+              {wallets.map((wallet) => (
+                <SelectItem key={wallet.id} value={wallet.id}>
+                  {wallet.label ?? shortenAddress(wallet.address)}
+                </SelectItem>
+              ))}
+            </Select>
+          )
+        ) : null}
+        {slot.mode === "counterparty" ? (
+          counterpartyAccounts.length === 0 ? (
+            <p className="rounded-lg border border-border-subtle bg-surface-sunken px-3 py-2 text-tertiary text-xs">
+              {t("DashboardMarkets.dvp.noCounterpartiesHint")}{" "}
+              <Link
+                className="text-primary underline underline-offset-2"
+                href="/dashboard/payments/counterparty"
               >
-                {selected ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-medium text-primary text-sm">{option.title}</span>
-                <span className="mt-0.5 block text-tertiary text-xs leading-relaxed">
-                  {option.detail}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-}
-
-export function SideChoice({
-  assetSymbol,
-  cashSymbol,
-  onChange,
-  value,
-}: {
-  assetSymbol: string;
-  cashSymbol: string;
-  onChange: (next: "a" | "b") => void;
-  value: "a" | "b";
-}) {
-  const t = useTranslations();
-  const options = [
-    {
-      side: "a" as const,
-      title: t("DashboardMarkets.dvp.sideAssetTitle"),
-      detail: t("DashboardMarkets.dvp.sideAssetDetail", {
-        deliver: assetSymbol || t("DashboardMarkets.dvp.sideAsset"),
-        receive: cashSymbol || t("DashboardMarkets.dvp.sideCash"),
-      }),
-    },
-    {
-      side: "b" as const,
-      title: t("DashboardMarkets.dvp.sideCashTitle"),
-      detail: t("DashboardMarkets.dvp.sideCashDetail", {
-        deliver: cashSymbol || t("DashboardMarkets.dvp.sideCash"),
-        receive: assetSymbol || t("DashboardMarkets.dvp.sideAsset"),
-      }),
-    },
-  ];
-
-  return (
-    <fieldset className="grid gap-1.5">
-      <legend className="mb-1.5 font-medium text-primary text-sm">
-        {t("DashboardMarkets.dvp.fieldSide")}
-      </legend>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {options.map((option) => {
-          const selected = value === option.side;
-          return (
-            <label
-              className={cn(
-                "flex cursor-pointer gap-3 rounded-2xl border p-4 transition-colors",
-                "focus-within:ring-2 focus-within:ring-border-strong",
-                selected
-                  ? "border-primary bg-fill-subtle"
-                  : "border-border-default bg-surface-raised hover:bg-fill-subtle"
-              )}
-              key={option.side}
+                {t("DashboardMarkets.dvp.noCounterpartiesAction")}
+              </Link>
+            </p>
+          ) : (
+            <Select
+              ariaLabel={label}
+              onValueChange={(next) =>
+                onChange({ mode: "counterparty", counterpartyAccountId: next ?? "" })
+              }
+              value={slot.counterpartyAccountId}
             >
-              <input
-                checked={selected}
-                className="sr-only"
-                name="dvp-side"
-                onChange={() => onChange(option.side)}
-                type="radio"
-                value={option.side}
-              />
-              {/* A drawn radio, not just a tinted background. Which card is
-                  chosen has to survive a glance, and a fill this subtle does
-                  not read as "selected" on its own. */}
-              <span
-                aria-hidden
-                className={cn(
-                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
-                  selected ? "border-primary" : "border-border-strong"
-                )}
-              >
-                {selected ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-medium text-primary text-sm">{option.title}</span>
-                <span className="mt-1 block text-secondary text-xs leading-relaxed">
-                  {option.detail}
-                </span>
-              </span>
-            </label>
-          );
-        })}
+              {counterpartyAccounts.map((account) => (
+                <SelectItem
+                  key={account.counterpartyAccountId}
+                  value={account.counterpartyAccountId}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="truncate">{account.name}</span>
+                    {account.label ? (
+                      <span className="truncate text-tertiary text-xs">{account.label}</span>
+                    ) : null}
+                  </span>
+                </SelectItem>
+              ))}
+            </Select>
+          )
+        ) : null}
+        {slot.mode === "address" ? (
+          <Input
+            aria-invalid={addressLooksWrong}
+            className="font-mono text-xs"
+            id={id}
+            onChange={(event) => onChange({ mode: "address", address: event.target.value })}
+            placeholder="7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"
+            required
+            spellCheck={false}
+            value={slot.address}
+          />
+        ) : null}
       </div>
-    </fieldset>
+    </Field>
   );
 }
 

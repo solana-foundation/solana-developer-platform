@@ -8,10 +8,11 @@
  * names an escrow address that does not exist.
  */
 
-import { DVP_TRADE_KINDS, DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
 import {
   createDvpTradeSchema as createDvpTradeSchemaBase,
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
+  fundDvpTradeSchema as fundDvpTradeSchemaBase,
   listDvpTradesQuerySchema as listDvpTradesQuerySchemaBase,
 } from "../../routes/dvp/schemas";
 import { isoDateTimeSchema, withOpenApi, z } from "./base";
@@ -30,18 +31,47 @@ export const createDvpTradeRequestSchema = withOpenApi(createDvpTradeSchemaBase,
 
 export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase;
 
+export const fundDvpTradeRequestSchema = withOpenApi(fundDvpTradeSchemaBase, {
+  description:
+    "Names the leg to fund and, optionally, which of the caller's custody wallets pays from. The right to fund a side is holding an active custody wallet whose public key is that side's party address — derived at act time, never stored on the trade. An explicit walletId only narrows: it must hold the named side's address.",
+});
+
 const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
   description:
     "Last observed lifecycle state. The program emits no events and funding never invokes it, so this is a cache of a poll rather than an event log. `creating` means the create transaction was signed and recorded but its outcome is not yet known. `closed_unknown` means the on-chain account is gone but which terminal path closed it has not been determined.",
   example: "created",
 });
 
-const dvpTradeLegSchema = z
+export const dvpTradePartySchema = z
   .object({
-    party: z.string().openapi({
+    address: z.string().openapi({
       description: "Address of the party on this leg.",
       example: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
     }),
+    counterparty: z
+      .object({
+        id: z.string().openapi({
+          description: "The creator's counterparty account this party resolves to.",
+        }),
+        label: z.string().openapi({
+          description: "The linked counterparty's display name.",
+        }),
+      })
+      .nullable()
+      .openapi({
+        description:
+          "The creator's registered counterparty this party is, or null for an external address. Attribution is org-scoped: only callers in the CREATING organization see it — a viewer from another organization always gets null, even when the trade stores the link. An archived account also reads as null.",
+      }),
+    custodied: z.boolean().openapi({
+      description:
+        "Whether the CALLER holds an active custody wallet for this address. Derived per caller from the same custody map discovery and funding authorize against; never stored.",
+    }),
+  })
+  .openapi({ description: "One party of the trade, as the caller may see it." });
+
+const dvpTradeLegSchema = z
+  .object({
+    party: dvpTradePartySchema,
     mint: z.string().openapi({ description: "Mint delivered on this leg." }),
     tokenProgram: z.string().openapi({
       description:
@@ -82,6 +112,10 @@ const dvpTradeLegSchema = z
         description:
           "What the reconciler last observed in this escrow, or null before it has looked. Null is not zero.",
       }),
+    fundingSignature: z.string().nullable().openapi({
+      description:
+        "The transaction that moved this leg into escrow: the funding receipt when one exists, else the live claim's signature while a funding is still in flight (so an in-flight funding links to the transaction it is waiting on), else null. Funding claims are tenant-scoped to the funding organization, so an organization that cannot read the claim row gets null — never a guess.",
+    }),
   })
   .openapi({ description: "One leg of the trade." });
 
@@ -96,13 +130,9 @@ export const dvpTradeSchema = z
       description: "The only key that can settle, cancel or reject this trade.",
     }),
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
-    tradeKind: z.enum(DVP_TRADE_KINDS).openapi({
+    kind: z.enum(["agent", "principal", "bilateral"]).openapi({
       description:
-        "Whether this organization is a party to the trade. `principal`: a custody wallet delivers one leg. `agent`: the terms were set for two other parties and this organization delivers neither leg, though its wallet signs the create and pays the escrow rent.",
-    }),
-    sdpSide: z.enum(DVP_TRADE_SIDES).nullable().openapi({
-      description:
-        "Which leg the SDP custody wallet delivers, or null on an agent trade where it delivers neither. Always present on a principal trade.",
+        "The caller's standing on this trade, derived per caller and never stored. Display copy only: how many sides the caller holds an active custody wallet for — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. Follows the same custody map discovery and funding authorize against, so a wallet-scoped key's kind reflects its own bindings.",
     }),
     nonce: z.string().openapi({
       description:
@@ -134,14 +164,58 @@ export const dvpTradeResponseSchema = z.object({ trade: dvpTradeSchema });
 export const listDvpTradesResponseSchema = z.object({ trades: z.array(dvpTradeSchema) });
 
 /**
+ * One leg of an inbound trade, as a party who is not the author may see it.
+ *
+ * Deliberately NOT `dvpTradeLegSchema`: the author's view derives `funding`
+ * and `fundingSignature`, both of which belong to organizations that can read
+ * the row and its claims — a party gets the raw observation and null standing.
+ */
+const dvpInboundLegSchema = z
+  .object({
+    party: dvpTradePartySchema,
+    mint: z.string().openapi({ description: "Mint delivered on this leg." }),
+    tokenProgram: z.string().openapi({
+      description:
+        "Token program owning the mint. A single trade may legitimately mix legacy SPL and Token-2022.",
+    }),
+    amount: z.string().openapi({
+      description: "Exact amount in base units, as a decimal string (u64).",
+      example: "1000000",
+    }),
+    decimals: z.number().nullable().openapi({
+      description: "The mint's decimals, or null when the trade predates them being stored.",
+    }),
+    symbol: z.string().nullable().openapi({
+      description: "The mint's symbol, or null when it carries no metadata.",
+    }),
+    escrow: z.string().openapi({
+      description:
+        "Address to fund this leg. There is no funding instruction: a party funds by sending an ordinary TransferChecked of exactly `amount` to this address.",
+    }),
+    settlementDestination: z.string().openapi({
+      description:
+        "Address the counter-leg proceeds are delivered to at settlement. Verify it before funding.",
+    }),
+    observedAmount: z.string().nullable().openapi({
+      description:
+        "Last observed escrow balance, in base units, or null before the reconciler looked.",
+    }),
+    frozen: z.boolean().nullable().openapi({
+      description:
+        "Whether the escrow account was last observed frozen. Null before the reconciler looked, which is not the same as thawed.",
+    }),
+  })
+  .openapi({ description: "One leg of an inbound trade." });
+
+/**
  * A trade another organization created that names one of your addresses.
  *
  * Deliberately NOT `dvpTradeSchema`: the terms are public on chain and are
  * yours to read, but everything around them belongs to the creating
- * organization. `sdpWallet`, `refString`, `tradeKind`, `sdpSide`, `nonce`,
- * `createSignature` and `settlementReadiness` are all withheld, and the
- * serializer builds this shape from scratch rather than trimming the full one
- * so a field added there cannot leak here by default.
+ * organization. The counterparty attribution, funding claims, the derived
+ * `kind` and `settlementReadiness` are all withheld, and the serializer builds
+ * this shape from scratch rather than trimming the full one so a field added
+ * there cannot leak here by default.
  */
 export const dvpInboundTradeSchema = z
   .object({
@@ -159,7 +233,7 @@ export const dvpInboundTradeSchema = z
     yourParty: z.string().openapi({
       description: "Your address, as named on that leg.",
     }),
-    legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
+    legs: z.object({ a: dvpInboundLegSchema, b: dvpInboundLegSchema }),
     expiryTimestamp: z.string().openapi({
       description: "Unix seconds after which the trade can no longer settle, as a string (i64).",
     }),

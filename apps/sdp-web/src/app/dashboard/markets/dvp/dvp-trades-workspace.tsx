@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
@@ -32,6 +31,7 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
+import { DvpPartyCell } from "./dvp-party-cell";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
@@ -39,7 +39,6 @@ import {
   type DvpTradeStatus,
   formatLegAmount,
   frozenLegs,
-  isDvpAgentTrade,
   isDvpTradeClosed,
   matchesAddressQuery,
   overFundedLegs,
@@ -60,7 +59,7 @@ function LegCell({
 }: {
   closed: boolean;
   leg: DvpTradeLeg;
-  /** Whether this is the leg SDP delivers. */
+  /** Whether the caller holds custody of this leg's party address. */
   mine: boolean;
 }) {
   const t = useTranslations();
@@ -173,8 +172,8 @@ function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): b
     trade.legs.b.symbol,
     trade.legs.a.mint,
     trade.legs.b.mint,
-    trade.legs.a.party,
-    trade.legs.b.party,
+    trade.legs.a.party.address,
+    trade.legs.b.party.address,
   ]
     .filter(Boolean)
     .some((value) => matchesAddressQuery(String(value), needle));
@@ -209,11 +208,10 @@ function filterOwnTrades(trades: DvpTrade[], status: StatusFilter, needle: strin
  */
 function OwnTradeRow({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  // Who to show in the parties column. On a trade we are a party to that is the
-  // other side; on one we only set up it is both, because neither of them is us.
-  const parties = isDvpAgentTrade(trade)
-    ? [trade.legs.a.party, trade.legs.b.party]
-    : [trade.sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party];
+  // Both parties, each styled for how the API classifies it: a counterparty
+  // link when registered, a "yours" mark when the caller custodies the
+  // address, plain otherwise.
+  const parties = [trade.legs.a.party, trade.legs.b.party];
   // Marked on the row rather than announced in a banner: a warning that does not
   // say WHICH trade sends an operator through every row to find it.
   //
@@ -244,10 +242,10 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
         </Link>
       </TableCell>
       <TableCell>
-        <LegCell closed={closed} leg={trade.legs.a} mine={trade.sdpSide === "a"} />
+        <LegCell closed={closed} leg={trade.legs.a} mine={trade.legs.a.party.custodied} />
       </TableCell>
       <TableCell>
-        <LegCell closed={closed} leg={trade.legs.b} mine={trade.sdpSide === "b"} />
+        <LegCell closed={closed} leg={trade.legs.b} mine={trade.legs.b.party.custodied} />
       </TableCell>
       <TableCell className="text-secondary text-sm">
         {/* Shortened to read, copyable in full. A truncated address is not an
@@ -256,11 +254,7 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
             column for. */}
         <span className="grid gap-0.5">
           {parties.map((party) => (
-            <span className="inline-flex items-center gap-1" key={party}>
-              <span className="sr-only">{party}</span>
-              <span aria-hidden>{shortenAddress(party)}</span>
-              <WalletAddressCopyButton address={party} tooltip={party} />
-            </span>
+            <DvpPartyCell key={party.address} party={party} />
           ))}
         </span>
       </TableCell>

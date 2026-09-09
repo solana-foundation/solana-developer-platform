@@ -1,10 +1,10 @@
-import { address, signature } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { DvpTradeInsert, DvpTradeRepository } from "./dvp-trade.repository";
+import type { DvpInboundScope, DvpTradeInsert, DvpTradeRepository } from "./dvp-trade.repository";
 import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_dvp_repo_test";
@@ -13,14 +13,11 @@ const CUSTODY_CONFIG_ID = "cust_dvp_repo_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_repo_test";
 const OTHER_CUSTODY_WALLET_ID = "cwlt_dvp_repo_other";
 
-// Valid base58 signature strings (64 bytes encoded) for the signature-branded
-// repository columns. Each is distinct so the claim/release compare-and-swap
-// does not conflate them.
-const SIG_CLAIM = "2".repeat(88);
-const SIG_SECOND = "3".repeat(88);
-const SIG_CLOSE = "4".repeat(88);
-const SIG_FUND = "5".repeat(88);
-const SIG_RETRY = "6".repeat(88);
+// The public keys seeded into custody_wallets below. A wallet-scoped read
+// now admits trades where a bound wallet's public key is a PARTY
+// (user_a/user_b), so the trade seeds must name these addresses.
+const WALLET_A_PUBKEY = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
+const WALLET_B_PUBKEY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 
 // Deliberately above Number.MAX_SAFE_INTEGER (9007199254740991). The nonce is a
 // PDA seed, so if anything in the storage path routes it through a JS number it
@@ -36,8 +33,8 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     projectId: TEST_PROJECT_ID,
     swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
     settlementAuthority: address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY"),
-    userA: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
-    userB: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
+    userA: address(WALLET_A_PUBKEY),
+    userB: address(WALLET_B_PUBKEY),
     mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
     mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
     nonce: BIG_NONCE,
@@ -51,14 +48,13 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     amountB: "2000",
     expiryTimestamp: "1800003600",
     earliestSettlementTimestamp: null,
-    userASettlementDestination: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
-    userBSettlementDestination: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
+    userASettlementDestination: address(WALLET_A_PUBKEY),
+    userBSettlementDestination: address(WALLET_B_PUBKEY),
     refString: null,
     escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
     escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    sdpSide: "a" as const,
-    tradeKind: "principal" as const,
-    sdpWalletId: CUSTODY_WALLET_ID,
+    counterpartyAccountIdA: null,
+    counterpartyAccountIdB: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
@@ -83,6 +79,8 @@ describe("DvpTradeRepository (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.prepare("DELETE FROM dvp_trades").run();
+    await db.prepare("DELETE FROM counterparty_accounts").run();
+    await db.prepare("DELETE FROM counterparties").run();
     await db.prepare("DELETE FROM custody_wallets").run();
     await db.prepare("DELETE FROM custody_configs").run();
     await db.prepare("DELETE FROM projects").run();
@@ -118,16 +116,16 @@ describe("DvpTradeRepository (postgres)", () => {
     await db
       .prepare(
         `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'w1', '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn', 'active')`
+         VALUES (?, ?, 'w1', ?, 'active')`
       )
-      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID)
+      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_A_PUBKEY)
       .run();
     await db
       .prepare(
         `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'w2', '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg', 'active')`
+         VALUES (?, ?, 'w2', ?, 'active')`
       )
-      .bind(OTHER_CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID)
+      .bind(OTHER_CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_B_PUBKEY)
       .run();
 
     repo = createPostgresDvpTradeRepository(db);
@@ -141,8 +139,38 @@ describe("DvpTradeRepository (postgres)", () => {
 
     expect(created.status).toBe("creating");
     expect(created.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
-    expect(created.sdpSide).toBe("a");
+    expect(created.counterpartyAccountIdA).toBeNull();
+    expect(created.counterpartyAccountIdB).toBeNull();
     expect(created.createdAt).toBeTruthy();
+  });
+
+  it("round-trips counterparty account attribution", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+         VALUES ('cpty_attribution', ?, ?, 'individual', 'Ada')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO counterparty_accounts (id, organization_id, project_id, counterparty_id, account_kind)
+         VALUES ('cpa_test_attribution', ?, ?, 'cpty_attribution', 'crypto_wallet')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+
+    const created = await repo.create(
+      tradeInsert({ counterpartyAccountIdA: "cpa_test_attribution" })
+    );
+
+    expect(created.counterpartyAccountIdA).toBe("cpa_test_attribution");
+    expect(created.counterpartyAccountIdB).toBeNull();
+
+    const read = await repo.getById(scope, created.id);
+    expect(read?.counterpartyAccountIdA).toBe("cpa_test_attribution");
+    expect(read?.counterpartyAccountIdB).toBeNull();
   });
 
   it("resolves a creating trade to created once the broadcast is accepted", async () => {
@@ -344,23 +372,34 @@ describe("DvpTradeRepository (postgres)", () => {
     await expect(repo.create(tradeInsert({ id: "dvp_trade_test_2" }))).rejects.toThrow();
   });
 
-  // A trade names the custody wallet holding SDP's leg, so a wallet-scoped API
-  // key reading one for a wallet it is not bound to is reading outside its
-  // scope. The dangerous case is the empty list, which must deny rather than
-  // fall through to "no filter".
+  // A trade names two party addresses. A wallet-scoped API key is now admitted
+  // iff a bound wallet's public key is a PARTY (user_a or user_b), which is the
+  // correct reading of wallet scoping post-reshape. The dangerous case is the
+  // empty list, which must deny rather than fall through to "no filter".
   describe("wallet scope", () => {
+    // A third address that neither bound wallet's public key matches.
+    const UNRELATED_PUBKEY = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+    const UNRELATED_PUBKEY_2 = "DxR4Km2vQp8nRtYwZbCdFgHiJkLmNoPqRsTuVwXyZ12u";
+
     const bothTrades = async () => {
+      // dvp_mine names WALLET_A's public key as user_a — visible to a key
+      // bound to CUSTODY_WALLET_ID.
       await repo.create(
         tradeInsert({
           id: "dvp_mine",
           swapDvp: address("SwapA11111111111111111111111111111111111111"),
+          userA: address(WALLET_A_PUBKEY),
+          userB: address(UNRELATED_PUBKEY),
         })
       );
+      // dvp_theirs names neither bound wallet's public key — invisible to a
+      // key bound to either wallet.
       await repo.create(
         tradeInsert({
           id: "dvp_theirs",
           swapDvp: address("SwapB11111111111111111111111111111111111111"),
-          sdpWalletId: OTHER_CUSTODY_WALLET_ID,
+          userA: address(UNRELATED_PUBKEY),
+          userB: address(UNRELATED_PUBKEY_2),
         })
       );
     };
@@ -373,7 +412,7 @@ describe("DvpTradeRepository (postgres)", () => {
       expect(listed.map((t) => t.id).sort()).toEqual(["dvp_mine", "dvp_theirs"]);
     });
 
-    it("returns only the bound wallet's trades", async () => {
+    it("admits only trades where a bound wallet's public key is a party", async () => {
       await bothTrades();
 
       const listed = await repo.listByProject({ ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] }, 10);
@@ -399,102 +438,83 @@ describe("DvpTradeRepository (postgres)", () => {
     });
   });
 
-  /**
-   * A funding claim is kept through an ambiguous failure on purpose: the
-   * transfer may still land, and releasing it could invite a second transfer on
-   * top of a live one. What was missing is the end of "may still land" — past
-   * the signed transaction's last-valid height it provably cannot, and until
-   * this the claim was held forever and the leg was unfundable with a hand-edit
-   * as the only recovery.
-   */
-  describe("releaseExpiredFundingClaims", () => {
-    async function claimedTrade(expiryHeight: string) {
-      const created = await repo.create(tradeInsert());
-      await repo.resolveCreate(created.id, "created");
-      await repo.claimLegFunding(created.id, signature(SIG_CLAIM), expiryHeight);
-      return created.id;
-    }
+  describe("listInboundForParty", () => {
+    // A third address that neither bound wallet's public key matches.
+    const UNRELATED_PUBKEY = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+    const UNRELATED_PUBKEY_2 = "DxR4Km2vQp8nRtYwZbCdFgHiJkLmNoPqRsTuVwXyZ12u";
 
-    it("releases a claim whose transaction can no longer land", async () => {
-      const id = await claimedTrade("100");
-
-      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(1);
-      await expect(repo.getById(scope, id)).resolves.toMatchObject({
-        sdpLegFundingSignature: null,
-      });
+    const inboundScope = (partyAddresses: Address[]): DvpInboundScope => ({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      partyAddresses,
     });
 
-    // Inside the window the transfer may still be in flight, and clearing the
-    // claim there is what would let a second one go out on top of it.
-    it("leaves a claim alone while its transaction could still land", async () => {
-      const id = await claimedTrade("300");
+    // The list only answers for open statuses, so each seeded trade is advanced
+    // to `created` the way a real create would leave it.
+    const createdForeignTrade = (id: string, swapDvp: string, userA: Address, userB: Address) =>
+      repo
+        .create(
+          tradeInsert({
+            id,
+            projectId: OTHER_PROJECT_ID,
+            swapDvp: address(swapDvp),
+            userA,
+            userB,
+          })
+        )
+        .then((trade) => repo.resolveCreate(trade.id, "created"));
 
-      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
-      await expect(repo.getById(scope, id)).resolves.toMatchObject({
-        sdpLegFundingSignature: SIG_CLAIM,
-      });
+    it("returns nothing when the caller holds no wallets", async () => {
+      await expect(repo.listInboundForParty(inboundScope([]), 10)).resolves.toEqual([]);
     });
 
-    // A released claim is fundable again, which is the whole point.
-    it("lets the leg be claimed again once released", async () => {
-      const id = await claimedTrade("100");
-      await repo.releaseExpiredFundingClaims(200n);
-
-      await expect(repo.claimLegFunding(id, signature(SIG_SECOND), "400")).resolves.toBe(true);
-    });
-
-    it("does not touch a claim on a trade that has closed", async () => {
-      const id = await claimedTrade("100");
-      await repo.recordClose(id, "settled", signature(SIG_CLOSE));
-
-      await expect(repo.releaseExpiredFundingClaims(200n)).resolves.toBe(0);
-    });
-  });
-
-  /**
-   * The receipt for the transfer that funded SDP's leg.
-   *
-   * The claim above cannot serve as this. Its whole purpose is to disappear —
-   * released on a rejected broadcast, swept once its blockhash expires — so a
-   * leg that funded correctly holds no claim at all. Reading it as the funding
-   * record left a funded leg with no transaction to point at, and a leg with no
-   * transaction reads as a leg that never funded.
-   */
-  describe("recordLegFundingTx", () => {
-    it("keeps the transaction after the claim that guarded it is swept", async () => {
-      const created = await repo.create(tradeInsert());
-      await repo.resolveCreate(created.id, "created");
-      await repo.claimLegFunding(created.id, signature(SIG_FUND), "100");
-      await repo.recordLegFundingTx(created.id, signature(SIG_FUND));
-
-      await repo.releaseExpiredFundingClaims(200n);
-
-      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
-        sdpLegFundingSignature: null,
-        sdpLegFundingTx: SIG_FUND,
-      });
-    });
-
-    // The leg has to be fundable again after a sweep, and the receipt must not
-    // be what stops it.
-    it("does not hold the claim open", async () => {
-      const created = await repo.create(tradeInsert());
-      await repo.resolveCreate(created.id, "created");
-      await repo.claimLegFunding(created.id, signature(SIG_FUND), "100");
-      await repo.recordLegFundingTx(created.id, signature(SIG_FUND));
-      await repo.releaseExpiredFundingClaims(200n);
-
-      await expect(repo.claimLegFunding(created.id, signature(SIG_RETRY), "400")).resolves.toBe(
-        true
+    it("returns nothing when no caller address is a party to any foreign trade", async () => {
+      await createdForeignTrade(
+        "dvp_inbound_unrelated",
+        "SwapU11111111111111111111111111111111111111",
+        address(WALLET_B_PUBKEY),
+        address(UNRELATED_PUBKEY)
       );
+
+      // The caller holds WALLET_A only; the foreign trade names WALLET_B.
+      await expect(
+        repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
+      ).resolves.toEqual([]);
     });
 
-    it("is null on a trade whose leg was never funded", async () => {
-      const created = await repo.create(tradeInsert());
+    it("excludes the caller's own project, where the trade is already listed", async () => {
+      await repo.create(
+        tradeInsert({
+          id: "dvp_inbound_own_project",
+          swapDvp: address("SwapW11111111111111111111111111111111111111"),
+          userA: address(WALLET_A_PUBKEY),
+          userB: address(UNRELATED_PUBKEY),
+        })
+      );
+      await repo.resolveCreate("dvp_inbound_own_project", "created");
 
-      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
-        sdpLegFundingTx: null,
-      });
+      await expect(
+        repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
+      ).resolves.toEqual([]);
+    });
+
+    it("returns a foreign trade naming the caller's address, and not an unrelated foreign one", async () => {
+      await createdForeignTrade(
+        "dvp_inbound_mine",
+        "SwapM11111111111111111111111111111111111111",
+        address(WALLET_A_PUBKEY),
+        address(UNRELATED_PUBKEY)
+      );
+      await createdForeignTrade(
+        "dvp_inbound_theirs",
+        "SwapT11111111111111111111111111111111111111",
+        address(UNRELATED_PUBKEY),
+        address(UNRELATED_PUBKEY_2)
+      );
+
+      const listed = await repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10);
+
+      expect(listed.map((trade) => trade.id)).toEqual(["dvp_inbound_mine"]);
     });
   });
 });
