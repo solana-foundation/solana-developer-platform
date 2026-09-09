@@ -64,9 +64,12 @@ function earnMovementEntry(
 ): AuditLogEntry {
   return {
     organizationId: actor.organizationId,
-    // `log()` falls back to the request context for absent actor fields. The
-    // caller passes the actor explicitly (the row's values on a withdrawal, the
-    // request's auth on a deposit, see the header) so that fallback never runs.
+    // `log()` falls back to the request context for absent actor fields, and a
+    // null here becomes `undefined`, so that fallback DOES evaluate for a null
+    // user or key. It cannot pick a different actor: the caller passes the
+    // actor explicitly (the row's values on a withdrawal, the request's auth on
+    // a deposit, see the header), and the request contexts are mutually
+    // exclusive, so whatever the fallback finds is the same principal.
     userId: actor.userId ?? undefined,
     apiKeyId: actor.apiKeyId ?? undefined,
     action,
