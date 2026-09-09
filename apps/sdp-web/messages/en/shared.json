@@ -1,4 +1,28 @@
 {
+  "quickStart": {
+    "backToForm": "Back to form",
+    "later": "Do this later",
+    "preparing": "Preparing your workspace…",
+    "syncDelayed": "Setup is taking a little longer. Try again in a moment.",
+    "accessDelayed": "Workspace access isn’t ready. Try again, or ask your organization admin to check your access.",
+    "serviceDelayed": "We couldn’t reach your workspace. Please try again.",
+    "retry": "Retry",
+    "title": "Quick start",
+    "progress": "Step {current} of {total}",
+    "optional": "Optional",
+    "skip": "Skip quick start",
+    "minimize": "Minimize quick start",
+    "apiKeyTitle": "Create an API key",
+    "apiKeyDescription": "Connect your app to SDP with an API key.",
+    "haveApiKey": "I already have an API key",
+    "walletTitle": "Create a wallet",
+    "walletDescription": "Create a wallet for testing, or use one you already have.",
+    "skipWallet": "Skip this step",
+    "faucetTitle": "Get test USDC",
+    "faucetDescription": "Choose USDC and Solana Devnet in Circle’s faucet, then paste your wallet address. Test funds have no monetary value.",
+    "openFaucet": "Open USDC faucet",
+    "finish": "Finish quick start"
+  },
   "tabs": {
     "overview": "Overview",
     "apiPlayground": "API Playground"
@@ -251,7 +275,7 @@
     "createFirstWalletActivity": "Create your first wallet to start tracking balances and activity.",
     "noRecentActivity": "No recent activity found yet.",
     "loadingRecentActivity": "Loading recent activity...",
-    "createWallet": "Create Wallet",
+    "createWallet": "Create a wallet",
     "totalBalance": "Total Balance",
     "todaysVolume": "Today's Volume",
     "walletsTracked": "Wallets",

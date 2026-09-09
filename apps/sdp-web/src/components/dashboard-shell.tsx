@@ -77,6 +77,7 @@ import {
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -845,7 +846,9 @@ export function DashboardShell({
         <section
           className={[
             "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
-            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
+            shouldLockViewportScroll
+              ? "flex min-h-0 flex-col overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+              : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
           <div
@@ -918,9 +921,7 @@ export function DashboardShell({
                 contentWidthClass,
                 // Clears the fixed mobile bottom bar so the last row of any page is
                 // still reachable; the bar is md:hidden, so the padding is too.
-                pathname === "/dashboard/issuance/create" || !shouldLockViewportScroll
-                  ? "pb-20 md:pb-0"
-                  : "",
+                !shouldLockViewportScroll ? "pb-20 md:pb-0" : "",
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",
@@ -942,6 +943,9 @@ export function DashboardShell({
               )}
             </div>
           </div>
+          {!isWorkspaceSwitching && !isMobileSidebarOpen && !isMoreSheetOpen ? (
+            <DashboardQuickStart docked={shouldLockViewportScroll} />
+          ) : null}
         </section>
       </div>
     </main>

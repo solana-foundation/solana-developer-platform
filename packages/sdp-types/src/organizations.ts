@@ -25,6 +25,18 @@ export const ORGANIZATION_RPC_PROVIDERS = [
 ] as const;
 export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
 
+export const DASHBOARD_QUICK_START_STEPS = ["api-key", "wallet", "faucet", "done"] as const;
+export type DashboardQuickStartStep = (typeof DASHBOARD_QUICK_START_STEPS)[number];
+
+/** Progress is monotonic so late responses or stale tabs cannot reopen setup. */
+export function advanceQuickStartProgress(
+  current: unknown,
+  incoming: unknown
+): DashboardQuickStartStep {
+  const ranks: readonly unknown[] = DASHBOARD_QUICK_START_STEPS;
+  return DASHBOARD_QUICK_START_STEPS[Math.max(0, ranks.indexOf(current), ranks.indexOf(incoming))];
+}
+
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx
   name: string;
@@ -37,6 +49,8 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
+  /** Optional dashboard guide; independent of legacy provider setup. */
+  quickStartStep?: DashboardQuickStartStep;
   rpcProvider?: OrganizationRpcProvider;
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;

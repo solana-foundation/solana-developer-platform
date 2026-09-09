@@ -112,6 +112,32 @@ describe("Organization access settings", () => {
     await clearKVStores(env);
   });
 
+  describe("optional dashboard quick start", () => {
+    it("does not let a stale browser regress saved progress", async () => {
+      await seedOrganization({ quickStartStep: "done" });
+      const res = await patch({ settings: { quickStartStep: "wallet" } });
+      expect(res.status).toBe(200);
+      expect((await readSettings())?.quickStartStep).toBe("done");
+    });
+    it("persists completion without requiring a wallet or changing other settings", async () => {
+      await seedOrganization({ defaultEnvironment: "sandbox", rpcProvider: "default" });
+      const res = await patch({ settings: { quickStartStep: "done" } });
+      expect(res.status).toBe(200);
+      expect(await readSettings()).toEqual({
+        defaultEnvironment: "sandbox",
+        rpcProvider: "default",
+        quickStartStep: "done",
+      });
+    });
+
+    it("rejects an unknown quick-start step", async () => {
+      await seedOrganization(null);
+      const res = await patch({ settings: { quickStartStep: "unknown" } });
+      expect(res.status).toBe(400);
+      expect(await readSettings()).toBeNull();
+    });
+  });
+
   describe("writing settings.allowedIpAddresses", () => {
     beforeEach(async () => {
       await seedOrganization(null);

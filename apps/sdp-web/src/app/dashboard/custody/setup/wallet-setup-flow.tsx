@@ -23,7 +23,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
 
 type SetupStep = "provider" | "details";
 
@@ -196,6 +198,7 @@ export function WalletSetupFlow({
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
+  const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const availability = useMemo(
     () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
@@ -284,6 +287,9 @@ export function WalletSetupFlow({
           return;
         }
 
+        if (selectedProjectId) {
+          completeQuickStartStep(quickStartKey(dashboardCacheScope, selectedProjectId), "wallet");
+        }
         router.refresh();
         router.push("/dashboard/wallets");
       } finally {
