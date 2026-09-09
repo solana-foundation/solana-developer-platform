@@ -156,6 +156,68 @@ describe("OperationComposer ring selection", () => {
     );
   });
 
+  it("hides the Move tab while the project has no custom rings", () => {
+    renderComposer([]);
+    expect(screen.queryByRole("tab", { name: "Move" })).toBeNull();
+  });
+
+  it("maps From=ring, To=default ring to a ring_exit naming that ring", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Move" }));
+    await fillShield(user);
+    await user.click(screen.getByRole("combobox", { name: "From" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        opType: "ring_exit",
+        ring: "treasury",
+        asset: {
+          mint: "So11111111111111111111111111111111111111112",
+          amountRaw: "1500000000",
+        },
+      })
+    );
+    // Self-only: a move never carries a recipient.
+    expect(mocks.prepareRingsOperation.mock.calls[0]?.[0]?.to).toBeUndefined();
+  });
+
+  it("maps From=default ring, To=ring to a ring_entry", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Move" }));
+    await fillShield(user);
+    await user.click(screen.getByRole("combobox", { name: "To" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ opType: "ring_entry", ring: "treasury" })
+    );
+  });
+
+  it("disables review and explains while both sides are custom rings", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Move" }));
+    await fillShield(user);
+    await user.click(screen.getByRole("combobox", { name: "From" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+    await user.click(screen.getByRole("combobox", { name: "To" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+
+    expect(screen.getByText(/Ring-to-ring moves aren't supported yet/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review" }).hasAttribute("disabled")).toBe(true);
+    expect(mocks.prepareRingsOperation).not.toHaveBeenCalled();
+  });
+
   it("forgets a ring choice when the operation changes tab", async () => {
     renderComposer([ACTIVE_RING]);
 

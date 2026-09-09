@@ -34,9 +34,12 @@ export function protocolMint(sdpMintValue: string): string {
  */
 export function requireProtocolSol(
   mint: string,
-  opType: "withdrawal" | "transfer" | "merge"
+  opTypeLabel: "withdrawals" | "transfers" | "merges" | "ring exits" | "ring entries"
 ): void {
   if (protocolMint(mint) !== PROTOCOL_NATIVE_MINT) {
-    throw new HeliusRingsError("invalid_input", `only SOL ${opType}s are supported in this build`);
+    throw new HeliusRingsError(
+      "invalid_input",
+      `only SOL ${opTypeLabel} are supported in this build`
+    );
   }
 }

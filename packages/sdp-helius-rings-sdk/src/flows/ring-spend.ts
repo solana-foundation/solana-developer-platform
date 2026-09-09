@@ -1,6 +1,8 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import {
+  buildRingEntryTransaction,
+  buildRingExitTransaction,
   buildRingTransferTransaction,
   buildRingWithdrawalTransaction,
 } from "@heliuslabs/zolana/ring";
@@ -63,7 +65,7 @@ export async function buildRingWithdrawalTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: string }
 ): Promise<Transaction> {
-  requireProtocolSol(input.mint, "withdrawal");
+  requireProtocolSol(input.mint, "withdrawals");
 
   return buildRingWithdrawalTransaction({
     ...ringSpendArgs(deps, input),
@@ -81,10 +83,42 @@ export async function buildRingTransferTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: ShieldedAddress }
 ): Promise<Transaction> {
-  requireProtocolSol(input.mint, "transfer");
+  requireProtocolSol(input.mint, "transfers");
 
   return buildRingTransferTransaction({
     ...ringSpendArgs(deps, input),
     recipient: input.recipient,
   });
+}
+
+/**
+ * Ring → default pool, the wallet's own note on both sides. The recipient is
+ * the wallet's OWN lifted `ShieldedAddress`: the builder would accept any
+ * recipient, so the self-only rule is this integration's, enforced by the
+ * caller passing `material.shieldedAddress` and nothing else. The full address
+ * skips the builder's on-chain registry lookup, like the transfer above.
+ */
+export async function buildRingExitTx(
+  deps: RingSpendDeps,
+  input: RingSpendInput & { recipient: ShieldedAddress }
+): Promise<Transaction> {
+  requireProtocolSol(input.mint, "ring exits");
+
+  return buildRingExitTransaction({
+    ...ringSpendArgs(deps, input),
+    recipient: input.recipient,
+  });
+}
+
+/**
+ * Default pool → ring, self-only by construction: the builder always sends to
+ * its own keys' address, so no recipient parameter exists to misuse.
+ */
+export async function buildRingEntryTx(
+  deps: RingSpendDeps,
+  input: RingSpendInput
+): Promise<Transaction> {
+  requireProtocolSol(input.mint, "ring entries");
+
+  return buildRingEntryTransaction(ringSpendArgs(deps, input));
 }

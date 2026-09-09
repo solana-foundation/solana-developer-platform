@@ -512,6 +512,26 @@ function ringWithdrawalPolicy(
   });
 }
 
+function ringMovePolicy(
+  opType: "ring_exit" | "ring_entry",
+  outerUnsignedTxBase64: string,
+  overrides: Partial<
+    Extract<OuterTransactionPolicyInput["intent"], { opType: "ring_exit" | "ring_entry" }>
+  > = {}
+): OuterTransactionPolicyInput {
+  return {
+    outerUnsignedTxBase64,
+    owner: OWNER,
+    intent: {
+      opType,
+      mint: SDP_SOL,
+      amountRaw: "10",
+      ring: { programId: RING_PROGRAM, lookupTable: RING_LOOKUP_TABLE },
+      ...overrides,
+    },
+  };
+}
+
 /**
  * Appends an index to one of the message's lookup lists without touching any
  * instruction — exactly the "unreferenced account rides along" shape the gate
@@ -1209,6 +1229,20 @@ describe("validateOuterTransaction", () => {
       ).resolves.toBeUndefined();
     });
 
+    it.each(["ring_exit", "ring_entry"] as const)(
+      "accepts a transfer-shaped ring transact under a %s intent",
+      async (opType) => {
+        // Exit and entry compile through the same builder path as a ring
+        // transfer: one tag-3 transact, no public settlement. The direction
+        // lives in encrypted outputs the gate cannot read.
+        await expect(
+          validateOuterTransaction(
+            ringMovePolicy(opType, await ringSpendWire(await ringTransfer()))
+          )
+        ).resolves.toBeUndefined();
+      }
+    );
+
     it.each([
       [
         "the pool transact tag in place of the ring tag",
@@ -1306,6 +1340,23 @@ describe("validateOuterTransaction", () => {
           ringTransferPolicy(
             addLookupIndex(await ringSpendWire(await ringTransfer()), "readonlyIndexes", 0)
           ),
+      ],
+      [
+        "a public settlement on a ring move",
+        async () => ringMovePolicy("ring_exit", await ringSpendWire(await ringWithdrawal())),
+      ],
+      [
+        "a ring move compressed over a different ring's table",
+        async () =>
+          ringMovePolicy(
+            "ring_entry",
+            await ringSpendWire(await ringTransfer(), { lookupTable: OTHER })
+          ),
+      ],
+      [
+        "a non-SOL requested mint on a ring move",
+        async () =>
+          ringMovePolicy("ring_entry", await ringSpendWire(await ringTransfer()), { mint: MINT }),
       ],
     ])("rejects %s", async (_case, buildInput) => {
       await expectPolicyRejection(await buildInput());

@@ -95,6 +95,21 @@ export type OuterTransactionPolicyIntent =
        */
       opType: "merge";
       mint: string;
+    }>
+  /**
+   * A ring move: the wallet's own funds cross between the named ring and the
+   * default pool, ring_exit out of it, ring_entry into it. Always ring-bound,
+   * so `ring` is required. The wire is transfer-shaped — no public settlement;
+   * amount, recipient, and destination pool live in encrypted outputs and are
+   * bound by construction in the SDK (entry is self-only in the builder, an
+   * exit's recipient is the wallet's own lifted shielded address), not proved
+   * here. See docs/ops/helius-rings.md, "Semantics worth knowing".
+   */
+  | Readonly<{
+      opType: "ring_exit" | "ring_entry";
+      mint: string;
+      amountRaw: string;
+      ring: Readonly<{ programId: string; lookupTable: string }>;
     }>;
 
 /** Kit-neutral DTO accepted at the SDK/API major-version boundary. */
@@ -602,16 +617,19 @@ function expectRingLookups(
 
 type SpendPolicyIntent = Extract<
   OuterTransactionPolicyIntent,
-  { opType: "transfer_registered" } | { opType: "withdraw" }
+  | { opType: "transfer_registered" }
+  | { opType: "withdraw" }
+  | { opType: "ring_exit" | "ring_entry" }
 >;
 
 /**
- * The public settlement a spend's wire must carry: none on a transfer,
- * exactly the approved recipient and amount on a withdraw. Returns what the
- * settlement appends to the transact's common account and static lists. A
- * transfer's recipient and amount are encrypted in the wire and only checked
- * for well-formedness here; where they ARE bound differs by rail (see
- * docs/ops/helius-rings.md, "Semantics worth knowing").
+ * The public settlement a spend's wire must carry: exactly the approved
+ * recipient and amount on a withdraw, none on anything else (transfers and
+ * ring moves settle shielded). Returns what the settlement appends to the
+ * transact's common account and static lists. A shielded spend's recipient and
+ * amount are encrypted in the wire and only checked for well-formedness here;
+ * where they ARE bound differs by rail (see docs/ops/helius-rings.md,
+ * "Semantics worth knowing").
  */
 function expectPublicSettlement(
   intent: SpendPolicyIntent,
@@ -620,7 +638,7 @@ function expectPublicSettlement(
   extraAccounts: readonly AccountExpectation[];
   extraStatics: readonly string[];
 }> {
-  if (intent.opType === "transfer_registered") {
+  if (intent.opType !== "withdraw") {
     requiredAddress(intent.mint);
     requiredAmount(intent.amountRaw);
     if (interfaceTransfers.length !== 0) mismatch();

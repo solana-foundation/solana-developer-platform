@@ -134,7 +134,16 @@ export interface WalletIdentityResult extends ReadIdentityResult {
 }
 
 /** Op types that consume notes, and so can duplicate a payment. */
-const SPEND_OP_TYPES = new Set<string>(["transfer_registered", "withdraw", "merge"]);
+const SPEND_OP_TYPES = new Set<string>([
+  "transfer_registered",
+  "withdraw",
+  "merge",
+  "ring_exit",
+  "ring_entry",
+]);
+
+/** The two ring moves: value crossing between a custom ring and the default pool. */
+const RING_MOVE_OP_TYPES = new Set<string>(["ring_exit", "ring_entry"]);
 
 /**
  * Why a paused wallet is not read. Says what to do about it, because the state
@@ -789,6 +798,11 @@ export class HeliusRingsService {
     // A retry re-runs the pinned ring, never the selector: the approver and
     // the failed attempt both saw a resolved id, and that is what re-runs.
     const ringProgramId = retry ? retry.ringProgramId : await this.resolveRing(input.ring);
+    // Defense in depth behind the route schema's required custom ring: a ring
+    // move pinned to the default pool has no boundary to cross.
+    if (RING_MOVE_OP_TYPES.has(input.opType) && ringProgramId === null) {
+      throw new HeliusRingsError("invalid_input", "a ring move names a custom ring");
+    }
     const intentKey = computeIntentKey(input, ringProgramId);
     const selectedConnectionId =
       ringsConnectionId === undefined ? await this.resolveConnectionId() : ringsConnectionId;
@@ -1886,6 +1900,20 @@ function requiredOuterPolicyField(value: string | null): string {
   return value;
 }
 
+/** Like {@link requiredOuterPolicyField}, for the op types whose ring pair is mandatory. */
+function requiredOuterPolicyRing(ring: { programId: string; lookupTable: string } | null): {
+  programId: string;
+  lookupTable: string;
+} {
+  if (!ring) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      "the persisted Rings operation is missing final-wire policy context"
+    );
+  }
+  return ring;
+}
+
 /** The 409 both ring-reservation paths raise on UNIQUE(project_id, ring_program_id). */
 function programInUseError(): HeliusRingsError {
   return new HeliusRingsError(
@@ -1946,6 +1974,19 @@ function outerTransactionPolicyInput(
         outerUnsignedTxBase64,
         owner,
         intent: { opType: "merge", mint },
+      };
+    case "ring_exit":
+    case "ring_entry":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: {
+          opType: operation.op_type,
+          ...common(),
+          // Never the optional spread: a ring move without its ring pair is
+          // missing the very thing the gate validates.
+          ring: requiredOuterPolicyRing(ring),
+        },
       };
     default:
       throw new HeliusRingsError(
