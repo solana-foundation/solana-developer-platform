@@ -8,10 +8,16 @@ import type { AppContext } from "../context";
 /**
  * Audit-ledger parity for earn money movements (PRO-1866).
  *
- * Every earn money write lands one hash-chained audit event whose actor is
- * the movement row's own attribution (`created_by`/`initiated_by_key_id`),
- * passed explicitly so the two records cannot disagree: the audit feed and
- * the wire-level movement must name the same key or user.
+ * Every earn money write lands one hash-chained audit event naming the same
+ * actor as its movement row, reached two different ways. WITHDRAWALS read the
+ * actor off the row itself (`created_by`/`initiated_by_key_id`), because the
+ * row exists by the time the post-effect audit is written. DEPOSITS are
+ * admitted BEFORE any movement row exists, so their intent carries the
+ * request's own auth (`auth.userId`/`auth.apiKeyId`), which is exactly what
+ * the service then writes into the row: same source, so the two agree, but
+ * the audit is not copied FROM the row on that path. Passing the values
+ * explicitly in both cases keeps `log()` from falling back to a context that
+ * could name a different actor.
  *
  * The two directions deliberately take different failure postures, the same
  * asymmetry the metered quotas follow (routes/earn/CLAUDE.md):
