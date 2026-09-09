@@ -11,6 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import {
   initializeQuickStart,
   quickStartKey,
+  quickStartLayout,
   readQuickStart,
   readQuickStartPlacement,
   setQuickStart,
@@ -131,12 +132,12 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
 
   const current = stepCopy[step];
   const stepNumber = current.number;
-  const isModal =
-    (placement === "modal" && pathname === "/dashboard") || (docked && expandedKey === storageKey);
-  const isRight =
-    docked ||
-    ["right", "right-collapsed"].includes(placement ?? "") ||
-    (placement === "modal" && !isModal);
+  const { isModal, isRight, isCollapsed } = quickStartLayout(
+    placement,
+    pathname,
+    docked,
+    expandedKey === storageKey
+  );
   const position = isRight ? "right-4" : "left-4";
   const minimize = () => {
     setQuickStartPlacement(storageKey, isRight ? "right-collapsed" : "left");
@@ -176,8 +177,6 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
       </button>
     </aside>
   );
-  const isCollapsed =
-    (placement === "left" || placement === "right-collapsed") && expandedKey !== storageKey;
   if (!isModal && (docked || isCollapsed)) return launcher;
   const canCreateWallet = flags.custody && dashboardAccess.capabilities.canManageCustody;
   const title = t(current.title);

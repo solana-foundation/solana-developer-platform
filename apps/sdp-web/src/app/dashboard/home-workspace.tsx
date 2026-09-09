@@ -21,6 +21,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { readApiErrorMessage } from "@/lib/api-error";
 import { quickStartKey, readQuickStart, subscribeQuickStart } from "@/lib/dashboard-quick-start";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
@@ -562,7 +563,7 @@ export function HomeWorkspace({
   const progressKey = quickStartKey(dashboardCacheScope, selectedProjectId);
   const quickStartFinished = useSyncExternalStore(
     subscribeQuickStart,
-    () => initialQuickStartStep === "done" || readQuickStart(progressKey) === "done",
+    () => readQuickStart(progressKey, initialQuickStartStep) === "done",
     () => initialQuickStartStep === "done"
   );
   const custodyEnabled = flags.custody;
@@ -613,9 +614,7 @@ export function HomeWorkspace({
     issuedTokens.map((token) => [token.mintAddress, token])
   );
   const activityError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
-      : t("Shared.homeWorkspace.activityUnavailable")
+    ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityNotice = activitySnapshot?.activityNotice ?? null;
   const emptyActivityMessage = isWalletEmptyState

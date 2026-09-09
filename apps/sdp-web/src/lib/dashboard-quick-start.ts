@@ -9,6 +9,22 @@ const pendingSaves = new Map<string, Promise<unknown>>();
 export type QuickStartPlacement = "modal" | "left" | "right" | "right-collapsed";
 const placements = new Map<string, QuickStartPlacement>();
 
+export function quickStartLayout(
+  placement: QuickStartPlacement | null,
+  pathname: string,
+  docked: boolean,
+  expanded: boolean
+) {
+  const isModal = (placement === "modal" && pathname === "/dashboard") || (docked && expanded);
+  const isRight =
+    docked ||
+    placement === "right" ||
+    placement === "right-collapsed" ||
+    (placement === "modal" && !isModal);
+  const isCollapsed = (placement === "left" || placement === "right-collapsed") && !expanded;
+  return { isModal, isRight, isCollapsed };
+}
+
 export function readQuickStartPlacement(key: string): QuickStartPlacement {
   try {
     const value = placements.get(key) ?? window.localStorage.getItem(`${key}:placement`);
