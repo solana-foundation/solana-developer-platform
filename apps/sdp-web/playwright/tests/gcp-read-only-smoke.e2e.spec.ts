@@ -11,6 +11,7 @@ import {
   resolveTotalBalance,
 } from "../../src/app/dashboard/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
+import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { createLocalApiClient } from "../support/local-api-client";
 import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
 
@@ -70,14 +71,16 @@ function capturePageFailures(page: Page): PageFailureCapture {
 async function assertExactIdentityAndProject(page: Page, fixture: ReadOnlyFixture): Promise<void> {
   const env = getE2EEnv();
   await expect
-    .poll(() =>
-      page.evaluate(() => {
-        return (
-          window as unknown as {
-            Clerk?: { organization?: { id?: string } };
-          }
-        ).Clerk?.organization?.id;
-      })
+    .poll(
+      () =>
+        page.evaluate(() => {
+          return (
+            window as unknown as {
+              Clerk?: { organization?: { id?: string } };
+            }
+          ).Clerk?.organization?.id;
+        }),
+      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
     )
     .toBe(env.clerkOrgId);
 
