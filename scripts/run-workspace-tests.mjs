@@ -83,6 +83,38 @@ function run(command, args, options = {}) {
   });
 }
 
+const TEST_SHARD_PATTERN = /^[1-9]\d*\/[1-9]\d*$/;
+
+/**
+ * Parses the `TEST_SHARD` environment variable (`<index>/<count>`, e.g. `2/4`).
+ * An unset or empty value means "run the whole suite unsharded" and yields
+ * `undefined`; any other malformed value is a hard error so a typo in CI can
+ * never silently run the full suite or an overlapping subset.
+ *
+ * @param {string | undefined} raw Value of `process.env.TEST_SHARD`.
+ * @returns {string | undefined} The validated `<index>/<count>` string, or `undefined` when unset.
+ * @throws {Error} When the value is set but does not match `<positive-index>/<positive-count>`.
+ */
+function parseTestShard(raw) {
+  const trimmed = raw?.trim();
+  if (trimmed === undefined || trimmed === "") {
+    return undefined;
+  }
+
+  if (!TEST_SHARD_PATTERN.test(trimmed)) {
+    throw new Error(
+      `TEST_SHARD must be formatted as <index>/<count> with positive integers (e.g. "1/4"), received: ${trimmed}`
+    );
+  }
+
+  const [index, count] = trimmed.split("/");
+  if (Number(index) > Number(count)) {
+    throw new Error(`TEST_SHARD index must not exceed count, received: ${trimmed}`);
+  }
+
+  return trimmed;
+}
+
 try {
   if (mode === "integration") {
     await configureIntegrationSolanaRpc(resolvedEnv);
@@ -104,6 +136,7 @@ try {
   } else {
     const changedSince = mode === "unit" ? process.env.TEST_CHANGED_SINCE?.trim() : undefined;
     const split = mode === "unit" ? process.env.TEST_WORKSPACE_SPLIT?.trim() : undefined;
+    const testShard = mode === "unit" ? parseTestShard(process.env.TEST_SHARD) : undefined;
     const filters =
       mode === "integration"
         ? ["--filter=@sdp/api-integration"]
@@ -121,6 +154,13 @@ try {
               ? [`--filter=...[${changedSince}]`, "--filter=!@sdp/api-integration"]
               : ["--filter=!@sdp/api-integration"];
     const cacheDir = process.env.TURBO_CACHE_DIR?.trim();
+    const vitestShardArgs = testShard
+      ? [`--shard=${testShard}`, "--reporter=blob", "--reporter=default"]
+      : [];
+    const passthroughArgs =
+      forwardedArgs.length > 0 || vitestShardArgs.length > 0
+        ? ["--", ...forwardedArgs, ...vitestShardArgs]
+        : [];
     await run("pnpm", [
       "exec",
       "turbo",
@@ -128,7 +168,7 @@ try {
       "test",
       ...(cacheDir ? [`--cache-dir=${cacheDir}`] : []),
       ...filters,
-      ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
+      ...passthroughArgs,
     ]);
   }
 } catch (error) {
