@@ -12,6 +12,7 @@ import {
   type ProjectRing,
   prepareRingsOperation,
   RINGS_ALLOWLISTED_ASSETS,
+  RINGS_NATIVE_SOL_MINT,
   type RingsOpType,
   type RingsWallet,
 } from "./helius-rings.data";
@@ -46,12 +47,10 @@ interface ComposerDraft {
   ring: string | null;
 }
 
-const NATIVE_SOL_MINT = RINGS_ALLOWLISTED_ASSETS[0].mint;
-
 /** Merge is SOL-only; the API rejects any other mint on that arm. */
 function assetsFor(opType: RingsOpType) {
   return opType === "merge"
-    ? RINGS_ALLOWLISTED_ASSETS.filter((entry) => entry.mint === NATIVE_SOL_MINT)
+    ? RINGS_ALLOWLISTED_ASSETS.filter((entry) => entry.mint === RINGS_NATIVE_SOL_MINT)
     : RINGS_ALLOWLISTED_ASSETS;
 }
 
@@ -59,7 +58,7 @@ function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDra
   return {
     walletId,
     opType,
-    assetMint: NATIVE_SOL_MINT,
+    assetMint: RINGS_NATIVE_SOL_MINT,
     amountDecimal: "",
     recipient: "",
     ring: null,
@@ -238,7 +237,7 @@ export function OperationComposer({
                   ring: null,
                   // A shield can name USDC; merge cannot, so a carried mint
                   // would 400. Other switches keep the current asset.
-                  ...(opType === "merge" ? { assetMint: NATIVE_SOL_MINT } : {}),
+                  ...(opType === "merge" ? { assetMint: RINGS_NATIVE_SOL_MINT } : {}),
                 });
               }}
             />

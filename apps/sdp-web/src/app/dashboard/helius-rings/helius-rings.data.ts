@@ -399,8 +399,11 @@ export function voidRingsOperation(
   );
 }
 
-/** Devnet assets seeded in the rings allowlist. */
+/** Native SOL. Merge (and this build's withdraw/transfer) accept only this mint. */
+export const RINGS_NATIVE_SOL_MINT = "So11111111111111111111111111111111111111112";
+
+/** Devnet assets seeded in the rings allowlist. Order is not a contract. */
 export const RINGS_ALLOWLISTED_ASSETS = [
-  { mint: "So11111111111111111111111111111111111111112", symbol: "SOL", decimals: 9 },
+  { mint: RINGS_NATIVE_SOL_MINT, symbol: "SOL", decimals: 9 },
   { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", symbol: "USDC", decimals: 6 },
 ] as const;
