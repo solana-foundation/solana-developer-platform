@@ -51,6 +51,15 @@ Things that will bite:
   as a vault deposit.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
+- **`getUnsettledVaultMovementStats` duplicates `claimUnsettledVaultMovements`'
+  predicate by copy, and only a test binds them** (PRO-1863). The stats read
+  feeds the backlog and movement-age alerts, so a predicate that drifts from
+  the claim reports a backlog the sweep is not actually working through. The
+  binding test seeds one row in every reachable status and asserts the stats
+  count equals the claimed id SET, not a literal, so the two fail together;
+  it lives in `../../services/jobs/reconcile-earn-vault-movements.test.ts`
+  ("reports exactly the rows the next claim would take"). Change one predicate
+  and you must change both.
 - **A vault row's signer is a column pair, not a new model** (PRO-1722,
   migration 0070): exactly one of `custody_wallet_id` (SDP signs) and
   `owner_address` (an external wallet SDP holds no key for signs) is set, on

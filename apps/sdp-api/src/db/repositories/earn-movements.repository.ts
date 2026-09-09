@@ -1346,9 +1346,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
     async getUnsettledVaultMovementStats() {
       // Keep this predicate in lockstep with claimUnsettledVaultMovements: the
-      // backlog it reports must be the same set the sweep would claim. A test
-      // asserts `backlog === claimUnsettledVaultMovements(...).length` rather
-      // than a literal, so the two fail together instead of drifting silently.
+      // backlog it reports must be the same set the sweep would claim. Bound by
+      // the "reports exactly the rows the next claim would take" test in
+      // services/jobs/reconcile-earn-vault-movements.test.ts, which seeds one
+      // row in every reachable status and asserts this count against the
+      // claimed id SET rather than a literal, so the two fail together instead
+      // of drifting silently.
       const row = await db
         .prepare(
           `SELECT COUNT(*) AS backlog,

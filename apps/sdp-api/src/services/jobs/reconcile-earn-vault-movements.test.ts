@@ -677,40 +677,70 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     );
   });
 
-  it("reports exactly the backlog the next claim would take", async () => {
-    // The repository comment promises these two predicates stay in lockstep;
-    // this asserts it against the claim itself rather than a literal, so they
-    // fail together instead of drifting.
-    await seedMovement();
-    await seedMovement();
-    const settled = await seedMovement();
-    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
-      signatures.map(() => null)
-    );
-    getBlockHeight.mockResolvedValue(99n);
-    await reconcileEarnVaultMovements(env);
-    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
-      movementId: settled.movement.id,
+  it("reports exactly the rows the next claim would take, across every status", async () => {
+    // The repository comment promises the backlog predicate and the claim
+    // predicate stay in lockstep. Assert it against the claim ITSELF, with one
+    // row in every reachable status so a predicate that drops or adds a status
+    // fails here instead of drifting silently into production. Comparing the
+    // id SETS (not just the counts) also catches a compensating drift that
+    // swaps one status for another.
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    const requested = await seedMovement();
+    const submitted = await seedMovement();
+    const confirmed = await seedMovement();
+    const failed = await seedMovement();
+    const finalized = await seedMovement();
+    const observedAt = new Date(0).toISOString();
+
+    await ledger.advanceVaultMovement({
+      movementId: submitted.movement.id,
+      organizationId: ORG,
+      toStatus: "submitted",
+    });
+    await ledger.advanceVaultMovement({
+      movementId: confirmed.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: observedAt,
+    });
+    await ledger.advanceVaultMovement({
+      movementId: failed.movement.id,
       organizationId: ORG,
       toStatus: "failed",
       failureReason: "test setup",
     });
-    logEvent.mockClear();
+    await ledger.advanceVaultMovement({
+      movementId: finalized.movement.id,
+      organizationId: ORG,
+      toStatus: "finalized",
+      confirmedAt: observedAt,
+      settledAt: observedAt,
+    });
 
-    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
-      signatures.map(() => ({
-        slot: 1n,
-        confirmations: 1n,
-        err: null,
-        confirmationStatus: "confirmed",
-      }))
+    const stats = await ledger.getUnsettledVaultMovementStats();
+    const claimable = await ledger.claimUnsettledVaultMovements(256);
+
+    // Unsettled: requested, submitted, confirmed. Terminal: failed, finalized.
+    expect(new Set(claimable.map((row) => row.id))).toEqual(
+      new Set([requested.movement.id, submitted.movement.id, confirmed.movement.id])
     );
-    await reconcileEarnVaultMovements(env);
+    expect(stats.backlog).toBe(claimable.length);
+    expect(stats.backlogBlockhashBound).toBe(2);
+    expect(stats.backlogConfirmed).toBe(1);
+    // Deposits here, so the exit axis stays empty and cannot be a false positive.
+    expect(stats.backlogWithdrawals).toBe(0);
+    expect(stats.oldestWithdrawalCreatedAt).toBeNull();
+    expect(stats.oldestBlockhashBoundCreatedAt).not.toBeNull();
+  });
 
-    const claimable = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).claimUnsettledVaultMovements(256);
-    expect(tickPayload()?.backlog).toBe(claimable.length);
+  it("counts a withdrawal on the exit axis of the backlog", async () => {
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    await seedWithdrawal();
+
+    const stats = await ledger.getUnsettledVaultMovementStats();
+
+    expect(stats.backlogWithdrawals).toBe(1);
+    expect(stats.oldestWithdrawalCreatedAt).not.toBeNull();
   });
 
   it("makes the cron run itself report error, not ok (EARN-006 end to end)", async () => {
