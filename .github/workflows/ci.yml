@@ -1000,7 +1000,7 @@ jobs:
 
       - name: Install Playwright browser
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+        run: pnpm --filter sdp-web exec playwright install chromium
 
       - name: Build web app for Playwright
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
