@@ -106,12 +106,65 @@ signature. The row then offers two actions:
 
 Never void a signature the chain confirms; wait the indexer out instead.
 
-## SPL follow-up
+## Assets a spend can name
 
-This PR is SOL-only. SPL withdraw is reachable: `WithdrawalTarget.spl` and
-`getSplAssetVaultAddress(mint)` are exported; re-derive the vault PDA with seeds
-`["spl_asset_vault", mint]` and assert it equals the exported address to recover
-the bump. SPL also needs an idempotent create-ATA instruction.
+Two, on either rail: native SOL and devnet USDC
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`). The pair is
+`PROTOCOL_SPEND_MINTS` in the SDK, and the route schema, the builders and the
+wire policy each assert it independently. It is narrower than the
+`helius_rings_assets` catalogue on purpose: a spend needs a settlement path
+this code can both assemble and re-derive, and only these two have one.
+
+A **USDC withdraw** is the only operation whose outer transaction changes
+shape, on the default ring and on a custom ring alike.
+`resolveWithdrawalSettlement` derives the mint's vault PDA
+(`getSplAssetVaultAddress`, with the bump recovered by re-deriving over
+`["spl_asset_vault", mint]` and asserting equality) and the recipient's
+associated token account, then emits three instructions instead of two: the
+compute limit, an **unconditional idempotent** create for that token account,
+and the pool transact. Unconditional because the builder makes no chain read —
+one fixed wire shape is what lets custody's policy verify it. Settlement
+accounts are the pool's CPI authority, the mint, the vault, the recipient's
+token account and the Token program — never `SOL_INTERFACE` and never the
+recipient's system address.
+
+A **ring** USDC withdraw carries the same three instructions and the same five
+settlement accounts: zolana derives both rails from one `settlementAccounts`.
+The one difference is where the accounts live in the message. A ring transact
+is compressed over the ring's lookup table, which holds the pool's CPI
+authority and both Token programs, so those arrive as lookups; the mint, the
+vault and the recipient's token account, which no table names, stay static.
+`validateRingSpend` splits the two groups on the table's contents rather than
+on the asset, so an account that changes sides is a mismatch either way.
+
+One ring cannot do this: a ring whose lookup table was rented before zolana
+0.1.6 appended the settlement group. SOL spends over such a table still work,
+but a USDC withdraw would have to name the CPI authority and the Token program
+as static keys, and custody refuses that shape. Bring-up is what rents a table
+and custody signs no second extend, so an affected ring stays SOL-only.
+
+Watch the packet limit here. A ring transact verifies two proofs and is the
+largest transaction this build emits; a USDC withdraw adds an instruction and
+three static keys the table cannot absorb. Zolana's `checkedTransactionSize`
+refuses an oversized build rather than emitting one, so the failure would be a
+build error on a wide note selection, not a broken signature.
+
+**USDC merge and USDC private transfer** keep the SOL wire shape: a merge
+publishes no mint and a registered transfer settles nothing publicly, so the
+asset is visible only in the approved intent and in the proof the circuit
+checks, never in an account the policy could bind it to.
+
+Out of scope: mainnet USDC (a different mint, and nothing has exercised the
+pool's SPL interface there) and Token-2022 mints. Nothing narrows by rail: the
+same two mints shield, merge, transfer and withdraw on the default ring and on
+a custom ring.
+
+If a USDC shield fails with `InvalidSettlementAccounts` (custom 7009), the
+pool's `splAssetRegistry`/`splAssetVault` PDAs for that mint do not exist on
+the cluster. Confirm with
+`pnpm exec tsx packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts`; it
+is a deployment gap, not an SDP bug, and withdraw cannot land until it is
+closed.
 
 ## Broadcast ambiguity (shield)
 
@@ -196,7 +249,7 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 | Shield | `failed:config_error` or `gateway_unavailable` | Build, sign, broadcast, index |
 | Shield (custom ring) | same; also needs a Ring RPC URL in project setup and an active ring | Ring-bound deposit through the ring program |
 | Withdraw (SOL) | same | Note selection, prove, outbox, sign, broadcast, index |
-| Withdraw / transfer (custom ring, SOL) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed |
+| Withdraw / transfer (custom ring) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed; a USDC withdraw adds the token-account create |
 | Merge (SOL, default ring) | same | Clears the on-chain merge gate, selects 2–5 notes, proves, signs, broadcasts, indexes |
 
 ## Custom rings
@@ -364,8 +417,8 @@ failure recorded on the row.
 Follow-up work, deliberately out of scope: ring → default-ring exits (the SDK
 exposes only a low-level `sendDefaultRing`), cross-ring transfers (impossible
 in one transaction at the protocol level — value routes through the default
-ring in two hops), SPL ring spends (the withdrawal builder is SOL-only in
-0.1.2-alpha), audit reads and grants to further readers (bring-up's initial
+ring in two hops), audit reads and grants to further readers
+(bring-up's initial
 grant makes the custody-held config authority the ring's only reader, so
 serving decrypted reads or granting a third-party reader needs a future
 custody-signed endpoint), and `GET /rings/:name` point reads.

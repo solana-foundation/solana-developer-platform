@@ -47,13 +47,6 @@ interface ComposerDraft {
   ring: string | null;
 }
 
-/** Merge is SOL-only; the API rejects any other mint on that arm. */
-function assetsFor(opType: RingsOpType) {
-  return opType === "merge"
-    ? RINGS_ALLOWLISTED_ASSETS.filter((entry) => entry.mint === RINGS_NATIVE_SOL_MINT)
-    : RINGS_ALLOWLISTED_ASSETS;
-}
-
 function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
   return {
     walletId,
@@ -231,14 +224,9 @@ export function OperationComposer({
                 // The ring's meaning flips with the op type — a shield's
                 // destination, a spend's source of funds — so a carried-over
                 // choice would silently redirect value. Every switch starts
-                // from the default pool.
-                patchDraft({
-                  opType,
-                  ring: null,
-                  // A shield can name USDC; merge cannot, so a carried mint
-                  // would 400. Other switches keep the current asset.
-                  ...(opType === "merge" ? { assetMint: RINGS_NATIVE_SOL_MINT } : {}),
-                });
+                // from the default pool, which takes the whole allowlist, so
+                // the chosen asset always carries over.
+                patchDraft({ opType, ring: null });
               }}
             />
             <ComposeStep
@@ -347,7 +335,7 @@ function ComposeStep({
               if (value) onPatch({ assetMint: value });
             }}
           >
-            {assetsFor(draft.opType).map((entry) => (
+            {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
               <SelectItem key={entry.mint} value={entry.mint}>
                 {entry.symbol}
               </SelectItem>
@@ -379,7 +367,8 @@ function ComposeStep({
               // literally named "default" impossible.
               value={draft.ring ?? DEFAULT_RING_NAME}
               onValueChange={(value) => {
-                if (value) onPatch({ ring: value === DEFAULT_RING_NAME ? null : value });
+                if (!value) return;
+                onPatch({ ring: value === DEFAULT_RING_NAME ? null : value });
               }}
             >
               <SelectItem value={DEFAULT_RING_NAME}>

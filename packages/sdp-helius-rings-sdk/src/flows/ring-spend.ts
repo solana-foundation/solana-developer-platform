@@ -1,5 +1,6 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
+import { SPL_TOKEN_PROGRAM_ID } from "@heliuslabs/zolana/interface";
 import {
   buildRingTransferTransaction,
   buildRingWithdrawalTransaction,
@@ -7,7 +8,7 @@ import {
 import type { Wallet } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Transaction } from "@solana/kit";
 import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
-import { requireProtocolSol } from "./mint.js";
+import { isProtocolNativeMint, protocolMint, requireSpendMint } from "./mint.js";
 
 /**
  * Spends of ring-bound notes, through the SDK's one-call ring builders.
@@ -44,17 +45,32 @@ export interface RingSpendInput {
   readonly amountRaw: string;
 }
 
-/** The argument set both ring builders share; only the recipient differs. */
+/**
+ * The argument set both ring builders share; only the recipient differs.
+ *
+ * `asset` is always named rather than left to the builder's SOL default, so
+ * the mint the caller approved is the one the ring transact binds. An SPL
+ * asset also names the legacy Token program: the two mints this build spends
+ * are native SOL and devnet USDC, and USDC is not Token-2022.
+ */
 function ringSpendArgs(deps: RingSpendDeps, input: RingSpendInput) {
+  const asset = address(protocolMint(input.mint));
+
   return {
     client: deps.client,
     ringProgramId: withConfiguredAddressErrorBridge(() => address(input.ringProgramId)),
     wallet: deps.wallet,
     keys: deps.keys,
     feePayer: deps.owner,
+    asset,
     amount: BigInt(input.amountRaw),
     lookupTable: withConfiguredAddressErrorBridge(() => address(input.lookupTable)),
   };
+}
+
+/** The token program an SPL ring withdrawal settles through, absent for SOL. */
+function splTokenProgramFor(mint: string): { splTokenProgram?: Address } {
+  return isProtocolNativeMint(mint) ? {} : { splTokenProgram: SPL_TOKEN_PROGRAM_ID };
 }
 
 // Both builders stay `async` so the guard's and the address bridge's throws
@@ -63,10 +79,11 @@ export async function buildRingWithdrawalTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: string }
 ): Promise<Transaction> {
-  requireProtocolSol(input.mint, "withdrawal");
+  requireSpendMint(input.mint, "withdrawal");
 
   return buildRingWithdrawalTransaction({
     ...ringSpendArgs(deps, input),
+    ...splTokenProgramFor(input.mint),
     recipient: address(input.recipient),
   });
 }
@@ -81,7 +98,7 @@ export async function buildRingTransferTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: ShieldedAddress }
 ): Promise<Transaction> {
-  requireProtocolSol(input.mint, "transfer");
+  requireSpendMint(input.mint, "transfer");
 
   return buildRingTransferTransaction({
     ...ringSpendArgs(deps, input),

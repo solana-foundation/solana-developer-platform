@@ -62,6 +62,8 @@ let walletId: string;
 const WALLET_KEYPAIR = await createKeyPairFromPrivateKeyBytes(new Uint8Array(32).fill(51));
 const WALLET_OWNER = await getAddressFromPublicKey(WALLET_KEYPAIR.publicKey);
 const SHIELDED_OWNER_HASH = new Uint8Array(32).fill(3);
+/** Devnet USDC: the one SPL asset this build spends, on either rail. */
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const WALLET_SHIELDED_IDENTITY = getBase58Decoder().decode(
   Uint8Array.from([...SHIELDED_OWNER_HASH, ...new Uint8Array(33).fill(5)])
 );
@@ -2259,6 +2261,29 @@ describe("HeliusRingsService", () => {
       const operation = await liveishService().prepareOperation(input, actorContext);
       expect(operation.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));
     });
+
+    // The ring rail spends the same two mints as the default pool: its
+    // builders take the asset, and the wire policy re-derives the SPL
+    // settlement there too. No asset-by-ring narrowing remains.
+    it.each(["shield", "withdraw", "transfer_registered"] as const)(
+      "pins a USDC %s to the named ring",
+      async (opType) => {
+        await seedActiveRing();
+
+        const operation = await liveishService().prepareOperation(
+          operationInput({
+            opType,
+            ring: "treasury",
+            asset: { mint: USDC_MINT, amountRaw: "1000000" },
+            clientNonce: `nonce-ring-usdc-${opType}`,
+          }),
+          actorContext
+        );
+
+        expect(operation.ringProgramId).toBe(RING_PROGRAM);
+        expect(operation.input.asset?.mint).toBe(USDC_MINT);
+      }
+    );
 
     it("refuses a name the project never recorded before reserving", async () => {
       // The request names a ring the project does not have: the caller's to fix.

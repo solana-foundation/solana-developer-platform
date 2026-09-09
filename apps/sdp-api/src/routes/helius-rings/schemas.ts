@@ -4,6 +4,7 @@ import {
   RING_NAME_PATTERN,
   ZONE_KINDS,
 } from "@sdp/helius-rings";
+import { SDP_NATIVE_MINT, SDP_USDC_MINT } from "@sdp/helius-rings-sdk";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
 
@@ -53,15 +54,20 @@ const amountRaw = z
   .refine((value) => BigInt(value) <= 18_446_744_073_709_551_615n, "amountRaw exceeds u64");
 
 /**
- * Native SOL, spelled as SDP spells it.
+ * The assets a spend may name.
  *
- * A withdrawal must be SOL: the pool's SPL token-interface address is derived
- * inside the SDK and not exported, so an SPL withdrawal cannot be assembled at
- * all. Refusing it here rather than in the adapter means the caller learns
- * before a policy evaluation and possibly a human approval are spent on it.
+ * Narrower than the `helius_rings_assets` catalogue, and narrower on purpose:
+ * these are the two whose settlement path the SDK's builders assemble and the
+ * outer-transaction policy re-derives. Refusing anything else here rather than
+ * in the adapter means the caller learns before a policy evaluation and
+ * possibly a human approval are spent on it.
+ *
+ * The same two on a custom ring: the ring builders take the asset too, and the
+ * wire policy re-derives the SPL settlement on that rail as well.
  */
-// biome-ignore lint/security/noSecrets: the wrapped SOL mint, a public constant.
-const SDP_NATIVE_MINT = "So11111111111111111111111111111111111111112";
+const spendMint = z.union([z.literal(SDP_NATIVE_MINT), z.literal(SDP_USDC_MINT)], {
+  error: "only SOL and USDC spends are supported",
+});
 
 /**
  * Per-flow shapes, because accepting a field no builder honours would record a
@@ -103,9 +109,7 @@ export const prepareRingsOperationSchema = z
         ...operationFields,
         opType: z.literal("withdraw"),
         asset: z.strictObject({
-          mint: z.literal(SDP_NATIVE_MINT, {
-            error: "only SOL withdrawals are supported",
-          }),
+          mint: spendMint,
           amountRaw,
         }),
         to: z.string().min(1),
@@ -114,12 +118,8 @@ export const prepareRingsOperationSchema = z
       z.strictObject({
         ...operationFields,
         opType: z.literal("transfer_registered"),
-        // Same SPL-vault caveat as withdraw — SOL is the only asset with a wired
-        // settlement in this build.
         asset: z.strictObject({
-          mint: z.literal(SDP_NATIVE_MINT, {
-            error: "only SOL private transfers are supported",
-          }),
+          mint: spendMint,
           amountRaw,
         }),
         /** Recipient's canonical shielded address; the service resolves it to a same-tenant wallet. */
@@ -135,11 +135,7 @@ export const prepareRingsOperationSchema = z
          * notes already held. Naming an amount would imply a choice the caller
          * does not get.
          */
-        asset: z.strictObject({
-          mint: z.literal(SDP_NATIVE_MINT, {
-            error: "only SOL merges are supported",
-          }),
-        }),
+        asset: z.strictObject({ mint: spendMint }),
         // No `ring`: ring-bound notes are consolidated by an instruction the
         // protocol reserves a tag for but ships no builder for, so a merge is
         // always the default ring's.
