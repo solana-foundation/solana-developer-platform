@@ -228,6 +228,8 @@ export interface InsertEarnProviderWalletInput {
 
 export interface ListEarnProviderWalletsInput {
   organizationId: string;
+  /** The owning project; the list is a project boundary like every per-program route. */
+  projectId: string;
   environment: SdpEnvironment;
   /** Optional filter; omitted lists every provider's programs. */
   provider?: EarnProviderId;

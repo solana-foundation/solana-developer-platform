@@ -76,7 +76,7 @@ jobs:
           echo "$READY" | jq -e '.status == "ready" and .checks.database == "ok" and .checks.redis == "ok"' >/dev/null
 
       - name: Install Playwright browser
-        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+        run: pnpm --filter sdp-web exec playwright install chromium
 
       - name: Build web app against the target API
         env:

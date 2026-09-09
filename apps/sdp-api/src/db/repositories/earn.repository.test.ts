@@ -880,6 +880,7 @@ describe("EarnRepository (postgres)", () => {
     ): Promise<ListEarnProviderWalletsResult> {
       return repo.listProviderWallets({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
         environment: "sandbox",
         limit: 20,
         offset: 0,
@@ -1047,7 +1048,10 @@ describe("EarnRepository (postgres)", () => {
         await expect(listPrograms({ environment: "production" })).resolves.toMatchObject({
           total: 1,
         });
-        const theirs = await listPrograms({ organizationId: OTHER_ORG.id });
+        const theirs = await listPrograms({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+        });
         expect(theirs.rows.map((row) => row.id)).toEqual([sibling.id]);
       });
 
@@ -1108,14 +1112,18 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      // project_id is still provisioning context only — a program created from a
-      // sibling project joins the same org+environment collection.
+      // A sibling project may hold its own program, but it belongs to THAT
+      // project's collection: the project is a boundary on the list exactly as
+      // it is on every per-program route (HOO-1563).
       await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
         project_id: OTHER_PROJECT_ID,
       });
+      await expect(listPrograms({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
+        total: 1,
+      });
 
       const { total } = await listPrograms();
-      expect(total).toBe(4);
+      expect(total).toBe(3);
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {

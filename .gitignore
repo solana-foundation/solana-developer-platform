@@ -53,6 +53,7 @@ infra/self-hosted/default.env.example
 
 # Test coverage
 coverage/
+.vitest-reports/
 apps/sdp-web/playwright/.clerk/
 apps/sdp-web/playwright/.fixtures/
 apps/sdp-web/playwright-report/
