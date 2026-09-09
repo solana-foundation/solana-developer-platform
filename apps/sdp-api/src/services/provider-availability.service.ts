@@ -830,40 +830,50 @@ export async function syncProviderAccessFromClerk(
     clerkOrganization: ClerkOrganizationWithMetadata;
   }
 ): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
-  const existing = await getOrganizationTierState(db, params.organizationId);
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
 
-  const {
-    providerOverrides: _staleOverrides,
-    enableProductionProject: _staleEnableProduction,
-    ...retainedSettings
-  } = existing.settings ?? {};
-  const nextSettings: OrganizationSettings = {
-    ...retainedSettings,
-    ...(clerkMetadata.providerOverrides
-      ? { providerOverrides: clerkMetadata.providerOverrides }
-      : {}),
-    ...(clerkMetadata.enableProductionProject ? { enableProductionProject: true } : {}),
-  };
+  // Settings are one JSON column patched by read-merge-write; the row lock keeps
+  // this sync from clobbering a concurrent dashboard settings update (and vice
+  // versa), matching the updateOrganization handler.
+  const { existingSettings, persistedSettings } = await db.transaction(async (tx) => {
+    const row = await tx
+      .prepare("SELECT settings FROM organizations WHERE id = ? FOR UPDATE")
+      .bind(params.organizationId)
+      .first<{ settings: string | null }>();
 
-  const persistedSettings = hasOwnEntries(nextSettings as Record<string, unknown>)
-    ? nextSettings
-    : null;
+    if (!row) {
+      throw new AppError("NOT_FOUND", "Organization not found");
+    }
 
-  await db
-    .prepare(
-      `UPDATE organizations
-       SET tier = ?, settings = ?, updated_at = sdp_datetime_now()
-       WHERE id = ?`
-    )
-    .bind(
-      clerkMetadata.tier,
-      toStoredOrganizationSettings(persistedSettings),
-      params.organizationId
-    )
-    .run();
+    const existing = parseOrganizationSettings(row.settings);
+    const {
+      providerOverrides: _staleOverrides,
+      enableProductionProject: _staleEnableProduction,
+      ...retainedSettings
+    } = existing ?? {};
+    const nextSettings: OrganizationSettings = {
+      ...retainedSettings,
+      ...(clerkMetadata.providerOverrides
+        ? { providerOverrides: clerkMetadata.providerOverrides }
+        : {}),
+      ...(clerkMetadata.enableProductionProject ? { enableProductionProject: true } : {}),
+    };
 
-  const wasProductionEnabled = existing.settings?.enableProductionProject === true;
+    const persisted = hasOwnEntries(nextSettings as Record<string, unknown>) ? nextSettings : null;
+
+    await tx
+      .prepare(
+        `UPDATE organizations
+         SET tier = ?, settings = ?, updated_at = sdp_datetime_now()
+         WHERE id = ?`
+      )
+      .bind(clerkMetadata.tier, toStoredOrganizationSettings(persisted), params.organizationId)
+      .run();
+
+    return { existingSettings: existing, persistedSettings: persisted };
+  });
+
+  const wasProductionEnabled = existingSettings?.enableProductionProject === true;
   if (wasProductionEnabled !== clerkMetadata.enableProductionProject) {
     logEvent("info", {
       event: "sdp_api_organization_production_enablement_changed",
