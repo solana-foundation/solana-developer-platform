@@ -84,7 +84,7 @@ import {
   type updateCounterpartySchema,
 } from "./schemas";
 
-function mapToCounterparty(row: CounterpartyRow): Counterparty {
+export function mapToCounterparty(row: CounterpartyRow): Counterparty {
   return {
     id: row.id,
     organizationId: row.organization_id,
