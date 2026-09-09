@@ -36,10 +36,11 @@ const EMPTY_SUPPORTING_DATA: TokenManagementSupportingData = {
 };
 
 function mergeWalletsPreferBalances(
-  primaryWallets: PaymentsDashboardWallet[],
+  primaryWallets: PaymentsDashboardWallet[] | undefined,
   secondaryWallets: PaymentsDashboardWallet[]
 ): PaymentsDashboardWallet[] {
-  if (primaryWallets.length === 0) {
+  // Missing/failed inventory may fall back; a successful empty inventory may not.
+  if (primaryWallets === undefined) {
     return secondaryWallets;
   }
   if (secondaryWallets.length === 0) {
@@ -47,7 +48,7 @@ function mergeWalletsPreferBalances(
   }
 
   const secondaryById = new Map(secondaryWallets.map((wallet) => [wallet.id, wallet]));
-  const merged = primaryWallets.map((wallet) => {
+  return primaryWallets.map((wallet) => {
     const richerWallet = secondaryById.get(wallet.id);
     if (!richerWallet) {
       return wallet;
@@ -56,14 +57,6 @@ function mergeWalletsPreferBalances(
       ? { ...wallet, balances: richerWallet.balances }
       : wallet;
   });
-
-  const primaryIds = new Set(primaryWallets.map((wallet) => wallet.id));
-  for (const wallet of secondaryWallets) {
-    if (!primaryIds.has(wallet.id)) {
-      merged.push(wallet);
-    }
-  }
-  return merged;
 }
 
 function requestErrorMessage(error: unknown, fallback: string): string | null {
@@ -179,15 +172,24 @@ export function useTokenOperationData({
     // so a mint/burn/etc. shows up in the transactions list right away.
     await globalMutate((key) => isTokenTransactionsKey(key, token.id));
   };
-  const authorityWallets = mergeWalletsPreferBalances(
-    authorityWalletsData?.authorityWallets ?? [],
-    resolvedSupportingData.authorityWallets
-  );
+  // Each request can supply the same project wallet inventory independently.
+  // Do not mix a failed request's cached rows or errors into a successful source.
+  const primaryWallets =
+    authorityWalletsFetchError || authorityWalletsData?.authorityWalletsError
+      ? undefined
+      : authorityWalletsData?.authorityWallets;
+  const supportingWallets =
+    supportingDataError || supportingData?.authorityWalletsError
+      ? undefined
+      : supportingData?.authorityWallets;
+  const authorityWallets = mergeWalletsPreferBalances(primaryWallets, supportingWallets ?? []);
   const authorityWalletsError =
-    authorityWalletsFetchError ??
-    authorityWalletsData?.authorityWalletsError ??
-    supportingDataError ??
-    resolvedSupportingData.authorityWalletsError;
+    primaryWallets !== undefined || supportingWallets !== undefined
+      ? null
+      : (authorityWalletsFetchError ??
+        authorityWalletsData?.authorityWalletsError ??
+        supportingDataError ??
+        resolvedSupportingData.authorityWalletsError);
   const transactions = resolvedSupportingData.transactions;
   const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
   const transactionsTotal = resolvedSupportingData.transactionsTotal;
