@@ -2,6 +2,11 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 import { TEST_WORKER_COUNT } from "./src/test/worker-count";
 
+// Matches parseTestShard in scripts/run-workspace-tests.mjs: an unset or
+// blank TEST_SHARD means an unsharded run, which must keep thresholds.
+const isShardedRun = process.env.TEST_SHARD !== undefined && process.env.TEST_SHARD.trim() !== "";
+const isCiRun = process.env.CI !== undefined;
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -39,13 +44,21 @@ export default defineConfig({
       reportsDirectory: "./coverage/node",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/types/**", "src/db/migrations/**"],
-      thresholds: {
-        statements: 78.1,
-        branches: 68.7,
-        functions: 84.3,
-        lines: 78.5,
-        autoUpdate: true,
-      },
+      // Per-shard runs exclude thresholds: each shard only sees a fraction of
+      // the suite, so threshold enforcement happens once in the CI merge job
+      // over the blob-merged coverage of all shards. The merge run leaves
+      // TEST_SHARD unset, so it enforces the thresholds defined here.
+      ...(isShardedRun
+        ? {}
+        : {
+            thresholds: {
+              statements: 78.1,
+              branches: 68.7,
+              functions: 84.3,
+              lines: 78.5,
+              autoUpdate: !isCiRun,
+            },
+          }),
     },
     testTimeout: 30_000,
     hookTimeout: 60_000,

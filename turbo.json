@@ -210,7 +210,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "env": ["TEST_SHARD"],
+      "outputs": ["coverage/**", ".vitest-reports/**"]
     },
     "test:coverage": {
       "dependsOn": ["^build"],

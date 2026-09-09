@@ -43,7 +43,7 @@ export interface MergeResult {
 }
 
 export async function buildMerge(deps: MergeDeps, input: MergeInput): Promise<MergeResult> {
-  requireSpendMint(input.mint, "merge");
+  requireSpendMint(input.mint, "merges");
 
   const asset = address(protocolMint(input.mint));
   const selection = selectMergeNotes({

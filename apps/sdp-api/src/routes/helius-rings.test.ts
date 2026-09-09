@@ -600,6 +600,117 @@ describe("Helius Rings routes", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    describe("ring moves", () => {
+      const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
+      const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
+
+      /** Records and activates a ring, then hands the gateway seam back. */
+      async function seedActiveRing(): Promise<void> {
+        // Restored afterwards so the operation posts below still hit the
+        // describe's own failing gateway, not this bring-up stub.
+        const previous = gatewayOverride.current;
+        gatewayOverride.current = {
+          provisionRing: async () => ({
+            auditorPublicKeyHex: "04ff",
+            lookupTableAddress: LOOKUP_TABLE,
+          }),
+        } as unknown as RingsGatewayPort;
+        const created = await post("/v1/helius-rings/rings", {
+          name: "treasury",
+          ringProgramId: RING_PROGRAM,
+        });
+        if (created.status !== 201) throw new Error("ring fixture did not activate");
+        gatewayOverride.current = previous;
+      }
+
+      it("prepares a ring_exit pinned to the active ring and fails honestly at the port", async () => {
+        await seedActiveRing();
+        const res = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_exit",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-1",
+          ring: "treasury",
+        });
+        expect(res.status).toBe(201);
+        const body = (await res.json()) as {
+          data: {
+            operation: {
+              opType: string;
+              ringProgramId: string | null;
+              state: string;
+              failure: { code: string } | null;
+            };
+          };
+        };
+        expect(body.data.operation.opType).toBe("ring_exit");
+        expect(body.data.operation.ringProgramId).toBe(RING_PROGRAM);
+        // Default policy is implicit allow, so the operation advances to the
+        // port call, where the describe's gateway records its config_error.
+        expect(body.data.operation.state).toBe("failed");
+        expect(body.data.operation.failure).toMatchObject({ code: "config_error" });
+      });
+
+      it("400s a ring move naming the default ring", async () => {
+        for (const opType of ["ring_exit", "ring_entry"]) {
+          const res = await post("/v1/helius-rings/operations", {
+            walletId: ringsWalletId,
+            opType,
+            asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+            clientNonce: `route-nonce-move-default-${opType}`,
+            ring: "default",
+          });
+          expect(res.status).toBe(400);
+        }
+      });
+
+      it("400s a ring_entry without a ring, and a ring_exit carrying a `to`", async () => {
+        await seedActiveRing();
+        const missingRing = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_entry",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-no-ring",
+        });
+        expect(missingRing.status).toBe(400);
+
+        // Strict objects: a recipient field on a self-only move is refused,
+        // never silently stripped.
+        const withRecipient = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_exit",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          to: "HrRouteTestPublicKey111111111111111111111111",
+          clientNonce: "route-nonce-move-to",
+          ring: "treasury",
+        });
+        expect(withRecipient.status).toBe(400);
+      });
+
+      it("400s a non-SOL ring move", async () => {
+        await seedActiveRing();
+        const res = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_entry",
+          asset: { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-usdc",
+          ring: "treasury",
+        });
+        expect(res.status).toBe(400);
+      });
+
+      it("400s a ring move naming a ring the project never recorded", async () => {
+        const res = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_entry",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-unknown",
+          ring: "treasury",
+        });
+        expect(res.status).toBe(400);
+      });
+    });
   });
 
   describe("POST /wallets/:walletId/sync", () => {

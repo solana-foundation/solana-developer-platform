@@ -37,7 +37,14 @@ export const createProjectRingSchema = z.object({
  * flow nothing can build has already consumed a policy evaluation and possibly
  * a human approval, and it tells the caller far less than a 400 does.
  */
-const ENABLED_OP_TYPES = ["shield", "withdraw", "transfer_registered", "merge"] as const;
+const ENABLED_OP_TYPES = [
+  "shield",
+  "withdraw",
+  "transfer_registered",
+  "merge",
+  "ring_exit",
+  "ring_entry",
+] as const;
 
 /**
  * Base units, as a string.
@@ -87,13 +94,40 @@ const assetAmount = z.strictObject({ mint, amountRaw });
 
 /**
  * Ring NAME the operation targets; the server resolves and pins the program id
- * at prepare time. Omitted or "default" = the default ring. For spends
- * the named ring is the SOURCE of funds. Existence and bring-up state are the
+ * at prepare time. Omitted or "default" = the default ring. For ring-bound
+ * spends and ring_exit the named ring is the SOURCE of funds; for ring shields
+ * and ring_entry it is the destination. Existence and bring-up state are the
  * service's checks, not the schema's.
  */
 const ring = z
   .union([z.literal(DEFAULT_RING_NAME), z.string().regex(RING_NAME_PATTERN)])
   .optional();
+
+/**
+ * A ring move's ring: required, and never "default" — the move's other side is
+ * always the default pool, so naming the default on both sides is a no-op the
+ * caller almost certainly didn't mean.
+ */
+const customRing = z
+  .string()
+  .regex(RING_NAME_PATTERN)
+  .refine((value) => value !== DEFAULT_RING_NAME, {
+    error: "a ring move names a custom ring; the default pool is the other side",
+  });
+
+/** ring_exit and ring_entry share one shape; only the opType literal differs. */
+const ringMoveSchema = (opType: "ring_exit" | "ring_entry") =>
+  z.strictObject({
+    ...operationFields,
+    opType: z.literal(opType),
+    asset: z.strictObject({
+      mint: z.literal(SDP_NATIVE_MINT, {
+        error: "only SOL ring moves are supported",
+      }),
+      amountRaw,
+    }),
+    ring: customRing,
+  });
 
 export const prepareRingsOperationSchema = z
   .discriminatedUnion(
@@ -140,6 +174,11 @@ export const prepareRingsOperationSchema = z
         // protocol reserves a tag for but ships no builder for, so a merge is
         // always the default ring's.
       }),
+      // The two ring moves: the wallet's own funds cross between the named
+      // custom ring and the default pool. No `to` — both directions are
+      // self-only by construction in the SDK.
+      ringMoveSchema("ring_exit"),
+      ringMoveSchema("ring_entry"),
     ],
     {
       error: `opType must be one of ${ENABLED_OP_TYPES.join(", ")}`,

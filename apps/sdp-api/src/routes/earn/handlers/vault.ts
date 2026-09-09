@@ -1082,6 +1082,11 @@ export async function listEarnVaultPositions(c: AppContext) {
 
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null;
+  // The withdrawal's own sponsorship gate, answered once for the page: a
+  // position's exit runs on the environment's cluster, so the copy a client
+  // shows on the exit step can read this instead of a quote that a provider
+  // with no exit floor never produces.
+  const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment));
 
   return success(c, {
     positions: rows.map((row) => {
@@ -1096,6 +1101,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         shareMint: row.shareMint,
         createdAt: row.createdAt,
         closedAt: row.closedAt,
+        feeSponsored,
         // Absent (not zero) when the chain read failed or returned nothing.
         shares: hydrated?.shares,
         withdrawableShares: hydrated?.withdrawableShares,

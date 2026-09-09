@@ -4,13 +4,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buildRingTransferTransaction = vi.fn();
 const buildRingWithdrawalTransaction = vi.fn();
+const buildRingEntryTransaction = vi.fn();
+const buildRingExitTransaction = vi.fn();
 
 vi.mock("@heliuslabs/zolana/ring", () => ({
   buildRingTransferTransaction: (...args: unknown[]) => buildRingTransferTransaction(...args),
   buildRingWithdrawalTransaction: (...args: unknown[]) => buildRingWithdrawalTransaction(...args),
+  buildRingEntryTransaction: (...args: unknown[]) => buildRingEntryTransaction(...args),
+  buildRingExitTransaction: (...args: unknown[]) => buildRingExitTransaction(...args),
 }));
 
-const { buildRingTransferTx, buildRingWithdrawalTx } = await import("./ring-spend.js");
+const { buildRingEntryTx, buildRingExitTx, buildRingTransferTx, buildRingWithdrawalTx } =
+  await import("./ring-spend.js");
 
 const OWNER = "GsbwXfJraMomNxBcjK1DiP5Mth8ZmQpDUFTmKfhtiHgo" as Address;
 const RECIPIENT = "6Ecs4vFmtiZ7WeQMWZibhFPQF3q3Pmqrb7CQGRJJKQTM";
@@ -48,6 +53,8 @@ describe("ring-spend flow", () => {
     vi.clearAllMocks();
     buildRingWithdrawalTransaction.mockResolvedValue({ fake: "tx" });
     buildRingTransferTransaction.mockResolvedValue({ fake: "tx" });
+    buildRingEntryTransaction.mockResolvedValue({ fake: "tx" });
+    buildRingExitTransaction.mockResolvedValue({ fake: "tx" });
   });
 
   it("hands the one-call withdrawal builder the pinned ring, its table, and no CU override", async () => {
@@ -125,6 +132,72 @@ describe("ring-spend flow", () => {
       expect(error?.message).not.toContain("also bad");
     }
     expect(buildRingWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("hands the entry builder the pinned ring, its table, and the amount, with no recipient and no CU override", async () => {
+    await buildRingEntryTx(deps(), {
+      ringProgramId: RING_PROGRAM,
+      lookupTable: LOOKUP_TABLE,
+      mint: SDP_SOL,
+      amountRaw: "1000000",
+    });
+
+    expect(buildRingEntryTransaction).toHaveBeenCalledTimes(1);
+    const [input] = buildRingEntryTransaction.mock.calls[0] as [Record<string, unknown>];
+    expect(input).toMatchObject({
+      ringProgramId: RING_PROGRAM,
+      lookupTable: LOOKUP_TABLE,
+      keys: { fake: "keys" },
+      feePayer: OWNER,
+      amount: 1_000_000n,
+      // Named rather than left to the builder's default, like every other ring
+      // spend. A move is SOL-only, so the value is that default either way.
+      asset: PROTOCOL_SOL,
+    });
+    // No `recipient` exists to pass: the builder always sends to its own keys'
+    // address, which is what makes entry self-only by construction.
+    expect(input).not.toHaveProperty("recipient");
+    expect(input).not.toHaveProperty("computeUnitLimit");
+  });
+
+  it("hands the exit builder the caller-lifted self shielded address as the recipient", async () => {
+    const self = { fake: "own-shielded-address" };
+    await buildRingExitTx(deps(), {
+      ringProgramId: RING_PROGRAM,
+      lookupTable: LOOKUP_TABLE,
+      mint: SDP_SOL,
+      amountRaw: "7",
+      recipient: self as never,
+    });
+
+    const [input] = buildRingExitTransaction.mock.calls[0] as [Record<string, unknown>];
+    // The full object, object-identical: the self-only rule is enforced by the
+    // caller lifting its own address, and the builder skips its registry read.
+    expect(input.recipient).toBe(self);
+    expect(input.amount).toBe(7n);
+    expect(input).not.toHaveProperty("computeUnitLimit");
+  });
+
+  it("refuses a non-SOL mint before reaching the entry or exit builder", async () => {
+    await expect(
+      buildRingEntryTx(deps(), {
+        ringProgramId: RING_PROGRAM,
+        lookupTable: LOOKUP_TABLE,
+        mint: USDC,
+        amountRaw: "1",
+      })
+    ).rejects.toMatchObject({ name: "HeliusRingsError", code: "invalid_input" });
+    await expect(
+      buildRingExitTx(deps(), {
+        ringProgramId: RING_PROGRAM,
+        lookupTable: LOOKUP_TABLE,
+        mint: USDC,
+        amountRaw: "1",
+        recipient: {} as never,
+      })
+    ).rejects.toMatchObject({ name: "HeliusRingsError", code: "invalid_input" });
+    expect(buildRingEntryTransaction).not.toHaveBeenCalled();
+    expect(buildRingExitTransaction).not.toHaveBeenCalled();
   });
 
   it("passes the transfer recipient through as the caller-lifted shielded address", async () => {

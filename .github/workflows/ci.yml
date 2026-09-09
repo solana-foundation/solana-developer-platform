@@ -107,6 +107,9 @@ jobs:
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
+      - name: Check pinned dependencies
+        run: pnpm check:pinned-dependencies
+
   translation_agent:
     name: Translation Agent
     runs-on: ubuntu-latest
@@ -207,20 +210,25 @@ jobs:
           fi
 
   test:
-    name: Unit Tests
+    name: Unit Tests (api ${{ matrix.shard }}/4)
     needs: unit_test_scope
     if: needs.unit_test_scope.outputs.api == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       TURBO_CACHE_DIR: ${{ github.workspace }}/.turbo-ci-cache
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: api
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-      DOPPLER_PRESERVE_ENV: TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT
+      TEST_SHARD: ${{ matrix.shard }}/4
+      DOPPLER_PRESERVE_ENV: TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT,TEST_SHARD
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -242,9 +250,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo-ci-cache
-          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ github.job }}-${{ runner.os }}-
+            turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -279,13 +287,80 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo-ci-cache
-          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
 
       - name: Unit tests (fork-safe)
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
           node scripts/run-workspace-tests.mjs unit
+
+      - name: Upload vitest shard artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: vitest-api-shard-${{ matrix.shard }}
+          path: apps/sdp-api/.vitest-reports/blob-${{ matrix.shard }}-4.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  test_merge:
+    name: Unit Tests
+    needs: [unit_test_scope, test]
+    if: always() && needs.unit_test_scope.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Report shard results
+        env:
+          SHARD_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "${SHARD_RESULT}" != "success" ]; then
+            echo "One or more Unit Tests (api) shards finished with ${SHARD_RESULT}." >&2
+            exit 1
+          fi
+          echo "All Unit Tests (api) shards passed."
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: vitest-api-shard-*
+          path: shard-artifacts
+
+      - name: Verify and assemble shard blobs
+        run: |
+          set -euo pipefail
+          mkdir -p apps/sdp-api/.vitest-reports
+          for shard in 1 2 3 4; do
+            blob="shard-artifacts/vitest-api-shard-${shard}/blob-${shard}-4.json"
+            if [ ! -f "${blob}" ]; then
+              echo "Missing blob report for shard ${shard} (expected ${blob})." >&2
+              exit 1
+            fi
+            cp "${blob}" apps/sdp-api/.vitest-reports/
+          done
+          echo "Assembled $(find apps/sdp-api/.vitest-reports -type f | wc -l | tr -d ' ') blob files."
+
+      - name: Merge coverage and enforce thresholds
+        working-directory: apps/sdp-api
+        run: pnpm exec vitest run --merge-reports --coverage
 
   test_packages:
     name: Unit Tests (packages)
@@ -925,7 +1000,7 @@ jobs:
 
       - name: Install Playwright browser
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+        run: pnpm --filter sdp-web exec playwright install chromium
 
       - name: Build web app for Playwright
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'

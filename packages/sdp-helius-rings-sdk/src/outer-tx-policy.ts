@@ -104,6 +104,21 @@ export type OuterTransactionPolicyIntent =
        */
       opType: "merge";
       mint: string;
+    }>
+  /**
+   * A ring move: the wallet's own funds cross between the named ring and the
+   * default pool, ring_exit out of it, ring_entry into it. Always ring-bound,
+   * so `ring` is required. The wire is transfer-shaped — no public settlement;
+   * amount, recipient, and destination pool live in encrypted outputs and are
+   * bound by construction in the SDK (entry is self-only in the builder, an
+   * exit's recipient is the wallet's own lifted shielded address), not proved
+   * here. See docs/ops/helius-rings.md, "Semantics worth knowing".
+   */
+  | Readonly<{
+      opType: "ring_exit" | "ring_entry";
+      mint: string;
+      amountRaw: string;
+      ring: Readonly<{ programId: string; lookupTable: string }>;
     }>;
 
 /** Kit-neutral DTO accepted at the SDK/API major-version boundary. */
@@ -628,7 +643,9 @@ function expectRingLookups(
 
 type SpendPolicyIntent = Extract<
   OuterTransactionPolicyIntent,
-  { opType: "transfer_registered" } | { opType: "withdraw" }
+  | { opType: "transfer_registered" }
+  | { opType: "withdraw" }
+  | { opType: "ring_exit" | "ring_entry" }
 >;
 
 /** What a settlement appends to the transact's account and static lists. */
@@ -647,11 +664,13 @@ interface ExpectedSettlement {
 }
 
 /**
- * The public settlement a spend's wire must carry: none on a transfer,
- * exactly the approved recipient and amount on a withdraw. A transfer's
- * recipient and amount are encrypted in the wire and only checked for
- * well-formedness here; where they ARE bound differs by rail (see
- * docs/ops/helius-rings.md, "Semantics worth knowing").
+ * The public settlement a spend's wire must carry: exactly the approved
+ * recipient and amount on a withdraw, none on anything else (transfers and
+ * ring moves settle shielded). Returns what the settlement appends to the
+ * transact's common account and static lists. A shielded spend's recipient and
+ * amount are encrypted in the wire and only checked for well-formedness here;
+ * where they ARE bound differs by rail (see docs/ops/helius-rings.md,
+ * "Semantics worth knowing").
  *
  * A withdraw settles one of two ways. SOL reaches the pool's native interface
  * and credits the recipient's system account directly. An SPL asset reaches
@@ -663,8 +682,14 @@ async function expectPublicSettlement(
   intent: SpendPolicyIntent,
   interfaceTransfers: readonly ParsedInterfaceTransfer[]
 ): Promise<ExpectedSettlement> {
-  if (intent.opType === "transfer_registered") {
-    requiredSpendMint(intent.mint);
+  if (intent.opType !== "withdraw") {
+    // A ring move settles shielded like a registered transfer, but its gate is
+    // still SOL-only in the builders, so the bytes assert the narrower set.
+    if (intent.opType === "ring_exit" || intent.opType === "ring_entry") {
+      requiredNativeMint(intent.mint);
+    } else {
+      requiredSpendMint(intent.mint);
+    }
     requiredAmount(intent.amountRaw);
     if (interfaceTransfers.length !== 0) mismatch();
     return { extraAccounts: [], extraStatics: [] };
@@ -728,6 +753,12 @@ function requiredSpendMint(mint: string): string {
   const protocolAsset = protocolMint(mint);
   if (!PROTOCOL_SPEND_MINTS.includes(protocolAsset)) mismatch();
   return protocolAsset;
+}
+
+/** The narrower gate the ring moves keep, asserted on the bytes. */
+function requiredNativeMint(mint: string): void {
+  requiredAddress(mint);
+  if (protocolMint(mint) !== PROTOCOL_NATIVE_MINT) mismatch();
 }
 
 /**

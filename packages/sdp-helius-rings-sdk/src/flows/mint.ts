@@ -58,11 +58,29 @@ export function isProtocolNativeMint(mint: string): boolean {
  * schema's mint union; the wire policy asserts the same set independently on
  * the bytes.
  */
-export function requireSpendMint(mint: string, opType: "withdrawal" | "transfer" | "merge"): void {
+export function requireSpendMint(
+  mint: string,
+  opTypeLabel: "withdrawals" | "transfers" | "merges"
+): void {
   if (!PROTOCOL_SPEND_MINTS.includes(protocolMint(mint))) {
     throw new HeliusRingsError(
       "invalid_input",
-      `only SOL and USDC ${opType}s are supported in this build`
+      `only SOL and USDC ${opTypeLabel} are supported in this build`
+    );
+  }
+}
+
+/**
+ * The narrower gate the ring moves still keep. A move settles shielded, so
+ * nothing about its wire would resist USDC, but no move has been proved
+ * against the pool's SPL interface yet and a gate is the wrong place to find
+ * out. Widen it to `requireSpendMint` when one has.
+ */
+export function requireProtocolSol(mint: string, opTypeLabel: "ring exits" | "ring entries"): void {
+  if (protocolMint(mint) !== PROTOCOL_NATIVE_MINT) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      `only SOL ${opTypeLabel} are supported in this build`
     );
   }
 }

@@ -41,6 +41,7 @@ function strategy(id: string): EarnStrategy {
     withdrawalSlippage: null,
     hostCluster: "devnet",
     fundable: true,
+    feeSponsored: false,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
   };
@@ -189,6 +190,7 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
     shareMint: `${id}-share-mint`,
     createdAt: TIMESTAMP,
     closedAt: null,
+    feeSponsored: false,
     shares: "1",
     tokenValue: "1.05",
   };

@@ -574,6 +574,9 @@ describe("Earn routes — strategy catalogue", () => {
     expect(defaultBody.data.strategies[0]).toMatchObject({
       hostCluster: "devnet",
       fundable: true,
+      // Sponsorship is unset in this harness, so a fundable row still reads
+      // wallet-pays. The flag is a fact about the deployment, not the row.
+      feeSponsored: false,
     });
     // The filter runs in SQL: the total describes the default view, not the
     // store, so pagination never walks a reader into hidden rows.
@@ -592,8 +595,50 @@ describe("Earn routes — strategy catalogue", () => {
     expect(optInBody.data.strategies[0]).toMatchObject({
       hostCluster: "mainnet-beta",
       fundable: false,
+      feeSponsored: false,
     });
     expect(optInBody.data.total).toBe(1);
+  });
+
+  /**
+   * `feeSponsored` rides on the catalogue row, not on the deposit quote, so a
+   * provider that never quotes (Kamino has no deposit floor) still gets honest
+   * fee copy. It answers the execution gate (`isEarnVaultSponsorshipEnabled`
+   * against the row's cluster), and a row that cannot be funded is never
+   * sponsored, whatever the flag says.
+   */
+  it("derives feeSponsored per request from the sponsorship gate and the row's cluster", async () => {
+    await seedAuth();
+    const local = await seedStrategy({ provider: "kamino", hostCluster: "devnet" });
+    const mirrored = await seedStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
+    const original = env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED;
+    env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = "true";
+    try {
+      const list = await getEarn("/v1/earn/strategies");
+      expect(list.status).toBe(200);
+      const listBody = (await list.json()) as {
+        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
+      };
+      expect(listBody.data.strategies).toEqual([
+        expect.objectContaining({ id: local.id, fundable: true, feeSponsored: true }),
+      ]);
+
+      const detail = await getEarn(`/v1/earn/strategies/${local.id}`);
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as { data: { strategy: { feeSponsored: boolean } } };
+      expect(detailBody.data.strategy.feeSponsored).toBe(true);
+
+      // Sponsorship is devnet-only and the mirrored row is not fundable here.
+      const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+      const optInBody = (await optIn.json()) as {
+        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
+      };
+      expect(optInBody.data.strategies).toEqual([
+        expect.objectContaining({ id: mirrored.id, fundable: false, feeSponsored: false }),
+      ]);
+    } finally {
+      env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
+    }
   });
 
   it("rejects a cluster value outside the Solana cluster vocabulary", async () => {

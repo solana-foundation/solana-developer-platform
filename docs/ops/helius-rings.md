@@ -1,9 +1,10 @@
 # Helius Rings — operations reference
 
 Devnet-only shielded wallets bound to SDP custody. Shield (deposit), withdraw
-and private transfer are built for the default ring and for custom rings, and
-merge is built for the default ring. Anonymous transfers, zones and timelocks
-are not.
+and private transfer are built for the default ring and for custom rings, merge
+is built for the default ring, and ring moves (`ring_exit` / `ring_entry`)
+carry a wallet's own funds between a custom ring and the default ring.
+Anonymous transfers, zones and timelocks are not.
 
 The SDK runs in-process behind `RingsGatewayPort`. No adapter switch, no sidecar.
 
@@ -329,6 +330,20 @@ failure recorded on the row.
   approval granted days later — and any retry — runs against the ring the
   reviewer saw. The pinned ring also joins the intent key: the same operation
   aimed at a different ring is a second operation, not a replay.
+- **Ring moves (`ring_exit` / `ring_entry`).** The wallet's own shielded SOL
+  crosses between a named custom ring and the default ring in one transact:
+  `ring_exit` spends ring-bound notes into the wallet's own default-ring note,
+  `ring_entry` spends default-ring notes into a ring-bound one. `ring` is
+  required and never `"default"` — the other side of every move is the default
+  ring. Self-only by construction: entry's recipient is hardcoded to the
+  sender inside the SDK builder, and exit's recipient is the wallet's own
+  shielded address lifted from the material scope already open for the build.
+  Both are spends and share the one-in-flight-spend-per-wallet slot. Value
+  stays shielded the whole way — no hop through the public custody address.
+  `ring_entry` is the first operation consuming default-ring notes through a
+  one-call builder, so the pinned-input/prepared-intent contract of default
+  spends does not apply to it; it carries the same rebuild posture as ring
+  spends (empty `input_notes`, signed bytes immutable).
 - **Ring spends have no pinned-input contract.** The SDK's one-call ring
   builders select same-ring notes internally on every build, so `input_notes`
   persists empty and a pre-sign rebuild may spend different notes than the
@@ -338,13 +353,15 @@ failure recorded on the row.
 - **What custody's wire gate can and cannot prove on a ring spend.** It proves
   the right ring program, the right tree, the ring's pinned lookup table, the
   exact account universe, a single owner signature, and the public settlement
-  (none on a transfer; exactly the approved recipient and amount on a
-  withdraw). On a ring TRANSFER the recipient and amount live inside encrypted
-  outputs and cannot be re-derived from the wire — the pre-encryption
-  prepared-intent check that binds them on default spends is bypassed because
-  the one-call builders never expose the prepared transfer. Accepted because
-  the transaction is built in-process against the approved persisted intent
-  and the recipient is a same-tenant wallet's shielded address.
+  (none on a transfer or a ring move; exactly the approved recipient and
+  amount on a withdraw). On a ring TRANSFER — and on a ring move, whose wire
+  is transfer-shaped — the recipient, amount, and destination pool live inside
+  encrypted outputs and cannot be re-derived from the wire — the
+  pre-encryption prepared-intent check that binds them on default spends is
+  bypassed because the one-call builders never expose the prepared transfer.
+  Accepted because the transaction is built in-process against the approved
+  persisted intent and the recipient is a same-tenant wallet's shielded
+  address (on a move, the wallet's own).
 - **Resume, never re-key.** Bring-up is idempotent against on-chain state:
   re-submitting the same name and program id resumes from whatever already
   landed. An existing on-chain config is adopted as it stands — re-keying a
@@ -414,19 +431,22 @@ failure recorded on the row.
     tree, with no other account reachable. Conservation of value is the
     circuit's job, not custody's.
 
-Follow-up work, deliberately out of scope: ring → default-ring exits (the SDK
-exposes only a low-level `sendDefaultRing`), cross-ring transfers (impossible
+Follow-up work, deliberately out of scope: cross-ring transfers (impossible
 in one transaction at the protocol level — value routes through the default
-ring in two hops), audit reads and grants to further readers
-(bring-up's initial
-grant makes the custody-held config authority the ring's only reader, so
-serving decrypted reads or granting a third-party reader needs a future
+ring in two hops; ring ↔ default moves ship as `ring_exit`/`ring_entry`, so
+the follow-up is server-side orchestration of the two moves, which the Move
+tab's From/To pair already expresses), USDC ring moves (a move settles
+shielded, so nothing about its wire resists USDC, but `requireProtocolSol`
+and the wire gate hold both arms to SOL until one has been proved against the
+pool's SPL interface), audit reads and grants to further readers (bring-up's
+initial grant makes the custody-held config authority the ring's only reader,
+so serving decrypted reads or granting a third-party reader needs a future
 custody-signed endpoint), and `GET /rings/:name` point reads.
 
 ## Diagnostics
 
 - `GET /v1/helius-rings/health` — component probes in `helius_rings_runtime_health`.
 - Dashboard — health board, balances with per-position note counts, composer
-  (shield, withdraw, private transfer, merge), and Activity
+  (shield, withdraw, private transfer, merge, move), and Activity
   with each row's action inline: execute, retry, or recheck and void for
   `manual_reconciliation_required`.

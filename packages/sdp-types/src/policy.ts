@@ -40,6 +40,8 @@ export const WALLET_OPERATION_TYPES = [
   "rings_timelock_create",
   "rings_timelock_settle",
   "rings_zone_create",
+  "rings_ring_exit",
+  "rings_ring_entry",
 ] as const;
 
 export type WalletOperationType = (typeof WALLET_OPERATION_TYPES)[number];

@@ -43,7 +43,13 @@ export interface InMemoryRingsGatewayOptions {
 }
 
 /** Op types that consume notes, and so have inputs worth pinning. */
-const SPENDS = new Set<string>(["transfer_registered", "withdraw", "merge"]);
+const SPENDS = new Set<string>([
+  "transfer_registered",
+  "withdraw",
+  "merge",
+  "ring_exit",
+  "ring_entry",
+]);
 
 const ALL_GREEN: RuntimeHealth = {
   rpc: "green",

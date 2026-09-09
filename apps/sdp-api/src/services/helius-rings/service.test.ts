@@ -2372,6 +2372,99 @@ describe("HeliusRingsService", () => {
       expect(retried.state).toBe("failed");
       expect(retried.failure?.code).toBe("config_error");
     });
+
+    it("prepares a ring_exit pinned to the ring and threads a ring_exit intent with the pair to the wire policy", async () => {
+      await seedActiveRing();
+
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+      const builds: BuildOperationInput[] = [];
+      const buildOperation = gateway.buildOperation.bind(gateway);
+      gateway.buildOperation = async (input) => {
+        builds.push(input);
+        return buildOperation(input);
+      };
+      const policyInputs: RingsOuterTransactionPolicyInput[] = [];
+
+      const operation = await liveishService({
+        gateway,
+        validateOuterTransaction: async (input) => {
+          policyInputs.push(input);
+        },
+      }).prepareOperation(
+        operationInput({ opType: "ring_exit", ring: "treasury", clientNonce: "nonce-ring-exit" }),
+        actorContext
+      );
+
+      expect(operation.state).toBe("indexing");
+      expect(operation.ringProgramId).toBe(RING_PROGRAM);
+      expect(builds[0]?.ring).toEqual({ programId: RING_PROGRAM, lookupTable: LOOKUP_TABLE });
+      // Self-only: no recipient ever resolves for a ring move.
+      expect(builds[0]?.recipient).toBeUndefined();
+      expect(policyInputs[0]?.intent).toMatchObject({
+        opType: "ring_exit",
+        ring: { programId: RING_PROGRAM, lookupTable: LOOKUP_TABLE },
+      });
+    });
+
+    it("refuses a ring move that resolves to the default pool", async () => {
+      // Defense in depth behind the route schema: a non-route caller naming
+      // the default (or nothing) has no boundary to cross.
+      for (const ring of ["default", undefined]) {
+        await expect(
+          liveishService().prepareOperation(
+            operationInput({
+              opType: "ring_entry",
+              ...(ring ? { ring } : {}),
+              clientNonce: `nonce-ring-move-default-${ring ?? "none"}`,
+            }),
+            actorContext
+          )
+        ).rejects.toMatchObject({ code: "invalid_input" });
+      }
+    });
+
+    it("refuses a ring_entry while an earlier signed spend is unaccounted for", async () => {
+      await seedActiveRing();
+
+      const operation = await liveishService().prepareOperation(
+        operationInput({ opType: "withdraw", clientNonce: "nonce-ring-move-guard-1" }),
+        actorContext
+      );
+      expect(operation.state).toBe("indexing");
+      await failSigned(operation.id, operation.state);
+
+      // A ring move consumes notes exactly like a withdraw: one spend class,
+      // one in-flight slot per wallet.
+      await expect(
+        liveishService().prepareOperation(
+          operationInput({
+            opType: "ring_entry",
+            ring: "treasury",
+            clientNonce: "nonce-ring-move-guard-2",
+          }),
+          actorContext
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("replays a ring move under the same nonce instead of reserving twice", async () => {
+      await seedActiveRing();
+
+      // A build-time failure leaves the row failed and unsigned, so the replay
+      // reaches the intent reservation instead of the in-flight spend guard.
+      const input = operationInput({
+        opType: "ring_exit",
+        ring: "treasury",
+        clientNonce: "nonce-ring-move-idem",
+      });
+      const first = await retryableFailureService().prepareOperation(input, actorContext);
+      const replay = await retryableFailureService().prepareOperation(input, actorContext);
+
+      expect(replay.id).toBe(first.id);
+      expect(first.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));
+    });
   });
 });
 

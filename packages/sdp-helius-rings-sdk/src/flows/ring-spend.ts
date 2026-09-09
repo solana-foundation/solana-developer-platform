@@ -2,13 +2,20 @@ import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import { SPL_TOKEN_PROGRAM_ID } from "@heliuslabs/zolana/interface";
 import {
+  buildRingEntryTransaction,
+  buildRingExitTransaction,
   buildRingTransferTransaction,
   buildRingWithdrawalTransaction,
 } from "@heliuslabs/zolana/ring";
 import type { Wallet } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Transaction } from "@solana/kit";
 import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
-import { isProtocolNativeMint, protocolMint, requireSpendMint } from "./mint.js";
+import {
+  isProtocolNativeMint,
+  protocolMint,
+  requireProtocolSol,
+  requireSpendMint,
+} from "./mint.js";
 
 /**
  * Spends of ring-bound notes, through the SDK's one-call ring builders.
@@ -79,7 +86,7 @@ export async function buildRingWithdrawalTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: string }
 ): Promise<Transaction> {
-  requireSpendMint(input.mint, "withdrawal");
+  requireSpendMint(input.mint, "withdrawals");
 
   return buildRingWithdrawalTransaction({
     ...ringSpendArgs(deps, input),
@@ -98,10 +105,42 @@ export async function buildRingTransferTx(
   deps: RingSpendDeps,
   input: RingSpendInput & { recipient: ShieldedAddress }
 ): Promise<Transaction> {
-  requireSpendMint(input.mint, "transfer");
+  requireSpendMint(input.mint, "transfers");
 
   return buildRingTransferTransaction({
     ...ringSpendArgs(deps, input),
     recipient: input.recipient,
   });
+}
+
+/**
+ * Ring → default pool, the wallet's own note on both sides. The recipient is
+ * the wallet's OWN lifted `ShieldedAddress`: the builder would accept any
+ * recipient, so the self-only rule is this integration's, enforced by the
+ * caller passing `material.shieldedAddress` and nothing else. The full address
+ * skips the builder's on-chain registry lookup, like the transfer above.
+ */
+export async function buildRingExitTx(
+  deps: RingSpendDeps,
+  input: RingSpendInput & { recipient: ShieldedAddress }
+): Promise<Transaction> {
+  requireProtocolSol(input.mint, "ring exits");
+
+  return buildRingExitTransaction({
+    ...ringSpendArgs(deps, input),
+    recipient: input.recipient,
+  });
+}
+
+/**
+ * Default pool → ring, self-only by construction: the builder always sends to
+ * its own keys' address, so no recipient parameter exists to misuse.
+ */
+export async function buildRingEntryTx(
+  deps: RingSpendDeps,
+  input: RingSpendInput
+): Promise<Transaction> {
+  requireProtocolSol(input.mint, "ring entries");
+
+  return buildRingEntryTransaction(ringSpendArgs(deps, input));
 }
