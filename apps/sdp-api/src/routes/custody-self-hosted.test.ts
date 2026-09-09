@@ -148,6 +148,10 @@ describe("Custody routes — self-hosted deployment mode", () => {
 
   it("GET /v1/wallets/switch-options returns only the configured local provider", async () => {
     await seedAuth("individual");
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { local: true } } }), TEST_ORG.id)
+      .run();
 
     const res = await app.request(
       "/v1/wallets/switch-options",

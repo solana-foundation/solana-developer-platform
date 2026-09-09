@@ -8,6 +8,7 @@ import {
   assertProviderAvailable,
   getProviderAvailability,
   isPersistedCustodyCompletionEnabled,
+  parseClerkOrganizationTierMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
@@ -420,7 +421,7 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("entitles every provider in self-hosted mode regardless of tier", async () => {
+  it("applies general defaults and metadata overrides uniformly to self-hosted orgs", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -429,21 +430,21 @@ describe("provider-availability.service", () => {
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
-      entitled: true,
+      entitled: false,
       configured: true,
-      enabled: true,
+      enabled: false,
     });
     expect(availability.providers.custody.dfns).toEqual({
-      entitled: true,
+      entitled: false,
       configured: false,
       enabled: false,
     });
     expect(availability.providers.custody.ibm_haven).toEqual({
-      entitled: true,
+      entitled: false,
       configured: false,
       enabled: false,
     });
-    expect(availability.providers.compliance.range.entitled).toBe(true);
+    expect(availability.providers.compliance.range.entitled).toBe(false);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
   });
@@ -506,7 +507,7 @@ describe("provider-availability.service", () => {
     ).resolves.toBe(false);
   });
 
-  it("respects providerOverrides[id] === false in self-hosted mode", async () => {
+  it("honors a custody override disabling local the same way in self-hosted mode", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -533,7 +534,7 @@ describe("provider-availability.service", () => {
     expect(availability.providers.custody.privy.entitled).toBe(true);
   });
 
-  it("does not bypass entitlements when SDP_DEPLOYMENT_MODE is unset", async () => {
+  it("applies general defaults when SDP_DEPLOYMENT_MODE is unset", async () => {
     env.SDP_DEPLOYMENT_MODE = undefined;
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -581,6 +582,103 @@ describe("provider-availability.service", () => {
     expect(organization?.tier).toBe("enterprise");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
       rpcProvider: "helius",
+    });
+  });
+
+  it("parseClerkOrganizationTierMetadata returns enableProductionProject true only for boolean true", () => {
+    const cases: Array<{ metadata: unknown; expected: boolean }> = [
+      { metadata: { sdp: { enableProductionProject: true } }, expected: true },
+      { metadata: { sdp: { enableProductionProject: false } }, expected: false },
+      { metadata: { sdp: { enableProductionProject: "true" } }, expected: false },
+      { metadata: { sdp: { enableProductionProject: 1 } }, expected: false },
+      { metadata: { sdp: {} }, expected: false },
+      { metadata: {}, expected: false },
+      { metadata: undefined, expected: false },
+    ];
+
+    for (const { metadata, expected } of cases) {
+      expect(
+        parseClerkOrganizationTierMetadata({
+          id: "org_parse_test",
+          private_metadata: metadata,
+        }).enableProductionProject
+      ).toBe(expected);
+    }
+  });
+
+  it("syncs enableProductionProject into settings when true and strips it when absent, preserving unrelated keys", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(
+        JSON.stringify({
+          rpcProvider: "helius",
+          enableProductionProject: true,
+        }),
+        TEST_ORG_ID
+      )
+      .run();
+
+    await syncProviderAccessFromClerk(getDb(env), {
+      organizationId: TEST_ORG_ID,
+      clerkOrganization: {
+        id: "org_clerk_strip_test",
+        private_metadata: {},
+      },
+    });
+
+    const stripped = await getDb(env)
+      .prepare("SELECT settings FROM organizations WHERE id = ?")
+      .bind(TEST_ORG_ID)
+      .first<{ settings: string | null }>();
+    expect(stripped?.settings ? JSON.parse(stripped.settings) : null).toEqual({
+      rpcProvider: "helius",
+    });
+  });
+
+  it("syncs enableProductionProject and collapses settings to null when nothing remains", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ enableProductionProject: true }), TEST_ORG_ID)
+      .run();
+
+    await syncProviderAccessFromClerk(getDb(env), {
+      organizationId: TEST_ORG_ID,
+      clerkOrganization: {
+        id: "org_clerk_collapse_test",
+        private_metadata: {},
+      },
+    });
+
+    const collapsed = await getDb(env)
+      .prepare("SELECT settings FROM organizations WHERE id = ?")
+      .bind(TEST_ORG_ID)
+      .first<{ settings: string | null }>();
+    expect(collapsed?.settings).toBeNull();
+  });
+
+  it("syncs enableProductionProject true alongside provider overrides", async () => {
+    await syncProviderAccessFromClerk(getDb(env), {
+      organizationId: TEST_ORG_ID,
+      clerkOrganization: {
+        id: "org_clerk_combined_test",
+        private_metadata: {
+          sdp: {
+            enableProductionProject: true,
+            providerOverrides: {
+              custody: { local: true },
+            },
+          },
+        },
+      },
+    });
+
+    const combined = await getDb(env)
+      .prepare("SELECT settings FROM organizations WHERE id = ?")
+      .bind(TEST_ORG_ID)
+      .first<{ settings: string | null }>();
+    expect(combined?.settings ? JSON.parse(combined.settings) : null).toEqual({
+      enableProductionProject: true,
+      providerOverrides: { custody: { local: true } },
     });
   });
 

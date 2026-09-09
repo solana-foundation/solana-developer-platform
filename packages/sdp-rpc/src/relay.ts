@@ -166,10 +166,6 @@ const TRANSACTION_METHOD_NAMES = new Set([SEND_TRANSACTION_METHOD, SEND_RAW_TRAN
 const MANAGED_RPC_PROVIDER_SET = new Set<string>(ORGANIZATION_RPC_PROVIDERS);
 const PROJECT_RPC_PROVIDER_SET = new Set<string>(PROJECT_RPC_PROVIDERS);
 
-type SdpDeploymentMode = "managed" | "self_hosted";
-
-const VALID_DEPLOYMENT_MODES = new Set<string>(["managed", "self_hosted"]);
-
 type OrganizationProviderRow = {
   tier: string;
   settings: unknown | null;
@@ -219,22 +215,6 @@ function parseOrganizationSettings(raw: unknown | null): OrganizationSettings | 
   }
 }
 
-function resolveDeploymentMode(value: string | undefined): SdpDeploymentMode {
-  if (value === undefined) {
-    return "managed";
-  }
-  if (!VALID_DEPLOYMENT_MODES.has(value)) {
-    throw new Error(
-      `Invalid SDP_DEPLOYMENT_MODE: "${value}". Expected "managed" or "self_hosted".`
-    );
-  }
-  return value as SdpDeploymentMode;
-}
-
-function isSelfHostedDeployment(env: Pick<RpcEnv, "SDP_DEPLOYMENT_MODE">): boolean {
-  return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE) === "self_hosted";
-}
-
 function hasEnv(env: RpcEnv, key: keyof RpcEnv): boolean {
   const value = env[key];
   return typeof value === "string" && value.trim().length > 0;
@@ -247,17 +227,6 @@ function buildConfiguredRpcProviders(env: RpcEnv): Record<OrganizationRpcProvide
       definition.isConfigured(env),
     ])
   ) as Record<OrganizationRpcProvider, boolean>;
-}
-
-function applySelfHostedEntitlements<T extends string>(
-  shape: Record<T, boolean>,
-  overrides?: Partial<Record<T, boolean>>
-): Record<T, boolean> {
-  const next = {} as Record<T, boolean>;
-  for (const key of Object.keys(shape) as T[]) {
-    next[key] = overrides?.[key] !== false;
-  }
-  return next;
 }
 
 function buildAvailabilityEntries<T extends string>(
@@ -510,11 +479,8 @@ async function getRpcProviderAvailability(
     providerOverrides: settings?.providerOverrides,
   });
   const configured = buildConfiguredRpcProviders(env);
-  const entitled = isSelfHostedDeployment(env)
-    ? applySelfHostedEntitlements(resolved.providers.rpc, settings?.providerOverrides?.rpc)
-    : resolved.providers.rpc;
 
-  return buildAvailabilityEntries(entitled, configured);
+  return buildAvailabilityEntries(resolved.providers.rpc, configured);
 }
 
 async function getProjectSettings(
