@@ -3073,10 +3073,10 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("names the fix when the token has no signing wallet and the key holds several", async () => {
-        // With no wallet on the token and more than one binding there is
-        // nothing to disambiguate on this route — it takes no walletId — so the
-        // refusal has to point at the token, not ask for a parameter.
+      it("refuses a token without a signing wallet when no binding carries tokens:write", async () => {
+        // The key reaches the route on its project permissions, but the wallet
+        // it would sign with is granted separately. Without that grant on the
+        // binding there is no wallet this key may sign the list change with.
         const db = getDb(env);
         await db
           .prepare(
@@ -3089,10 +3089,12 @@ describe("Issuance Routes", () => {
           walletScope: "selected",
           signingWalletIds: ["wal_one", "wal_two"],
           walletBindings: [
-            { walletId: "wal_one", permissions: ["tokens:write"] },
-            { walletId: "wal_two", permissions: ["tokens:write"] },
+            { walletId: "wal_one", permissions: ["tokens:read"] },
+            { walletId: "wal_two", permissions: ["tokens:read"] },
           ],
         });
+
+        const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
 
         try {
           const res = await app.request(
@@ -3110,16 +3112,18 @@ describe("Issuance Routes", () => {
 
           expect(res.status).toBe(403);
           const body = (await res.json()) as { error: { message: string } };
-          expect(body.error.message).toContain("Token has no signing wallet");
+          expect(body.error.message).toContain("wallet permissions");
+          expect(createOrgSignerSpy).not.toHaveBeenCalled();
         } finally {
+          createOrgSignerSpy.mockRestore();
           await seedCachedApiKey(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
         }
       });
 
       it("signs with the key's default wallet when the token names none and several are bound", async () => {
-        // Several bindings are only ambiguous without a default. The key names
-        // one, and the shared resolver already authorizes it — refusing here
-        // would strand a key that has a perfectly good signer.
+        // Several bindings never leave the signer ambiguous: the key's default
+        // is its explicit signingWalletId, or its first binding when it names
+        // none. Refusing here would strand a key that has a usable signer.
         const db = getDb(env);
         await db
           .prepare(

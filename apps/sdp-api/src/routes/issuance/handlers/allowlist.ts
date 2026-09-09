@@ -166,39 +166,6 @@ async function removeExistingAllowlistEntryOnChain(opts: {
   }
 }
 
-/**
- * Which wallet signs an on-chain control-list change, under this key's scope.
- *
- * The token's own value cannot be handed to the signer directly: a key bound to
- * selected wallets would reach a wallet it was never granted, and a token that
- * names no wallet would fall back to the project default. A key that is not
- * wallet-scoped keeps resolving exactly as before.
- */
-function resolveAllowlistSigningWalletId(
-  auth: Parameters<typeof resolveApiKeySigningWalletId>[0],
-  signingWalletId: string | null
-): string | null {
-  if (signingWalletId) {
-    return resolveApiKeySigningWalletId(auth, signingWalletId, ["tokens:write"]);
-  }
-
-  try {
-    return resolveApiKeySigningWalletId(auth, null, ["tokens:write"]);
-  } catch (error) {
-    // The shared resolver answers "specify a walletId" when several bindings and
-    // no default leave the signer ambiguous, and this route carries no walletId
-    // parameter. Only that answer is rewritten: a key with an authorized default
-    // signs with it, and every other refusal already names its own cause.
-    if (error instanceof AppError && error.code === "BAD_REQUEST") {
-      throw new AppError(
-        "FORBIDDEN",
-        "Token has no signing wallet; set one before changing its control list"
-      );
-    }
-    throw error;
-  }
-}
-
 export const listAllowlist = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { projectId, orgId } = requireProjectScope(c);
@@ -273,9 +240,11 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
   // under this key's scope rather than handing the token's own value straight
   // to the signer: a key bound to selected wallets must hold the token's
   // signing wallet, and a token without one must not silently fall back to the
-  // project default the key was never granted.
+  // project default the key was never granted. The shared resolver is the same
+  // one every other signing route uses, so the key's own default answers here
+  // exactly as it does there.
   const signingWalletId = token.ablListAddress
-    ? resolveAllowlistSigningWalletId(auth, token.signingWalletId)
+    ? resolveApiKeySigningWalletId(auth, token.signingWalletId, ["tokens:write"])
     : null;
 
   try {
@@ -351,9 +320,11 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   // under this key's scope rather than handing the token's own value straight
   // to the signer: a key bound to selected wallets must hold the token's
   // signing wallet, and a token without one must not silently fall back to the
-  // project default the key was never granted.
+  // project default the key was never granted. The shared resolver is the same
+  // one every other signing route uses, so the key's own default answers here
+  // exactly as it does there.
   const signingWalletId = token.ablListAddress
-    ? resolveAllowlistSigningWalletId(auth, token.signingWalletId)
+    ? resolveApiKeySigningWalletId(auth, token.signingWalletId, ["tokens:write"])
     : null;
 
   const auditService = new AuditService(getDb(c.env));
