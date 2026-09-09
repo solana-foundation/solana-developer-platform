@@ -1170,6 +1170,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
+        // Makes the order's idempotency key unique per transfer (TS-BANK-10 OD#9/OD#11).
+        paymentTransferId: reservedTransferId,
         // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
         externalCustomerId: link.accountId,
       });

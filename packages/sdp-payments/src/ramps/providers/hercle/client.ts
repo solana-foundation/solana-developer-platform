@@ -416,7 +416,10 @@ export class HercleRampClient implements RampProvider {
           destinationWalletAddress: input.destinationWalletAddress,
         },
         onBehalfOf: input.externalCustomerId,
-        idempotencyKey: `sdp-onramp-${input.externalCustomerId}-${input.fiatCurrency}-${input.fiatAmount}-${input.destinationWalletAddress}`,
+        // Keyed on our transfer id so two legitimate orders for the same amount never collapse into one
+        // (Hercle replays a key while its order is still fundable); the content-addressed form is only a
+        // fallback for callers that reserved no transfer.
+        idempotencyKey: `sdp-onramp-${input.paymentTransferId ?? `${input.externalCustomerId}-${input.fiatCurrency}-${input.fiatAmount}-${input.destinationWalletAddress}`}`,
       }),
       "on-ramp order"
     );

@@ -1082,6 +1082,7 @@ describe("Payments routes — ramps", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data: {
+        transferId: string;
         quote: {
           provider: string;
           deliveryMode: string;
@@ -1106,6 +1107,9 @@ describe("Payments routes — ramps", () => {
     expect(headers.get("on-behalf-of")).toBe(accountId);
     expect(headers.get("X-Hercle-Client")).toBe(TEST_HERCLE_CLIENT_ID);
     expect(headers.get("X-Hercle-Signature")).toBeTruthy();
+    // TS-BANK-10 OD#9/OD#11: the key carries our transfer id, so a customer buying the same amount twice
+    // gets two orders instead of a replay of the first while it is still fundable.
+    expect(headers.get("Idempotency-Key")).toBe(`sdp-onramp-${body.data.transferId}`);
 
     fetchSpy.mockRestore();
   });
