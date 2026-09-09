@@ -19,10 +19,12 @@ const MAX_LINK_LENGTH = 2048;
 // the same way.
 const ACTIVE_CONTENT_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "blob:", "file:"]);
 
-// A whole string that is a scheme plus a body, with no whitespace: prose that
-// merely quotes a scheme (`javascript:alert(1), seen in an incident`) is text,
-// not a link. Compared after trimming, so surrounding whitespace cannot hide it.
-const URI_LIKE_PATTERN = /^[a-z][a-z0-9+.-]*:\S+$/i;
+// The leading scheme of a string, if it opens with one. Judged on the prefix
+// rather than on the whole string being URI-shaped: a browser handed
+// `javascript:alert(1) // note` as an href runs it, so a body containing
+// whitespace is not evidence that the value is prose. Text that merely quotes a
+// scheme mid-sentence never starts with one and stays unconstrained.
+const LEADING_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 
 const parseUri = (value: string): URL | null => {
   try {
@@ -38,12 +40,8 @@ const isHttpUrl = (value: string): boolean => {
 };
 
 const isActiveContentUri = (value: string): boolean => {
-  const trimmed = value.trim();
-  if (!URI_LIKE_PATTERN.test(trimmed)) {
-    return false;
-  }
-  const url = parseUri(trimmed);
-  return url !== null && ACTIVE_CONTENT_SCHEMES.has(url.protocol);
+  const scheme = LEADING_SCHEME_PATTERN.exec(value.trim())?.[0];
+  return scheme !== undefined && ACTIVE_CONTENT_SCHEMES.has(scheme.toLowerCase());
 };
 
 function collectActiveContentIssues(
@@ -62,7 +60,9 @@ function collectActiveContentIssues(
   }
 
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => collectActiveContentIssues(entry, [...path, index], issues));
+    for (const [index, entry] of value.entries()) {
+      collectActiveContentIssues(entry, [...path, index], issues);
+    }
     return;
   }
 

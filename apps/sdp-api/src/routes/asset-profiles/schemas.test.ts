@@ -52,12 +52,25 @@ describe("issuanceMetadataSchema asset link validation", () => {
 
   it("does not constrain link-shaped text in non-link keys", () => {
     const result = issuanceMetadataSchema.safeParse({
-      asset: { notes: "javascript:alert(1) quoted in an incident report" },
+      asset: { notes: "an incident report quoting javascript:alert(1) inline" },
       compliance: { website: "javascript:not-validated-here" },
     });
     // compliance.* is never publicly projected; only the asset namespace is
     // clamped. The schema stays permissive elsewhere by design.
     expect(result.success).toBe(true);
+  });
+
+  it("refuses an active-content scheme that opens a value carrying prose", () => {
+    // A body containing whitespace is not evidence of prose: a consumer handed
+    // `javascript:alert(1) // note` as an href still runs it, so the leading
+    // scheme decides, not whether the whole string looks URI-shaped.
+    for (const notes of [
+      "javascript:alert(1) // note",
+      "data:text/html,<script>alert(1)</script> screenshot below",
+      "  vbscript:evil payload seen in the wild",
+    ]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(false);
+    }
   });
 
   it("refuses an active-content URI under a key the name pattern never covered", () => {
