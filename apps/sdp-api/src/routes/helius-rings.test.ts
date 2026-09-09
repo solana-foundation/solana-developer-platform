@@ -42,6 +42,10 @@ const TEST_ORG = { id: "org_hr_route", name: "Rings Route Org", slug: "rings-rou
 const TEST_PROJECT = { id: "prj_hr_route", slug: "rings-route-project" };
 const TEST_USER = { id: "usr_hr_route", email: "rings-route@example.com" };
 const TEST_API_KEY = { id: "key_hr_route", raw: "sk_test_helius_rings", prefix: "sk_test_hr" };
+/** Devnet USDC, seeded active by migration 0057. */
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+/** Allowlisted by neither the asset catalogue nor the spend gate. */
+const OTHER_MINT = "E4KqM12ZDosJbV7gZ5iR8rK1T2mC3nF4pQ6sU8wX9yZa";
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
@@ -545,6 +549,54 @@ describe("Helius Rings routes", () => {
         to: "HrRouteTestPublicKey111111111111111111111111",
         clientNonce: "route-nonce-ring-withdraw-2",
         ring: "treasury",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    // USDC is the one SPL asset with a settlement path this build assembles:
+    // the pool's own vault for a withdraw, and nothing public for a merge.
+    it.each([
+      [
+        "withdraw",
+        {
+          opType: "withdraw",
+          asset: { mint: USDC_MINT, amountRaw: "1000000" },
+          to: "HrRouteTestPublicKey111111111111111111111111",
+        },
+      ],
+      [
+        "private transfer",
+        {
+          opType: "transfer_registered",
+          asset: { mint: USDC_MINT, amountRaw: "1000000" },
+          to: "rings1recipient",
+        },
+      ],
+      ["merge", { opType: "merge", asset: { mint: USDC_MINT } }],
+    ])("accepts a USDC %s on the default ring", async (label, body) => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        clientNonce: `route-nonce-usdc-${label.replace(/\s/g, "-")}`,
+        ...body,
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it.each([
+      [
+        "withdraw",
+        {
+          opType: "withdraw",
+          asset: { mint: OTHER_MINT, amountRaw: "1000000" },
+          to: "HrRouteTestPublicKey111111111111111111111111",
+        },
+      ],
+      ["merge", { opType: "merge", asset: { mint: OTHER_MINT } }],
+    ])("400s a %s of a mint outside the two the build settles", async (label, body) => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        clientNonce: `route-nonce-unknown-${label}`,
+        ...body,
       });
       expect(res.status).toBe(400);
     });

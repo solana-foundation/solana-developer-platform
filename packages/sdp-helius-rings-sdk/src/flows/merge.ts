@@ -7,7 +7,7 @@ import {
 } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { type Address, address, type Transaction } from "@solana/kit";
-import { protocolMint, requireProtocolSol } from "./mint.js";
+import { protocolMint, requireSpendMint } from "./mint.js";
 import { selectMergeNotes } from "./notes.js";
 
 /**
@@ -43,7 +43,7 @@ export interface MergeResult {
 }
 
 export async function buildMerge(deps: MergeDeps, input: MergeInput): Promise<MergeResult> {
-  requireProtocolSol(input.mint, "merges");
+  requireSpendMint(input.mint, "merges");
 
   const asset = address(protocolMint(input.mint));
   const selection = selectMergeNotes({

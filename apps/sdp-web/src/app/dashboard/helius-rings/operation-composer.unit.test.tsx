@@ -16,6 +16,8 @@ vi.mock("./helius-rings.data", async (importOriginal) => ({
 }));
 
 const RING_PROGRAM = "RingProgram1111111111111111111111111111111";
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
 const WALLET: RingsWallet = {
   id: "hrw_treasury",
@@ -24,6 +26,14 @@ const WALLET: RingsWallet = {
   shieldedAddress: "rings1treasury",
   status: "ready",
   network: "devnet",
+};
+
+const RECIPIENT: RingsWallet = {
+  ...WALLET,
+  id: "hrw_desk",
+  sdpWalletId: "wal_desk",
+  name: "Trading desk",
+  shieldedAddress: "rings1desk",
 };
 
 const ACTIVE_RING: ProjectRing = {
@@ -53,12 +63,12 @@ const PREPARED = {
   },
 };
 
-function renderComposer(projectRings: ProjectRing[]) {
+function renderComposer(projectRings: ProjectRing[], recipientOptions: RingsWallet[] = []) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <OperationComposer
         wallet={WALLET}
-        recipientOptions={[]}
+        recipientOptions={recipientOptions}
         custodyPublicKey="9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
         projectRings={projectRings}
         gatewayRed={false}
@@ -267,17 +277,14 @@ describe("OperationComposer merge", () => {
     // The API's merge arm is strict, so an amount it has no use for would be
     // refused rather than ignored.
     expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        opType: "merge",
-        asset: { mint: "So11111111111111111111111111111111111111112" },
-      })
+      expect.objectContaining({ opType: "merge", asset: { mint: SOL_MINT } })
     );
     const sent = mocks.prepareRingsOperation.mock.calls[0]?.[0] ?? {};
     expect("ring" in sent).toBe(false);
     expect(sent.to).toBeUndefined();
   });
 
-  it("does not offer USDC, even if the previous op had it selected", async () => {
+  it("submits a USDC merge, carrying the asset across the tab switch", async () => {
     renderComposer([]);
 
     const user = userEvent.setup();
@@ -285,18 +292,102 @@ describe("OperationComposer merge", () => {
     await user.click(await screen.findByRole("option", { name: "USDC" }));
     await user.click(screen.getByRole("tab", { name: "Merge" }));
 
-    await user.click(screen.getByRole("combobox", { name: "Asset" }));
-    expect(screen.queryByRole("option", { name: "USDC" })).toBeNull();
-    expect(await screen.findByRole("option", { name: "SOL" })).toBeTruthy();
-
-    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Review" }));
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         opType: "merge",
-        asset: { mint: "So11111111111111111111111111111111111111112" },
+        asset: { mint: USDC_MINT },
+      })
+    );
+  });
+});
+
+describe("OperationComposer USDC", () => {
+  it("offers USDC on every operation", async () => {
+    // A recipient, so the private-transfer tab composes rather than reporting
+    // it has nobody to send to.
+    renderComposer([ACTIVE_RING], [RECIPIENT]);
+
+    const user = userEvent.setup();
+    for (const tab of ["Shield", "Withdraw", "Private transfer", "Merge"]) {
+      await user.click(screen.getByRole("tab", { name: tab }));
+      await user.click(screen.getByRole("combobox", { name: "Asset" }));
+      expect(await screen.findByRole("option", { name: "USDC" })).toBeTruthy();
+      await user.keyboard("{Escape}");
+    }
+  });
+
+  it("submits a USDC withdrawal from the default ring", async () => {
+    renderComposer([]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
+    await user.click(screen.getByRole("combobox", { name: "Asset" }));
+    await user.click(await screen.findByRole("option", { name: "USDC" }));
+    await fillShield(user);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      // USDC has six decimals, so "1.5" is 1_500_000 base units.
+      expect.objectContaining({
+        opType: "withdraw",
+        asset: { mint: USDC_MINT, amountRaw: "1500000" },
+      })
+    );
+  });
+
+  // Pinning a ring changes where the notes come from, not which assets the
+  // build settles: a chosen USDC survives the ring select rather than
+  // silently falling back to SOL.
+  it("keeps USDC on a spend once a custom ring is pinned", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
+    await user.click(screen.getByRole("combobox", { name: "Asset" }));
+    await user.click(await screen.findByRole("option", { name: "USDC" }));
+
+    await user.click(screen.getByRole("combobox", { name: "Ring" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+
+    await user.click(screen.getByRole("combobox", { name: "Asset" }));
+    expect(await screen.findByRole("option", { name: "USDC" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    await fillShield(user);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        opType: "withdraw",
+        ring: "treasury",
+        asset: { mint: USDC_MINT, amountRaw: "1500000" },
+      })
+    );
+  });
+
+  it("shields USDC into a custom ring", async () => {
+    renderComposer([ACTIVE_RING]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Asset" }));
+    await user.click(await screen.findByRole("option", { name: "USDC" }));
+    await user.click(screen.getByRole("combobox", { name: "Ring" }));
+    await user.click(await screen.findByRole("option", { name: "treasury" }));
+
+    await fillShield(user);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        opType: "shield",
+        ring: "treasury",
+        asset: { mint: USDC_MINT, amountRaw: "1500000" },
       })
     );
   });

@@ -3,6 +3,7 @@ import { getAssociatedTokenAddress } from "@heliuslabs/zolana/addresses";
 import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
 import { getMergeTransactInstruction, type SignerAccount } from "@heliuslabs/zolana/instructions";
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   DEFAULT_TREE_ADDRESS,
   DepositAsset,
   depositInstruction,
@@ -206,8 +207,15 @@ function mutateInstructionData(wire: string, mutate: (data: Uint8Array) => void)
 }
 
 interface PublicSettlement {
-  readonly tag: 0 | 1;
+  /** `solDeposit`, `solWithdrawal`, `splDeposit`, `splWithdrawal`. */
+  readonly tag: 0 | 1 | 2 | 3;
   readonly amount: bigint;
+  /** Required by the two SPL tags, which carry the vault bump inline. */
+  readonly splInterfaceBump?: number;
+}
+
+function bumpMissing(): never {
+  throw new Error("test SPL settlement needs a vault bump");
 }
 
 function u64Bytes(value: bigint): Uint8Array {
@@ -240,7 +248,13 @@ function opaqueTransactData(
     inputCount,
     ...bytes(inputCount * TRANSACT_INPUT_LENGTH, 0x4b),
     settlements.length,
-    ...settlements.flatMap((settlement) => [settlement.tag, ...u64Bytes(settlement.amount)]),
+    ...settlements.flatMap((settlement) => [
+      settlement.tag,
+      ...u64Bytes(settlement.amount),
+      ...(settlement.tag === 2 || settlement.tag === 3
+        ? [settlement.splInterfaceBump ?? bumpMissing()]
+        : []),
+    ]),
     ...(options.tail ?? bytes(5, 0xa5)),
   ]);
 }
@@ -280,6 +294,108 @@ function spendWire(protocolInstruction: Instruction): string {
   return encodeTransaction([
     getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }),
     protocolInstruction,
+  ]);
+}
+
+// --- SPL withdrawal fixtures -------------------------------------------------
+
+/**
+ * The vault PDA and its bump for a mint, and the recipient's associated token
+ * account: exactly what the builder derives and the gate re-derives.
+ */
+async function splWithdrawalAccounts(
+  mint: Address = MINT,
+  recipient: Address = RECIPIENT
+): Promise<Readonly<{ vault: Address; bump: number; tokenAccount: Address }>> {
+  const [[vault, bump], tokenAccount] = await Promise.all([
+    getProgramDerivedAddress({
+      programAddress: SHIELDED_POOL_PROGRAM_ID,
+      seeds: [new TextEncoder().encode("spl_asset_vault"), getAddressEncoder().encode(mint)],
+    }),
+    getAssociatedTokenAddress(recipient, mint),
+  ]);
+  return { vault, bump, tokenAccount };
+}
+
+/** The pool transact of an SPL withdrawal: five settlement accounts, no `SOL_INTERFACE`. */
+async function splWithdrawalInstruction(
+  options: Readonly<{
+    mint?: Address;
+    recipient?: Address;
+    data?: Uint8Array;
+    vault?: Address;
+    tokenAccount?: Address;
+    tokenProgram?: Address;
+  }> = {}
+): Promise<Instruction> {
+  const mint = options.mint ?? MINT;
+  const derived = await splWithdrawalAccounts(mint, options.recipient ?? RECIPIENT);
+  return {
+    programAddress: SHIELDED_POOL_PROGRAM_ID,
+    accounts: [
+      ...commonSpendAccounts,
+      { address: SHIELDED_POOL_CPI_AUTHORITY, role: AccountRole.READONLY },
+      { address: mint, role: AccountRole.READONLY },
+      { address: options.vault ?? derived.vault, role: AccountRole.WRITABLE },
+      { address: options.tokenAccount ?? derived.tokenAccount, role: AccountRole.WRITABLE },
+      { address: options.tokenProgram ?? SPL_TOKEN_PROGRAM_ID, role: AccountRole.READONLY },
+    ],
+    data:
+      options.data ??
+      opaqueTransactData({
+        settlements: [{ tag: 3, amount: 10n, splInterfaceBump: derived.bump }],
+      }),
+  };
+}
+
+async function createAssociatedTokenInstruction(
+  options: Readonly<{
+    mint?: Address;
+    recipient?: Address;
+    payer?: Address;
+    tokenAccount?: Address;
+    data?: Uint8Array;
+    /** Only a self-withdrawal's merge with the fee payer may make this writable. */
+    recipientWritable?: boolean;
+  }> = {}
+): Promise<Instruction> {
+  const mint = options.mint ?? MINT;
+  const recipient = options.recipient ?? RECIPIENT;
+  const { tokenAccount } = await splWithdrawalAccounts(mint, recipient);
+  return {
+    programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
+    accounts: [
+      { address: options.payer ?? OWNER, role: AccountRole.WRITABLE_SIGNER },
+      { address: options.tokenAccount ?? tokenAccount, role: AccountRole.WRITABLE },
+      {
+        address: recipient,
+        role: options.recipientWritable ? AccountRole.WRITABLE : AccountRole.READONLY,
+      },
+      { address: mint, role: AccountRole.READONLY },
+      { address: SYSTEM, role: AccountRole.READONLY },
+      { address: SPL_TOKEN_PROGRAM_ID, role: AccountRole.READONLY },
+    ],
+    data: options.data ?? Uint8Array.of(1),
+  };
+}
+
+/** Compute budget, the idempotent token-account create, then the pool transact. */
+async function splWithdrawalWire(
+  options: Parameters<typeof splWithdrawalInstruction>[0] & {
+    create?: Instruction | null;
+  } = {}
+): Promise<string> {
+  const create =
+    options.create === undefined
+      ? await createAssociatedTokenInstruction({
+          ...(options.mint ? { mint: options.mint } : {}),
+          ...(options.recipient ? { recipient: options.recipient } : {}),
+        })
+      : options.create;
+  return encodeTransaction([
+    getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }),
+    ...(create ? [create] : []),
+    await splWithdrawalInstruction(options),
   ]);
 }
 
@@ -414,13 +530,54 @@ async function ringWithdrawal(
   return ringSpendInstruction({
     ring: options.ring ?? RING_PROGRAM,
     data: options.data ?? ringTransactData({ settlements: [{ tag: 1, amount: 10n }] }),
-    settlementRecipient: options.recipient ?? RECIPIENT,
+    settlement: [
+      { address: SOL_INTERFACE, role: AccountRole.WRITABLE },
+      { address: options.recipient ?? RECIPIENT, role: AccountRole.WRITABLE },
+    ],
+  });
+}
+
+/**
+ * A ring withdrawal of an SPL asset: the same five settlement accounts the
+ * pool rail appends, since zolana derives both from one `settlementAccounts`.
+ */
+async function ringSplWithdrawal(
+  options: Readonly<{
+    ring?: Address;
+    data?: Uint8Array;
+    mint?: Address;
+    recipient?: Address;
+    vault?: Address;
+    tokenAccount?: Address;
+    tokenProgram?: Address;
+  }> = {}
+): Promise<Instruction> {
+  const mint = options.mint ?? MINT;
+  const derived = await splWithdrawalAccounts(mint, options.recipient ?? RECIPIENT);
+  return ringSpendInstruction({
+    ring: options.ring ?? RING_PROGRAM,
+    data:
+      options.data ??
+      ringTransactData({
+        settlements: [{ tag: 3, amount: 10n, splInterfaceBump: derived.bump }],
+      }),
+    settlement: [
+      { address: SHIELDED_POOL_CPI_AUTHORITY, role: AccountRole.READONLY },
+      { address: mint, role: AccountRole.READONLY },
+      { address: options.vault ?? derived.vault, role: AccountRole.WRITABLE },
+      { address: options.tokenAccount ?? derived.tokenAccount, role: AccountRole.WRITABLE },
+      { address: options.tokenProgram ?? SPL_TOKEN_PROGRAM_ID, role: AccountRole.READONLY },
+    ],
   });
 }
 
 /** `ringTransactAccounts` verbatim: payer twice, both trees, ringAuth at index 7. */
 async function ringSpendInstruction(
-  options: Readonly<{ ring?: Address; data?: Uint8Array; settlementRecipient?: Address }>
+  options: Readonly<{
+    ring?: Address;
+    data?: Uint8Array;
+    settlement?: readonly Readonly<{ address: Address; role: AccountRole }>[];
+  }>
 ): Promise<Instruction> {
   const ring = options.ring ?? RING_PROGRAM;
   const [ringConfig, ringAuth] = await Promise.all([
@@ -438,21 +595,19 @@ async function ringSpendInstruction(
       { address: SHIELDED_POOL_PROGRAM_ID, role: AccountRole.READONLY },
       { address: SYSTEM, role: AccountRole.READONLY },
       { address: ringAuth, role: AccountRole.READONLY },
-      ...(options.settlementRecipient
-        ? [
-            { address: SOL_INTERFACE, role: AccountRole.WRITABLE },
-            { address: options.settlementRecipient, role: AccountRole.WRITABLE },
-          ]
-        : []),
+      ...(options.settlement ?? []),
     ],
     data: options.data ?? ringTransactData(),
   };
 }
 
-/** Compute budget + the ring transact, ALT-compressed like the real builders emit. */
+/**
+ * Compute budget, any setup instruction, then the ring transact, ALT-compressed
+ * like the real builders emit.
+ */
 async function ringSpendWire(
   instruction: Instruction,
-  options: Readonly<{ lookupTable?: Address }> = {}
+  options: Readonly<{ lookupTable?: Address; setup?: readonly Instruction[] }> = {}
 ): Promise<string> {
   const tableAddress = options.lookupTable ?? RING_LOOKUP_TABLE;
   const tables = {
@@ -481,7 +636,11 @@ async function ringSpendWire(
         ),
       (message) =>
         appendTransactionMessageInstructions(
-          [getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }), instruction],
+          [
+            getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }),
+            ...(options.setup ?? []),
+            instruction,
+          ],
           message
         ),
       (message) => compressTransactionMessageUsingAddressLookupTables(message, tables as never)
@@ -530,6 +689,30 @@ function ringMovePolicy(
       ...overrides,
     },
   };
+}
+
+/**
+ * A whole USDC ring withdrawal: the idempotent token-account create between
+ * the compute limit and the ring transact, against a USDC intent. Options
+ * spoil one part at a time; the defaults are the shape the builder emits.
+ */
+async function ringSplWithdrawalPolicyInput(
+  options: Readonly<{
+    transact?: Parameters<typeof ringSplWithdrawal>[0];
+    create?: Instruction | null;
+    intent?: Partial<Extract<OuterTransactionPolicyInput["intent"], { opType: "withdraw" }>>;
+  }> = {}
+): Promise<OuterTransactionPolicyInput> {
+  const create =
+    options.create === undefined
+      ? await createAssociatedTokenInstruction({ mint: MINT })
+      : options.create;
+  return ringWithdrawalPolicy(
+    await ringSpendWire(await ringSplWithdrawal(options.transact ?? {}), {
+      ...(create ? { setup: [create] } : {}),
+    }),
+    { mint: MINT, ...options.intent }
+  );
 }
 
 /**
@@ -916,6 +1099,20 @@ describe("validateOuterTransaction", () => {
       ).resolves.toBeUndefined();
     });
 
+    // A registered transfer settles nothing publicly, so a USDC one has the
+    // same wire as a SOL one and the same empty settlement section.
+    it("accepts a USDC transfer over the same wire", async () => {
+      await expect(
+        validateOuterTransaction(transferPolicy(spendWire(transferInstruction()), { mint: MINT }))
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects an unallowlisted transfer mint", async () => {
+      await expectPolicyRejection(
+        transferPolicy(spendWire(transferInstruction()), { mint: OTHER_MINT })
+      );
+    });
+
     it("accepts arbitrary opaque tail bytes after the public settlement section", async () => {
       await expect(
         validateOuterTransaction(
@@ -1089,11 +1286,187 @@ describe("validateOuterTransaction", () => {
         },
       ],
       [
-        "non-SOL requested mint",
+        "an unallowlisted requested mint",
+        () => withdrawalPolicy(spendWire(withdrawalInstruction()), { mint: OTHER_MINT }),
+      ],
+      [
+        "a USDC intent over a SOL settlement",
         () => withdrawalPolicy(spendWire(withdrawalInstruction()), { mint: MINT }),
       ],
     ])("rejects %s", async (_case, buildInput) => {
       await expectPolicyRejection(buildInput());
+    });
+  });
+
+  describe("USDC withdrawal", () => {
+    it("accepts a settlement through the mint's vault and the recipient's token account", async () => {
+      await expect(
+        validateOuterTransaction(withdrawalPolicy(await splWithdrawalWire(), { mint: MINT }))
+      ).resolves.toBeUndefined();
+    });
+
+    // Withdrawing to one's own address is ordinary, and there the create's
+    // readonly owner meta is the fee payer: Solana merges the two into one
+    // writable signer, so the expectation has to follow the merge rather than
+    // insist on the readonly role the instruction asked for.
+    it("accepts a withdrawal to the owner's own address on either rail", async () => {
+      await expect(
+        validateOuterTransaction(
+          withdrawalPolicy(await splWithdrawalWire({ recipient: OWNER }), {
+            mint: MINT,
+            to: OWNER,
+          })
+        )
+      ).resolves.toBeUndefined();
+      await expect(
+        validateOuterTransaction(
+          await ringSplWithdrawalPolicyInput({
+            transact: { recipient: OWNER },
+            create: await createAssociatedTokenInstruction({ mint: MINT, recipient: OWNER }),
+            intent: { to: OWNER },
+          })
+        )
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      [
+        "a SOL intent over an SPL settlement",
+        async () => withdrawalPolicy(await splWithdrawalWire(), { mint: SDP_SOL }),
+      ],
+      [
+        "an unallowlisted mint whose vault the gate will not derive",
+        async () =>
+          withdrawalPolicy(await splWithdrawalWire({ mint: OTHER_MINT }), { mint: OTHER_MINT }),
+      ],
+      [
+        "a settlement mint that is not the approved one",
+        async () => withdrawalPolicy(await splWithdrawalWire({ mint: OTHER_MINT }), { mint: MINT }),
+      ],
+      [
+        "a vault that is not the mint's",
+        async () => withdrawalPolicy(await splWithdrawalWire({ vault: OTHER }), { mint: MINT }),
+      ],
+      [
+        "a token account that is not the recipient's",
+        async () =>
+          withdrawalPolicy(await splWithdrawalWire({ tokenAccount: OTHER }), { mint: MINT }),
+      ],
+      [
+        "a recipient the intent did not approve",
+        async () => withdrawalPolicy(await splWithdrawalWire({ recipient: OTHER }), { mint: MINT }),
+      ],
+      [
+        "Token-2022 in the legacy token program's slot",
+        async () =>
+          withdrawalPolicy(await splWithdrawalWire({ tokenProgram: SPL_TOKEN_2022_PROGRAM_ID }), {
+            mint: MINT,
+          }),
+      ],
+      [
+        "a vault bump that disagrees with the vault it names",
+        async () => {
+          const { bump } = await splWithdrawalAccounts();
+          return withdrawalPolicy(
+            await splWithdrawalWire({
+              data: opaqueTransactData({
+                settlements: [{ tag: 3, amount: 10n, splInterfaceBump: bump - 1 }],
+              }),
+            }),
+            { mint: MINT }
+          );
+        },
+      ],
+      [
+        "an SPL deposit instead of a withdrawal",
+        async () => {
+          const { bump } = await splWithdrawalAccounts();
+          return withdrawalPolicy(
+            await splWithdrawalWire({
+              data: opaqueTransactData({
+                settlements: [{ tag: 2, amount: 10n, splInterfaceBump: bump }],
+              }),
+            }),
+            { mint: MINT }
+          );
+        },
+      ],
+      [
+        "a wrong public amount",
+        async () => {
+          const { bump } = await splWithdrawalAccounts();
+          return withdrawalPolicy(
+            await splWithdrawalWire({
+              data: opaqueTransactData({
+                settlements: [{ tag: 3, amount: 11n, splInterfaceBump: bump }],
+              }),
+            }),
+            { mint: MINT }
+          );
+        },
+      ],
+      [
+        "a missing token-account create",
+        async () => withdrawalPolicy(await splWithdrawalWire({ create: null }), { mint: MINT }),
+      ],
+      [
+        "a non-idempotent token-account create",
+        async () =>
+          withdrawalPolicy(
+            await splWithdrawalWire({
+              create: await createAssociatedTokenInstruction({ data: Uint8Array.of(0) }),
+            }),
+            { mint: MINT }
+          ),
+      ],
+      [
+        "a token-account create for somebody else",
+        async () =>
+          withdrawalPolicy(
+            await splWithdrawalWire({
+              create: await createAssociatedTokenInstruction({ recipient: OTHER }),
+            }),
+            { mint: MINT }
+          ),
+      ],
+      [
+        "a token-account create funded by an account other than the owner",
+        async () =>
+          withdrawalPolicy(
+            await splWithdrawalWire({
+              create: await createAssociatedTokenInstruction({ payer: OTHER }),
+            }),
+            { mint: MINT }
+          ),
+      ],
+      // The owner's own address may be writable only because Solana merged it
+      // with the signer. Nobody else's may be, on either rail.
+      [
+        "a token-account create that makes the recipient's system account writable",
+        async () =>
+          withdrawalPolicy(
+            await splWithdrawalWire({
+              create: await createAssociatedTokenInstruction({ recipientWritable: true }),
+            }),
+            { mint: MINT }
+          ),
+      ],
+      [
+        "a ring token-account create that makes the recipient's system account writable",
+        async () =>
+          ringSplWithdrawalPolicyInput({
+            create: await createAssociatedTokenInstruction({ mint: MINT, recipientWritable: true }),
+          }),
+      ],
+      [
+        "an extra Memo instruction riding along",
+        async () =>
+          withdrawalPolicy(await splWithdrawalWire({ create: { programAddress: MEMO } }), {
+            mint: MINT,
+          }),
+      ],
+    ])("rejects %s", async (_case, buildInput) => {
+      await expectPolicyRejection(await buildInput());
     });
   });
 
@@ -1114,6 +1487,14 @@ describe("validateOuterTransaction", () => {
     it("accepts a merge against the owner's own registry record", async () => {
       await expect(
         validateOuterTransaction(mergePolicy(spendWire(await mergeInstruction())))
+      ).resolves.toBeUndefined();
+    });
+
+    // A merge's wire carries no mint, so a USDC merge is byte-identical to a
+    // SOL one; the asset lives only in the approved intent.
+    it("accepts a USDC merge over the same wire", async () => {
+      await expect(
+        validateOuterTransaction(mergePolicy(spendWire(await mergeInstruction()), { mint: MINT }))
       ).resolves.toBeUndefined();
     });
 
@@ -1138,8 +1519,8 @@ describe("validateOuterTransaction", () => {
         async () => mergePolicy(spendWire(await mergeInstruction({ outputTree: OTHER }))),
       ],
       [
-        "a non-SOL requested mint",
-        async () => mergePolicy(spendWire(await mergeInstruction()), { mint: MINT }),
+        "an unallowlisted requested mint",
+        async () => mergePolicy(spendWire(await mergeInstruction()), { mint: OTHER_MINT }),
       ],
       [
         "a truncated merge body",
@@ -1229,6 +1610,23 @@ describe("validateOuterTransaction", () => {
       ).resolves.toBeUndefined();
     });
 
+    it("accepts a USDC ring withdrawal, whose vault and token account stay static", async () => {
+      // The ring's table holds the CPI authority and the Token program, so
+      // those two arrive compressed while the mint, the vault and the
+      // recipient's token account — which no table names — stay static.
+      await expect(
+        validateOuterTransaction(await ringSplWithdrawalPolicyInput())
+      ).resolves.toBeUndefined();
+    });
+
+    it("accepts a USDC ring transfer, which settles nothing publicly", async () => {
+      await expect(
+        validateOuterTransaction(
+          ringTransferPolicy(await ringSpendWire(await ringTransfer()), { mint: MINT })
+        )
+      ).resolves.toBeUndefined();
+    });
+
     it.each(["ring_exit", "ring_entry"] as const)(
       "accepts a transfer-shaped ring transact under a %s intent",
       async (opType) => {
@@ -1283,8 +1681,9 @@ describe("validateOuterTransaction", () => {
         async () => transferPolicy(await ringSpendWire(await ringTransfer())),
       ],
       [
-        "a non-SOL requested mint",
-        async () => ringTransferPolicy(await ringSpendWire(await ringTransfer()), { mint: MINT }),
+        "a requested mint outside the spend set",
+        async () =>
+          ringTransferPolicy(await ringSpendWire(await ringTransfer()), { mint: OTHER_MINT }),
       ],
       [
         "a public settlement on a ring transfer",
@@ -1340,6 +1739,60 @@ describe("validateOuterTransaction", () => {
           ringTransferPolicy(
             addLookupIndex(await ringSpendWire(await ringTransfer()), "readonlyIndexes", 0)
           ),
+      ],
+      // The SPL settlement of a ring withdrawal, spoiled one account at a
+      // time: each is re-derived from the approved mint and recipient, so a
+      // builder that named any other must not be signed.
+      [
+        "a USDC ring withdrawal that settles into another vault",
+        async () => ringSplWithdrawalPolicyInput({ transact: { vault: OTHER } }),
+      ],
+      [
+        "a USDC ring withdrawal that credits another token account",
+        async () => ringSplWithdrawalPolicyInput({ transact: { tokenAccount: OTHER } }),
+      ],
+      [
+        "a USDC ring withdrawal through Token-2022 rather than the approved program",
+        async () =>
+          ringSplWithdrawalPolicyInput({ transact: { tokenProgram: SPL_TOKEN_2022_PROGRAM_ID } }),
+      ],
+      [
+        "a USDC ring withdrawal carrying another mint's vault bump",
+        async () =>
+          ringSplWithdrawalPolicyInput({
+            transact: {
+              data: ringTransactData({
+                settlements: [{ tag: 3, amount: 10n, splInterfaceBump: 0 }],
+              }),
+            },
+          }),
+      ],
+      [
+        "a USDC ring withdrawal with no token-account create ahead of the transact",
+        async () => ringSplWithdrawalPolicyInput({ create: null }),
+      ],
+      [
+        "a USDC ring withdrawal whose create names an account the settlement never credits",
+        async () =>
+          ringSplWithdrawalPolicyInput({
+            create: await createAssociatedTokenInstruction({ mint: MINT, tokenAccount: OTHER }),
+          }),
+      ],
+      [
+        "a USDC ring withdrawal with a second instruction that is not the create",
+        async () =>
+          ringSplWithdrawalPolicyInput({
+            create: { programAddress: MEMO, accounts: [], data: Uint8Array.of(1) },
+          }),
+      ],
+      [
+        "a SOL ring withdrawal under a USDC intent",
+        async () =>
+          ringWithdrawalPolicy(await ringSpendWire(await ringWithdrawal()), { mint: MINT }),
+      ],
+      [
+        "a USDC ring withdrawal under a SOL intent",
+        async () => ringSplWithdrawalPolicyInput({ intent: { mint: SDP_SOL } }),
       ],
       [
         "a public settlement on a ring move",

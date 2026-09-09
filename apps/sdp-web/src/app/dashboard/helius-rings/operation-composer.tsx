@@ -48,13 +48,6 @@ interface ComposerDraft {
   toRing: string | null;
 }
 
-/** Merge is SOL-only; the API rejects any other mint on that arm. */
-function assetsFor(tab: ComposerTab) {
-  return tab === "merge"
-    ? RINGS_ALLOWLISTED_ASSETS.filter((entry) => entry.mint === RINGS_NATIVE_SOL_MINT)
-    : RINGS_ALLOWLISTED_ASSETS;
-}
-
 function newDraft(walletId: string, tab: ComposerTab = "shield"): ComposerDraft {
   return {
     walletId,
@@ -265,17 +258,15 @@ export function OperationComposer({
                 // The ring's meaning flips with the op type — a shield's
                 // destination, a spend's source of funds — so a carried-over
                 // choice would silently redirect value. Every switch starts
-                // from the default pool.
+                // from the default pool, which takes the whole allowlist, so
+                // the chosen asset carries over — except onto Move, whose arm
+                // is SOL-only and would 400 on a carried USDC.
                 patchDraft({
                   tab,
                   ring: null,
                   fromRing: null,
                   toRing: null,
-                  // A shield can name USDC; merge and move cannot, so a carried
-                  // mint would 400. Other switches keep the current asset.
-                  ...(tab === "merge" || tab === "move"
-                    ? { assetMint: RINGS_NATIVE_SOL_MINT }
-                    : {}),
+                  ...(tab === "move" ? { assetMint: RINGS_NATIVE_SOL_MINT } : {}),
                 });
               }}
             />
@@ -434,7 +425,7 @@ function AssetField({
             if (value) onPatch({ assetMint: value });
           }}
         >
-          {assetsFor(draft.tab).map((entry) => (
+          {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
             <SelectItem key={entry.mint} value={entry.mint}>
               {entry.symbol}
             </SelectItem>

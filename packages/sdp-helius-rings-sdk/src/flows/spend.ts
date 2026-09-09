@@ -7,12 +7,12 @@ import {
   encryptConfidentialTransfer,
   ProofInputUtxo,
   type Wallet,
-  WithdrawalTarget,
 } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Instruction } from "@solana/kit";
 import { type PreparedSpendIntent, validatePreparedTransferIntent } from "../intent-validation.js";
-import { protocolMint, requireProtocolSol } from "./mint.js";
+import { protocolMint, requireSpendMint } from "./mint.js";
 import { type NoteSelection, selectNotes } from "./notes.js";
+import { resolveWithdrawalSettlement } from "./settlement.js";
 
 export interface SpendDeps {
   readonly client: ZolanaClient;
@@ -42,26 +42,31 @@ export interface TransferInput {
 }
 
 export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Promise<SpendResult> {
-  requireProtocolSol(input.mint, "withdrawals");
+  requireSpendMint(input.mint, "withdrawals");
 
   const recipient = address(input.recipient);
   const { asset, amount, selection, transfer: withdrawal } = arm(deps, input);
 
-  const target = WithdrawalTarget.sol({ recipient });
-  withdrawal.withdraw(asset, amount, target);
+  // A SOL withdrawal reaches the pool's native interface; an SPL one reaches
+  // that asset's vault and the recipient's token account, which the setup
+  // instruction makes sure exists.
+  const settlement = await resolveWithdrawalSettlement({ payer: deps.owner, recipient, asset });
+  withdrawal.withdraw(asset, amount, settlement.target);
 
   return {
     instructions: [
+      ...settlement.setup,
       transactInstruction({
         payer: deps.owner,
         inputTree: deps.client.tree,
         outputTree: deps.client.tree,
-        withdrawal: target,
+        withdrawal: settlement.accounts,
         data: await prove(deps, withdrawal, {
           kind: "withdraw",
           owner: deps.owner,
-          recipient,
+          asset,
           amount,
+          target: settlement.target,
         }),
       }),
     ],
@@ -75,7 +80,7 @@ export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Pr
  * instead of a public settlement target. No interface transfer on the outer tx.
  */
 export async function buildTransfer(deps: SpendDeps, input: TransferInput): Promise<SpendResult> {
-  requireProtocolSol(input.mint, "transfers");
+  requireSpendMint(input.mint, "transfers");
 
   const { asset, amount, selection, transfer } = arm(deps, input);
   transfer.send(input.recipient, asset, amount);

@@ -1,3 +1,4 @@
+import { SPL_TOKEN_PROGRAM_ID } from "@heliuslabs/zolana/interface";
 import type { Address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +22,11 @@ const RECIPIENT = "6Ecs4vFmtiZ7WeQMWZibhFPQF3q3Pmqrb7CQGRJJKQTM";
 const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
 const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
 const SDP_SOL = "So11111111111111111111111111111111111111112";
+/** How the protocol spells native SOL: the system program, not the wrapped mint. */
+const PROTOCOL_SOL = "11111111111111111111111111111111";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+// Mainnet USDC: a real mint, deliberately outside this build's spend set.
+const UNKNOWN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 function deps() {
   return {
@@ -65,21 +70,44 @@ describe("ring-spend flow", () => {
       recipient: RECIPIENT,
       amount: 1_000_000n,
     });
-    // No `asset` (SOL is the builder default) and no `computeUnitLimit`: the
-    // 1.4M default is byte-for-byte what the wire policy expects.
-    expect(input).not.toHaveProperty("asset");
+    // SOL as the protocol spells it, named rather than left to the builder's
+    // default, and no SPL settlement to reach. No `computeUnitLimit` either:
+    // the 1.4M default is byte-for-byte what the wire policy expects.
+    expect(input.asset).toBe(PROTOCOL_SOL);
+    expect(input).not.toHaveProperty("splTokenProgram");
     expect(input).not.toHaveProperty("computeUnitLimit");
   });
 
-  it("refuses a non-SOL mint before reaching the builder", async () => {
-    // The withdrawal builder would refuse SPL anyway; the transfer builder
-    // would not, so the shared guard is load-bearing there.
+  it("names the mint and the legacy Token program for a USDC withdrawal", async () => {
+    await buildRingWithdrawalTx(deps(), withdrawalInput({ mint: USDC }));
+
+    const [input] = buildRingWithdrawalTransaction.mock.calls[0] as [Record<string, unknown>];
+    // Devnet USDC is not Token-2022, and the builder settles into the
+    // recipient's associated token account for this program.
+    expect(input.asset).toBe(USDC);
+    expect(input.splTokenProgram).toBe(SPL_TOKEN_PROGRAM_ID);
+  });
+
+  it("carries the asset into a ring transfer, which settles nothing publicly", async () => {
+    await buildRingTransferTx(deps(), {
+      ...withdrawalInput({ mint: USDC }),
+      recipient: { fake: "shielded-address" } as never,
+    });
+
+    const [input] = buildRingTransferTransaction.mock.calls[0] as [Record<string, unknown>];
+    // The asset picks the sender's note slot, so it is needed even though no
+    // token account is touched; the transfer builder takes no token program.
+    expect(input.asset).toBe(USDC);
+    expect(input).not.toHaveProperty("splTokenProgram");
+  });
+
+  it("refuses a mint outside the spend set before reaching either builder", async () => {
     await expect(
-      buildRingWithdrawalTx(deps(), withdrawalInput({ mint: USDC }))
+      buildRingWithdrawalTx(deps(), withdrawalInput({ mint: UNKNOWN_MINT }))
     ).rejects.toMatchObject({ name: "HeliusRingsError", code: "invalid_input" });
     await expect(
       buildRingTransferTx(deps(), {
-        ...withdrawalInput({ mint: USDC }),
+        ...withdrawalInput({ mint: UNKNOWN_MINT }),
         recipient: {} as never,
       })
     ).rejects.toMatchObject({ name: "HeliusRingsError", code: "invalid_input" });
@@ -122,11 +150,13 @@ describe("ring-spend flow", () => {
       keys: { fake: "keys" },
       feePayer: OWNER,
       amount: 1_000_000n,
+      // Named rather than left to the builder's default, like every other ring
+      // spend. A move is SOL-only, so the value is that default either way.
+      asset: PROTOCOL_SOL,
     });
     // No `recipient` exists to pass: the builder always sends to its own keys'
     // address, which is what makes entry self-only by construction.
     expect(input).not.toHaveProperty("recipient");
-    expect(input).not.toHaveProperty("asset");
     expect(input).not.toHaveProperty("computeUnitLimit");
   });
 
