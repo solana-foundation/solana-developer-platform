@@ -94,7 +94,9 @@ export type RingsOperationOpType =
   | "merge"
   | "timelock_create"
   | "timelock_settle"
-  | "zone_create";
+  | "zone_create"
+  | "ring_exit"
+  | "ring_entry";
 
 export interface RingsOperationSummary {
   id: string;
@@ -330,7 +332,13 @@ export async function fetchRingsWalletIdentity(
  * rejects anything else on a strict schema, so widening this without widening
  * that one only moves the refusal later.
  */
-export type RingsOpType = "shield" | "withdraw" | "transfer_registered" | "merge";
+export type RingsOpType =
+  | "shield"
+  | "withdraw"
+  | "transfer_registered"
+  | "merge"
+  | "ring_exit"
+  | "ring_entry";
 
 export interface PrepareRingsOperationInput {
   walletId: string;
@@ -341,8 +349,9 @@ export interface PrepareRingsOperationInput {
   to?: string;
   /**
    * Ring NAME the operation targets; the server resolves and pins the program
-   * id at prepare. Omitted = the default pool. For spends the named ring is
-   * the source of funds.
+   * id at prepare. Omitted = the default pool. For ring-bound spends and
+   * ring_exit the named ring is the source of funds; for ring shields and
+   * ring_entry it is the destination. Required for ring moves, never "default".
    */
   ring?: string;
 }
