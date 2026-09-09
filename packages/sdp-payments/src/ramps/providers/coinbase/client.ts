@@ -7,7 +7,6 @@ import { z } from "zod";
 import { divideDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
 import { badRequest, providerNotConfigured, providerUnavailable } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
-import { readyCounterparty } from "../../requirements";
 import {
   isSolanaCryptoAsset,
   RAMP_RAIL_DUMPS,
@@ -27,6 +26,7 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
+import { coinbaseCounterpartyRequirements } from "./counterparty";
 
 // v1 API (Bearer JWT): buy options, buy quote — used for rail discovery + estimates.
 const CDP_V1_API_BASE_URL = "https://api.developer.coinbase.com";
@@ -195,18 +195,10 @@ export class CoinbaseRampClient implements RampProvider {
   readonly declaredRailSupport = COINBASE_DECLARED_RAIL_SUPPORT;
 
   validateCounterparty(
-    _counterparty: Counterparty,
+    counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    if (options.direction !== "onramp") {
-      return {
-        provider: this.id,
-        direction: options.direction,
-        status: "unsupported",
-        reason: "Coinbase Onramp supports on-ramp only.",
-      };
-    }
-    return readyCounterparty(this.id, options.direction);
+    return coinbaseCounterpartyRequirements(counterparty, options);
   }
 
   async discoverCurrencyAndRails(
