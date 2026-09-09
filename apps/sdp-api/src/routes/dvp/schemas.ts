@@ -1,4 +1,3 @@
-import { DVP_TRADE_SIDES } from "@sdp/types";
 import { address } from "@solana/kit";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
@@ -48,15 +47,29 @@ export const dvpTradeIdParamsSchema = z.object({
   tradeId: z.string().min(1),
 });
 
-/** Terms shared by both kinds of trade. Only the parties differ. */
-const dvpTradeTermsShape = {
-  /**
-   * Custody wallet behind the trade. Signs the create, pays the network fee and
-   * pays rent for both escrows. On a principal trade it also delivers a leg; on
-   * an agent trade it delivers nothing.
-   */
-  sdpWalletId: z.string().min(1),
+/**
+ * One party slot, used for both `partyA` and `partyB`.
+ *
+ * The three variants carry no shared tag key, so this is a `z.union` of three
+ * `z.strictObject`s rather than a `z.discriminatedUnion`: strict objects mean
+ * exactly one key is present, so the variants cannot blur, with the present key
+ * acting as the discriminator the design spec calls for.
+ *
+ * - `walletId` — a custody wallet of the caller's. Resolves to its address and
+ *   stores nothing; fundability is re-derived at act time, and storing it would
+ *   be a cache that drifts.
+ * - `counterpartyAccountId` — a registered counterparty crypto-wallet account
+ *   of the caller's. Resolves the linked address and stores the reference.
+ * - `address` — an external address. Stored as nothing but the address.
+ */
+const dvpPartySchema = z.union([
+  z.strictObject({ walletId: z.string().min(1) }),
+  z.strictObject({ counterpartyAccountId: z.string().min(1) }),
+  z.strictObject({ address: dvpAddressSchema }),
+]);
 
+/** Terms shared by every trade. Only the parties differ. */
+const dvpTradeTermsShape = {
   mintA: dvpAddressSchema,
   tokenProgramA: dvpAddressSchema,
   mintB: dvpAddressSchema,
@@ -93,52 +106,24 @@ const dvpTradeTermsShape = {
 } as const;
 
 /**
- * The original shape: SDP holds one leg, the counterparty is any address.
+ * The create body: two symmetric party slots and the trade terms.
  *
- * The V1 shape (PRO-1830), and still the default.
+ * `partyA` and `partyB` are {@link dvpPartySchema} slots; `payerWalletId` is the
+ * fee/rent signer and is NOT a term of the trade. Omitted, the project's DvP
+ * settlement wallet pays — and, closing every trade, later receives the rent
+ * back.
  */
-const createPrincipalDvpTradeSchema = z.object({
+export const createDvpTradeSchema = z.object({
+  partyA: dvpPartySchema,
+  partyB: dvpPartySchema,
+  /**
+   * The wallet that signs `CreateDvp`, pays the network fee and both escrows'
+   * rent. Optional; omitted means the project's DvP settlement wallet pays.
+   * It is not a term of the trade.
+   */
+  payerWalletId: z.string().min(1).nullish(),
   ...dvpTradeTermsShape,
-  /** Omitted is principal, so existing callers keep working unchanged. */
-  tradeKind: z.literal("principal").optional(),
-  /** Which leg SDP delivers. The counterparty takes the other. */
-  sdpSide: z.enum(DVP_TRADE_SIDES),
-  /** The other party. Any address; SDP holds no key for it and it signs nothing. */
-  counterparty: dvpAddressSchema,
 });
-
-/**
- * The execution-desk shape: SDP sets the terms and two other parties do the
- * swaps.
- *
- * The party that submits a trade is not necessarily a party to it. An execution
- * agent setting up the on-chain swap details and having two counterparties do
- * the swaps is the more common arrangement, and nothing here ruled it out.
- *
- * The program always allowed this: `CreateDvp`'s only signer is the payer, and
- * both parties are plain accounts. There is deliberately no `sdpSide` here —
- * SDP holds neither leg, and a side would name one it has no key for.
- */
-const createAgentDvpTradeSchema = z.object({
-  ...dvpTradeTermsShape,
-  tradeKind: z.literal("agent"),
-  /** Delivers leg A. An arbitrary address; signs nothing here. */
-  partyA: dvpAddressSchema,
-  /** Delivers leg B. Likewise. */
-  partyB: dvpAddressSchema,
-});
-
-/**
- * Discriminated so the two kinds cannot blur. A body carrying both a side and
- * two parties is refused rather than silently resolved, because guessing which
- * the caller meant is guessing which leg SDP is about to fund.
- */
-export const createDvpTradeSchema = z
-  .discriminatedUnion("tradeKind", [
-    createPrincipalDvpTradeSchema.extend({ tradeKind: z.literal("principal") }),
-    createAgentDvpTradeSchema,
-  ])
-  .or(createPrincipalDvpTradeSchema);
 
 export const listDvpTradesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),

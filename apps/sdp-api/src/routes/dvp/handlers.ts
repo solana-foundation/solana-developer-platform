@@ -221,27 +221,35 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   const body = c.req.valid("json");
 
   // `payments:write` alone only says the key may write. It does not say which
-  // wallet, and this wallet pays the fee and the escrow rent and delivers SDP's
-  // leg. Re-read from the database rather than trusting the request's auth
-  // context, which may be up to an hour of cached KV — the same guard Payments
-  // uses before any money-moving write.
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, body.sdpWalletId, [
-    "payments:write",
-  ]);
+  // wallet, and a wallet named here either spends fee+rent (the payer) or is
+  // staged for funding (a party slot). Re-read the binding from the database
+  // rather than trusting the request's auth context, which may be up to an
+  // hour of cached KV — the same guard Payments uses before any money-moving
+  // write.
+  //
+  // An explicit `payerWalletId` spends fee+rent, so it is asserted. A
+  // `partyA`/`partyB` slot given as `{ walletId }` stages that wallet for
+  // funding, so it is asserted too — a key without rights over the wallet must
+  // not be able to do that. The defaulted payer (the settlement wallet) needs
+  // NO per-key assertion: it is project infrastructure every trade uses, and
+  // key/wallet bindings gate caller-chosen wallets. The close path applies
+  // policy to the settlement wallet separately.
+  const assertedWalletIds = [
+    ...(body.payerWalletId ? [body.payerWalletId] : []),
+    ...("walletId" in body.partyA ? [body.partyA.walletId] : []),
+    ...("walletId" in body.partyB ? [body.partyB.walletId] : []),
+  ];
+  for (const walletId of assertedWalletIds) {
+    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, walletId, ["payments:write"]);
+  }
 
   const trade = await createDvpTrade(c.env, {
     organizationId: auth.organizationId,
     projectId,
-    sdpWalletId: body.sdpWalletId,
-    // Omitted kind is principal, so callers written before agent trades
-    // existed keep working unchanged.
-    ...(body.tradeKind === "agent"
-      ? { tradeKind: "agent" as const, partyA: body.partyA, partyB: body.partyB }
-      : {
-          tradeKind: "principal" as const,
-          sdpSide: body.sdpSide,
-          counterparty: body.counterparty,
-        }),
+    partyA: body.partyA,
+    partyB: body.partyB,
+    payerWalletId:
+      body.payerWalletId === null || body.payerWalletId === undefined ? null : body.payerWalletId,
     mintA: body.mintA,
     tokenProgramA: body.tokenProgramA,
     mintB: body.mintB,
