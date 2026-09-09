@@ -21,6 +21,7 @@ const MODULE_METADATA = [
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
+      "@sdp/dvp",
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
@@ -85,6 +86,12 @@ const MODULE_METADATA = [
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
     allowedDependencies: ["@sdp/redaction", "@sdp/types"],
+  },
+  {
+    name: "@sdp/dvp",
+    directory: "packages/sdp-dvp",
+    purpose: "Generated @solana/kit client for the DvP atomic swap program.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/earn",

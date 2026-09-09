@@ -49,7 +49,10 @@ vi.mock("@/app/dashboard/custody/wallet-activity.data", async (importOriginal) =
   };
 });
 
-import WalletDetailPage, { WalletBalanceSummary, WalletBalancesSection } from "./page";
+import WalletDetailPage, {
+  WalletBalanceSummary,
+  WalletBalancesSection,
+} from "./wallet-detail-page";
 
 const solBalance: CustodyWalletTokenBalance = {
   token: "SOL",

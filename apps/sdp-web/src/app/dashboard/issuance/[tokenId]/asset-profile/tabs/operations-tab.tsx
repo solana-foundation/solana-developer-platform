@@ -1,142 +1,150 @@
 "use client";
 
-import { Coins, Flame, Lock, type LucideIcon, Rocket } from "lucide-react";
+import type { Token } from "@sdp/types";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
-import type { FundManagementRowId } from "../../token-fund-management-section";
-import { TokenTransactionsBrowser } from "../token-transactions-browser";
+import { AnimatedSection } from "../animated-section";
 import type { TokenOperations } from "../use-token-operations";
+import {
+  getOperationGroups,
+  getOperationLabels,
+  type OperationAction,
+  type OperationRow,
+} from "./operation-rows.model";
+import { OpsActionForms } from "./ops-action-forms";
 
-// "lock-supply" is local to this tab: it opens its own modal rather than the
-// shared fund-management one, so it stays out of FundManagementRowId.
-type OperationRowId = FundManagementRowId | "lock-supply";
-
-interface OperationRow {
-  id: OperationRowId;
-  icon: LucideIcon;
-  title: string;
-  helper: string;
-  actionLabel: string;
-  onAction: () => void;
-  disabled: boolean;
-  disabledReason: string | null;
-}
-
-export function OperationsTab({ ops, tokenId }: { ops: TokenOperations; tokenId: string }) {
+export function OperationsTab({
+  ops,
+  token,
+  canManageTokenAdmin,
+}: {
+  ops: TokenOperations;
+  token: Token;
+  canManageTokenAdmin: boolean;
+}) {
   const t = useTranslations();
-  const operationRows: OperationRow[] = ops.canDeployToken
-    ? [
-        {
-          id: "deploy",
-          icon: Rocket,
-          title: t("DashboardIssuance.management.deployToken"),
-          helper: t("DashboardIssuance.operations.deployHelper"),
-          actionLabel: t("DashboardIssuance.header.deploy"),
-          onAction: () => ops.deployToken(),
-          disabled: ops.isPending || Boolean(ops.deployDisabledReason),
-          disabledReason: ops.deployDisabledReason,
-        },
-      ]
-    : [
-        {
-          id: "mint",
-          icon: Coins,
-          title: t("DashboardIssuance.management.mintTokens"),
-          helper: t("DashboardIssuance.management.mintHelper"),
-          actionLabel: t("DashboardIssuance.management.mint"),
-          onAction: () => ops.openFundManagementModal("mint"),
-          disabled: Boolean(ops.fundManagementDisabledReasons.mint),
-          disabledReason: ops.fundManagementDisabledReasons.mint,
-        },
-        {
-          id: "burn",
-          icon: Flame,
-          title: t("DashboardIssuance.management.burnTokens"),
-          helper: t("DashboardIssuance.management.burnHelper"),
-          actionLabel: t("DashboardIssuance.management.burn"),
-          onAction: () => ops.openFundManagementModal("burn"),
-          disabled: Boolean(ops.fundManagementDisabledReasons.burn),
-          disabledReason: ops.fundManagementDisabledReasons.burn,
-        },
-      ];
-
-  // Only offered once a cap exists to enforce — without one the action has no
-  // target, and its disabled reason would just be noise on every uncapped token.
-  // lockSupplyRemaining is null precisely when there is no cap to aim at.
-  if (!ops.canDeployToken && ops.lockSupplyRemaining !== null) {
-    operationRows.push({
-      id: "lock-supply",
-      icon: Lock,
-      title: t("DashboardIssuance.management.lockSupplyTitle"),
-      helper: t("DashboardIssuance.management.lockSupplyHelper"),
-      actionLabel: t("DashboardIssuance.management.lockSupplyAction"),
-      onAction: () => ops.openLockSupplyModal(),
-      disabled: Boolean(ops.lockSupplyDisabledReason),
-      disabledReason: ops.lockSupplyDisabledReason,
-    });
-  }
+  const [activeAction, setActiveAction] = useState<OperationAction | null>(null);
+  const labels = getOperationLabels(token, t);
+  const { supply, transfers, recovery } = getOperationGroups({
+    ops,
+    token,
+    canManageTokenAdmin,
+    t,
+    onSelect: setActiveAction,
+    labels,
+  });
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-3">
-        <div>
-          <p className="text-base font-medium text-primary">
-            {t("DashboardIssuance.management.operations")}
-          </p>
-          <p className="mt-0.5 text-sm text-tertiary">
-            {t("DashboardIssuance.operations.subtitle")}
-          </p>
-        </div>
-
-        {/* Single deploy action spans full width; mint + burn sit side by side
-            from lg. With lock supply present it spans the second row until 2xl,
-            where all three fit on one row. */}
-        <div
-          className={cn(
-            "grid gap-4",
-            operationRows.length > 1 && "lg:grid-cols-2",
-            operationRows.length > 2 && "2xl:grid-cols-3"
-          )}
+    <div className="w-full space-y-6">
+      <OperationGroup
+        title={t("DashboardIssuance.simplified.supply")}
+        rows={supply}
+        pending={ops.isPending}
+      />
+      <OperationGroup
+        title={t("DashboardIssuance.simplified.transfers")}
+        rows={transfers}
+        pending={ops.isPending}
+      />
+      {recovery.length ? (
+        <AnimatedSection
+          title={t("DashboardIssuance.simplified.recovery")}
+          className="border-t border-border-subtle pt-5"
         >
-          {operationRows.map((row) => {
-            const Icon = row.icon;
-            return (
-              <div
-                key={row.id}
-                data-testid={`fund-management-row-${row.id}`}
-                className={cn(
-                  "flex items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-5",
-                  row.id === "lock-supply" && "lg:col-span-2 2xl:col-span-1"
-                )}
-              >
-                <div className="flex min-w-0 items-center gap-3.5">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-base font-medium text-primary">{row.title}</p>
-                    <p className="mt-0.5 text-sm text-secondary">{row.helper}</p>
-                  </div>
-                </div>
-                <TokenDisabledActionTooltip reason={row.disabledReason}>
-                  <Button
-                    type="button"
-                    className="w-[96px]"
-                    onClick={row.onAction}
-                    disabled={row.disabled}
-                  >
-                    {row.actionLabel}
-                  </Button>
-                </TokenDisabledActionTooltip>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+          <p className="mt-2 text-sm text-tertiary">
+            {t("DashboardIssuance.simplified.recoveryHint")}
+          </p>
+          <OperationRows rows={recovery} pending={ops.isPending} />
+        </AnimatedSection>
+      ) : null}
+      <Modal
+        isOpen={Boolean(activeAction)}
+        ariaLabel={
+          activeAction ? labels[activeAction] : t("DashboardIssuance.management.operations")
+        }
+        onClose={() => setActiveAction(null)}
+        closeDisabled={ops.isPending}
+        size="xl"
+        contentClassName="p-6 [&_[data-slot=card-header]]:pr-10"
+      >
+        {activeAction ? (
+          <OpsActionForms
+            token={token}
+            activeAction={activeAction}
+            ops={{
+              ...ops,
+              handleSeize: () => {
+                setActiveAction(null);
+                ops.handleSeize();
+              },
+              handleForceBurn: () => {
+                setActiveAction(null);
+                ops.handleForceBurn();
+              },
+              handleFreeze: (freeze) => {
+                setActiveAction(null);
+                ops.handleFreeze(freeze);
+              },
+            }}
+            formVariant="bare"
+            submitAlignment="end"
+          />
+        ) : null}
+      </Modal>
+    </div>
+  );
+}
 
-      <TokenTransactionsBrowser tokenId={tokenId} />
+function OperationGroup({
+  title,
+  rows,
+  pending,
+}: {
+  title: string;
+  rows: OperationRow[];
+  pending: boolean;
+}) {
+  if (!rows.length) return null;
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-medium text-tertiary">{title}</h3>
+      <OperationRows rows={rows} pending={pending} />
+    </section>
+  );
+}
+
+function OperationRows({ rows, pending }: { rows: OperationRow[]; pending: boolean }) {
+  const t = useTranslations();
+  return (
+    <div className="divide-y divide-border-subtle">
+      {rows.map(({ icon: Icon, ...row }) => (
+        <div
+          key={row.id}
+          data-testid={`fund-management-row-${row.id}`}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 sm:grid-cols-[20px_minmax(0,1fr)_auto] sm:gap-4 sm:py-4"
+        >
+          <Icon className="hidden size-5 shrink-0 text-secondary sm:block" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-primary">{row.title}</p>
+            <p className="mt-1 hidden text-sm text-tertiary sm:block">{row.helper}</p>
+          </div>
+          <TokenDisabledActionTooltip reason={row.disabledReason}>
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label={row.title}
+              className="min-w-20"
+              disabled={pending || Boolean(row.disabledReason)}
+              onClick={row.onAction}
+            >
+              {row.actionLabel ?? t("DashboardIssuance.simplified.open")}
+            </Button>
+          </TokenDisabledActionTooltip>
+        </div>
+      ))}
     </div>
   );
 }
