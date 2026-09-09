@@ -9,7 +9,6 @@ import {
   removePrincipalChannelMembership,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 
@@ -18,7 +17,6 @@ export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; messa
 export async function createPrincipalAction(
   name: string
 ): Promise<ActionResult<PrivateChannelPrincipalDto>> {
-  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     const { principal } = await createPrivateChannelPrincipal(client, { name });
@@ -30,7 +28,6 @@ export async function createPrincipalAction(
 }
 
 export async function disablePrincipalAction(id: string): Promise<ActionResult> {
-  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     await disablePrivateChannelPrincipal(client, id);
@@ -45,7 +42,6 @@ export async function addPrincipalToChannelAction(
   channelId: string,
   principalId: string
 ): Promise<ActionResult> {
-  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     await addPrincipalChannelMembership(client, channelId, principalId);
@@ -60,7 +56,6 @@ export async function removePrincipalFromChannelAction(
   channelId: string,
   principalId: string
 ): Promise<ActionResult> {
-  await requirePrivateChannelsAccess("project-members:write");
   try {
     const client = await createSdpApiClient();
     await removePrincipalChannelMembership(client, channelId, principalId);

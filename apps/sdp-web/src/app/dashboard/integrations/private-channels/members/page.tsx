@@ -7,7 +7,7 @@ import { loadPrincipals } from "../private-channels-page.data";
 import { MembersTable } from "./members-table";
 
 export default async function PrivateChannelsMembersPage() {
-  await requirePrivateChannelsAccess("project-members:read");
+  await requirePrivateChannelsAccess();
 
   const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
   const principals = await loadPrincipals(client);
