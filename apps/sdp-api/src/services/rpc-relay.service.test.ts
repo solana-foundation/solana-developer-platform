@@ -224,20 +224,21 @@ describe("rpc-relay.service", () => {
     expect(second.selectionMode).toBe("round_robin_default");
   });
 
-  it("rejects invalid deployment mode values", async () => {
+  it("ignores SDP_DEPLOYMENT_MODE and resolves managed providers regardless of its value", async () => {
     rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
     rpcEnv.SDP_DEPLOYMENT_MODE = "selfhosted";
 
-    await expect(
-      resolveRpcTarget({
-        env: appEnv,
-        kv,
-        db,
-        organizationId: TEST_ORG_ID,
-        authProjectId: null,
-        requestedProjectId: null,
-      })
-    ).rejects.toThrow('Invalid SDP_DEPLOYMENT_MODE: "selfhosted"');
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("triton");
+    expect(target.selectionMode).toBe("round_robin_default");
   });
 
   it("resolves validationcloud, substitutes the path-segment key, and redacts it in the label", async () => {

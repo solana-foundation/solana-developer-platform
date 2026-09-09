@@ -57,6 +57,10 @@ export const AUDIT_ACTIONS = [
   "workflow_execution_approved",
   "workflow_execution_rejected",
   "workflow_execution_retried",
+  // Earn money movements (PRO-1866): resourceType "earn_movement", resourceId
+  // the ledger movement id, actor matching the row's createdBy/initiatedByKeyId.
+  "deposit",
+  "withdraw",
   // Privileged audit-ledger operations (verification checkpoints, restore evidence).
   "maintenance",
 ] as const;
@@ -93,6 +97,7 @@ export type ResourceType =
   | "custody_connection"
   | "workflow"
   | "workflow_execution"
+  | "earn_movement"
   | "audit_ledger";
 
 export interface AuditLogEntry {

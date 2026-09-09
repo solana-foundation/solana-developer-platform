@@ -7,6 +7,7 @@ import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
+import { DVP_TRADES_CRON } from "./dvp-trades";
 import { EARN_CATALOGUE_SYNC_CRON } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
 import {
@@ -71,6 +72,11 @@ vi.mock("./approved-wallet-operations", () => ({
 vi.mock("./earn-vault-movements", () => ({
   EARN_VAULT_MOVEMENTS_CRON: "* * * * *",
   runEarnVaultMovementsReconciliation: vi.fn(),
+}));
+
+vi.mock("./dvp-trades", () => ({
+  DVP_TRADES_CRON: "* * * * *",
+  runDvpTradeReconciliation: vi.fn(),
 }));
 
 vi.mock("./pending-transfers", async (importOriginal) => {
@@ -173,10 +179,10 @@ describe("startCron", () => {
   // in every count below too — including the ones where asset profiles is off.
   //
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 12 tasks. What a
+  // proof-of-life no-ops, so every configuration schedules all 13 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 12;
+  const ALL_TASKS = 13;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -205,6 +211,7 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[9][0]).toBe(EARN_METRICS_REFRESH_CRON);
     expect(scheduleMock.mock.calls[10][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
     expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {
@@ -473,7 +480,10 @@ describe("startCron", () => {
     const env = SELF_HOSTED_NO_PROFILES;
     const observability = makeObservability();
     startCron({ env, bg, observability });
-    const tick = scheduleMock.mock.calls.at(-1)?.[1] as () => void;
+    // Indexed rather than `.at(-1)`: this asserts the vault-movement task
+    // specifically, and taking whatever happens to be registered last silently
+    // retargets the assertion the moment another task is appended.
+    const tick = scheduleMock.mock.calls[11][1] as () => void;
     tick();
     expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
       env,

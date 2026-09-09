@@ -1,4 +1,10 @@
-import { ArrowRightIcon, LandmarkIcon, type LucideIcon, UsersRoundIcon } from "lucide-react";
+import {
+  ArrowLeftRightIcon,
+  ArrowRightIcon,
+  LandmarkIcon,
+  type LucideIcon,
+  UsersRoundIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import {
@@ -92,6 +98,13 @@ export async function MarketsLanding() {
             href={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
             icon={UsersRoundIcon}
             title={t("Shared.dashboardShell.earnProgram")}
+          />
+          <MarketsPathCard
+            audience={t("DashboardMarkets.dvp.landingAudience")}
+            description={t("DashboardMarkets.dvp.landingDescription")}
+            href={DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}
+            icon={ArrowLeftRightIcon}
+            title={t("DashboardMarkets.dvp.navLabel")}
           />
         </div>
       </div>

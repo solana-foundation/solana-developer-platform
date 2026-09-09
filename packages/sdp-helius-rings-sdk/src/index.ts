@@ -3,6 +3,11 @@
 export { decodeShieldedPoolError } from "@heliuslabs/zolana/interface";
 export { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
 export {
+  type ProbeOutcome,
+  probeRingRpcHealth,
+  type RingRpcHealthInput,
+} from "./health.js";
+export {
   type OuterTransactionPolicyInput,
   type OuterTransactionPolicyIntent,
   validateOuterTransaction,

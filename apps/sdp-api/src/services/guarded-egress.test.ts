@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
+  createGuardedFetch,
   EgressBlockedError,
   guardedFetch,
   guardedLookup,
@@ -160,6 +161,38 @@ describe("guardedFetch", () => {
   it("refuses a plaintext endpoint outright", async () => {
     await expect(
       guardedFetch("http://example.com/", { method: "POST", headers: {}, body: "{}" })
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+});
+
+describe("createGuardedFetch", () => {
+  const fetchImpl = createGuardedFetch();
+
+  it("refuses a Request input rather than partially honoring it", async () => {
+    await expect(fetchImpl(new Request("https://example.com/"))).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("refuses a non-string body rather than silently dropping it", async () => {
+    await expect(
+      fetchImpl("https://example.com/", { method: "POST", body: new Uint8Array(4) })
+    ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("keeps the guard's plaintext refusal behind the fetch signature", async () => {
+    await expect(
+      fetchImpl("http://example.com/", { method: "POST", body: "{}" })
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
+  it("normalizes a URL input and Headers before the guard runs", async () => {
+    // A loopback name clears the protocol gate and fails on the address, which
+    // proves the URL object and Headers were accepted and the guard still ran.
+    await expect(
+      fetchImpl(new URL("https://localhost:1/"), {
+        method: "POST",
+        headers: new Headers({ "content-type": "application/json" }),
+        body: "{}",
+      })
     ).rejects.toBeInstanceOf(EgressBlockedError);
   });
 });

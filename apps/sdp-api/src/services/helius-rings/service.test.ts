@@ -38,13 +38,15 @@ import {
 import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import { AppError } from "@/lib/errors";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
-import type { RingsOuterTransactionPolicyInput } from "./gateway";
+import { type RingsOuterTransactionPolicyInput, UnconfiguredRingsGateway } from "./gateway";
 import {
   computeIntentKey,
   createHeliusRingsService,
@@ -52,6 +54,7 @@ import {
 } from "./service";
 
 const TEST_PROJECT_ID = "prj_hrs_service_test";
+const TEST_CONNECTION_ID = "hrconn_hrs_service_test";
 const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
 let walletId: string;
@@ -109,6 +112,8 @@ async function failSigned(id: string, state: string): Promise<void> {
 function service(deps: HeliusRingsServiceDependencies = {}) {
   return createHeliusRingsService(env, tenant, {
     enforcePolicy: policyStub("allow"),
+    gateway: new UnconfiguredRingsGateway(),
+    resolveConnectionId: async () => TEST_CONNECTION_ID,
     ...deps,
   });
 }
@@ -274,6 +279,39 @@ describe("HeliusRingsService", () => {
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
       .run();
+
+    const credentialId = "pcred_hrs_service_test";
+    const credential = await new ProviderCredentialStore(db).insertCredential({
+      id: credentialId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "helius_rings",
+      label: "Service test",
+      scope: "project",
+      source: "stored",
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "test-only" },
+      displayMetadata: {},
+      version: 1,
+      rotatedFromId: null,
+      idempotencyKey: TEST_CONNECTION_ID,
+      idempotencyFingerprint: TEST_CONNECTION_ID,
+      createdBy: TEST_USER.id,
+    });
+    await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+      credentialId,
+    ]);
+    await new HeliusRingsConnectionStore(db).insert({
+      id: TEST_CONNECTION_ID,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      name: "Service test",
+      providerCredentialId: credentialId,
+      providerCredentialScopeKey: credential.scope_key,
+      allowInsecureHttp: false,
+      displayMetadata: {},
+      makeDefault: true,
+      createdBy: TEST_USER.id,
+    });
 
     const wallets = createHeliusRingsWalletRepository(env);
     const wallet = await wallets.createWallet({
@@ -665,6 +703,45 @@ describe("HeliusRingsService", () => {
       expect(row?.sync_cursor).toBeNull();
     });
 
+    it("refuses to re-key while a signed operation is still in flight", async () => {
+      // Completing that operation after rotation would write its slot onto the
+      // new identity via GREATEST(COALESCE(null, 0), slot) and skip the new
+      // keys' history. The signed bytes can also still land against the
+      // abandoned identity.
+      const inFlight = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-rekey-inflight" }),
+        actorContext
+      );
+      expect(inFlight.state).toBe("indexing");
+      await pause();
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      await expect(rekey(gateway, "Treasury")).rejects.toMatchObject({
+        code: "conflict",
+        message: expect.stringMatching(/not settled/),
+      });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("re-keys after the in-flight operation has settled", async () => {
+      const gateway = new InMemoryRingsGateway({
+        indexingDelayMs: 0,
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+      const svc = liveishService({ gateway });
+      const inFlight = await svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-rekey-settled" }),
+        actorContext
+      );
+      gateway.recordSubmission(OUTER_TX.signature);
+      expect((await svc.executeOperation(inFlight.id)).state).toBe("completed");
+      await pause();
+
+      const result = await rekey(foreignGateway(), "Treasury");
+      expect(result.status).toBe("ready");
+    });
+
     it("finishes a rotation that landed on chain but never reached the database", async () => {
       // Confirmation, the re-read, or the write can fail after the transaction
       // lands. The registry is then correct and the row is not, and `readIdentity`
@@ -987,9 +1064,7 @@ describe("HeliusRingsService", () => {
     it("does not offer a retry when the gateway is merely misconfigured", async () => {
       const gateway = new InMemoryRingsGateway();
       gateway.buildOperation = () =>
-        Promise.reject(
-          new HeliusRingsError("config_error", "misconfigured: missing HELIUS_RINGS_PROVER_URL")
-        );
+        Promise.reject(new HeliusRingsError("config_error", "Helius Rings setup is required"));
 
       const operation = await service({ gateway }).prepareOperation(
         operationInput({ clientNonce: "nonce-misconfigured" }),
@@ -1001,7 +1076,7 @@ describe("HeliusRingsService", () => {
       // says so too, rather than hiding behind the transient-sounding
       // `gateway_unavailable` it had to borrow before 0067 added this one.
       expect(operation.failure).toMatchObject({ code: "config_error", retryable: false });
-      expect(operation.failure?.message).toContain("HELIUS_RINGS_PROVER_URL");
+      expect(operation.failure?.message).toContain("Helius Rings setup is required");
     });
 
     it("resends the persisted bytes when resumed in submitted", async () => {
@@ -1140,13 +1215,14 @@ describe("HeliusRingsService", () => {
         await db
           .prepare(
             `INSERT INTO helius_rings_operations
-               (id, organization_id, project_id, wallet_id, op_type, state, intent_key)
-             VALUES (?, ?, ?, ?, 'shield', 'completed', ?)`
+               (id, organization_id, project_id, rings_connection_id, wallet_id, op_type, state, intent_key)
+             VALUES (?, ?, ?, ?, ?, 'shield', 'completed', ?)`
           )
           .bind(
             `hro_filler_${index}`,
             TEST_ORG.id,
             TEST_PROJECT_ID,
+            TEST_CONNECTION_ID,
             walletId,
             `sha256:filler_${index}`
           )
@@ -1575,6 +1651,7 @@ describe("HeliusRingsService", () => {
       const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
       const reserved = await operations.reserveIntent({
         ...tenant,
+        ringsConnectionId: TEST_CONNECTION_ID,
         walletId,
         opType: "merge",
         intentKey: "sha256:existing-merge",
@@ -1722,6 +1799,7 @@ describe("HeliusRingsService", () => {
       const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
       const reserved = await operations.reserveIntent({
         ...tenant,
+        ringsConnectionId: TEST_CONNECTION_ID,
         walletId,
         opType: "merge",
         intentKey: "sha256:historical-merge",

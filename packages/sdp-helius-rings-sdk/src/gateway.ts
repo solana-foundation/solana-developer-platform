@@ -60,14 +60,23 @@ export interface RingsGatewayConfig {
   readonly tree?: string;
   readonly allowInsecureHttp?: boolean;
   readonly healthTimeoutMs?: number;
+  /**
+   * Carries every leg this package dials directly — health probes, the
+   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's
+   * own Solana RPC transport cannot take one (upstream gap), so that leg
+   * stays on the library's plain transport.
+   */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };
 
 function describeClientFailure(error: unknown, config: RingsGatewayConfig): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
-  const apiKey = readApiKey(config.solanaRpcUrl);
-  const secrets = apiKey === null ? [config.solanaRpcUrl] : [config.solanaRpcUrl, apiKey];
+  const secrets = [config.solanaRpcUrl, config.indexerUrl, config.proverUrl].flatMap((url) => [
+    url,
+    ...readQueryValues(url),
+  ]);
 
   return secrets.reduce(
     (message, secret) => (secret.length === 0 ? message : message.replaceAll(secret, "[redacted]")),
@@ -75,11 +84,11 @@ function describeClientFailure(error: unknown, config: RingsGatewayConfig): stri
   );
 }
 
-function readApiKey(rpcUrl: string): string | null {
+function readQueryValues(endpointUrl: string): string[] {
   try {
-    return new URL(rpcUrl).searchParams.get("api-key");
+    return [...new URL(endpointUrl).searchParams.values()].filter((value) => value.length > 0);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -140,9 +149,10 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
 
   return {
     async probeHealth(): Promise<RuntimeHealth> {
-      let resolved: ZolanaClient;
       try {
-        resolved = await withHealthTimeout(client(), config.healthTimeoutMs);
+        // The probes dial the endpoints themselves; the client is constructed
+        // only to surface a configuration it cannot even initialize from.
+        await withHealthTimeout(client(), config.healthTimeoutMs);
       } catch (error) {
         // The Zolana client couldn't even initialize — none of the per-upstream
         // probes ran. Repeat the reason on each so the operator sees it whichever
@@ -155,10 +165,11 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
       }
 
       return probeRingsHealth({
-        client: resolved,
+        solanaRpcUrl: config.solanaRpcUrl,
         indexerUrl: config.indexerUrl,
         proverUrl: config.proverUrl,
         timeoutMs: config.healthTimeoutMs,
+        ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
       });
     },
 
@@ -189,6 +200,7 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             signTransaction: config.signTransaction,
             signMessage: bringUp.signMessage,
             submitTransaction: config.submitTransaction,
+            ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
             ...(recordRingLookupTable
               ? {
                   recordLookupTable: (lookupTableAddress: string) =>
