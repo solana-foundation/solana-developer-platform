@@ -21,7 +21,7 @@ const getWalletOperationById = vi.hoisted(() => vi.fn());
 const getById = vi.hoisted(() => vi.fn());
 const getByIdAsParty = vi.hoisted(() => vi.fn());
 const assertFreshApiKeyCustodyWalletAccess = vi.hoisted(() => vi.fn());
-const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
+const readDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const custodyWalletForParty = vi.hoisted(() => vi.fn());
 const findOperationalWalletById = vi.hoisted(() => vi.fn());
 const findWalletRow = vi.hoisted(() => vi.fn());
@@ -53,7 +53,7 @@ vi.mock("@/db", () => ({
     prepare: () => ({ bind: () => ({ first: findWalletRow }) }),
   }),
 }));
-vi.mock("@/services/dvp/settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
+vi.mock("@/services/dvp/settlement-wallet", () => ({ readDvpSettlementWallet }));
 vi.mock("@/services/api-key-scope.service", () => ({
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions: () => null,
@@ -203,7 +203,7 @@ describe("extractDvpTradeActionPolicyCandidate (close)", () => {
     getAuth.mockReturnValue({ organizationId: "org_x", apiKeyId: "ak_1" });
     requireProjectId.mockReturnValue("prj_x");
     getById.mockResolvedValue(trade());
-    getOrCreateDvpSettlementWallet.mockResolvedValue(settlement);
+    readDvpSettlementWallet.mockResolvedValue(settlement);
     assertFreshApiKeyCustodyWalletAccess.mockResolvedValue(undefined);
   });
 
@@ -222,7 +222,7 @@ describe("extractDvpTradeActionPolicyCandidate (close)", () => {
     async (action) => {
       await extractDvpTradeActionPolicyCandidate(extractContext, action);
 
-      expect(getOrCreateDvpSettlementWallet).toHaveBeenCalled();
+      expect(readDvpSettlementWallet).toHaveBeenCalled();
       expect(assertFreshApiKeyCustodyWalletAccess).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
@@ -258,7 +258,7 @@ describe("extractDvpFundPolicyCandidate", () => {
     getAuth.mockReturnValue({ organizationId: "org_x", apiKeyId: "ak_1" });
     requireProjectId.mockReturnValue("prj_x");
     getByIdAsParty.mockResolvedValue(trade());
-    getOrCreateDvpSettlementWallet.mockResolvedValue(settlement);
+    readDvpSettlementWallet.mockResolvedValue(settlement);
     assertFreshApiKeyCustodyWalletAccess.mockResolvedValue(undefined);
     approvedWalletOperationId.mockReturnValue(undefined);
     getWalletOperationById.mockResolvedValue(null);

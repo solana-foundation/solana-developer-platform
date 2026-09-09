@@ -29,7 +29,7 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { legOfSide, readDvpLegShortfall } from "@/services/dvp/fund";
 import type { DvpCloseAction } from "@/services/dvp/settle";
-import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
+import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
@@ -173,10 +173,17 @@ export async function extractDvpTradeActionPolicyCandidate(
     };
   }
 
-  const settlement = await getOrCreateDvpSettlementWallet(c.env, {
+  // READ, never provision: authorization has not run yet, and a revoked key
+  // must not mint a provider wallet as a side effect. Every trade's create
+  // already provisioned the settlement authority (it is a PDA seed), so a
+  // missing row here is corrupted state, not first use.
+  const settlement = await readDvpSettlementWallet(c.env, {
     organizationId: trade.organizationId,
     projectId: trade.projectId,
   });
+  if (!settlement) {
+    throw notFound("DvP settlement wallet not found for this trade's project");
+  }
 
   // Before the gate records anything: the trade was found through the CACHED
   // auth snapshot (up to an hour stale), so a revoked key would otherwise get
