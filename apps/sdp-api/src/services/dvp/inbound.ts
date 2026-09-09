@@ -86,6 +86,21 @@ export async function callerPartyAddresses(
 }
 
 /**
+ * A trade another organization created that names this caller, plus the exact
+ * address map that decided membership.
+ *
+ * The map rides along because the response derives each leg's `custodied` from
+ * it: recomputing it in the serializer would be a second wallet listing, and
+ * the whole point of `callerPartyAddresses` is that one rule answers both
+ * questions.
+ */
+export interface DvpInboundResult {
+  trades: DvpInboundTrade[];
+  /** The caller's custody wallet addresses (address → wallet id). */
+  callerAddresses: Map<string, string>;
+}
+
+/**
  * Open trades created elsewhere that name one of this caller's wallets.
  *
  * Returns an empty list rather than throwing when the caller holds no wallets:
@@ -95,10 +110,10 @@ export async function callerPartyAddresses(
 export async function listInboundDvpTrades(
   env: Env,
   request: DvpInboundRequest
-): Promise<DvpInboundTrade[]> {
+): Promise<DvpInboundResult> {
   const addressesToWallet = await callerPartyAddresses(env, request);
   if (addressesToWallet.size === 0) {
-    return [];
+    return { trades: [], callerAddresses: addressesToWallet };
   }
 
   const repository = createDvpTradeRepository(env);
@@ -111,24 +126,27 @@ export async function listInboundDvpTrades(
     DVP_INBOUND_LIMIT
   );
 
-  return rows.flatMap((trade) => {
-    // Which leg is theirs decides what the row says and, later, which escrow
-    // they fund. Leg A is checked first so a caller holding BOTH addresses gets
-    // a stable answer rather than one that depends on row order.
-    const side: DvpTradeSide | null = addressesToWallet.has(trade.userA)
-      ? "a"
-      : addressesToWallet.has(trade.userB)
-        ? "b"
-        : null;
+  return {
+    trades: rows.flatMap((trade) => {
+      // Which leg is theirs decides what the row says and, later, which escrow
+      // they fund. Leg A is checked first so a caller holding BOTH addresses gets
+      // a stable answer rather than one that depends on row order.
+      const side: DvpTradeSide | null = addressesToWallet.has(trade.userA)
+        ? "a"
+        : addressesToWallet.has(trade.userB)
+          ? "b"
+          : null;
 
-    // The database returned it, so a wallet of ours matches one of the parties.
-    // If neither does, the query and the policy disagree and the safe reading
-    // is to show nothing rather than guess a side and point somebody at the
-    // wrong escrow.
-    if (side === null) {
-      return [];
-    }
+      // The database returned it, so a wallet of ours matches one of the parties.
+      // If neither does, the query and the policy disagree and the safe reading
+      // is to show nothing rather than guess a side and point somebody at the
+      // wrong escrow.
+      if (side === null) {
+        return [];
+      }
 
-    return [{ trade, side, party: side === "a" ? trade.userA : trade.userB }];
-  });
+      return [{ trade, side, party: side === "a" ? trade.userA : trade.userB }];
+    }),
+    callerAddresses: addressesToWallet,
+  };
 }

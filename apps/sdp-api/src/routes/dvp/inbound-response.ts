@@ -22,6 +22,13 @@
  *   to know the terms, not to learn which SDP customer wrote them.
  * - `refString` — the creating org's own reference for its own records.
  * - `sdpWallet` — that org's custody wallet address and its label.
+ * - Counterparty attribution — which registered counterparty a party is is a
+ *   fact about the CREATING organization; a viewer on inbound is never that
+ *   org, so `party.counterparty` is always null here.
+ * - Funding claims — tenant-scoped to the funding organization, so a party
+ *   read answers null for them by construction.
+ * - `tradeKind` / the derived `kind` — standing is conveyed by `custodied` on
+ *   each leg and by `yourSide`, not by a stored or derived label.
  * - `idempotencyKey`, and the fingerprint derived from it.
  * - `settlementReadiness` — whether their settlement authority holds enough
  *   SOL is an operational fact about their deployment.
@@ -30,9 +37,21 @@
 
 import type { DvpInboundTrade } from "@/services/dvp/inbound";
 
+/** One party of the trade, as a party who is not the author may see it. */
+interface DvpInboundPartyResponse {
+  address: string;
+  /**
+   * Never attributed: which registered counterparty a party is belongs to the
+   * creating organization, and the viewer on inbound is never that org.
+   */
+  counterparty: null;
+  /** Whether the CALLER holds an active custody wallet for this address. */
+  custodied: boolean;
+}
+
 /** One leg, as a party who is not the author may see it. */
 interface DvpInboundLegResponse {
-  party: string;
+  party: DvpInboundPartyResponse;
   mint: string;
   tokenProgram: string;
   amount: string;
@@ -66,7 +85,27 @@ export interface DvpInboundTradeResponse {
   observedAt: string | null;
 }
 
-export function toDvpInboundResponse(inbound: DvpInboundTrade): DvpInboundTradeResponse {
+/**
+ * One leg's party as a party viewer sees it: the address and whether the
+ * CALLER holds a custody wallet for it, never attribution.
+ *
+ * @param address - The party address on the leg.
+ * @param callerAddresses - The caller's custody wallet addresses, the same map
+ *   membership was derived from — an inbound trade has at least one custodied
+ *   side by construction, and both legs can be custodied when the caller holds
+ *   both addresses.
+ */
+function inboundParty(
+  address: string,
+  callerAddresses: ReadonlyMap<string, string>
+): DvpInboundPartyResponse {
+  return { address, counterparty: null, custodied: callerAddresses.has(address) };
+}
+
+export function toDvpInboundResponse(
+  inbound: DvpInboundTrade,
+  callerAddresses: ReadonlyMap<string, string>
+): DvpInboundTradeResponse {
   const { trade, side, party } = inbound;
 
   return {
@@ -78,7 +117,7 @@ export function toDvpInboundResponse(inbound: DvpInboundTrade): DvpInboundTradeR
     yourParty: party,
     legs: {
       a: {
-        party: trade.userA,
+        party: inboundParty(trade.userA, callerAddresses),
         mint: trade.mintA,
         tokenProgram: trade.tokenProgramA,
         amount: trade.amountA,
@@ -90,7 +129,7 @@ export function toDvpInboundResponse(inbound: DvpInboundTrade): DvpInboundTradeR
         frozen: trade.escrowAFrozen,
       },
       b: {
-        party: trade.userB,
+        party: inboundParty(trade.userB, callerAddresses),
         mint: trade.mintB,
         tokenProgram: trade.tokenProgramB,
         amount: trade.amountB,

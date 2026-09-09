@@ -17,6 +17,7 @@ import {
   createDvpTradeRequestSchema,
   dvpTradeIdParamSchema,
   errorResponseSchema,
+  fundDvpTradeRequestSchema,
   listDvpTradesQuerySchema,
   z,
 } from "../schemas";
@@ -104,39 +105,10 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     description:
       "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce. Subject to wallet policy: a request needing approval returns 202.",
     security: [{ apiKeyAuth: [] }],
-    request: { headers: projectScopeHeaders, params: tradeIdPathParams },
-    responses: {
-      200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
-      202: { description: "Awaiting policy approval", content: jsonContent(errorResponseSchema) },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/dvp/trades/{tradeId}/fund-as-party",
-    tags: [DVP_TAG],
-    summary: "Fund your leg of a trade someone else created",
-    operationId: "fundDvpTradeAsParty",
-    description:
-      "Moves your leg into escrow on a trade another organization created and which names an address you hold the key to. The right to call this comes from holding that key, not from owning the trade, so it is the one DvP action whose authorization is not project scope. The amount is the leg's shortfall, never a parameter. Send `side` only when you hold BOTH party addresses, which happens on an agent trade set up for you: without it leg A is chosen and leg B could never be funded. Subject to wallet policy: a request needing approval returns 202.",
-    security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: tradeIdPathParams,
-      body: {
-        required: false,
-        content: {
-          "application/json": {
-            schema: z.object({
-              side: z.enum(["a", "b"]).optional().openapi({
-                description:
-                  "Which leg to fund. Only meaningful when you hold both party addresses; ignored for a leg you do not hold. Defaults to a.",
-              }),
-            }),
-          },
-        },
-      },
+      body: { content: jsonContent(fundDvpTradeRequestSchema) },
     },
     responses: {
       200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
