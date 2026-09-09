@@ -9,6 +9,7 @@ import { TokenControlRow } from "./token-control-row";
 import {
   findControlConflict,
   groupTokenControls,
+  settlementBlockedMessageKey,
   toggleTokenControl,
 } from "./token-controls-model";
 
@@ -149,6 +150,23 @@ describe("token controls editor", () => {
 
       expect(markup).toContain("Non-transferable");
       expect(markup).toContain("tokens could never leave escrow");
+    });
+
+    // The draft form renders its controls from booleans, not capability
+    // entries, so it names these two keys directly. If the deny list stops
+    // covering them the form silently loses its warning, which no render
+    // assertion here would catch.
+    it("covers the two extensions the draft form offers", () => {
+      expect(settlementBlockedMessageKey("interestBearing")).toBe(
+        "DashboardIssuance.config.settlementBlockedAmount"
+      );
+      expect(settlementBlockedMessageKey("transferFee")).toBe(
+        "DashboardIssuance.config.settlementBlockedAmount"
+      );
+      expect(settlementBlockedMessageKey("nonTransferable")).toBe(
+        "DashboardIssuance.config.settlementBlockedEscrow"
+      );
+      expect(settlementBlockedMessageKey("permanentDelegate")).toBeNull();
     });
 
     it("leaves settings the program accepts unmarked", () => {

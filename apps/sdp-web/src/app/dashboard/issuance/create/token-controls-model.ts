@@ -1,10 +1,27 @@
 import {
+  dvpBlockReason,
   type GroupedSetting,
   getConflictingSettingKeys,
   type SettingKey,
 } from "@sdp/issuance/capabilities";
 import type { MessageKey } from "@/i18n/messages";
 import type { AdvancedSettingsDraft } from "./issuance-draft-wizard.types";
+
+/**
+ * The message naming why an extension rules an asset out of DvP settlement, or
+ * null when the program accepts it.
+ *
+ * Lives here rather than in a row component because two unrelated surfaces need
+ * it: the capability-driven rows on the asset profile, and the draft form's own
+ * hand-rolled controls. One lookup keeps them from drifting apart.
+ */
+export function settlementBlockedMessageKey(key: SettingKey): MessageKey | null {
+  const reason = dvpBlockReason(key);
+  if (!reason) return null;
+  return reason === "amountMutating"
+    ? "DashboardIssuance.config.settlementBlockedAmount"
+    : "DashboardIssuance.config.settlementBlockedEscrow";
+}
 
 export const SIMPLE_CONTROL_LABELS: Partial<Record<SettingKey, MessageKey>> = {
   pauseTransfers: "DashboardIssuance.simplified.pauseCapability",

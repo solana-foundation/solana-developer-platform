@@ -1,27 +1,17 @@
 "use client";
 
-import { dvpBlockReason, type GroupedSetting } from "@sdp/issuance/capabilities";
+import type { GroupedSetting } from "@sdp/issuance/capabilities";
 import { Lock, TriangleAlert } from "lucide-react";
 import { useId } from "react";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { AdvancedSettingsDraft } from "./issuance-draft-wizard.types";
 import { TokenControlParameters } from "./token-control-parameters";
-import { type ControlEditMode, SIMPLE_CONTROL_LABELS } from "./token-controls-model";
-
-/**
- * The message naming why an extension rules the asset out of DvP settlement.
- *
- * A lookup rather than a ternary in the row, so the row renders what it is
- * given and branches on nothing.
- */
-function settlementBlockedMessageKey(key: GroupedSetting["key"]): MessageKey | null {
-  const reason = dvpBlockReason(key);
-  if (!reason) return null;
-  return reason === "amountMutating"
-    ? "DashboardIssuance.config.settlementBlockedAmount"
-    : "DashboardIssuance.config.settlementBlockedEscrow";
-}
+import {
+  type ControlEditMode,
+  SIMPLE_CONTROL_LABELS,
+  settlementBlockedMessageKey,
+} from "./token-controls-model";
 
 export function TokenControlRow({
   entry,
