@@ -246,14 +246,17 @@ describe("syncRingsWallet", () => {
     expect(syncWallet).toHaveBeenCalledTimes(1);
   });
 
-  it("hands the sync an authority that can read but not spend", async () => {
+  it("hands the sync keys that can read but not prove", async () => {
     await syncRingsWallet(DEPS, { walletId: "hrw_1", owner: OWNER });
 
-    const [{ authority }] = syncWallet.mock.calls[0] as [{ authority: Record<string, unknown> }];
+    const [{ keys }] = syncWallet.mock.calls[0] as [{ keys: object }];
 
-    // Sync has no operation behind it, so there is no approval an authority
-    // could honestly stand for. Anything beyond reading must be absent rather
-    // than stubbed, so a future SDK that tried to spend here would fail loudly.
-    expect(Object.keys(authority)).toEqual(["syncMaterial"]);
+    // Sync has no operation behind it, so nothing it holds should be able to
+    // spend. Proving is a separate capability in 0.1.6, and the read path takes
+    // the form that does not have it, so an SDK that tried would fail loudly.
+    expect("derive" in keys).toBe(true);
+    expect("decrypt" in keys).toBe(true);
+    expect("prove" in keys).toBe(false);
+    expect("proveMerge" in keys).toBe(false);
   });
 });

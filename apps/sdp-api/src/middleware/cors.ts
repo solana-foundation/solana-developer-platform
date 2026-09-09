@@ -40,10 +40,11 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
 
   return cors({
     origin: (origin) => {
+      // Never reflect an unlisted origin: this middleware runs with
+      // `credentials: true` on the app mounting the earn money routes, and
+      // non-production deployments hold real devnet funds (PRO-1865).
       if (!origin) return null;
-      if (isAllowedOrigin(origin)) return origin;
-      if (!isProduction) return origin;
-      return null;
+      return isAllowedOrigin(origin) ? origin : null;
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-Request-ID", "Idempotency-Key"],

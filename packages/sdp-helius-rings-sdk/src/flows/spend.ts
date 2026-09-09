@@ -1,24 +1,23 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
-import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import { transactInstruction } from "@heliuslabs/zolana/interface";
 import {
   ConfidentialTransfer,
+  type EncryptedTransfer,
+  encryptConfidentialTransfer,
   ProofInputUtxo,
   type Wallet,
-  type WalletAuthority,
   WithdrawalTarget,
 } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Instruction } from "@solana/kit";
 import { type PreparedSpendIntent, validatePreparedTransferIntent } from "../intent-validation.js";
-import type { ShieldedMaterial } from "../material.js";
 import { protocolMint, requireProtocolSol } from "./mint.js";
 import { type NoteSelection, selectNotes } from "./notes.js";
 
 export interface SpendDeps {
   readonly client: ZolanaClient;
   readonly wallet: Wallet;
-  readonly authority: WalletAuthority;
-  readonly material: ShieldedMaterial;
+  readonly keys: WalletKeys;
   readonly owner: Address;
 }
 
@@ -45,22 +44,10 @@ export interface TransferInput {
 export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Promise<SpendResult> {
   requireProtocolSol(input.mint, "withdrawal");
 
-  const asset = address(protocolMint(input.mint));
-  const amount = BigInt(input.amountRaw);
   const recipient = address(input.recipient);
-  const selection = selectNotes({
-    wallet: deps.wallet,
-    asset,
-    amount,
-    ...(input.pinnedInputs ? { pinned: input.pinnedInputs } : {}),
-  });
+  const { asset, amount, selection, transfer: withdrawal } = arm(deps, input);
 
   const target = WithdrawalTarget.sol({ recipient });
-  const withdrawal = new ConfidentialTransfer(
-    deps.material.shieldedAddress,
-    proofInputs(deps, selection),
-    deps.owner
-  );
   withdrawal.withdraw(asset, amount, target);
 
   return {
@@ -90,20 +77,7 @@ export async function buildWithdrawal(deps: SpendDeps, input: WithdrawInput): Pr
 export async function buildTransfer(deps: SpendDeps, input: TransferInput): Promise<SpendResult> {
   requireProtocolSol(input.mint, "transfer");
 
-  const asset = address(protocolMint(input.mint));
-  const amount = BigInt(input.amountRaw);
-  const selection = selectNotes({
-    wallet: deps.wallet,
-    asset,
-    amount,
-    ...(input.pinnedInputs ? { pinned: input.pinnedInputs } : {}),
-  });
-
-  const transfer = new ConfidentialTransfer(
-    deps.material.shieldedAddress,
-    proofInputs(deps, selection),
-    deps.owner
-  );
+  const { asset, amount, selection, transfer } = arm(deps, input);
   transfer.send(input.recipient, asset, amount);
 
   return {
@@ -125,12 +99,52 @@ export async function buildTransfer(deps: SpendDeps, input: TransferInput): Prom
   };
 }
 
+/**
+ * Selects the notes and opens a confidential transfer over them. Everything up
+ * to this point is common to both spends; only the call that arms the transfer
+ * — `withdraw` to a public target, or `send` to a shielded address — differs.
+ */
+function arm(
+  deps: SpendDeps,
+  input: Readonly<{ mint: string; amountRaw: string; pinnedInputs?: readonly string[] }>
+) {
+  const asset = address(protocolMint(input.mint));
+  const amount = BigInt(input.amountRaw);
+  const selection = selectNotes({
+    wallet: deps.wallet,
+    asset,
+    amount,
+    ...(input.pinnedInputs ? { pinned: input.pinnedInputs } : {}),
+  });
+
+  return {
+    asset,
+    amount,
+    selection,
+    transfer: new ConfidentialTransfer(
+      deps.keys.address(),
+      proofInputs(deps, selection),
+      deps.owner
+    ),
+  };
+}
+
+/**
+ * `ProofInputUtxo` takes the nullifier as a value rather than deriving it from
+ * a key, so it never holds a secret. The value comes from the note the sync
+ * stored: sync derives it to decide whether the note is spent, so taking it
+ * from there rather than re-deriving keeps one source for it and leaves nothing
+ * for a wrong hash-and-blinding pairing to disagree about.
+ */
 function proofInputs(deps: SpendDeps, selection: NoteSelection): ProofInputUtxo[] {
+  const nullifierPublicKey = deps.keys.address().nullifierPublicKey;
+
   return selection.notes.map(
     (note) =>
       new ProofInputUtxo({
         utxo: note.utxo,
-        nullifierKey: deps.material.nullifierKey,
+        nullifierPublicKey,
+        nullifier: note.nullifier,
         ...(note.dataHash ? { dataHash: note.dataHash } : {}),
         ...(note.ringDataHash ? { ringDataHash: note.ringDataHash } : {}),
       })
@@ -144,11 +158,26 @@ async function prove(
 ) {
   const prepared = transfer.prepare();
   validatePreparedTransferIntent(prepared, expectedIntent);
-  const encrypted = await deps.authority.encryptConfidentialTransfer({
-    firstNullifier: prepared.firstNullifier,
-    outputs: prepared.outputs,
-    assets: deps.wallet.registry,
-  });
 
-  return deps.client.proveTransact(prepared.finalize(encrypted));
+  // One key per transaction, keyed to its first nullifier, and ours to destroy.
+  const [transactionViewingKey] = await deps.keys.transactionKeys([
+    {
+      viewingPublicKey: deps.keys.viewingPublicKeys()[0],
+      firstNullifier: prepared.firstNullifier,
+    },
+  ]);
+
+  let encrypted: EncryptedTransfer;
+  try {
+    encrypted = encryptConfidentialTransfer(transactionViewingKey, {
+      outputs: prepared.outputs,
+      assets: deps.wallet.registry,
+    });
+  } finally {
+    transactionViewingKey.destroy();
+  }
+
+  // The nullifier secret is consumed here: the inputs arrive with its slots
+  // absent and `keys` fills them on the way to the prover.
+  return deps.client.proveTransact(prepared.finalize(encrypted), deps.keys);
 }

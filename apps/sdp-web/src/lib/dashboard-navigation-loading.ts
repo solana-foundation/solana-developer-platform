@@ -15,6 +15,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
   earnProgram: "/dashboard/markets/embedded-yield",
+  dvp: "/dashboard/markets/dvp",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -24,6 +25,14 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
   deposit: "/dashboard/payments/deposit",
   requests: "/dashboard/payments/requests",
   recurring: "/dashboard/payments/recurring",
+} as const;
+
+export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
+  custody: "/dashboard/integrations?tab=custody",
+  rpc: "/dashboard/integrations?tab=rpc",
+  ramps: "/dashboard/integrations?tab=ramps",
+  compliance: "/dashboard/integrations?tab=compliance",
+  privacy: "/dashboard/integrations?tab=privacy",
 } as const;
 
 export type DashboardLoadingRoute =
@@ -45,6 +54,9 @@ export type DashboardLoadingRoute =
   | "embedded-yield-portfolio"
   | "embedded-yield-configure"
   | "embedded-yield-integrate"
+  | "dvp-trades"
+  | "dvp-trade-create"
+  | "dvp-trade-detail"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -106,6 +118,14 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   }
   if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`) {
     return "embedded-yield-integrate";
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) return "dvp-trades";
+  // Before the detail arm: /dvp/create would otherwise match its id pattern.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) return "dvp-trade-create";
+  // Detail routes need their own arm: every other markets match is exact, so a
+  // trade id would resolve to no loading key and fall back to the home skeleton.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return "dvp-trade-detail";
   }
   return null;
 }
@@ -170,22 +190,37 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
  * `/dashboard/custody` tree too — they are the same destination under two paths.
  */
 export function isDashboardNavItemActive(pathname: string, href: string): boolean {
+  const [pathnameOnly, pathnameSearch = ""] = pathname.split("?", 2);
+  const [hrefPathname, hrefSearch] = href.split("?", 2);
+
+  // Integration family links intentionally keep the reader on the catalog and
+  // change only its `tab` query parameter. Match that parameter exactly so
+  // just one child in the sidebar earns the active rail treatment.
+  if (hrefSearch) {
+    return pathnameOnly === hrefPathname && pathnameSearch === hrefSearch;
+  }
+
   if (href === "/dashboard") {
     // Holdings has no nav entry of its own and is only reached from the home
     // allocation card, so Home keeps the highlight rather than the sidebar going
     // blank while you are on it.
-    return pathname === "/dashboard" || pathname === "/dashboard/tokens";
+    return pathnameOnly === "/dashboard" || pathnameOnly === "/dashboard/tokens";
   }
   if (href === "/dashboard/integrations") {
     return (
-      pathname === "/dashboard/integrations" || pathname.startsWith("/dashboard/integrations/")
+      pathnameOnly === "/dashboard/integrations" ||
+      pathnameOnly.startsWith("/dashboard/integrations/")
     );
   }
   if (href === "/dashboard/wallets") {
-    return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
+    return (
+      pathnameOnly.startsWith("/dashboard/wallets") || pathnameOnly.startsWith("/dashboard/custody")
+    );
   }
   if (href === "/dashboard/payments") {
-    return pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+    return (
+      pathnameOnly === "/dashboard/payments" || pathnameOnly.startsWith("/dashboard/payments/")
+    );
   }
-  return pathname === href || pathname.startsWith(`${href}/`);
+  return pathnameOnly === href || pathnameOnly.startsWith(`${href}/`);
 }

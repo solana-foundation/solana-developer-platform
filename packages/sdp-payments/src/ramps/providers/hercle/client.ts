@@ -9,7 +9,6 @@ import {
   type CryptoRailId,
   type CryptoRailNetwork,
   getCryptoRailAssetLabel,
-  SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -100,19 +99,6 @@ export async function buildHercleSignature(
     `${timestampSeconds}${method.toUpperCase()}${pathWithQuery}${rawBody}`,
     secret
   );
-}
-
-/** Quotes carry a token symbol ("SOL"), estimates a rail id ("sol.solana"); both resolve here. */
-export function parseCryptoRail(cryptoToken: string): CryptoRailId {
-  const normalized = cryptoToken.trim().toLowerCase();
-  const railId = normalized.includes(".") ? normalized : `${normalized}.solana`;
-  const parsed = z.enum(SOLANA_CRYPTO_RAILS).safeParse(railId);
-  if (!parsed.success) {
-    throw badRequest(`Unsupported crypto token "${cryptoToken}" for Hercle.`, {
-      provider: "hercle",
-    });
-  }
-  return parsed.data;
 }
 
 function railNetwork(assetRail: CryptoRailId): CryptoRailNetwork {
@@ -403,16 +389,14 @@ export class HercleRampClient implements RampProvider {
         provider: this.id,
       });
     }
-    const assetRail = parseCryptoRail(input.cryptoToken);
-
     const order = this.parseWith(
       hercleOnrampOrderResponseSchema,
       await this.request(ctx, "POST", "/partner/v1/orders/onramp", {
         body: {
           fiatCurrency: input.fiatCurrency,
           fiatAmount: input.fiatAmount,
-          cryptoAsset: getCryptoRailAssetLabel(assetRail),
-          network: railNetwork(assetRail),
+          cryptoAsset: getCryptoRailAssetLabel(input.assetRail),
+          network: railNetwork(input.assetRail),
           destinationWalletAddress: input.destinationWalletAddress,
         },
         onBehalfOf: input.externalCustomerId,

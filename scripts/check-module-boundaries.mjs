@@ -21,15 +21,18 @@ const MODULE_METADATA = [
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
+      "@sdp/dvp",
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
       "@sdp/helius-rings-sdk",
       "@sdp/issuance",
       "@sdp/kamino",
+      "@sdp/jupiter-lend",
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
+      "@sdp/redaction",
       "@sdp/rpc",
       "@sdp/solana",
       "@sdp/spc-escrow",
@@ -54,6 +57,7 @@ const MODULE_METADATA = [
       "@sdp/issuance",
       "@sdp/policy",
       "@sdp/private-channels",
+      "@sdp/redaction",
       "@sdp/solana",
       "@sdp/types",
     ],
@@ -81,7 +85,13 @@ const MODULE_METADATA = [
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
-    allowedDependencies: ["@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/types"],
+  },
+  {
+    name: "@sdp/dvp",
+    directory: "packages/sdp-dvp",
+    purpose: "Generated @solana/kit client for the DvP atomic swap program.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/earn",
@@ -114,6 +124,12 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
   {
+    name: "@sdp/jupiter-lend",
+    directory: "packages/sdp-jupiter-lend",
+    purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
+    allowedDependencies: ["@sdp/earn", "@sdp/types"],
+  },
+  {
     name: "@sdp/veda",
     directory: "packages/sdp-veda",
     purpose: "Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk.",
@@ -129,7 +145,7 @@ const MODULE_METADATA = [
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
-    allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/policy",
@@ -155,6 +171,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-private-channels",
     purpose: "Solana Private Channels gateway, auth, and instance clients.",
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
+  },
+  {
+    name: "@sdp/redaction",
+    directory: "packages/sdp-redaction",
+    purpose:
+      "Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/rpc",

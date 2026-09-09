@@ -176,21 +176,22 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@coinbase/cdp-sdk": "1.54.0",
+    "@coinbase/cdp-sdk": "1.55.0",
+    "@sdp/redaction": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
-    "@solana/fixed-points": "7.1.0",
+    "@solana/fixed-points": "7.1.1",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3",
     "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "26.1.2",
-    "tsx": "4.23.5",
+    "@types/node": "26.4.0",
+    "tsx": "4.23.12",
     "typescript": "6.0.3"
   }
 }

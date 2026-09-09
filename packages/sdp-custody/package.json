@@ -35,6 +35,7 @@
     "lint": "biome check src/"
   },
   "dependencies": {
+    "@sdp/redaction": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
@@ -48,6 +49,6 @@
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
     "@solana/transactions": "catalog:",
-    "jose": "6.2.8"
+    "jose": "6.2.10"
   }
 }

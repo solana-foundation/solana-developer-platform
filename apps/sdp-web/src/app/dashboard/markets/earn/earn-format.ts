@@ -115,6 +115,7 @@ function formatIsoDuration(duration: string): string {
 const EARN_PROVIDER_LABELS = {
   ground: "Ground",
   kamino: "Kamino",
+  jupiter_lend: "Jupiter Lend",
   perena: "Perena",
   upshift: "Upshift",
   veda: "Veda",

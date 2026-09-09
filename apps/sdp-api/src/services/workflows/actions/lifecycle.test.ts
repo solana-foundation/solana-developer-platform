@@ -21,25 +21,40 @@ const WALLET = "AENLi9e2xTiK7YHThmEQhBrCaDTjTRV4hsDXdwbPcBbK";
 const fetchToken = vi.hoisted(() => vi.fn());
 const freezeAccount = vi.hoisted(() => vi.fn());
 const thawAccount = vi.hoisted(() => vi.fn());
+const pauseToken = vi.hoisted(() => vi.fn());
+const unpauseToken = vi.hoisted(() => vi.fn());
+const getTokenPauseState = vi.hoisted(() => vi.fn());
+const getSlot = vi.hoisted(() => vi.fn());
 // The stale mirror: it claims nothing is frozen, which is the post-failed-write state.
 const isAccountFrozen = vi.hoisted(() => vi.fn());
 const mirrorFreezeWrite = vi.hoisted(() => vi.fn());
 const mirrorUnfreezeWrite = vi.hoisted(() => vi.fn());
+const applySettledTokenStatus = vi.hoisted(() => vi.fn());
+const reconcileObservedTokenPauseState = vi.hoisted(() => vi.fn());
+const recordWorkflowTransaction = vi.hoisted(() => vi.fn());
 
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchToken,
 }));
-vi.mock("@sdp/rpc/solana", () => ({ createRpcForSdk: () => ({}) }));
+vi.mock("@solana/mosaic-sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana/mosaic-sdk")>()),
+  getTokenPauseState,
+}));
+vi.mock("@sdp/rpc/solana", () => ({
+  createRpcForSdk: () => ({ getSlot: () => ({ send: getSlot }) }),
+}));
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/token.service", () => ({
   TokenService: class {
     isAccountFrozen = isAccountFrozen;
     freezeAccount = mirrorFreezeWrite;
     unfreezeAccount = mirrorUnfreezeWrite;
+    applySettledTokenStatus = applySettledTokenStatus;
+    reconcileObservedTokenPauseState = reconcileObservedTokenPauseState;
   },
 }));
-vi.mock("./record-transaction", () => ({ recordWorkflowTransaction: async () => true }));
+vi.mock("./record-transaction", () => ({ recordWorkflowTransaction }));
 
 // prepareOnchain reaches custody and RPC; the signer/mosaic surface is all these actions
 // use from it. resolveWalletTokenAccount is a live RPC derive, stubbed to a fixed account.
@@ -52,14 +67,15 @@ vi.mock("./onchain", async (importOriginal) => {
       ctx: {
         mintAddress: TOKEN_ACCOUNT,
         signer: { address: WALLET },
-        mosaic: { freezeAccount, thawAccount },
+        mosaic: { freezeAccount, thawAccount, pauseToken, unpauseToken },
       },
     }),
     resolveWalletTokenAccount: async () => TOKEN_ACCOUNT,
   };
 });
 
-import { runFreeze, runUnfreeze } from "./lifecycle";
+import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import { runFreeze, runPause, runUnfreeze, runUnpause } from "./lifecycle";
 
 const env = {} as Env;
 
@@ -101,6 +117,7 @@ describe("freeze/unfreeze converge on chain state, not the DB mirror", () => {
     thawAccount.mockResolvedValue({ signature: "sig_thaw", slot: 2 });
     mirrorFreezeWrite.mockResolvedValue(undefined);
     mirrorUnfreezeWrite.mockResolvedValue(undefined);
+    recordWorkflowTransaction.mockResolvedValue("tx_ledger_1");
   });
 
   // The reported bug. The mirror write failed after an earlier freeze landed, so the
@@ -162,5 +179,135 @@ describe("freeze/unfreeze converge on chain state, not the DB mirror", () => {
     expect(thawAccount).not.toHaveBeenCalled();
     expect(result.status).toBe("failed");
     expect(result.retryable).toBe(true);
+  });
+});
+
+// HOO-1013: the DB pause mirror must flow through applySettledTokenStatus —
+// the ordered, once-only writer the manual admin path uses — anchored on the
+// recorded transaction. A direct status write from the engine could land after
+// a newer manual pause/unpause and silently reverse it.
+describe("pause/unpause mirror status through the settled-transaction path", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pauseToken.mockResolvedValue({ signature: "sig_pause", slot: 7 });
+    unpauseToken.mockResolvedValue({ signature: "sig_unpause", slot: 8 });
+    recordWorkflowTransaction.mockResolvedValue("tx_ledger_1");
+    applySettledTokenStatus.mockResolvedValue(undefined);
+    reconcileObservedTokenPauseState.mockResolvedValue(true);
+    getSlot.mockResolvedValue(500n);
+    getTokenPauseState.mockResolvedValue(true);
+  });
+
+  it("records the pause and applies the settled status against that transaction", async () => {
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(pauseToken).toHaveBeenCalledTimes(1);
+    expect(recordWorkflowTransaction).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: "workflow_execution_lifecycle" }),
+      expect.objectContaining({ type: "pause", signature: "sig_pause", slot: 7 })
+    );
+    expect(applySettledTokenStatus).toHaveBeenCalledWith("tx_ledger_1", "tok_1", "paused");
+    expect(result.status).toBe("succeeded");
+    expect(result.result).not.toMatchObject({ mirrorFailed: true });
+  });
+
+  it("records the unpause and applies the settled status against that transaction", async () => {
+    const result = await runUnpause(env, executionFixture(), action);
+
+    expect(applySettledTokenStatus).toHaveBeenCalledWith("tx_ledger_1", "tok_1", "active");
+    expect(result.status).toBe("succeeded");
+  });
+
+  // A receipt without a slot cannot pass settled-status bookkeeping (which
+  // refuses unordered confirmations), so the mirror comes from a slot-anchored
+  // chain observation instead of being skipped.
+  it("mirrors from a slot-anchored observation when the receipt has no slot", async () => {
+    pauseToken.mockResolvedValue({ signature: "sig_pause_no_slot" });
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(applySettledTokenStatus).not.toHaveBeenCalled();
+    expect(reconcileObservedTokenPauseState).toHaveBeenCalledWith("tok_1", "paused", 500);
+    expect(result.status).toBe("succeeded");
+    expect(result.result).not.toMatchObject({ mirrorFailed: true });
+  });
+
+  // The converged mint may have been paused by an earlier tick whose ledger
+  // write died — the DB must not stay `active` forever, so the branch repairs
+  // from an observation rather than skipping.
+  it("repairs the DB status from observation when the mint is already paused", async () => {
+    pauseToken.mockRejectedValue(new Error(MINT_ALREADY_PAUSED_ERROR));
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.result).toMatchObject({ alreadyPaused: true, statusRepaired: true });
+    expect(reconcileObservedTokenPauseState).toHaveBeenCalledWith("tok_1", "paused", 500);
+    expect(recordWorkflowTransaction).not.toHaveBeenCalled();
+  });
+
+  it("repairs the DB status from observation when the mint is already active", async () => {
+    unpauseToken.mockRejectedValue(new Error(MINT_NOT_PAUSED_ERROR));
+    getTokenPauseState.mockResolvedValue(false);
+
+    const result = await runUnpause(env, executionFixture(), action);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.result).toMatchObject({ alreadyActive: true, statusRepaired: true });
+    expect(reconcileObservedTokenPauseState).toHaveBeenCalledWith("tok_1", "active", 500);
+  });
+
+  it("omits statusRepaired when the observation found nothing to repair", async () => {
+    pauseToken.mockRejectedValue(new Error(MINT_ALREADY_PAUSED_ERROR));
+    reconcileObservedTokenPauseState.mockResolvedValue(false);
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.result).toMatchObject({ alreadyPaused: true });
+    expect(result.result).not.toMatchObject({ statusRepaired: true });
+  });
+
+  // An unreadable observation must become a retry, never a success that
+  // preserves a possibly-stale row.
+  it("retries when the converge observation cannot be read", async () => {
+    pauseToken.mockRejectedValue(new Error(MINT_ALREADY_PAUSED_ERROR));
+    getTokenPauseState.mockRejectedValue(new Error("rpc timeout"));
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(result.status).toBe("failed");
+    expect(result.retryable).toBe(true);
+    expect(reconcileObservedTokenPauseState).not.toHaveBeenCalled();
+  });
+
+  it("succeeds with mirrorFailed when the settled status write fails after the chain effect", async () => {
+    applySettledTokenStatus.mockRejectedValue(new Error("db down"));
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.result).toMatchObject({ mirrorFailed: true });
+  });
+
+  it("succeeds with ledgerFailed and no status write when the ledger write fails", async () => {
+    recordWorkflowTransaction.mockResolvedValue(null);
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.result).toMatchObject({ ledgerFailed: true, mirrorFailed: true });
+    expect(applySettledTokenStatus).not.toHaveBeenCalled();
+  });
+
+  it("retries on other chain errors", async () => {
+    pauseToken.mockRejectedValue(new Error("rpc timeout"));
+
+    const result = await runPause(env, executionFixture(), action);
+
+    expect(result.status).toBe("failed");
+    expect(result.retryable).toBe(true);
+    expect(recordWorkflowTransaction).not.toHaveBeenCalled();
   });
 });

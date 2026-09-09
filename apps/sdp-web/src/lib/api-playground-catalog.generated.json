@@ -5302,7 +5302,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -5626,7 +5626,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&cryptoToken={cryptoToken}&fiatCurrency={fiatCurrency}&destinationWallet={destinationWallet}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}&destinationCountry={destinationCountry}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5661,11 +5661,34 @@
             ]
           },
           {
-            "key": "cryptoToken",
-            "label": "cryptoToken",
-            "description": "Crypto asset symbol.",
-            "defaultValue": "USDC",
-            "required": true
+            "key": "assetRail",
+            "label": "assetRail",
+            "description": "Canonical SDP crypto asset rail.",
+            "defaultValue": "usdc.solana",
+            "required": true,
+            "kind": "select",
+            "options": [
+              {
+                "label": "sol.solana",
+                "value": "sol.solana"
+              },
+              {
+                "label": "usdc.solana",
+                "value": "usdc.solana"
+              },
+              {
+                "label": "usdt.solana",
+                "value": "usdt.solana"
+              },
+              {
+                "label": "usdg.solana",
+                "value": "usdg.solana"
+              },
+              {
+                "label": "pyusd.solana",
+                "value": "pyusd.solana"
+              }
+            ]
           },
           {
             "key": "fiatCurrency",
@@ -6274,10 +6297,17 @@
             ]
           },
           {
-            "key": "destinationWallet",
-            "label": "destinationWallet",
-            "description": "Destination wallet ID. Required when direction is onramp.",
-            "defaultValue": "privy_wallet_123",
+            "key": "destinationCustodyWalletId",
+            "label": "destinationCustodyWalletId",
+            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
+          {
+            "key": "destinationCountry",
+            "label": "destinationCountry",
+            "description": "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
+            "defaultValue": "US",
             "required": false
           }
         ],
@@ -7522,7 +7552,14 @@
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "bankName": "Example Bank",
                 "accountNumberLast4": "6789",
-                "paymentRails": ["ACH", "WIRE"]
+                "paymentRails": ["ACH", "WIRE"],
+                "customerLink": {
+                  "id": "counterparty_provider_account_customer",
+                  "providerCustomerReference": "Customer:0193b2c4",
+                  "status": "active",
+                  "providerStatus": "ACTIVE",
+                  "createdAt": "2025-01-01T00:00:00.000Z"
+                }
               }
             ]
           },

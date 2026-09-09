@@ -23,7 +23,11 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
 } from "@sdp/types";
-import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
+import {
+  earnDepositStyle,
+  earnWithdrawSlippageFloor,
+  isVaultDirectDepositEnabled,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnExternalWalletTransactionRow } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -69,6 +73,12 @@ import {
   type earnVaultWithdrawalPreviewSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import {
+  beginEarnDepositAudit,
+  completeEarnDepositAudit,
+  concludeEarnDepositAuditOnError,
+  recordEarnWithdrawalAudit,
+} from "./movement-audit";
 import { decodeMovementCursor } from "./movements";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import {
@@ -523,28 +533,6 @@ export async function createEarnExternalWalletDepositTransaction(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  // ENVIRONMENT CAPABILITY first, same constant as the custody deposit: what
-  // keeps production vault deposits closed (PRO-1703) is not custody-shaped,
-  // so the caller-signed path must not slip past it.
-  if (!isVaultDirectDepositEnabled(environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Vault deposits are not available in production yet: vault positions are not surfaced " +
-        "on the Active tab, so a position opened here would sit outside the portfolio view."
-    );
-  }
-
-  // SLIPPAGE FLOOR, required wherever real money moves — see the custody
-  // deposit for the full rationale. It matters MORE here: the signer is a
-  // stranger's wallet, so nothing else stands between a stale vault state and
-  // the legacy no-floor instruction.
-  if (environment === "production" && body.minSharesOut === undefined) {
-    throw badRequest(
-      "minSharesOut is required for a production vault deposit: without a floor the pinned " +
-        "Kamino SDK builds the legacy deposit instruction, which accepts any number of shares."
-    );
-  }
-
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
     throw notFound("Earn strategy");
@@ -569,6 +557,21 @@ export async function createEarnExternalWalletDepositTransaction(
     );
   }
   const provider = strategy.provider;
+
+  if (!isVaultDirectDepositEnabled(environment, provider)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `Vault deposits for ${provider} are not available from a ${environment} project.`
+    );
+  }
+
+  // Every production deposit carries a caller-chosen share floor derived from
+  // the provider's live quote and enforced by its on-chain instruction.
+  if (environment === "production" && body.minSharesOut === undefined) {
+    throw badRequest(
+      "minSharesOut is required for this production vault deposit because the provider supports a share floor."
+    );
+  }
 
   assertEarnProviderSurfaced(provider);
   await assertProviderAvailable(
@@ -713,6 +716,15 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     throw notFound("Earn external-wallet position");
   }
 
+  // Same provider-policy exit floor as the custody withdrawal: a non-null
+  // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
+  // derived from the withdrawal preview — never an admission gate).
+  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+    throw badRequest(
+      `minAmountOut is required for this withdrawal because ${position.provider} declares a withdrawal slippage policy.`
+    );
+  }
+
   // Same owner-is-the-default normalization as the deposit build.
   const feePayer = body.feePayer === position.ownerAddress ? undefined : body.feePayer;
 
@@ -815,15 +827,53 @@ export async function createEarnExternalWalletDeposit(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const result = await submitExternalWalletDeposit(c.env, {
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    transactionId: body.transactionId,
-    signedTransaction: body.signedTransaction,
-    requestId,
-    userId: auth.userId ?? null,
-    apiKeyId: auth.apiKeyId ?? null,
+  // Fail-closed audit admission (PRO-1866): no durable intent, no broadcast.
+  const auditIntent = await beginEarnDepositAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      requestId,
+    }
+  );
+
+  let result: Awaited<ReturnType<typeof submitExternalWalletDeposit>>;
+  try {
+    result = await submitExternalWalletDeposit(c.env, {
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      transactionId: body.transactionId,
+      signedTransaction: body.signedTransaction,
+      requestId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    });
+  } catch (error) {
+    // A 4xx is a definitive pre-broadcast refusal (verification, build
+    // consumption, recording): close the intent instead of paging
+    // verification over it. Anything else stays UNRESOLVED (the submit can
+    // 5xx after a successful send; see movement-audit.ts).
+    await concludeEarnDepositAuditOnError(c, auditIntent, error);
+    throw error;
+  }
+
+  await completeEarnDepositAudit(c, auditIntent, {
+    resourceId: result.movement.id,
+    metadata: {
+      movementId: result.movement.id,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      replayed: result.replayed,
+    },
   });
 
   const response: EarnExternalWalletDepositResponse = {
@@ -852,6 +902,30 @@ export async function createEarnExternalWalletWithdrawal(
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
+
+  // Best-effort and post-effect (PRO-1866): a fail-closed audit write would
+  // be a new way for the exit submit to 5xx (ADR 0002). A replay only
+  // backfills an audit row the crashed original never wrote.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: result.movement.created_by,
+      apiKeyId: result.movement.initiated_by_key_id,
+    },
+    result.movement.id,
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      requestId,
+    },
+    { replayed: result.replayed }
+  );
 
   const response: EarnExternalWalletWithdrawalResponse = {
     withdrawal: toExternalWalletMovementWire(result.movement, result.replayed),

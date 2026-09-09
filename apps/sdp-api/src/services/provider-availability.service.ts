@@ -22,10 +22,12 @@ import {
   resolveOrganizationProviderEntitlements,
   type SdpEnvironment,
 } from "@sdp/types";
+import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
@@ -84,7 +86,7 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
  * keys on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
-type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda">;
+type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda" | "jupiter_lend">;
 
 /**
  * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
@@ -355,6 +357,7 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     perena: keyPairCredentialDefinition("Perena", "PERENA"),
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
     kamino: publicApiDefinition("Kamino"),
+    jupiter_lend: publicApiDefinition("Jupiter Lend"),
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 
@@ -415,11 +418,6 @@ function toStoredOrganizationSettings(settings: OrganizationSettings | null): st
   }
 
   return JSON.stringify(settings);
-}
-
-function omitProviderOverrides(settings: OrganizationSettings): OrganizationSettings {
-  const { providerOverrides: _providerOverrides, ...rest } = settings;
-  return rest;
 }
 
 function hasOwnEntries(value: Record<string, unknown>): boolean {
@@ -490,6 +488,7 @@ export function parseProviderOverridesFromClerkMetadata(
 export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizationWithMetadata): {
   tier: OrganizationTier;
   providerOverrides?: OrganizationProviderOverrides;
+  enableProductionProject: boolean;
 } {
   const privateMetadata = asRecord(organization.private_metadata);
   const sdp = asRecord(privateMetadata?.sdp);
@@ -497,11 +496,12 @@ export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizati
   return {
     tier: normalizeOrganizationTier(typeof sdp?.tier === "string" ? sdp.tier : undefined),
     providerOverrides: parseProviderOverridesFromClerkMetadata(sdp?.providerOverrides),
+    enableProductionProject: sdp?.enableProductionProject === true,
   };
 }
 
 export async function getOrganizationTierState(
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string
 ): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
   const row = await db
@@ -545,24 +545,6 @@ function getConfiguredProviders(env: Env) {
   };
 }
 
-/**
- * Self-hosted entitlement: every key in `shape` is entitled by default,
- * minus any explicit `false` overrides (disable-only).
- *
- * `shape` is used only as a key set — its values are ignored, since
- * self-hosted bypasses tier-based entitlement.
- */
-function applySelfHostedEntitlements<T extends string>(
-  shape: Record<T, boolean>,
-  overrides?: Partial<Record<T, boolean>>
-): Record<T, boolean> {
-  const next = {} as Record<T, boolean>;
-  for (const key of Object.keys(shape) as T[]) {
-    next[key] = overrides?.[key] !== false;
-  }
-  return next;
-}
-
 function buildAvailabilityEntries<T extends string>(
   entitled: Record<T, boolean>,
   configured: Record<T, boolean>
@@ -594,7 +576,7 @@ function getProviderLabel(family: OrganizationProviderFamily, providerId: string
 
 export async function getProviderAvailability(
   env: Env,
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string
 ): Promise<OrganizationProviderAvailabilityResponse> {
   const organization = await getOrganizationTierState(db, organizationId);
@@ -604,28 +586,55 @@ export async function getProviderAvailability(
   });
   const configured = getConfiguredProviders(env);
 
-  let entitled = resolved.providers;
-  if (isSelfHostedDeployment(env)) {
-    const overrides = organization.settings?.providerOverrides;
-    entitled = {
-      custody: applySelfHostedEntitlements(entitled.custody, overrides?.custody),
-      rpc: applySelfHostedEntitlements(entitled.rpc, overrides?.rpc),
-      compliance: applySelfHostedEntitlements(entitled.compliance, overrides?.compliance),
-      ramps: applySelfHostedEntitlements(entitled.ramps, overrides?.ramps),
-      earn: applySelfHostedEntitlements(entitled.earn, overrides?.earn),
-    };
-  }
-
   return {
     tier: resolved.tier,
     providers: {
-      custody: buildAvailabilityEntries(entitled.custody, configured.custody),
-      rpc: buildAvailabilityEntries(entitled.rpc, configured.rpc),
-      compliance: buildAvailabilityEntries(entitled.compliance, configured.compliance),
-      ramps: buildAvailabilityEntries(entitled.ramps, configured.ramps),
-      earn: buildAvailabilityEntries(entitled.earn, configured.earn),
+      custody: buildAvailabilityEntries(resolved.providers.custody, configured.custody),
+      rpc: buildAvailabilityEntries(resolved.providers.rpc, configured.rpc),
+      compliance: buildAvailabilityEntries(resolved.providers.compliance, configured.compliance),
+      ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps),
+      earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn),
     },
   };
+}
+
+export function isCustodyProviderEntitled(
+  availability: OrganizationProviderAvailabilityResponse,
+  provider: CustodyProvider
+): boolean {
+  return availability.providers.custody[provider]?.entitled === true;
+}
+
+/**
+ * Runtime admission for persisted custody owners depends on organization
+ * entitlement, not on legacy environment credentials. Stored Connection
+ * credentials remain usable when the matching runtime-env credential is absent.
+ */
+export async function assertCustodyProviderEntitled(
+  env: Env,
+  db: DatabaseExecutor,
+  organizationId: string,
+  provider: CustodyProvider
+): Promise<void> {
+  const availability = await getProviderAvailability(env, db, organizationId);
+  const entry = availability.providers.custody[provider];
+  if (!isCustodyProviderEntitled(availability, provider)) {
+    logEvent("warn", {
+      event: "sdp_api_custody_entitlement_denied",
+      organization_id: organizationId,
+      provider,
+      reason: "provider_not_entitled",
+    });
+    throw new AppError(
+      "FORBIDDEN",
+      getAvailabilityMessage(
+        availability.tier,
+        "custody",
+        provider,
+        entry ?? { entitled: false, configured: false, enabled: false }
+      )
+    );
+  }
 }
 
 export async function isPersistedCustodyCompletionEnabled(
@@ -654,7 +663,6 @@ export async function isPersistedCustodyCompletionEnabled(
 }
 
 function getAvailabilityMessage(
-  env: Env,
   _tier: OrganizationTier,
   family: OrganizationProviderFamily,
   providerId: string,
@@ -663,9 +671,6 @@ function getAvailabilityMessage(
   const label = getProviderLabel(family, providerId);
 
   if (!entry.entitled) {
-    if (isSelfHostedDeployment(env)) {
-      return `${label} is disabled for this organization.`;
-    }
     return `${label} requires manual activation for this organization.`;
   }
 
@@ -730,7 +735,6 @@ export async function assertProviderAvailable(
     throw new AppError(
       "FORBIDDEN",
       getAvailabilityMessage(
-        env,
         access.tier,
         family,
         providerId,
@@ -844,32 +848,57 @@ export async function syncProviderAccessFromClerk(
     clerkOrganization: ClerkOrganizationWithMetadata;
   }
 ): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
-  const existing = await getOrganizationTierState(db, params.organizationId);
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
 
-  const nextSettings: OrganizationSettings = clerkMetadata.providerOverrides
-    ? {
-        ...(existing.settings ?? {}),
-        providerOverrides: clerkMetadata.providerOverrides,
-      }
-    : omitProviderOverrides(existing.settings ?? {});
+  // Settings are one JSON column patched by read-merge-write; the row lock keeps
+  // this sync from clobbering a concurrent dashboard settings update (and vice
+  // versa), matching the updateOrganization handler.
+  const { existingSettings, persistedSettings } = await db.transaction(async (tx) => {
+    const row = await tx
+      .prepare("SELECT settings FROM organizations WHERE id = ? FOR UPDATE")
+      .bind(params.organizationId)
+      .first<{ settings: string | null }>();
 
-  const persistedSettings = hasOwnEntries(nextSettings as Record<string, unknown>)
-    ? nextSettings
-    : null;
+    if (!row) {
+      throw new AppError("NOT_FOUND", "Organization not found");
+    }
 
-  await db
-    .prepare(
-      `UPDATE organizations
-       SET tier = ?, settings = ?, updated_at = sdp_datetime_now()
-       WHERE id = ?`
-    )
-    .bind(
-      clerkMetadata.tier,
-      toStoredOrganizationSettings(persistedSettings),
-      params.organizationId
-    )
-    .run();
+    const existing = parseOrganizationSettings(row.settings);
+    const {
+      providerOverrides: _staleOverrides,
+      enableProductionProject: _staleEnableProduction,
+      ...retainedSettings
+    } = existing ?? {};
+    const nextSettings: OrganizationSettings = {
+      ...retainedSettings,
+      ...(clerkMetadata.providerOverrides
+        ? { providerOverrides: clerkMetadata.providerOverrides }
+        : {}),
+      ...(clerkMetadata.enableProductionProject ? { enableProductionProject: true } : {}),
+    };
+
+    const persisted = hasOwnEntries(nextSettings as Record<string, unknown>) ? nextSettings : null;
+
+    await tx
+      .prepare(
+        `UPDATE organizations
+         SET tier = ?, settings = ?, updated_at = sdp_datetime_now()
+         WHERE id = ?`
+      )
+      .bind(clerkMetadata.tier, toStoredOrganizationSettings(persisted), params.organizationId)
+      .run();
+
+    return { existingSettings: existing, persistedSettings: persisted };
+  });
+
+  const wasProductionEnabled = existingSettings?.enableProductionProject === true;
+  if (wasProductionEnabled !== clerkMetadata.enableProductionProject) {
+    logEvent("info", {
+      event: "sdp_api_organization_production_enablement_changed",
+      organization_id: params.organizationId,
+      enable_production_project: clerkMetadata.enableProductionProject,
+    });
+  }
 
   return {
     tier: clerkMetadata.tier,

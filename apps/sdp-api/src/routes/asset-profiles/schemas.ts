@@ -5,6 +5,38 @@ import { queryBooleanSchema } from "@/openapi/schemas/base";
 // Free-form JSON object; mirrors JSONB `= 'object'` DB constraint.
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
+// Link-bearing keys in the open `asset` namespace. `asset.website` sits on the
+// default public projection of most registry types and is served verbatim by
+// the public metadata.json, so a javascript:/data: value stored here becomes an
+// active-content link on every consumer that renders it (HOO-1013).
+const LINK_KEY_PATTERN = /^(?:website|homepage)$|(?:url|uri|link|logo|image|icon)$/i;
+
+const isHttpUrl = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+// The namespace stays open, but any key that names a link must hold a bounded
+// http(s) URL — hostile schemes and non-string values fail closed.
+const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
+  for (const [key, value] of Object.entries(record)) {
+    if (value == null || !LINK_KEY_PATTERN.test(key)) {
+      continue;
+    }
+    if (typeof value !== "string" || value.length > 2048 || !isHttpUrl(value)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [key],
+        message: `asset.${key} must be an http(s) URL of at most 2048 characters`,
+      });
+    }
+  }
+});
+
 export const assetCategorySchema = z.enum(ASSET_CATEGORIES);
 
 // Registry validation in create/update refinements; shape only here.
@@ -48,7 +80,7 @@ const advancedSettingsSchema = z
 
 // Strict namespaces, loose within for v1; looseObject allows future top-level fields.
 export const issuanceMetadataSchema = z.looseObject({
-  asset: jsonObjectSchema.optional(),
+  asset: assetMetadataSchema.optional(),
   compliance: jsonObjectSchema.optional(),
   chain: jsonObjectSchema.optional(),
   custom: customMetadataSchema.optional(),

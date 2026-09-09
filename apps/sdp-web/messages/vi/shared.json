@@ -143,7 +143,9 @@
     "playgroundExecutionFailed": "Thực thi Playground thất bại.",
     "requestExecutionFailed": "Thực thi request thất bại.",
     "unknownToken": "Không xác định",
-    "sdpMintedToken": "SDP-Minted"
+    "sdpMintedToken": "SDP-Minted",
+    "selectExistingOrganizationDescription": "Chọn một tổ chức hiện có để tiếp tục.",
+    "loadMore": "Tải thêm"
   },
   "dashboardShell": {
     "workspace": "Không gian làm việc",

@@ -1,4 +1,3 @@
-import { redactCredentialString } from "@sdp/custody";
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
@@ -34,10 +33,11 @@ import {
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { buildRequirementSchema, readyCounterparty } from "@sdp/payments/ramps/requirements";
-import { isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { redactCredentialString } from "@sdp/redaction";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  getCryptoRailAssetLabel,
   isCountryCode,
   type PaymentRampEstimate,
   type PaymentRampInstruction,
@@ -122,9 +122,10 @@ import {
 } from "../schemas";
 import {
   assertFreshPaymentWalletAccess,
+  assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
-  resolveWalletAddress,
+  resolveWalletByCustodyWalletId,
 } from "../wallets";
 import {
   bvnkOnrampQuote,
@@ -234,22 +235,6 @@ export async function assertRampProviderAvailable(
 type RampQuoteDirection = "onramp" | "offramp";
 
 /**
- * Resolves a request's crypto asset symbol to its canonical crypto rail.
- *
- * @param cryptoToken - Public crypto asset symbol from the request.
- * @returns The canonical Solana crypto rail.
- */
-export function requireCryptoRail(cryptoToken: string): CryptoRailId {
-  const symbol = cryptoToken.trim().toUpperCase();
-  if (!isSolanaCryptoAsset(symbol)) {
-    throw badRequest(
-      `cryptoToken must be one of: ${Object.keys(SOLANA_ASSET_TO_RAIL).join(", ")}.`
-    );
-  }
-  return SOLANA_ASSET_TO_RAIL[symbol];
-}
-
-/**
  * Throws unless the committed corridor-support matrix (the same tables estimate
  * selects providers from) lists the provider for the requested crypto/fiat pair.
  * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the
@@ -257,24 +242,24 @@ export function requireCryptoRail(cryptoToken: string): CryptoRailId {
  */
 function assertRampCorridorSupported(
   direction: RampQuoteDirection,
-  input: { provider: RampProviderId; cryptoToken: string; fiatCurrency?: RampFiatCurrency },
+  input: { provider: RampProviderId; assetRail: CryptoRailId; fiatCurrency?: RampFiatCurrency },
   environment: SdpEnvironment
 ): void {
-  const rail = requireCryptoRail(input.cryptoToken);
+  const { assetRail } = input;
   const pairs: readonly (OnrampPairSupport | OfframpPairSupport)[] =
     direction === "onramp" ? ONRAMP_SUPPORT : OFFRAMP_SUPPORT;
   const fiat = input.fiatCurrency;
   const matched = pairs.filter((pair) => {
     const railSide = direction === "onramp" ? pair.dest : pair.source;
     const fiatSide = direction === "onramp" ? pair.source : pair.dest;
-    return railSide === rail && (fiat === undefined || fiatSide === fiat);
+    return railSide === assetRail && (fiat === undefined || fiatSide === fiat);
   });
   const supportedProviders = providersFromPairs(matched).filter((p) =>
     isRampProviderSurfaced(p, environment)
   );
   if (!supportedProviders.includes(input.provider)) {
     throw unsupportedRampCorridor(input.provider, direction, {
-      assetRail: rail,
+      assetRail,
       fiatCurrency: fiat,
       supportedProviders,
     });
@@ -303,7 +288,7 @@ interface PersistRampQuoteTransferInput {
   direction: RampQuoteDirection;
   wallet: ScopedRampWallet;
   walletAddress: string;
-  cryptoToken: string;
+  assetRail: CryptoRailId;
   cryptoAmount: string | null;
   fiatCurrency: RampFiatCurrency | null;
   fiatAmount: string | null;
@@ -311,43 +296,22 @@ interface PersistRampQuoteTransferInput {
   providerData?: Record<string, unknown>;
 }
 
-function requireRampTransferWallet(
-  scope: ResolvedScope,
-  walletIdOrAddress: string,
-  walletAddress: string,
-  fieldName: string
-): ScopedRampWallet {
-  const matches = scope.wallets.filter(
-    (entry) => entry.walletId === walletIdOrAddress || entry.publicKey === walletAddress
-  );
-  if (matches.length > 1) {
-    throw conflict("Custody wallet ownership is ambiguous");
-  }
-  const wallet = matches[0];
-  if (!wallet) {
-    throw badRequest(`${fieldName} must reference an SDP wallet.`);
-  }
-  return wallet;
-}
-
 /**
  * Resolve the state shared by both ramp-quote extractions: corridor support,
  * provider availability, the counterparty, and the SDP wallet on the crypto
- * leg.
+ * leg. The wallet is keyed by its internal custody wallet id.
  *
  * @param c - Request context.
  * @param direction - The quote direction.
  * @param input - The validated quote request body.
- * @param walletFieldName - The request field naming the wallet.
- * @param walletIdOrAddress - The requested wallet id or address.
+ * @param custodyWalletId - The internal custody wallet id from the request.
  * @returns The resolved scope, project, counterparty, wallet, and address.
  */
 async function resolveRampQuoteRequest(
   c: AppContext,
   direction: RampQuoteDirection,
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
-  walletFieldName: "destinationWallet" | "sourceWallet",
-  walletIdOrAddress: string
+  custodyWalletId: string
 ): Promise<RampQuotePolicyResolved> {
   assertRampProviderSurfaced(input.provider, resolveSdpEnvironment(c));
   assertRampCorridorSupported(direction, input, resolveSdpEnvironment(c));
@@ -364,21 +328,10 @@ async function resolveRampQuoteRequest(
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
 
-  const walletAddress = resolveWalletAddress(
-    scope.wallets,
-    walletIdOrAddress,
-    walletFieldName,
-    scope.auth,
-    ["payments:write"]
-  );
-  const wallet = requireRampTransferWallet(
-    scope,
-    walletIdOrAddress,
-    walletAddress,
-    walletFieldName
-  );
+  const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
+  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
-  return { scope, projectId, counterparty, wallet, walletAddress };
+  return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 
 /**
@@ -395,8 +348,7 @@ export async function extractOnrampQuotePolicyCandidate(
     c,
     "onramp",
     input,
-    "destinationWallet",
-    input.destinationWallet
+    input.destinationCustodyWalletId
   );
 
   return {
@@ -410,7 +362,7 @@ export async function extractOnrampQuotePolicyCandidate(
       source: "api",
       operationFamily: "ramp",
       operationType: "ramp_onramp_quote",
-      asset: input.cryptoToken,
+      asset: rampTransferTokenMint(input.assetRail, c.env),
       amount: input.fiatAmount,
       destination: walletAddress,
       context: {},
@@ -424,7 +376,7 @@ export async function extractOnrampQuotePolicyCandidate(
       counterpartyId: input.counterpartyId,
       fiatCurrency: input.fiatCurrency,
       fiatAmount: input.fiatAmount,
-      cryptoToken: input.cryptoToken,
+      assetRail: input.assetRail,
     },
     idempotencyKey: null,
   };
@@ -444,8 +396,7 @@ export async function extractOfframpQuotePolicyCandidate(
     c,
     "offramp",
     input,
-    "sourceWallet",
-    input.sourceWallet
+    input.sourceCustodyWalletId
   );
 
   return {
@@ -459,7 +410,7 @@ export async function extractOfframpQuotePolicyCandidate(
       source: "api",
       operationFamily: "ramp",
       operationType: "ramp_offramp_quote",
-      asset: input.cryptoToken,
+      asset: rampTransferTokenMint(input.assetRail, c.env),
       amount: input.cryptoAmount,
       destination: null,
       context: {},
@@ -473,7 +424,7 @@ export async function extractOfframpQuotePolicyCandidate(
       counterpartyId: input.counterpartyId,
       fiatCurrency: input.fiatCurrency,
       cryptoAmount: input.cryptoAmount,
-      cryptoToken: input.cryptoToken,
+      assetRail: input.assetRail,
     },
     idempotencyKey: null,
   };
@@ -532,7 +483,7 @@ async function persistRampQuoteTransfer(
     walletId: input.wallet.walletId,
     counterpartyId: input.counterparty.id,
     direction: input.direction,
-    token: rampTransferTokenMint(input.cryptoToken, c.env),
+    token: rampTransferTokenMint(input.assetRail, c.env),
     sourceAddress: isOnramp ? null : input.walletAddress,
     destinationAddress: isOnramp ? input.walletAddress : null,
     amount: input.cryptoAmount,
@@ -636,7 +587,6 @@ async function advanceLightsparkRequirements(
   if (input.direction === "onramp") {
     return lightsparkOnrampReady();
   }
-  const cryptoRail = requireCryptoRail(input.cryptoToken);
   const collectedData = input.collectedData;
   const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
   if (collectedData === undefined || collectedData.destinationCountry === undefined) {
@@ -649,7 +599,7 @@ async function advanceLightsparkRequirements(
     });
     const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), rows);
     return lightsparkCollectAccountRequirements(
-      cryptoRail,
+      input.assetRail,
       input.fiatCurrency,
       mapPayoutRequirementAccounts(rows, enriched)
     );
@@ -721,7 +671,7 @@ async function advanceLightsparkRequirements(
     counterparty: input.counterparty,
     projectId: input.projectId,
     customer,
-    cryptoRail,
+    cryptoRail: input.assetRail,
     fiatCurrency: input.fiatCurrency,
     collectedData,
   });
@@ -851,13 +801,15 @@ export async function advanceCounterpartyRequirements(
         return readyCounterparty("bvnk", input.direction);
       }
       const scope = await resolveScope(c);
-      const destinationWalletAddress = resolveWalletAddress(
+      const destinationWallet = resolveWalletByCustodyWalletId(
         scope.wallets,
-        input.destinationWallet,
-        "destinationWallet",
-        scope.auth
+        input.destinationCustodyWalletId
       );
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+      assertPaymentWalletExactAccess(c, destinationWallet.id, []);
+      const destinationWalletAddress = destinationWallet.publicKey;
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+        getCryptoRailAssetLabel(input.assetRail)
+      );
       const resolution = await ensureBvnkPaymentRule(
         c,
         rampRuntime(c),
@@ -1023,7 +975,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: null,
         destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.cryptoToken, c.env),
+        token: rampTransferTokenMint(input.assetRail, c.env),
         amount: null,
         memo: null,
         type: "onramp",
@@ -1047,7 +999,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       precreatedTransferId = pendingTransfer.id;
       try {
         quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
-          cryptoToken: input.cryptoToken,
+          assetRail: input.assetRail,
           fiatCurrency: input.fiatCurrency,
           fiatAmount: input.fiatAmount,
           destinationWalletAddress,
@@ -1085,7 +1037,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         throw counterpartyNotProvisioned("lightspark", "onramp");
       }
       quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOnrampQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
@@ -1097,7 +1049,9 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     case "bvnk": {
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+        getCryptoRailAssetLabel(input.assetRail)
+      );
       const bvnkCustomer = await readBvnkCustomerLink(c, counterparty);
       if (!bvnkCustomer) {
         throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: undefined });
@@ -1130,7 +1084,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "moneygram": {
       quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOnrampQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
@@ -1140,7 +1094,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     }
     case "coinbase": {
       quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
@@ -1153,7 +1107,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       quote = await stripeOnrampQuote(c, {
         counterparty,
         destinationWalletAddress,
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         customerIpAddress: getClientIp(c) ?? undefined,
@@ -1166,7 +1120,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         throw counterpartyNotProvisioned("hercle", "onramp");
       }
       quote = await RAMP_PROVIDER_CLIENTS.hercle.createOnrampQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
@@ -1197,7 +1151,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         direction: "onramp",
         wallet: destinationWallet,
         walletAddress: destinationWalletAddress,
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         cryptoAmount: null,
         fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
         fiatAmount: input.fiatAmount,
@@ -1242,7 +1196,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: sourceWalletAddress,
         destinationAddress: null,
-        token: rampTransferTokenMint(input.cryptoToken, c.env),
+        token: rampTransferTokenMint(input.assetRail, c.env),
         amount: input.cryptoAmount,
         memo: null,
         type: "offramp",
@@ -1266,7 +1220,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       precreatedTransferId = pendingMoonpayTransfer.id;
       try {
         quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOfframpQuote(rampRuntime(c), {
-          cryptoToken: input.cryptoToken,
+          assetRail: input.assetRail,
           fiatCurrency: input.fiatCurrency,
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
@@ -1341,7 +1295,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       }
       transferProviderData = { payoutProviderAccountId: payoutAccount.id };
       quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOfframpQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
@@ -1384,14 +1338,14 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         custodyWalletId: sourceWallet.id,
         walletId: sourceWallet.walletId,
         walletAddress: sourceWalletAddress,
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         cryptoAmount: input.cryptoAmount,
         fiatCurrency: input.fiatCurrency,
         rampsMemo: input.rampsMemo,
       });
       try {
         quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
-          cryptoToken: input.cryptoToken,
+          assetRail: input.assetRail,
           fiatCurrency: input.fiatCurrency,
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
@@ -1415,7 +1369,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     }
     case "moneygram": {
       quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOfframpQuote(rampRuntime(c), {
-        cryptoToken: input.cryptoToken,
+        assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         cryptoAmount: input.cryptoAmount,
         sourceWalletAddress,
@@ -1461,7 +1415,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       direction: "offramp",
       wallet: sourceWallet,
       walletAddress: sourceWalletAddress,
-      cryptoToken: input.cryptoToken,
+      assetRail: input.assetRail,
       cryptoAmount: input.cryptoAmount,
       fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
       fiatAmount: null,
@@ -1608,14 +1562,15 @@ export async function simulateSandboxTransfer(
       if (!counterparty) {
         throw new AppError("NOT_FOUND", "Counterparty not found");
       }
-      const destinationWalletAddress = resolveWalletAddress(
+      const destinationWallet = resolveWalletByCustodyWalletId(
         scope.wallets,
-        payload.destinationWallet,
-        "destinationWallet",
-        scope.auth,
-        ["payments:write"]
+        payload.destinationCustodyWalletId
       );
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(payload.cryptoToken);
+      assertPaymentWalletExactAccess(c, destinationWallet.id, ["payments:write"]);
+      const destinationWalletAddress = destinationWallet.publicKey;
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+        getCryptoRailAssetLabel(payload.assetRail)
+      );
       const key = buildBvnkOnrampPaymentRuleKey(
         payload.fiatCurrency,
         currency,

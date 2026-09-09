@@ -309,7 +309,13 @@ export function buildIssuanceMetadata(draft: DraftState): IssuanceMetadata {
         .map((field) => [field.key.trim(), field.value])
     )
   );
-  const custom = pruneEmpty({ customer: Object.keys(customer).length > 0 ? customer : undefined });
+  const customerWithAuthorities = {
+    ...customer,
+    ...(draft.authorityWalletIds ? { authorityWalletIds: draft.authorityWalletIds } : {}),
+  };
+  const custom = pruneEmpty({
+    customer: Object.keys(customerWithAuthorities).length > 0 ? customerWithAuthorities : undefined,
+  });
 
   const selectedSettings = buildSelectedSettings(draft.advancedSettings);
   const settings =
@@ -638,9 +644,7 @@ export function getAssetDetailsErrors(
   }
 
   const description = draft.description.trim();
-  if (!description) {
-    errors.description = t("DashboardIssuance.errors.descriptionRequired");
-  } else if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
+  if (description.length > ASSET_DESCRIPTION_MAX_LENGTH) {
     errors.description = t("DashboardIssuance.errors.descriptionTooLong", {
       max: ASSET_DESCRIPTION_MAX_LENGTH,
     });

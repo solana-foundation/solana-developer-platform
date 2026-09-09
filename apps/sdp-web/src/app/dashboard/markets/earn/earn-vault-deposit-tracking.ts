@@ -4,14 +4,14 @@ import {
   createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
-} from "./earn-idempotency-key-store";
+} from "@/lib/idempotency-key-store";
 
 /**
  * The vault DEPOSIT idempotency key store (PRO-1692).
  *
  * All of the machinery — the per-tab `sessionStorage` tier, the in-memory
  * fallback, the quota-divergence handling, the approval-hold pinning, the
- * expiring-entry bound — lives in `earn-idempotency-key-store.ts`, shared with
+ * expiring-entry bound — lives in `@/lib/idempotency-key-store.ts`, shared with
  * the withdrawal flow. This module owns the two things that make a DEPOSIT a
  * deposit: its versioned storage key (which existing tabs already hold data
  * under — never change it casually) and what makes two submissions the SAME

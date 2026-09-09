@@ -65,6 +65,14 @@ const fundingWalletsResponseSchema = z.object({
   }),
 });
 
+const fundingWalletBalanceResponseSchema = z.object({
+  data: z.object({
+    walletBalances: z.object({
+      balances: z.array(walletTokenBalanceSchema),
+    }),
+  }),
+});
+
 export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
 
 /**
@@ -88,11 +96,67 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
   return parsed.data.data.wallets.filter((wallet) => wallet.status === "active");
 }
 
+/**
+ * Read one wallet directly from the uncached Payments balance endpoint.
+ *
+ * The collection endpoint intentionally keeps a short API-side cache for
+ * normal dashboard reads. That cache is the wrong source immediately after a
+ * vault movement settles: both the submit refresh and the settlement refresh
+ * can otherwise land inside the same cache window and leave Treasury frozen
+ * on the pre-transaction balance.
+ */
+export async function fetchLiveFundingWalletBalance(
+  walletId: string
+): Promise<NonNullable<EarnFundingWallet["balances"]>> {
+  const response = await fetch(
+    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+    { cache: "no-store" }
+  );
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status})`);
+  }
+  const parsed = fundingWalletBalanceResponseSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    throw new Error("Invalid custody wallet balance response");
+  }
+  return parsed.data.data.walletBalances.balances;
+}
+
+/**
+ * Refresh every visible wallet independently. A failed live read preserves
+ * that wallet's previous observation, including `undefined`; it never turns
+ * unavailable into an invented zero and it does not block healthy wallets
+ * from updating.
+ */
+export async function refreshFundingWalletBalances(
+  wallets: readonly EarnFundingWallet[]
+): Promise<EarnFundingWallet[]> {
+  return Promise.all(
+    wallets.map(async (wallet) => {
+      try {
+        const balances = await fetchLiveFundingWalletBalance(wallet.walletId);
+        return { ...wallet, balances };
+      } catch {
+        return wallet;
+      }
+    })
+  );
+}
+
 export function useEarnFundingWallets() {
   const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
     fetchFundingWallets()
   );
-  return { wallets: data, error, isLoading, refresh: () => void mutate() };
+  return {
+    wallets: data,
+    error,
+    isLoading,
+    refresh: () => void mutate(),
+    refreshBalances: () =>
+      void mutate(async () => refreshFundingWalletBalances(await fetchFundingWallets()), {
+        revalidate: false,
+      }),
+  };
 }
 
 // --- Display helpers -------------------------------------------------------

@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Counterparty, CounterpartyProviderData } from "@sdp/types/counterparties";
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { RampDiscoveryContext, ValidateCounterpartyOptions } from "../../types";
-import { buildHercleSignature, HercleRampClient, parseCryptoRail } from "./client";
+import { buildHercleSignature, HercleRampClient } from "./client";
 import {
   HERCLE_PRIVACY_CONSENT_FIELD_KEY,
   HERCLE_PRIVACY_POLICY_URL,
@@ -42,14 +41,12 @@ describe("buildHercleSignature", () => {
   it("implements Signed Key v1: HMAC-SHA256 over ts + METHOD + pathWithQuery + rawBody", async () => {
     // Vector pinned against the Hercle partner spec (documentation-only secret).
     const signature = await buildHercleSignature(
-      // biome-ignore lint/security/noSecrets: published documentation-only test vector secret
       "cvVdfH8pVpI3rWx1Gt4duZAxRq0Y2eaB7kNQ5mM1sT2",
       1756200000,
       "get",
       "/partner/v1/ping",
       ""
     );
-    // biome-ignore lint/security/noSecrets: published documentation-only test vector signature
     assert.equal(signature, "iMXClpe2o7fK3tmryuWZYDrMArC9EeWU8K+lqqc06uQ=");
   });
 });
@@ -106,7 +103,11 @@ describe("hercleCounterpartyRequirements", () => {
     }
     const consents = requirements.fields.filter((field) => field.kind === "consent");
     assert.deepEqual(
-      consents.map((field) => [field.key, field.required, field.kind === "consent" ? field.documentUrl : null]),
+      consents.map((field) => [
+        field.key,
+        field.required,
+        field.kind === "consent" ? field.documentUrl : null,
+      ]),
       [
         [HERCLE_TERMS_CONSENT_FIELD_KEY, true, HERCLE_TERMS_URL],
         [HERCLE_PRIVACY_CONSENT_FIELD_KEY, true, HERCLE_PRIVACY_POLICY_URL],
@@ -174,42 +175,7 @@ describe("provider-data mapping", () => {
   });
 });
 
-describe("parseCryptoRail", () => {
-  it("resolves the token symbols quotes send", () => {
-    assert.equal(parseCryptoRail("SOL"), "sol.solana");
-    assert.equal(parseCryptoRail("USDC"), "usdc.solana");
-  });
-
-  it("passes through the rail ids estimates send", () => {
-    assert.equal(parseCryptoRail("sol.solana"), "sol.solana");
-    assert.equal(parseCryptoRail("usdc.solana"), "usdc.solana");
-  });
-
-  it("tolerates casing and padding", () => {
-    assert.equal(parseCryptoRail(" sol "), "sol.solana");
-    assert.equal(parseCryptoRail("Usdc"), "usdc.solana");
-    assert.equal(parseCryptoRail("USDC.SOLANA"), "usdc.solana");
-  });
-
-  it("rejects tokens outside the Solana rails", () => {
-    assert.throws(() => parseCryptoRail("BTC"));
-    assert.throws(() => parseCryptoRail("usdc.ethereum"));
-    assert.throws(() => parseCryptoRail(""));
-  });
-
-  it("accepts every crypto the provider declares, addressed either way", async () => {
-    // The bug this guards: the rail catalogue offered SOL while the quote path
-    // rejected "SOL", so the pair was selectable and then unquotable.
-    const { snapshot } = await new HercleRampClient().discoverCurrencyAndRails(
-      {} as RampDiscoveryContext
-    );
-
-    for (const rail of [...snapshot.onramp.cryptos, ...snapshot.offramp.cryptos]) {
-      assert.equal(parseCryptoRail(rail), rail);
-      assert.equal(parseCryptoRail(getCryptoRailAssetLabel(rail)), rail);
-    }
-  });
-
+describe("rail catalogue", () => {
   it("declares the EUR-only, on-ramp-only launch corridor", async () => {
     const { snapshot } = await new HercleRampClient().discoverCurrencyAndRails(
       {} as RampDiscoveryContext

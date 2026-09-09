@@ -46,6 +46,75 @@ describe("tenant data-access boundary", () => {
     expect(violations).toEqual([]);
   });
 
+  it("keeps the raw identity runner private to its approved entry points", () => {
+    // runWithDatabaseIdentity accepts any identity kind, including operator —
+    // which must only ever be reachable through the audited break-glass path.
+    // The kind-specific wrappers and runWithOperatorDatabaseAccess are the
+    // public surface; everything else imports those.
+    const allowed = ["db/identity.ts", "db/operator-access.ts", "db/client.ts", "db/index.ts"];
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("runWithDatabaseIdentity"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => !allowed.includes(path));
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps system database-identity grants in registered entry points", () => {
+    // Each of these files is an explicit cross-tenant surface: HTTP auth
+    // resolution, public endpoints, webhook/cron/job entry points, and ops
+    // scripts. Granting the system identity anywhere else would silently
+    // widen the database tenant boundary — extend this registry deliberately.
+    const allowedPrefixes = [
+      "db/index.ts",
+      "db/identity.ts",
+      "db/operator-access.ts",
+      "cron/runner.ts",
+      "job.ts",
+      "middleware/auth.ts",
+      "middleware/clerk-auth.ts",
+      // Pre-link Clerk surface: resolves the Clerk-org mapping before any
+      // tenant exists, then narrows the request to the mapped organization.
+      "middleware/clerk-onboarding.ts",
+      "middleware/session-auth.ts",
+      "middleware/database-identity.ts",
+      // The audit ledger's hash chain spans every organization by design; its
+      // head/anchor reads run privileged while rows keep tenant attribution.
+      "services/audit.service.ts",
+      "routes/issuance/index.ts",
+      "routes/members/index.ts",
+      // BOLA guard: must see every organization's ledger rows to 404 a
+      // foreign withdrawal ref before any provider call.
+      "routes/earn/handlers/program.ts",
+    ];
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => !allowedPrefixes.some((prefix) => path.startsWith(prefix)));
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps the audited operator bypass out of application code", () => {
+    // runWithOperatorDatabaseAccess is break-glass tooling for operational
+    // scripts; nothing in the request/worker paths may import it.
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("runWithOperatorDatabaseAccess"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => path !== join("db", "operator-access.ts"));
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps the test-only default database identity out of production code", () => {
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => readFileSync(path, "utf8").includes("setDefaultDatabaseIdentityForTesting"))
+      .map((path) => relative(sourceRoot, path))
+      .filter((path) => !path.startsWith("test/") && path !== join("db", "identity.ts"));
+
+    expect(violations).toEqual([]);
+  });
+
   it("requires transactional payment repositories to receive a tenant scope", () => {
     const allowedSystemFactory = join(sourceRoot, "db", "repositories", "repository-factory.ts");
     const violations = sourceFiles(sourceRoot)

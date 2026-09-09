@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
@@ -142,7 +143,7 @@ export function toWalletIdentity(
  * where leaving costs nothing; `new-tab` when the surrounding surface holds
  * unsaved state (a modal or form) that in-place navigation would tear down.
  */
-export type WalletLinkTarget = "same-tab" | "new-tab";
+export type WalletLinkTarget = "same-tab" | "new-tab" | "disabled";
 
 function walletHref(walletId: string): string {
   return `/dashboard/wallets/${encodeURIComponent(walletId)}`;
@@ -156,23 +157,38 @@ export function WalletIdentityBadge({
   className,
 }: {
   identity: WalletIdentity;
-  /** Compact only — the card copies to the clipboard itself, see CardCopyButton. */
+  /** Compact only — card and row variants provide their own copy feedback. */
   onCopy?: (value: string) => void;
-  variant?: "compact" | "card";
+  variant?: "compact" | "card" | "row";
   walletLink?: WalletLinkTarget;
   /** Sizing hook for callers that stack badges in a column and need them to align
    *  — the content is intrinsically ragged (a wallet name vs. "Held externally"),
    *  so a fixed width has to come from the list, not the badge. */
   className?: string;
 }) {
+  const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const copyAddress = async (value: string) => {
+    const label = t("DashboardIssuance.wallet.publicKey");
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t("DashboardIssuance.wallet.copied", { label }));
+    } catch {
+      toast.error(t("DashboardIssuance.wallet.unableToCopy", { label }));
+    }
+  };
+  const resolvedWalletLink = workspace?.flags.custody === false ? "disabled" : walletLink;
   return variant === "card" ? (
-    <IdentityCard identity={identity} walletLink={walletLink} className={className} />
+    <IdentityCard identity={identity} walletLink={resolvedWalletLink} className={className} />
   ) : (
     <CompactIdentity
       identity={identity}
-      onCopy={onCopy}
-      walletLink={walletLink}
-      className={className}
+      onCopy={onCopy ?? (variant === "row" ? copyAddress : undefined)}
+      walletLink={resolvedWalletLink}
+      className={cn(
+        variant === "row" && "rounded-none border-0 bg-transparent px-0 py-1",
+        className
+      )}
     />
   );
 }
@@ -200,6 +216,14 @@ function WalletNameLink({
   className?: string;
   children: ReactNode;
 }) {
+  if (target === "disabled") {
+    return (
+      <span title={title} className={cn("inline-flex w-fit max-w-full items-center", className)}>
+        <span className="truncate">{children}</span>
+      </span>
+    );
+  }
+
   return (
     <WalletLinkAnchor
       href={walletHref(walletId)}

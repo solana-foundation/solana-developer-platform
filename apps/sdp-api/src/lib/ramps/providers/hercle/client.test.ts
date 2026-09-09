@@ -32,14 +32,12 @@ describe("buildHercleSignature", () => {
   it("implements Signed Key v1: HMAC-SHA256 over ts + METHOD + pathWithQuery + rawBody", async () => {
     // Vector pinned against the Hercle partner spec (documentation-only secret).
     const signature = await buildHercleSignature(
-      // biome-ignore lint/security/noSecrets: published documentation-only test vector secret
       "cvVdfH8pVpI3rWx1Gt4duZAxRq0Y2eaB7kNQ5mM1sT2",
       1756200000,
       "get",
       "/partner/v1/ping",
       ""
     );
-    // biome-ignore lint/security/noSecrets: published documentation-only test vector signature
     expect(signature).toBe("iMXClpe2o7fK3tmryuWZYDrMArC9EeWU8K+lqqc06uQ=");
   });
 });
@@ -120,7 +118,7 @@ describe("HercleRampClient off-ramp", () => {
 
     await expect(
       client.createOfframpQuote(RUNTIME, {
-        cryptoToken: "usdc.solana",
+        assetRail: "usdc.solana",
         fiatCurrency: "EUR",
         cryptoAmount: "250",
         sourceWalletAddress: DEPOSIT_ADDRESS,
@@ -139,30 +137,19 @@ describe("HercleRampClient off-ramp", () => {
 });
 
 describe("HercleRampClient on-ramp quote", () => {
-  it("rejects unsupported crypto tokens before any network call", async () => {
-    const client = new HercleRampClient();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    await expect(
-      client.createOnrampQuote(RUNTIME, {
-        cryptoToken: "doge.solana",
-        fiatCurrency: "EUR",
-        fiatAmount: "250",
-        destinationWalletAddress: DEPOSIT_ADDRESS,
-        externalCustomerId: "hercle-account-1",
-      })
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("scopes the order to the sub-account via on-behalf-of", async () => {
     const client = new HercleRampClient();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      jsonResponse({ orderId: "ord_124", fiatCurrency: "EUR", fiatAmount: "250", bankAccount: {} })
+      jsonResponse({
+        orderId: "ord_124",
+        fiatCurrency: "EUR",
+        fiatAmount: "250",
+        bankAccount: {},
+      })
     );
 
     await client.createOnrampQuote(RUNTIME, {
-      cryptoToken: "usdc.solana",
+      assetRail: "usdc.solana",
       fiatCurrency: "EUR",
       fiatAmount: "250",
       destinationWalletAddress: DEPOSIT_ADDRESS,
@@ -192,7 +179,7 @@ describe("HercleRampClient on-ramp quote", () => {
     );
 
     const quote = await client.createOnrampQuote(RUNTIME, {
-      cryptoToken: "usdc.solana",
+      assetRail: "usdc.solana",
       fiatCurrency: "EUR",
       fiatAmount: "1000",
       destinationWalletAddress: DEPOSIT_ADDRESS,

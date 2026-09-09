@@ -143,7 +143,9 @@
     "dateRange": "Intervalo de datas",
     "done": "Concluir",
     "time": "Hora",
-    "unknownToken": "Desconhecido"
+    "unknownToken": "Desconhecido",
+    "selectExistingOrganizationDescription": "Escolha uma organização existente para continuar.",
+    "loadMore": "Carregar mais"
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",

@@ -10,14 +10,10 @@ import { useTranslations } from "@/i18n/provider";
 // Without a boundary here, a throw in any dashboard page escapes all the way to
 // app/global-error.tsx — which renders its own <html>/<body> and so replaces the
 // whole document, taking the shell, the sidebar, and every client effect mounted
-// inside it with it. That is more than a cosmetic difference: the organization
-// onboarding redirect lives in a DashboardShell effect, so a page that throws
-// before onboarding is complete used to leave the user stranded on a bare error
-// page instead of being sent to /dashboard/onboarding.
+// inside it with it.
 //
 // Sitting under the layout means the chrome survives and only the content slot
-// is replaced, so the redirect still fires and the rest of the dashboard stays
-// navigable.
+// is replaced, so the rest of the dashboard stays navigable.
 //
 // Note this catches the symptom, not the cause: project-scoped pages reach
 // createSdpApiClient(), which throws "Selected project required" when the
