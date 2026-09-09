@@ -67,15 +67,11 @@ dvp.get("/trades", requirePermissions("wallets:read", "payments:read"), listTrad
 dvp.get("/trades/inbound", requirePermissions("wallets:read", "payments:read"), listInboundTrades);
 dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"), getTrade);
 
-// Funding ONE side of a trade — whichever side the caller names. Creator
-// funding and party funding are the same operation: the right to fund side X
-// is holding an active custody wallet whose public key equals that side's
-// party address. Bilateral trades take two calls, one claim each.
-//
-// The gate sits AFTER `validateBody`, exactly like every other body-validated
-// policy-gated route (earn vault deposits), so a malformed body is a 400 from
-// the schema rather than an extraction failure, and a denial is decided before
-// any custody or RPC access.
+// Funding ONE side — creator and party funding are the same operation: the
+// right to fund side X is holding a custody wallet whose public key equals
+// that side's party address. The gate sits after `validateBody` (like every
+// body-validated policy-gated route), so a malformed body is a 400 from the
+// schema before any custody or RPC access.
 dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),

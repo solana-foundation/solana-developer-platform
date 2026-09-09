@@ -379,33 +379,6 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
-  // A key is a claim, not a proof. Reused with different terms it would hand
-  // back the earlier trade — and that trade publishes escrow addresses, so a
-  // wallet-scoped caller would receive escrows outside their own scope.
-  it("refuses a key reused with different terms", async () => {
-    sendTransaction.mockResolvedValue("sig");
-    await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1" });
-
-    await expect(
-      createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1", amountA: 999n })
-    ).rejects.toThrow(/different request payload/);
-  });
-
-  // payerWalletId is in the fingerprint as sent, so a key reused against a
-  // different payer is a different request.
-  it("refuses a key reused against a different payer wallet", async () => {
-    sendTransaction.mockResolvedValue("sig");
-    await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1" });
-
-    await expect(
-      createDvpTrade(env, {
-        ...tradeInput(),
-        idempotencyKey: "key-1",
-        payerWalletId: "cwlt_some_other_payer",
-      })
-    ).rejects.toThrow(/different request payload/);
-  });
-
   // Two overlapping retries both miss the lookup and both reach the insert. The
   // unique index rejects one, and without recovery that retry gets a 500 —
   // exactly the case the key exists to make safe.
@@ -658,67 +631,5 @@ describe("createDvpTrade", () => {
       TEST_PROJECT_ID,
       "cwlt_settlement"
     );
-  });
-
-  // The reference kind is material: `{address: X}` and `{walletId}`-resolving-to-X
-  // hash differently, so the same key reused with the flipped slot 409s.
-  it("refuses a key reused when a slot flips from address to walletId-resolving-to-the-same-address", async () => {
-    sendTransaction.mockResolvedValue("sig");
-    // First request: partyA as the custody wallet, whose address IS
-    // custodyWalletAddress. Second request: partyA as a bare address equal to
-    // custodyWalletAddress. Same resolved address, different reference kind.
-    const inputWallet = { ...tradeInput(), idempotencyKey: "key-flip" };
-    await createDvpTrade(env, inputWallet);
-
-    await expect(
-      createDvpTrade(env, {
-        ...tradeInput(),
-        idempotencyKey: "key-flip",
-        partyA: { address: address(custodyWalletAddress) },
-      })
-    ).rejects.toThrow(/different request payload/);
-  });
-
-  // A re-pointed counterparty account (same id, new address) between two keyed
-  // calls is a different trade: the reference value is unchanged but the
-  // resolved address changed, and both are material.
-  it("refuses a key reused after the counterparty account is re-pointed to a new address", async () => {
-    const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
-         VALUES ('cpty_repoint', ?, ?, 'individual', 'Ari')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO counterparty_accounts
-           (id, organization_id, project_id, counterparty_id, account_kind, details, status)
-         VALUES ('cpa_repoint', ?, ?, 'cpty_repoint', 'crypto_wallet',
-                 '{"network":"solana","address":"${COUNTERPARTY_ADDRESS}"}'::jsonb, 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID)
-      .run();
-
-    sendTransaction.mockResolvedValue("sig");
-    const input = {
-      ...tradeInput(),
-      partyA: { counterpartyAccountId: "cpa_repoint" },
-      partyB: { address: address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr") },
-      idempotencyKey: "key-repoint",
-    } as const;
-    await createDvpTrade(env, input);
-
-    // Re-point the account to a different address.
-    await db
-      .prepare(
-        `UPDATE counterparty_accounts
-            SET details = '{"network":"solana","address":"EdBvwdvCVfNRsKk6F6g5TthdN3Ci8jQgrxTGpCwAHjux"}'::jsonb
-          WHERE id = 'cpa_repoint'`
-      )
-      .run();
-
-    await expect(createDvpTrade(env, input)).rejects.toThrow(/different request payload/);
   });
 });

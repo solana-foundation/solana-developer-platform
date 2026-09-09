@@ -1,10 +1,10 @@
-import { address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { DvpTradeInsert, DvpTradeRepository } from "./dvp-trade.repository";
+import type { DvpInboundScope, DvpTradeInsert, DvpTradeRepository } from "./dvp-trade.repository";
 import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_dvp_repo_test";
@@ -435,6 +435,86 @@ describe("DvpTradeRepository (postgres)", () => {
         repo.getBySwapDvp(bound, address("SwapB11111111111111111111111111111111111111"))
       ).resolves.toBeNull();
       await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
+    });
+  });
+
+  describe("listInboundForParty", () => {
+    // A third address that neither bound wallet's public key matches.
+    const UNRELATED_PUBKEY = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+    const UNRELATED_PUBKEY_2 = "DxR4Km2vQp8nRtYwZbCdFgHiJkLmNoPqRsTuVwXyZ12u";
+
+    const inboundScope = (partyAddresses: Address[]): DvpInboundScope => ({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      partyAddresses,
+    });
+
+    // The list only answers for open statuses, so each seeded trade is advanced
+    // to `created` the way a real create would leave it.
+    const createdForeignTrade = (id: string, swapDvp: string, userA: Address, userB: Address) =>
+      repo
+        .create(
+          tradeInsert({
+            id,
+            projectId: OTHER_PROJECT_ID,
+            swapDvp: address(swapDvp),
+            userA,
+            userB,
+          })
+        )
+        .then((trade) => repo.resolveCreate(trade.id, "created"));
+
+    it("returns nothing when the caller holds no wallets", async () => {
+      await expect(repo.listInboundForParty(inboundScope([]), 10)).resolves.toEqual([]);
+    });
+
+    it("returns nothing when no caller address is a party to any foreign trade", async () => {
+      await createdForeignTrade(
+        "dvp_inbound_unrelated",
+        "SwapU11111111111111111111111111111111111111",
+        address(WALLET_B_PUBKEY),
+        address(UNRELATED_PUBKEY)
+      );
+
+      // The caller holds WALLET_A only; the foreign trade names WALLET_B.
+      await expect(
+        repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
+      ).resolves.toEqual([]);
+    });
+
+    it("excludes the caller's own project, where the trade is already listed", async () => {
+      await repo.create(
+        tradeInsert({
+          id: "dvp_inbound_own_project",
+          swapDvp: address("SwapW11111111111111111111111111111111111111"),
+          userA: address(WALLET_A_PUBKEY),
+          userB: address(UNRELATED_PUBKEY),
+        })
+      );
+      await repo.resolveCreate("dvp_inbound_own_project", "created");
+
+      await expect(
+        repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
+      ).resolves.toEqual([]);
+    });
+
+    it("returns a foreign trade naming the caller's address, and not an unrelated foreign one", async () => {
+      await createdForeignTrade(
+        "dvp_inbound_mine",
+        "SwapM11111111111111111111111111111111111111",
+        address(WALLET_A_PUBKEY),
+        address(UNRELATED_PUBKEY)
+      );
+      await createdForeignTrade(
+        "dvp_inbound_theirs",
+        "SwapT11111111111111111111111111111111111111",
+        address(UNRELATED_PUBKEY),
+        address(UNRELATED_PUBKEY_2)
+      );
+
+      const listed = await repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10);
+
+      expect(listed.map((trade) => trade.id)).toEqual(["dvp_inbound_mine"]);
     });
   });
 });

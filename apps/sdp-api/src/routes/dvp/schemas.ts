@@ -51,17 +51,10 @@ export const dvpTradeIdParamsSchema = z.object({
 /**
  * One party slot, used for both `partyA` and `partyB`.
  *
- * The three variants carry no shared tag key, so this is a `z.union` of three
- * `z.strictObject`s rather than a `z.discriminatedUnion`: strict objects mean
- * exactly one key is present, so the variants cannot blur, with the present key
- * acting as the discriminator the design spec calls for.
- *
- * - `walletId` — a custody wallet of the caller's. Resolves to its address and
- *   stores nothing; fundability is re-derived at act time, and storing it would
- *   be a cache that drifts.
- * - `counterpartyAccountId` — a registered counterparty crypto-wallet account
- *   of the caller's. Resolves the linked address and stores the reference.
- * - `address` — an external address. Stored as nothing but the address.
+ * `z.union` of three strict objects (no shared tag key; exactly one key
+ * present acts as the discriminator): `walletId` (resolves to its address,
+ * stores nothing), `counterpartyAccountId` (resolves the linked address,
+ * stores the ref), or a bare external `address`.
  */
 const dvpPartySchema = z.union([
   z.strictObject({ walletId: z.string().min(1) }),
@@ -83,26 +76,14 @@ const dvpTradeTermsShape = {
   earliestSettlementTimestamp: i64StringSchema.nullish(),
 
   /**
-   * Where each party's proceeds are delivered, when that is not the party.
-   *
-   * An execution desk routinely settles into an account other than the one it
-   * funded from, and the program has always supported it — `CreateDvp` takes
-   * both destinations as arguments and records the party's own address when
-   * they are omitted. Everything downstream already reads them; only create
-   * was dropping them on the floor.
-   *
-   * Omit for the ordinary trade. A destination that differs from its party is
-   * exactly the shape a forged trade takes, so surfaces that show a trade to a
-   * counterparty must say when these are set rather than render them quietly.
+   * Where each party's proceeds are delivered instead of to the party. Omit
+   * for the ordinary trade; a differing destination is also the shape a forged
+   * trade takes, so surfaces showing a trade to a counterparty must surface it.
    */
   userASettlementDestination: dvpAddressSchema.nullish(),
   userBSettlementDestination: dvpAddressSchema.nullish(),
 
-  /**
-   * Opaque client reference, at most 64 bytes. Unauthenticated: anyone's forged
-   * create can carry the same value, so it is a correlation hint and never an
-   * identity on its own.
-   */
+  /** Opaque client reference, at most 64 bytes; a correlation hint, never an identity. */
   refString: z.string().max(64).nullish(),
 } as const;
 
@@ -117,11 +98,7 @@ const dvpTradeTermsShape = {
 export const createDvpTradeSchema = z.object({
   partyA: dvpPartySchema,
   partyB: dvpPartySchema,
-  /**
-   * The wallet that signs `CreateDvp`, pays the network fee and both escrows'
-   * rent. Optional; omitted means the project's DvP settlement wallet pays.
-   * It is not a term of the trade.
-   */
+  /** Fee/rent signer; omitted means the settlement wallet pays. Not a term of the trade. */
   payerWalletId: z.string().min(1).nullish(),
   ...dvpTradeTermsShape,
 });
@@ -131,15 +108,8 @@ export const listDvpTradesQuerySchema = z.object({
 });
 
 /**
- * The fund body: which leg, and optionally which of the caller's wallets pays.
- *
- * @param side - Names the leg being funded. The caller must hold an active
- *   custody wallet whose public key equals that side's party address — that is
- *   the whole of the authorization, re-derived from the database at act time.
- * @param walletId - Optionally names WHICH of the caller's custody wallets to
- *   pay from. It must hold that side's party address, so naming one narrows
- *   and never widens: a wallet that does not hold the address is refused.
- *   Omitted, the wallet is resolved from the party address.
+ * The fund body: which leg, and optionally which of the caller's wallets pays
+ * (it must hold that side's party address — naming one narrows, never widens).
  */
 export const fundDvpTradeSchema = z.object({
   side: z.enum(DVP_TRADE_SIDES),

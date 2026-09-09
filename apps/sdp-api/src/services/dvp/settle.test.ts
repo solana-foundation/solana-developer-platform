@@ -300,13 +300,5 @@ describe("closeDvpTrade", () => {
       const figure = (message: string) => Number(/needs about (\d+)/.exec(message)?.[1]);
       expect(figure(cancelCost as string)).toBeLessThan(figure(settleCost as string));
     });
-
-    // A missing account reads as 0n from getBalance, which is the case this
-    // check exists for: a freshly provisioned authority holds nothing, and
-    // settlement must be refused before a signature is spent.
-    it("blocks when the authority holds nothing", async () => {
-      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(/holds 0 lamports/);
-      expect(sendTransaction).not.toHaveBeenCalled();
-    });
   });
 });

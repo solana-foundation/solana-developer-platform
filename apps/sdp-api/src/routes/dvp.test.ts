@@ -977,35 +977,6 @@ describe("DvP routes", () => {
       await seedCustodyWallets();
     });
 
-    it("shows a trade the bound wallet is a party to, in list and get", async () => {
-      await seedWalletScopedKey(BOUND_WALLET);
-      await seedTradeFor({ tradeId: "dvp_bound_party" });
-
-      const list = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
-      const listBody = (await list.json()) as { data: { trades: { id: string }[] } };
-      expect(listBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_bound_party"]);
-
-      const get = await app.request(
-        "/v1/dvp/trades/dvp_bound_party",
-        { headers: authHeaders() },
-        env
-      );
-      expect(get.status).toBe(200);
-      const getBody = (await get.json()) as {
-        data: {
-          trade: {
-            kind: string;
-            legs: { a: { party: { custodied: boolean } }; b: { party: { custodied: boolean } } };
-          };
-        };
-      };
-      // The scoped key's view derives from ITS OWN bindings: side A (its
-      // address) custodied, side B not, kind principal.
-      expect(getBody.data.trade.legs.a.party.custodied).toBe(true);
-      expect(getBody.data.trade.legs.b.party.custodied).toBe(false);
-      expect(getBody.data.trade.kind).toBe("principal");
-    });
-
     it("hides a trade the bound wallet is not party to: absent from list, 404 on get, row untouched", async () => {
       await seedWalletScopedKey(THIRD_WALLET);
       await seedTradeFor({ tradeId: "dvp_unrelated_trade" });
@@ -1029,13 +1000,80 @@ describe("DvP routes", () => {
         .first<{ status: string; escrow_a_amount: string | null }>();
       expect(row).toEqual({ status: "created", escrow_a_amount: null });
     });
+  });
 
-    it("shows the same trade to an unscoped key", async () => {
-      await seedTradeFor({ tradeId: "dvp_unbound_trade" });
+  // The party fallback answers for the ORGANIZATION; a wallet-scoped key must
+  // still be bound to the wallet that makes a side theirs (handlers.ts:851).
+  describe("party fallback wallet scope", () => {
+    beforeEach(async () => {
+      await seedPartyOrg();
+    });
 
-      const list = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
-      const body = (await list.json()) as { data: { trades: { id: string }[] } };
-      expect(body.data.trades.map((trade) => trade.id)).toEqual(["dvp_unbound_trade"]);
+    async function seedPartyScopedKey(custodyWalletId: string, walletId: string): Promise<void> {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+           VALUES (?, ?, ?, ?)`
+        )
+        .bind(
+          `akwp_dvp_party_${custodyWalletId}`,
+          PARTY_API_KEY.id,
+          walletId,
+          JSON.stringify(["*"])
+        )
+        .run();
+      const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedCachedApiKey(env, keyHash, {
+        ...PARTY_CACHED_API_KEY,
+        walletScope: "selected",
+        signingWalletId: walletId,
+        walletBindings: [{ walletId, custodyWalletId, permissions: ["*"] }],
+      });
+    }
+
+    it("404s a scoped party key whose bindings exclude the party wallet, even though the org holds one", async () => {
+      // The org's custody resolves side A to cwlt_dvp_party; this key is bound
+      // only to an unrelated wallet, so the fallback must refuse it the same
+      // way the scoped lookup above did.
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, ?, ?, ?, 'active')`
+        )
+        .bind(
+          "cwlt_dvp_party_unrelated",
+          "cust_dvp_party",
+          "dvp_party_wallet_unrelated",
+          UNRELATED_ADDRESS
+        )
+        .run();
+      await seedPartyScopedKey("cwlt_dvp_party_unrelated", "dvp_party_wallet_unrelated");
+      await seedTradeFor({ tradeId: "dvp_party_scoped_hidden" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_party_scoped_hidden",
+        { headers: partyAuthHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(404);
+    });
+
+    // The complement: bound to the party wallet itself, the same trade answers.
+    it("shows the trade to a scoped party key bound to the party wallet", async () => {
+      await seedPartyScopedKey("cwlt_dvp_party", "dvp_party_wallet");
+      await seedTradeFor({ tradeId: "dvp_party_scoped_visible" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_party_scoped_visible",
+        { headers: partyAuthHeaders() },
+        env
+      );
+      expect(res.status).toBe(200);
+
+      const body = (await res.json()) as { data: { trade: { yourSide: string; kind: string } } };
+      expect(body.data.trade.yourSide).toBe("a");
+      expect(body.data.trade.kind).toBe("principal");
     });
   });
 

@@ -86,13 +86,8 @@ export async function callerPartyAddresses(
 }
 
 /**
- * A trade another organization created that names this caller, plus the exact
- * address map that decided membership.
- *
- * The map rides along because the response derives each leg's `custodied` from
- * it: recomputing it in the serializer would be a second wallet listing, and
- * the whole point of `callerPartyAddresses` is that one rule answers both
- * questions.
+ * The inbound trades plus the address map that decided membership, which the
+ * serializer derives each leg's `custodied` from.
  */
 export interface DvpInboundResult {
   trades: DvpInboundTrade[];
@@ -128,19 +123,15 @@ export async function listInboundDvpTrades(
 
   return {
     trades: rows.flatMap((trade) => {
-      // Which leg is theirs decides what the row says and, later, which escrow
-      // they fund. Leg A is checked first so a caller holding BOTH addresses gets
-      // a stable answer rather than one that depends on row order.
+      // Leg A first, so a caller holding BOTH addresses gets a stable answer.
       const side: DvpTradeSide | null = addressesToWallet.has(trade.userA)
         ? "a"
         : addressesToWallet.has(trade.userB)
           ? "b"
           : null;
 
-      // The database returned it, so a wallet of ours matches one of the parties.
-      // If neither does, the query and the policy disagree and the safe reading
-      // is to show nothing rather than guess a side and point somebody at the
-      // wrong escrow.
+      // A returned row must match a wallet of ours; if the query and policy
+      // disagree, show nothing rather than guess a side.
       if (side === null) {
         return [];
       }

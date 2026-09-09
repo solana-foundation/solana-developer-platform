@@ -47,15 +47,7 @@ interface DvpSdpLeg {
 }
 
 /**
- * One leg of a trade by side, with no claim about who holds it.
- *
- * This answers "what is leg B", which is the question a party funding its own
- * leg has: each side names an address, and the custody lookup decides who may
- * pay it — nothing on the leg itself does.
- *
- * @param trade - The trade to read the leg from.
- * @param side - Which leg, by side.
- * @returns That leg's mint, token program, escrow address and target amount.
+ * One leg of a trade by side; the custody lookup decides who may fund it.
  */
 export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
   const isA = side === "a";
@@ -69,16 +61,8 @@ export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
 }
 
 /**
- * How much of one leg is still outstanding, per the chain right now.
- *
- * Exported for the policy extractor: an approver has to be shown the amount
- * that will actually move, and funding sends the shortfall rather than the
- * target. Returns 0n for a leg that is already at or above its target.
- *
- * @param env - API process environment, for the RPC.
- * @param trade - The trade whose leg is being funded.
- * @param side - Which leg to read, by side.
- * @returns The outstanding base-unit amount, never negative.
+ * The outstanding base-unit shortfall of one leg, per the chain now. Exported
+ * for the policy extractor — the approver is shown what will actually move.
  */
 export async function readDvpLegShortfall(
   env: Env,
@@ -92,15 +76,9 @@ export async function readDvpLegShortfall(
 }
 
 /**
- * Who signs a funding transfer, and where its lock lives.
- *
- * One plan shape for every funder — the creating organization funding the leg
- * its wallet is named on and a counterparty funding theirs run the SAME code
- * from the escrow read to the receipt. Every safety property below — the
- * pre-read, the shortfall, the frozen refusal, the re-read before signing, the
- * claim, the approval fence, the ambiguous-failure rule — is identical for
- * both, and none of it is specific to who is paying. Two copies would be two
- * places for those to drift.
+ * Who signs a funding transfer, and where its lock lives. One plan shape for
+ * every funder — creator and counterparty run the same safety properties, so
+ * they cannot drift apart.
  */
 export interface DvpFundingPlan {
   leg: DvpSdpLeg;
@@ -115,22 +93,9 @@ export interface DvpFundingPlan {
 }
 
 /**
- * The funding plan for one side of a trade: that side's leg, the funder's
- * wallet, and a claim on `dvp_leg_funding_claims` keyed (trade, side) and
- * owned by the FUNDING organization.
- *
- * The lock lives on the claims table, keyed by (trade, side) and owned by the
- * funding organization, so two parties funding opposite legs cannot collide
- * and no cross-organization write is needed — the creating org funding its
- * own leg and a counterparty funding theirs take DIFFERENT rows on the same
- * table, never the same lock.
- *
- * @param env - API process environment, for the database.
- * @param trade - The trade whose leg is being funded.
- * @param side - Which leg, by side.
- * @param signer - Whose wallet pays: the funding organization's own custody
- *   wallet, resolved by the caller from the side's party address.
- * @returns The plan `executeDvpFunding` runs.
+ * The funding plan for one side of a trade: leg, funder's wallet, and a claim
+ * on `dvp_leg_funding_claims` keyed (trade, side) and owned by the FUNDING
+ * org — opposite legs are different rows, so they never share a lock.
  */
 export function fundingPlan(
   env: Env,
@@ -158,23 +123,9 @@ export function fundingPlan(
 }
 
 /**
- * Funds one side of a trade from the custody wallet that owns that side's
- * party address.
- *
- * Mechanical by design: the authorization decision — resolving the funding
- * wallet through the custody lookup and re-reading it from the database
- * before broadcast — belongs to the caller (the policy extractor and the
- * handler), because it has to happen at the right point relative to the gate.
- * This function takes the already-resolved wallet and moves the shortfall.
- *
- * @param c - Request context, for the approved-operation effect fence.
- * @param trade - The trade whose leg should be funded.
- * @param params - Which side, and the funding organization's custody wallet.
- * @param params.side - The leg being funded, by side.
- * @param params.custodyWalletId - The funding wallet's custody record id.
- * @param params.organizationId - The funding organization.
- * @param params.projectId - The funding organization's project.
- * @returns The broadcast signature and what moved.
+ * Funds one side from the caller's already-resolved custody wallet. Mechanical
+ * by design: the custody lookup and re-read belong to the caller, so they run
+ * at the right point relative to the policy gate.
  */
 export async function fundDvpTradeLeg(
   c: Context<{ Bindings: Env }>,
@@ -200,13 +151,7 @@ export async function fundDvpTradeLeg(
 /**
  * Reads the escrow, sends the shortfall, and records what happened.
  *
- * Shared by every funder. The plan decides which leg, who signs and where the
- * lock lives; nothing below asks who is paying.
- *
- * @param c - Request context, for the approved-operation effect fence.
- * @param trade - The trade being funded, for its status.
- * @param plan - Which leg, whose wallet, and the claim that serialises it.
- * @returns The broadcast signature, which leg moved, and how much.
+ * Shared by every funder; nothing below asks who is paying.
  */
 export async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,

@@ -1,20 +1,10 @@
 /**
  * Policy candidates for the DvP trade routes.
  *
- * A DvP trade is genuinely two-sided, which the policy engine already has a
- * shape for: `legs` carries "per-leg evaluation views of a multi-leg operation"
- * (`packages/sdp-policy/src/ports.ts:32`), the same machinery batch transfers
- * use for their recipients. So both legs are evaluated on their own asset,
- * amount and destination rather than being flattened into one.
- *
- * Closing (settle/cancel) moves BOTH legs, so both are evaluated and the
- * top-level candidate leads with leg A as the representative — chosen, not
- * fallen into. Its context names BOTH parties, which is always true: a trade
- * is two addresses and a settlement authority, and nothing on the row says
- * which (if either) the caller holds.
- *
- * Funding moves ONE leg — the side the caller named — and is evaluated against
- * the FUNDING organization's own wallet by {@link extractDvpFundPolicyCandidate}.
+ * A trade is genuinely two-sided, evaluated through the engine's existing
+ * multi-leg `legs` shape. Closing moves BOTH legs and leads with leg A as the
+ * representative; funding moves ONE leg — the side the caller named — against
+ * the FUNDING organization's own wallet (see {@link extractDvpFundPolicyCandidate}).
  */
 
 import type { PolicyCandidate } from "@sdp/types";
@@ -53,14 +43,8 @@ interface SettlementWalletRef {
 }
 
 /**
- * Builds the policy candidate for closing a trade.
- *
- * @param c - Request context, for the acting principal.
- * @param trade - The trade being closed.
- * @param settlement - The wallet that will sign, which is what policy governs.
- * @param action - settle or cancel; they are separate operation types because
- *   an org may well allow one and not the other.
- * @returns The top-level candidate and the per-leg evaluation views.
+ * Builds the policy candidate for closing a trade. Settlement is the signing
+ * wallet policy governs; settle and cancel stay separate operation types.
  */
 export function buildDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
@@ -74,19 +58,14 @@ export function buildDvpTradeActionPolicyCandidate(
     organizationId: auth.organizationId,
     projectId: trade.projectId,
     custodyWalletId: settlement.custodyWalletId,
-    // The PROVIDER's wallet id, not the on-chain address. The wallet-operations
-    // ownership check matches `custody_wallets.wallet_id`
-    // (`policy.repository.postgres.ts:1044`), so an address finds no row and the
-    // operation is refused as belonging to nobody — which surfaced as
-    // "Failed to record wallet operation" on every settle and cancel.
-    // `payments/handlers/ramps.ts:405-406` is the convention this now matches.
+    // The PROVIDER's wallet id, not the on-chain address: the ownership check
+    // matches `custody_wallets.wallet_id` (`policy.repository.postgres.ts:1044`).
     walletId: settlement.providerWalletId,
     apiKeyId: auth.apiKeyId,
     actor: walletOperationActorFromAuth(auth),
     source: "api",
-    // The same family Earn uses for its on-chain vault operations. DvP is an
-    // interaction with a Solana program, not a payment rail, and reusing it
-    // means no migration to widen the wallet_operations family constraint.
+    // The same family Earn uses for on-chain operations, so the
+    // wallet_operations family constraint needs no widening.
     operationFamily: "program" as const,
     operationType: (action === "settle" ? "dvp_settle" : "dvp_cancel") as
       | "dvp_settle"
@@ -98,9 +77,7 @@ export function buildDvpTradeActionPolicyCandidate(
     ...base,
     asset: trade.mintA,
     amount: trade.amountA,
-    // Where this leg's tokens end up: delivered to the counterparty on settle,
-    // returned to the depositor on cancel. A destination rule should see the
-    // address the money actually reaches.
+    // Where this leg's tokens end up: the counterparty on settle, the depositor on cancel.
     destination: action === "settle" ? trade.userBSettlementDestination : trade.userA,
     context: { dvpTradeId: trade.id, dvpLeg: "a", dvpAction: action },
   };
@@ -113,11 +90,8 @@ export function buildDvpTradeActionPolicyCandidate(
     context: { dvpTradeId: trade.id, dvpLeg: "b", dvpAction: action },
   };
 
-  // Leg A leads — chosen, not fallen into. There is no "our leg" to prefer any
-  // more: a trade is two addresses and nothing on the row says which the
-  // caller holds, so the representative is a stable convention rather than a
-  // claim, and both legs are evaluated below regardless, so nothing escapes
-  // policy either way.
+  // Leg A leads as the representative — chosen, not fallen into: the row does
+  // not say which leg is the caller's, and both legs are evaluated regardless.
   const legs = [legA, legB];
 
   return {
@@ -127,9 +101,6 @@ export function buildDvpTradeActionPolicyCandidate(
         dvpTradeId: trade.id,
         dvpAction: action,
         swapDvp: trade.swapDvp,
-        // Naming both parties is always true — a trade is two addresses — so
-        // no per-side "counterparty" naming is made up here. The per-side
-        // counterparty naming returns in the read paths' derived views.
         parties: [trade.userA, trade.userB],
       },
     },
@@ -138,13 +109,8 @@ export function buildDvpTradeActionPolicyCandidate(
 }
 
 /**
- * What funding should be evaluated at: the approved amount on a replay, the
- * live per-side shortfall otherwise.
- *
- * @param c - Request context, which carries the approved operation on a replay.
- * @param trade - The trade whose leg is being funded.
- * @param side - Which leg, by side.
- * @returns The base-unit amount to put on the policy candidate.
+ * The amount funding is evaluated at: the approved one on a replay, the live
+ * per-side shortfall otherwise.
  */
 async function approvedOrLiveFundingAmount(
   c: Context<{ Bindings: Env }>,
@@ -157,9 +123,8 @@ async function approvedOrLiveFundingAmount(
       c.env,
       getRequestTenantScope(c)
     ).getWalletOperationById(operationId);
-    // Only when the stored row actually carries an amount. A missing one means
-    // this is not the operation we think it is, and the field-by-field match
-    // downstream is the right place for that to fail loudly.
+    // A stored row without an amount is not the operation we think it is; let
+    // the field-by-field replay match fail loudly downstream.
     if (operation?.amount) {
       return BigInt(operation.amount);
     }
@@ -170,16 +135,8 @@ async function approvedOrLiveFundingAmount(
 /**
  * The policy-gate extractor for `POST /trades/:tradeId/{settle,cancel}`.
  *
- * Resolves the trade and the project's settlement wallet before the gate runs,
- * and hands both to the handler through `resolved` so the work is not repeated
- * after approval. Returns a null candidate when the trade does not exist —
- * `policyGate` treats that as ungoverned and lets the handler produce the 404,
- * rather than filing a wallet operation for a trade that is not there.
- *
- * @param c - Request context.
- * @param action - settle or cancel.
- * @returns The extraction for the gate: candidate, legs, and the resolved
- *   trade and settlement wallet.
+ * Resolves the trade and the settlement wallet before the gate runs; a missing
+ * trade is ungoverned (candidate null) so the handler produces the 404.
  */
 export async function extractDvpTradeActionPolicyCandidate(
   c: Context<{ Bindings: Env }>,
@@ -198,10 +155,8 @@ export async function extractDvpTradeActionPolicyCandidate(
     {
       organizationId: auth.organizationId,
       projectId,
-      // `payments:write`, not read. The routes this extractor serves require
-      // write, so filtering by read would hide the trade from a binding that
-      // holds write without read — an authorized settle would come back as
-      // "trade not found", which is both wrong and impossible to diagnose.
+      // `payments:write`, not read: a binding holding write without read must
+      // still see the trade it is authorized to settle.
       sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]),
     },
     tradeId
@@ -223,17 +178,11 @@ export async function extractDvpTradeActionPolicyCandidate(
     projectId: trade.projectId,
   });
 
-  // Before the gate records anything. The trade was found through the CACHED
-  // auth snapshot, which can be up to an hour stale, so a key revoked inside
-  // that window would otherwise get an approval request filed in its name and
-  // a settlement wallet provisioned on its behalf. The handler checks this
-  // again after approval; both are needed, because only one of them runs on
-  // the approved-replay path.
-  //
-  // The wallet asserted is the SETTLEMENT wallet — for settle and cancel it is
-  // the wallet that signs, and the trade row no longer carries a wallet of its
-  // own to assert instead. Resolving it first, above, is what makes the id
-  // available to assert against.
+  // Before the gate records anything: the trade was found through the CACHED
+  // auth snapshot (up to an hour stale), so a revoked key would otherwise get
+  // an approval filed in its name. The wallet asserted is the SETTLEMENT
+  // wallet — the one that signs — and the handler re-asserts after approval
+  // because only one of the two checks runs on the approved-replay path.
   await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, settlement.custodyWalletId, [
     "payments:write",
   ]);
@@ -265,46 +214,21 @@ export type DvpFundResolved =
 /**
  * The policy-gate extractor for `POST /trades/:tradeId/fund`.
  *
- * One extractor for every funder, because there is only one authorization rule
- * left: the right to fund side X is holding an active custody wallet whose
- * public key equals `user_x`. Three things about how it resolves:
- *
- * 1. The trade is loaded WITHOUT project scope. The trade may belong to
- *    somebody else — that is the point of party funding — and the read is
- *    permitted by the `sdp_dvp_party_read` policy (0089), which admits it only
- *    when a custody wallet of this tenant matches a party address, so an
- *    unrelated trade id returns nothing here regardless of what this code
- *    does. Own-tenant reads are held by `sdp_tenant_isolation` (0086). RLS is
- *    the boundary, not this predicate.
- * 2. Policy is evaluated against the FUNDING organization's own wallet. Their
- *    limits and approvals govern their money; the creating org's govern theirs.
- * 3. One leg, the named side. The other leg describes what the counterparty
- *    owes and is no part of this operation.
- *
- * `idempotencyKey` is deliberately null. The old creator path keyed
- * `dvp_fund_${trade.id}`, which pinned one funding per trade forever — but
- * top-ups are legal (funding sends the shortfall, a partly funded leg may be
- * topped up) and both sides of a bilateral trade are separately fundable, so
- * that key would refuse legitimate work. What actually serialises concurrent
- * sends is the (trade, side) claim CAS inside the funding path, which holds
- * exactly while a broadcast is in flight and no longer.
- *
- * @param c - Request context, carrying the validated `{side, walletId?}` body.
- * @returns The extraction for the gate: a per-side candidate, and the resolved
- *   trade plus the funding wallet for the handler. The candidate is null —
- *   ungoverned, with `funding: null` — when the caller holds no wallet on the
- *   named side; the handler produces the 403, and filing a wallet operation
- *   for a trade this caller has no leg on would put somebody else's trade in
- *   their approvals queue.
+ * One rule for every funder: the right to fund side X is holding an active
+ * custody wallet whose public key equals `user_x`. The trade loads WITHOUT
+ * project scope — party funding reads another org's row, admitted by RLS 0089
+ * (`sdp_dvp_party_read`) only when a wallet of this tenant matches a party
+ * address — and policy is evaluated against the FUNDING org's own wallet on
+ * the named leg. `idempotencyKey` is deliberately null: top-ups are legal and
+ * both sides are separately fundable, so the (trade, side) claim CAS inside
+ * the funding path is the serialization, not a key.
  */
 export async function extractDvpFundPolicyCandidate(
   c: ValidatedBodyContext<typeof fundDvpTradeSchema>
 ): Promise<PolicyGateExtraction> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  // Typed string | undefined only because the generic Context cannot see the
-  // route pattern; the route always carries :tradeId, so a missing param is a
-  // wiring bug and must fail loudly rather than resolve to a "" lookup.
+  // The route always carries :tradeId, so a missing param is a wiring bug.
   const tradeId = c.req.param("tradeId");
   if (tradeId === undefined) {
     throw notFound("DvP trade not found");
@@ -327,12 +251,8 @@ export async function extractDvpFundPolicyCandidate(
 
   const partyAddress = body.side === "a" ? trade.userA : trade.userB;
 
-  // Resolve the funding wallet. An explicit `walletId` only narrows: it must
-  // be an active custody wallet in the caller's org/project whose public key
-  // equals the named side's party address, and a mismatch or a miss is
-  // ungoverned here so the handler can refuse with the real reason. Absent,
-  // the wallet is resolved from the party address — the same derivation every
-  // other custody-capability question uses.
+  // An explicit `walletId` only narrows: it must be active in scope and hold
+  // the named side's party address. Absent, resolve from the party address.
   const custodyWalletId =
     body.walletId !== null && body.walletId !== undefined
       ? await walletIdIfHoldsAddress(c, body.walletId, partyAddress)
@@ -342,17 +262,14 @@ export async function extractDvpFundPolicyCandidate(
           partyAddress
         );
 
-  // Ungoverned rather than refused here: the handler produces the 403, and
-  // filing a wallet operation for a trade this caller has no leg on would put
-  // somebody else's trade in their approvals queue.
+  // Ungoverned (candidate null) so the handler produces the 403: filing an
+  // operation for a trade this caller has no leg on would pollute their queue.
   if (custodyWalletId === null) {
     return absent(trade);
   }
 
-  // The gate's auth context is a KV snapshot and can be up to an hour old, so
-  // a key whose `payments:write` was revoked in that window would still reach
-  // enforcement and sign. Re-read the binding from the database, on the wallet
-  // the side RESOLVED to, which is not known until above.
+  // Re-read the binding on the RESOLVED wallet: the gate's auth context can be
+  // an hour-old KV snapshot, so a revocation in that window must still bite.
   await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
     "payments:write",
   ]);
@@ -371,29 +288,18 @@ export async function extractDvpFundPolicyCandidate(
 
   const leg = legOfSide(trade, body.side);
 
-  // Funding tops a leg up to its target, so what policy is shown has to be the
-  // shortfall rather than the target. Read here, at extraction, because this
-  // is the value the approval request stores and a human reads later.
-  //
-  // On an approved REPLAY the stored amount wins over a fresh read. The replay
-  // is checked field-by-field against the approved row with `amount` compared
-  // for exact equality (`services/policy/enforcement.service.ts:113`), and a
-  // deposit landing between approval and execution would make a fresh read
-  // smaller — so recomputing here would fail the match and strand an approved
-  // top-up behind a second approval it should never have needed.
-  //
-  // Pinning is safe in the direction that matters: an escrow only gains tokens
-  // while its trade is open, so the live shortfall funding actually sends is
-  // always at or below the amount that was approved. Policy approved a ceiling
-  // and the transfer stays under it.
+  // The shortfall, not the target: funding tops a leg up. On an approved
+  // REPLAY the stored amount must win — the replay match compares `amount` for
+  // exact equality, and a deposit landing in between would shrink a fresh read.
+  // Pinning is safe: an escrow only gains while open, so the live shortfall
+  // stays at or below what was approved.
   const amount = await approvedOrLiveFundingAmount(c, trade, body.side);
 
   const candidate: PolicyCandidate = {
     organizationId: auth.organizationId,
     projectId,
     custodyWalletId: wallet.custody_wallet_id,
-    // The PROVIDER's wallet id, not the on-chain address — the same convention
-    // the close candidate follows and for the same reason (see base above).
+    // The PROVIDER's wallet id, like the close candidate (see base above).
     walletId: wallet.wallet_id,
     apiKeyId: auth.apiKeyId,
     actor: walletOperationActorFromAuth(auth),
@@ -424,13 +330,7 @@ export async function extractDvpFundPolicyCandidate(
 
 /**
  * Resolves an explicitly named wallet, but only when it holds the side's
- * party address.
- *
- * @param c - Request context, for the custody target.
- * @param walletId - The custody wallet record id the caller named.
- * @param partyAddress - The named side's party address.
- * @returns The wallet id when it is active in scope and holds the address,
- *   null otherwise — naming a wallet narrows and never widens.
+ * party address — naming a wallet narrows and never widens.
  */
 export async function walletIdIfHoldsAddress(
   c: Context<{ Bindings: Env }>,

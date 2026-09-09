@@ -1,38 +1,15 @@
 /**
  * What a party is told about a trade somebody else created.
  *
- * Written from scratch rather than reusing `toTradeResponse`, and that is the
- * point of the file. That serializer speaks to the organization that created
- * the trade and carries things which belong to it: `sdpWallet`, `refString`,
- * the settlement authority's funding readiness. Reaching for it here and
- * deleting fields afterwards would put the disclosure decision in whatever
- * shape that response happens to have next month.
- *
- * The rule this encodes: the CHAIN's facts cross, ours do not.
- *
- * Everything below is already readable by anyone holding the trade's PDA, using
- * the checked decoders in `@sdp/dvp` — the parties, the mints, the amounts, the
- * escrow addresses, the expiry. Telling a named party about a trade that names
- * it discloses nothing it was not already entitled to read, which is why the
- * 0089 policy is safe.
- *
- * Deliberately absent, each because it is ours and not the chain's:
- *
- * - `organizationId` / `projectId` — who set the trade up. A party is entitled
- *   to know the terms, not to learn which SDP customer wrote them.
- * - `refString` — the creating org's own reference for its own records.
- * - `sdpWallet` — that org's custody wallet address and its label.
- * - Counterparty attribution — which registered counterparty a party is is a
- *   fact about the CREATING organization; a viewer on inbound is never that
- *   org, so `party.counterparty` is always null here.
- * - Funding claims — tenant-scoped to the funding organization, so a party
- *   read answers null for them by construction.
- * - `tradeKind` / the derived `kind` — standing is conveyed by `custodied` on
- *   each leg and by `yourSide`, not by a stored or derived label.
- * - `idempotencyKey`, and the fingerprint derived from it.
- * - `settlementReadiness` — whether their settlement authority holds enough
- *   SOL is an operational fact about their deployment.
- * - `symbolA` / `symbolB` are included; they are read off the mint on chain.
+ * Written from scratch rather than reusing `toTradeResponse`, which speaks to
+ * the creating org and carries fields belonging to it. The rule: the CHAIN's
+ * facts cross (everything below a PDA holder can already decode), ours do not.
+ * Deliberately absent — `organizationId`/`projectId`, `refString`, `sdpWallet`,
+ * counterparty attribution (a fact about the CREATING org, so always null),
+ * funding claims (tenant-scoped, so null by construction), the derived `kind`
+ * (`custodied` + `yourSide` convey standing), `idempotencyKey`, and
+ * `settlementReadiness`. `symbolA`/`symbolB` ARE included; they are read off
+ * the mint on chain.
  */
 
 import type { DvpInboundTrade } from "@/services/dvp/inbound";
@@ -40,10 +17,7 @@ import type { DvpInboundTrade } from "@/services/dvp/inbound";
 /** One party of the trade, as a party who is not the author may see it. */
 interface DvpInboundPartyResponse {
   address: string;
-  /**
-   * Never attributed: which registered counterparty a party is belongs to the
-   * creating organization, and the viewer on inbound is never that org.
-   */
+  /** Never attributed: it belongs to the creating org, which the viewer is not. */
   counterparty: null;
   /** Whether the CALLER holds an active custody wallet for this address. */
   custodied: boolean;
@@ -86,14 +60,8 @@ export interface DvpInboundTradeResponse {
 }
 
 /**
- * One leg's party as a party viewer sees it: the address and whether the
- * CALLER holds a custody wallet for it, never attribution.
- *
- * @param address - The party address on the leg.
- * @param callerAddresses - The caller's custody wallet addresses, the same map
- *   membership was derived from — an inbound trade has at least one custodied
- *   side by construction, and both legs can be custodied when the caller holds
- *   both addresses.
+ * One leg's party as a party viewer sees it: address and `custodied`, never
+ * attribution.
  */
 function inboundParty(
   address: string,

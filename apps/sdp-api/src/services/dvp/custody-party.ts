@@ -12,25 +12,9 @@ import type { Env } from "@/types/env";
 
 /**
  * Resolves the active custody wallet for a party address, re-reading from the
- * DB on every call.
- *
- * This is the single custody derivation of the DvP per-side ownership reshape:
- * "can this caller act on this side" is answered here and only here. The
- * re-read is deliberate — authorization at act time must not trust a stale
- * resolution. A wallet archived between a create and a fund must make the fund
- * refuse, and only a fresh DB read sees that.
- *
- * Only ACTIVE wallets qualify. `CustodyRuntimeTargets.listWallets` already
- * filters `w.status = 'active'` in both its config-backed and connection-backed
- * wallet queries, so archived wallets never appear in the result — this relies
- * on that filter rather than re-applying it.
- *
- * @param env - The request environment, used to open the DB connection.
- * @param params.organizationId - The caller's organization id.
- * @param params.projectId - The caller's project id.
- * @param partyAddress - The on-chain address to resolve against.
- * @returns The matching active custody wallet's `custody_wallets.id`, or null
- *   when no active wallet in scope holds that address.
+ * DB on every call — the single "can this caller act on this side" derivation,
+ * and a stale read must not authorize a fund after an archive. Active-only via
+ * `CustodyRuntimeTargets.listWallets`, which already filters `w.status`.
  */
 export async function custodyWalletForParty(
   env: Env,

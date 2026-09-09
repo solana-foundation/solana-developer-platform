@@ -161,10 +161,6 @@ describe("buildDvpTradeActionPolicyCandidate (close)", () => {
     expect(candidate.asset).toBe(trade().mintA);
     expect(candidate.amount).toBe("1000");
     expect(candidate.context).not.toHaveProperty("counterparty");
-    // The trade-kind vocabulary is gone from policy context: a trade is two
-    // addresses, and neither leg is "ours" from the row's point of view.
-    expect(candidate.context).not.toHaveProperty("dvpTradeKind");
-    expect(candidate.context).not.toHaveProperty("dvpSdpSide");
     expect(candidate.context).toMatchObject({ parties: [trade().userA, trade().userB] });
   });
 

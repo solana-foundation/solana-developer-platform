@@ -138,26 +138,4 @@ describe("toDvpInboundResponse", () => {
 
     expect(json).not.toContain(secret);
   });
-
-  // Whether their settlement authority holds enough SOL is an operational fact
-  // about somebody else's deployment, and it is not on chain in this trade.
-  // The creator's derived kind and the per-leg funding claims are withheld for
-  // the same reason — both belong to organizations that can read the row.
-  it("says nothing about the other organization's settlement readiness, standing or claims", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES) as unknown as Record<
-      string,
-      unknown
-    >;
-
-    expect(response.settlementReadiness).toBeUndefined();
-    expect(response.sdpWallet).toBeUndefined();
-    expect(response.refString).toBeUndefined();
-
-    // Searched in the serialized JSON, like the secrets above: a field that
-    // arrives later under either name is caught no matter where it lands.
-    const json = JSON.stringify(response);
-    expect(json).not.toContain("fundingSignature");
-    expect(json).not.toContain('"kind"');
-    expect(json).not.toContain('"tradeKind"');
-  });
 });

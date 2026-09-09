@@ -50,13 +50,9 @@ export interface DvpTradeRow {
 
   /**
    * Org-scoped attribution naming which registered counterparty this party is,
-   * or null when the party is an external address.
-   *
-   * The referenced `counterparty_accounts` row is app-enforced to be
-   * `crypto_wallet` kind, active, belong to the creator's org/project, and
-   * have its address (in `details` JSONB) equal `user_a` / `user_b`. It is
-   * never operational: custody capability derives from the custody lookup, not
-   * from this column.
+   * or null for an external address. App-enforced `crypto_wallet`-kind, active,
+   * in the creator's org/project, address equal to the party; never operational
+   * — custody capability derives from the custody lookup.
    */
   counterpartyAccountIdA: string | null;
   /** Counterparty attribution for side B; see {@link counterpartyAccountIdA}. */
@@ -117,10 +113,6 @@ export interface DvpTradeScope {
    * reading is the repo-wide convention for wallet allowlists (see
    * `payments.repository.postgres.ts:74-80`) and getting it backwards would turn
    * a key with no usable bindings into a key that reads the whole project.
-   *
-   * A bound wallet admits the trades it is a PARTY to (`user_a` or `user_b`),
-   * not the trades it created — nothing on the row records a creator wallet,
-   * and party is the reading inbound discovery already uses.
    */
   sdpWalletIds?: string[] | null;
 }

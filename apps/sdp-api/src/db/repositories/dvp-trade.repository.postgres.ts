@@ -104,18 +104,11 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          created_at, updated_at`;
 
 /**
- * The wallet allowlist clause, as SQL plus its bindings.
- *
- * An empty list is "authorized for no wallet" and must match nothing — `1 = 0`
- * rather than a dropped clause. Absent or null is genuinely unrestricted. That
- * asymmetry is the whole point: treating empty as "no filter" would hand a key
- * with no usable bindings the entire project's trades.
- *
- * A bound wallet admits the trades it is a PARTY to (`user_a` or `user_b`),
- * not the trades it created — nothing on the row records a creator wallet any
- * more, and party is the reading inbound discovery already uses. The wallet id
- * list is joined to `custody_wallets.public_key`; the bindings are duplicated
- * because the two IN-lists are separate subqueries (one per side).
+ * The wallet allowlist clause, as SQL plus its bindings. Empty means
+ * "authorized for no wallet" (`1 = 0`, never a dropped clause); absent or
+ * null is unrestricted. A bound wallet admits the trades it is a PARTY to —
+ * the wallet ids join to `custody_wallets.public_key`, duplicated across the
+ * two per-side IN subqueries.
  */
 function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
   sql: string;

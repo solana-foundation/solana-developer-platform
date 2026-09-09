@@ -61,13 +61,9 @@ import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
 
 /**
- * One party slot, however the caller chose to describe it.
- *
- * - `walletId` — a custody wallet of the caller's; resolves to its address and
- *   stores nothing.
- * - `counterpartyAccountId` — a registered counterparty crypto-wallet account
- *   of the caller's; resolves the linked address and stores the reference.
- * - `address` — an external address; stored as nothing but the address.
+ * One party slot: `walletId` (resolves to the wallet's address, stores
+ * nothing), `counterpartyAccountId` (resolves the linked address, stores the
+ * ref), or a bare external `address`.
  */
 export type DvpPartyInput =
   | { walletId: string }
@@ -80,11 +76,7 @@ export type CreateDvpTradeInput = {
   /** The two parties, each as the caller described them. */
   partyA: DvpPartyInput;
   partyB: DvpPartyInput;
-  /**
-   * The custody wallet that signs `CreateDvp`, pays the network fee and both
-   * escrows' rent. Null means the project's DvP settlement wallet pays. It is
-   * NOT a term of the trade.
-   */
+  /** Signs and pays fee + rent; null means the settlement wallet. NOT a term of the trade. */
   payerWalletId: string | null;
   /** Asset leg mint and its token program. */
   mintA: Address;
@@ -115,10 +107,8 @@ export type CreateDvpTradeInput = {
 /**
  * Confirms a replay is the SAME request, not merely one carrying the same key.
  *
- * A key is a claim, not a proof. Reused with different terms it would hand back
- * the earlier trade — and since that trade publishes escrow addresses, a
- * wallet-scoped caller would receive escrows outside their scope. The
- * fingerprint is compared precisely so that crossing cannot happen quietly.
+ * A key is a claim, not a proof; the fingerprint is compared precisely so a
+ * wallet-scoped caller never receives escrows outside its scope.
  */
 function assertOwnReplay(trade: DvpTradeRow, fingerprint: string | null): DvpTradeRow {
   if (trade.idempotencyFingerprint !== fingerprint) {
@@ -165,23 +155,10 @@ function wellKnownSymbol(mint: string): string | null {
 }
 
 /**
- * Resolves both party slots to their on-chain addresses and stored refs (the
- * semantics of each slot variant are on {@link DvpPartyInput}).
- *
- * Resolution MUST precede the idempotency-replay lookup: the fingerprint hashes
- * the resolved addresses, so they have to be known before it is computed. Both
- * lookups are already org/project-scoped and active-only —
- * `CustodyRuntimeTargets.findOperationalWalletById` for a wallet slot,
- * `getCounterpartyAccountByIdInProject` (SQL-enforced `status = 'active'`) for
- * a counterparty slot — so a foreign or archived reference resolves to nothing
- * and is refused naming the slot.
- *
- * @param env - API process environment.
- * @param params.organizationId - The caller's organization id.
- * @param params.projectId - The caller's project id.
- * @param params.partyA - Side A as the caller described it.
- * @param params.partyB - Side B as the caller described it.
- * @returns The two resolved parties (address + stored ref), in slot order.
+ * Resolves both slots to on-chain addresses and stored refs (slot semantics on
+ * {@link DvpPartyInput}). Must precede the replay lookup: the fingerprint
+ * hashes the resolved addresses. Both lookups are org/project-scoped and
+ * active-only, so a foreign or archived reference refuses naming the slot.
  */
 async function resolveParties(
   env: Env,
@@ -287,8 +264,7 @@ async function assertNamedDestinationsUsable(
 export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Promise<DvpTradeRow> {
   const repository = createDvpTradeRepository(env);
 
-  // Resolve BOTH parties before the idempotency-replay lookup. The fingerprint
-  // hashes the resolved addresses, so resolution must precede it (see §4).
+  // Resolve BOTH parties first: the fingerprint hashes the resolved addresses.
   const [resolvedA, resolvedB] = await resolveParties(env, {
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -364,15 +340,11 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   });
   const settlementAuthority = settlement.address;
 
-  // The payer signs `CreateDvp`, pays the network fee and both escrows' rent.
-  // An explicit `payerWalletId` resolves to that custody wallet; absent, the
-  // project's DvP settlement wallet — already provisioned above for the
-  // settlement authority — pays. One provisioning call serves both roles; do
-  // not call it twice. The program refuses
-  // `settlement_authority == user_a || user_b`, and the payer is neither a
-  // party nor a seed, so the settlement wallet as payer is legal for both trade
-  // shapes; rent refunds land on the wallet that closes, which is this same
-  // wallet — that alignment is WHY it is the default.
+  // The payer signs and pays fee + rent: explicit `payerWalletId`, else the
+  // settlement wallet already provisioned above (one provisioning call serves
+  // both roles). It is legal as payer for both trade shapes — the program
+  // refuses only `settlement_authority == user_a || user_b` — and rent refunds
+  // land on the wallet that closes, which is this same one.
   const payerWalletId =
     input.payerWalletId === null ? settlement.custodyWalletId : input.payerWalletId;
   const signer = await createOrgSignerForCustodyWallet(
@@ -514,8 +486,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     refString: input.refString,
     escrowA,
     escrowB,
-    // Org-scoped attribution, or null when the party is an external address or
-    // a custody wallet (which stores nothing — fundability re-derives later).
+    // Org-scoped attribution; null for external addresses and wallets (fundability re-derives).
     counterpartyAccountIdA: resolvedA.counterpartyAccountId,
     counterpartyAccountIdB: resolvedB.counterpartyAccountId,
     idempotencyKey: input.idempotencyKey,
