@@ -4,7 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMap, parseDocument } from "yaml";
 
-const directDependencyFields = ["dependencies", "devDependencies", "optionalDependencies"];
+const dependencyFields = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
 const exactVersion = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const supportedNonRegistrySpecifiers =
   /^(?:workspace:\*|catalog:|file:|link:|git\+|github:|https?:)/;
@@ -18,7 +23,7 @@ export function isPinnedVersion(specifier) {
 export function validateManifest(manifest, manifestPath) {
   const violations = [];
 
-  for (const field of directDependencyFields) {
+  for (const field of dependencyFields) {
     for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
       if (
         solanaEarnPackage.test(name) &&
@@ -31,7 +36,10 @@ export function validateManifest(manifest, manifestPath) {
         );
         continue;
       }
-      if (!isPinnedVersion(specifier)) {
+      // Semver ranges are conventional for ordinary peer dependencies. Earn peers are handled by
+      // the stricter source policy above, while non-peer dependency fields keep the repo-wide exact
+      // version policy.
+      if (field !== "peerDependencies" && !isPinnedVersion(specifier)) {
         violations.push(
           `${manifestPath}: ${field}.${name} must be an exact version (found ${specifier}).`
         );

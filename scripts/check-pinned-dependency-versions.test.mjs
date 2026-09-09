@@ -40,6 +40,11 @@ test("requires Solana Earn packages to come from immutable registry versions", (
         "@solana/earn-core": "catalog:",
         "@solana/earn-test-utils": "catalog:solana-earn",
       },
+      peerDependencies: {
+        "@solana/earn-provider-ground": "0.1.0-beta.1",
+        "@solana/earn-provider-kamino": "catalog:solana-earn",
+        react: "^19",
+      },
     },
     "apps/sdp-api/package.json"
   );
@@ -48,6 +53,36 @@ test("requires Solana Earn packages to come from immutable registry versions", (
     "apps/sdp-api/package.json: dependencies.@solana/earn must use an exact registry version or catalog: (found workspace:*).",
     "apps/sdp-api/package.json: dependencies.@solana/earn-kit must use an exact registry version or catalog: (found link:../../../solana-earn/packages/kit).",
   ]);
+});
+
+test("rejects mutable Solana Earn peer dependency sources", () => {
+  const mutableSources = [
+    "^0.1.0",
+    "workspace:*",
+    "link:../../../solana-earn/packages/kit",
+    "file:../../../solana-earn/packages/kit",
+    "github:solana-foundation/solana-earn",
+    "git+https://github.com/solana-foundation/solana-earn.git",
+    "https://artifacts.example/solana-earn.tgz",
+  ];
+
+  for (const specifier of mutableSources) {
+    assert.deepEqual(
+      validateManifest(
+        {
+          peerDependencies: {
+            "@solana/earn-kit": specifier,
+            react: "^19",
+          },
+        },
+        "packages/example/package.json"
+      ),
+      [
+        "packages/example/package.json: peerDependencies.@solana/earn-kit must use an exact registry version or catalog: " +
+          `(found ${specifier}).`,
+      ]
+    );
+  }
 });
 
 test("rejects ranges in pnpm catalogs", () => {
