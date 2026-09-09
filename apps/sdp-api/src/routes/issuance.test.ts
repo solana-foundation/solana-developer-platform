@@ -1905,6 +1905,84 @@ describe("Issuance Routes", () => {
       tokenId = created.data.token.id;
     });
 
+    it("updates a draft signing wallet only after resolving it in project scope", async () => {
+      const signer = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValue(createNoopSigner(address(TEST_SOLANA_ADDRESSES.wallet2)));
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${tokenId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ signingWalletId: "wallet_draft_selection" }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect(signer).toHaveBeenCalledWith(
+          env,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          "wallet_draft_selection"
+        );
+        expect((await response.json()).data.token.signingWalletId).toBe("wallet_draft_selection");
+      } finally {
+        signer.mockRestore();
+      }
+    });
+
+    it("does not persist a signing wallet that cannot be resolved", async () => {
+      const signer = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockRejectedValue(new AppError("FORBIDDEN", "Wallet is outside this project"));
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${tokenId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ signingWalletId: "wallet_other_project" }),
+          },
+          env
+        );
+        expect(response.status).toBe(403);
+        const row = await getDb(env)
+          .prepare("SELECT signing_wallet_id FROM issued_tokens WHERE id = ?")
+          .bind(tokenId)
+          .first<{ signing_wallet_id: string | null }>();
+        expect(row?.signing_wallet_id).not.toBe("wallet_other_project");
+      } finally {
+        signer.mockRestore();
+      }
+    });
+
+    it("rejects signing-wallet changes after deployment", async () => {
+      await getDb(env)
+        .prepare("UPDATE issued_tokens SET status = 'active', mint_address = ? WHERE id = ?")
+        .bind(TEST_SOLANA_ADDRESSES.wallet2, tokenId)
+        .run();
+      const response = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ signingWalletId: "wallet_new" }),
+        },
+        env
+      );
+      expect(response.status).toBe(400);
+    });
+
     it("updates token details", async () => {
       const res = await app.request(
         `/v1/issuance/tokens/${tokenId}`,

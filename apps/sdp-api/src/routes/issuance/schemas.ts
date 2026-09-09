@@ -134,6 +134,7 @@ export type CreateTokenWithAssetProfileInput = z.infer<typeof createTokenWithAss
 // (tokens:admin + an on-chain transaction). Accepting it in a tokens:write PATCH
 // desynchronized the DB flag from the chain (HOO-1013).
 export const updateTokenSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   name: z.string().min(1).max(100).optional(),
   // Symbol and decimals define the mint; the handler rejects them after deploy.
   // Same constraints as createTokenSchema.

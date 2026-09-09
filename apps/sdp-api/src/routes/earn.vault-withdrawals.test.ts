@@ -3,6 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -10,6 +11,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
+import { AuditService } from "@/services/audit.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -416,6 +418,37 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     };
     expect(body.data.withdrawal.positionId).toBe(positionId);
     expect(body.data.withdrawal.signature).toBeTruthy();
+    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+  });
+
+  it("withdraws from a PAUSED strategy — admission stops money in, never money out", async () => {
+    // The gate asymmetry stated on the operator stop switch itself:
+    // `assertStrategyDepositable` refuses a paused row on every money-in path,
+    // and the exit deliberately never consults the catalogue, so pausing a
+    // strategy mid-incident cannot trap an existing position (EARN-012).
+    await seedAuth();
+    await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+      provider: "kamino",
+      providerReference: VAULT,
+      name: "Paused Exit Vault",
+      sourceKind: "defi",
+      underlyingSource: "kamino",
+      depositMints: [USDC_MINT],
+      shareMint: SHARE_MINT,
+      apyType: "variable",
+      currentApy: "0.062",
+      liquidityTerm: "instant",
+      redemptionDelayDays: null,
+      riskMetadata: {},
+      status: "paused",
+      hostCluster: "devnet",
+      environment: "sandbox",
+    });
+    const positionId = await seedPosition();
+
+    const res = await postVaultWithdrawal({ positionId, shares: "10" });
+
+    expect(res.status).toBe(200);
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
@@ -905,5 +938,106 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     // earn:read-only key from reading any org position's live payout while
     // GET /vault-positions answers the same key 403.
     expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () => {
+  function auditRows() {
+    return getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'withdraw' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>()
+      .then(({ results }) => results ?? []);
+  }
+
+  it("records the exit with the movement's own attribution", async () => {
+    await seedAuth();
+    const positionId = await seedPosition();
+    withdrawFromVault.mockImplementation(async (_env, input) => ({
+      position: { id: input.positionId },
+      movement: movementRow({
+        id: "earn_movement_audit_exit",
+        position_id: input.positionId,
+        request_id: input.requestId,
+        initiated_by_key_id: TEST_API_KEY.id,
+      }),
+      replayed: false,
+    }));
+
+    const res = await postVaultWithdrawal({ positionId, shares: "10" });
+    expect(res.status).toBe(200);
+
+    const rows = await auditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      resource_id: "earn_movement_audit_exit",
+      organization_id: TEST_ORG.id,
+      api_key_id: TEST_API_KEY.id,
+      user_id: null,
+    });
+  });
+
+  it("never fails the exit when the audit ledger is unavailable (ADR 0002)", async () => {
+    // The audit write is post-effect and best-effort on money OUT: a
+    // fail-closed write here would let an audit-store outage trap funds, the
+    // same shape that keeps metered quotas off every exit route.
+    await seedAuth();
+    const positionId = await seedPosition();
+    vi.spyOn(AuditService.prototype, "log").mockRejectedValue(new Error("audit ledger locked"));
+
+    const res = await postVaultWithdrawal({ positionId, shares: "10" });
+
+    expect(res.status).toBe(200);
+    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+  });
+
+  it("enforces one withdraw event per movement at the database (migration 0083)", async () => {
+    // The atomic form of the backfill's existence check: two writers that
+    // both pass the SELECT still cannot append twice.
+    await seedAuth();
+    const insert = () =>
+      getDb(env)
+        .prepare(
+          `INSERT INTO audit_logs (id, organization_id, action, resource_type, resource_id, status)
+           VALUES (?, ?, 'withdraw', 'earn_movement', 'earn_movement_uq_test', 'success')`
+        )
+        .bind(`aud_${crypto.randomUUID()}`, TEST_ORG.id)
+        .run();
+
+    await insert();
+    await expect(insert()).rejects.toThrow(/unique|duplicate/i);
+  });
+
+  it("backfills a missing audit on replay, exactly once", async () => {
+    // The crash-window repair: the movement exists (replay) but the original
+    // attempt died before its audit write. The retry writes the one missing
+    // row; a further retry finds it and writes nothing.
+    await seedAuth();
+    const positionId = await seedPosition();
+    withdrawFromVault.mockImplementation(async (_env, input) => ({
+      position: { id: input.positionId },
+      movement: movementRow({
+        id: "earn_movement_audit_backfill",
+        position_id: input.positionId,
+        request_id: input.requestId,
+        initiated_by_key_id: TEST_API_KEY.id,
+      }),
+      replayed: true,
+    }));
+
+    const first = await postVaultWithdrawal({ positionId, shares: "10" });
+    expect(first.status).toBe(200);
+    const rows = await auditRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      resource_id: "earn_movement_audit_backfill",
+      api_key_id: TEST_API_KEY.id,
+    });
+    expect(String(rows[0]?.metadata)).toContain("backfilledOnReplay");
+
+    const second = await postVaultWithdrawal({ positionId, shares: "10" });
+    expect(second.status).toBe(200);
+    await expect(auditRows()).resolves.toHaveLength(1);
   });
 });

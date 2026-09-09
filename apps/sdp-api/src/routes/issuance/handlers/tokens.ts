@@ -1,6 +1,6 @@
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenResponse, TokenStatus } from "@sdp/types";
+import type { Token, TokenResponse, TokenStatus } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -196,30 +196,7 @@ export const getToken = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSchema>) => {
-  const { tokenId } = c.req.param();
-  const { auth, projectId, orgId } = requireProjectScope(c);
-
-  const body = c.req.valid("json");
-
-  const tokenService = getTenantTokenService(c);
-
-  const existing = await tokenService.getToken({
-    tokenId,
-    organizationId: orgId,
-    projectId,
-  });
-  if (!existing) {
-    throw notFound("Token");
-  }
-
-  // `deploying` is an internal transient state, so it is not part of the
-  // public TokenStatus union even though it can be observed between the claim
-  // and final deployment writes. Reject the whole PATCH during that window.
-  if (String(existing.status) === "deploying") {
-    throw conflict("Token deployment is in progress; retry after it completes");
-  }
-
+function validateDraftOnlyUpdates(existing: Token, body: z.infer<typeof updateTokenSchema>) {
   // Access-control enforcement is baked into the mint at deploy; the flag only
   // makes sense to change while the token is still an undeployed draft.
   if (
@@ -248,6 +225,42 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
   ) {
     throw badRequest("maxSupply cannot be changed after the supply is locked on-chain");
   }
+}
+
+export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSchema>) => {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+
+  const body = c.req.valid("json");
+
+  const tokenService = getTenantTokenService(c);
+
+  const existing = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+  if (!existing) {
+    throw notFound("Token");
+  }
+
+  // `deploying` is an internal transient state, so it is not part of the
+  // public TokenStatus union even though it can be observed between the claim
+  // and final deployment writes. Reject the whole PATCH during that window.
+  if (String(existing.status) === "deploying") {
+    throw conflict("Token deployment is in progress; retry after it completes");
+  }
+
+  if (body.signingWalletId !== undefined) {
+    if (existing.mintAddress || existing.status !== "pending") {
+      throw badRequest("signingWalletId cannot be changed after deployment");
+    }
+    const walletId = resolveApiKeySigningWalletId(auth, body.signingWalletId, ["tokens:write"]);
+    if (!walletId) throw badRequest("A signing wallet is required");
+    await createOrgSigner(c.env, orgId, projectId, walletId);
+  }
+
+  validateDraftOnlyUpdates(existing, body);
 
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;

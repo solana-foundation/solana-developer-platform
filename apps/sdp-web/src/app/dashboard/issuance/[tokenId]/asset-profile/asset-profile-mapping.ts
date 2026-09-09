@@ -1,4 +1,5 @@
 import type { AssetProfile, IssuanceMetadata, Token } from "@sdp/types";
+import { getTokenAccessControlMode } from "../../access-control.utils";
 import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
@@ -54,6 +55,7 @@ export interface UpdateAssetProfileActionInput {
   // the freshly fetched profile server-side before the PATCH.
   rebuiltMetadata: IssuanceMetadata;
   tokenPatch: {
+    signingWalletId?: string;
     name: string;
     description: string | null;
     uri: string | null;
@@ -202,10 +204,17 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     propertyType: readString(asset, "propertyType"),
     propertyLocation: readString(asset, "propertyLocation"),
     documents: readDocuments(asset.documents),
-    accessControl: readAccessControl(compliance.accessControl),
+    accessControl: readAccessControl(compliance.accessControl) || getTokenAccessControlMode(token),
     capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
     signingWalletId: token.signingWalletId ?? "",
+    authorityWalletIds: isRecord(customer.authorityWalletIds)
+      ? Object.fromEntries(
+          Object.entries(customer.authorityWalletIds).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string"
+          )
+        )
+      : undefined,
     metadataUri: token.uri ?? "",
     customFields: readCustomFields(customer),
     publicFields,
@@ -390,6 +399,9 @@ function canonicalDraft(draft: DraftState): Record<string, unknown> {
           .sort(([a], [b]) => a.localeCompare(b)),
       })),
     signingWalletId: draft.signingWalletId.trim(),
+    authorityWalletIds: Object.entries(draft.authorityWalletIds ?? {}).sort(([a], [b]) =>
+      a.localeCompare(b)
+    ),
     metadataUri: draft.metadataUri.trim(),
     customFields: draft.customFields
       .filter((field) => field.key.trim() || field.value.trim())

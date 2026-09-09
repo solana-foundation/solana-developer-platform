@@ -98,9 +98,9 @@ function getDestinationAccessControlError({
   const accessControlMode = getTokenAccessControlMode(token);
   const isListed = allowlistEntries.some((entry) => entry.address === normalizedDestination);
 
-  if (accessControlMode === "allowlist" && !isListed) {
-    return t("DashboardIssuance.management.destinationNotAllowlisted");
-  }
+  // Lists are loaded separately and paginated. Absence from this snapshot is
+  // not evidence that a wallet is unapproved. The API checks current on-chain
+  // membership (and, for minting, approves new recipients but rejects revocations).
 
   if (accessControlMode === "blocklist" && isListed) {
     return t("DashboardIssuance.management.destinationDenylisted");
@@ -179,12 +179,18 @@ export function createInitialAllowlistForm(): AllowlistFormState {
   };
 }
 
+function parseActivityDate(value: string): Date {
+  // Legacy audit rows are SQL UTC timestamps without an explicit timezone.
+  const isSqlUtc = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value);
+  return new Date(isSqlUtc ? `${value.replace(" ", "T")}Z` : value);
+}
+
 export function formatDate(value: string | null | undefined, locale: AppLocale): string {
   if (!value) {
     return "—";
   }
 
-  const date = new Date(value);
+  const date = parseActivityDate(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
@@ -202,7 +208,7 @@ export function formatDateTime(value: string | null | undefined, locale: AppLoca
     return "—";
   }
 
-  const date = new Date(value);
+  const date = parseActivityDate(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
@@ -228,7 +234,7 @@ export function formatActivityTimestamp(
     return "—";
   }
 
-  const date = new Date(value);
+  const date = parseActivityDate(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
@@ -782,7 +788,7 @@ export function getAvailableSignerWallets(
 
 export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet, t: Translate): string {
   const primaryLabel = wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled");
-  return `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  return `${primaryLabel} · ${formatValue(wallet.publicKey, t)}`;
 }
 
 export function findWalletByWalletId(
@@ -951,7 +957,7 @@ export function getMintValidationErrors({
   if (normalizedAmount) {
     const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
     if (amountBaseUnits === null) {
-      amountError = t("DashboardIssuance.management.validMintAmount");
+      amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
     } else if (amountBaseUnits <= ZERO_BIGINT) {
       amountError = t("DashboardIssuance.management.mintAmountPositive");
     } else if (token.maxSupply) {
@@ -1024,7 +1030,7 @@ export function getBurnValidationErrors({
   if (normalizedAmount) {
     const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
     if (amountBaseUnits === null) {
-      amountError = t("DashboardIssuance.management.validBurnAmount");
+      amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
     } else if (amountBaseUnits <= ZERO_BIGINT) {
       amountError = t("DashboardIssuance.management.burnAmountPositive");
     } else if (!normalizedSource || !signerWallet) {
@@ -1141,7 +1147,7 @@ export function getSeizeValidationErrors({
 
   const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
   if (amountBaseUnits === null) {
-    amountError = t("DashboardIssuance.management.validTransferAmount");
+    amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
   } else if (amountBaseUnits <= ZERO_BIGINT) {
     amountError = t("DashboardIssuance.management.transferAmountPositive");
   }
@@ -1211,7 +1217,7 @@ export function getForceBurnValidationErrors({
 
   const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
   if (amountBaseUnits === null) {
-    amountError = t("DashboardIssuance.management.validBurnAmount");
+    amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
   } else if (amountBaseUnits <= ZERO_BIGINT) {
     amountError = t("DashboardIssuance.management.forceBurnAmountPositive");
   }

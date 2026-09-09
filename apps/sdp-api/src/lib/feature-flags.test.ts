@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isAssetProfilesEnabled,
   isCustodyConnectionRuntimeEnabled,
+  isDvpEnabled,
   isEarnEnabled,
   isMarketsEnabled,
   isPrivateChannelsEnabled,
@@ -157,6 +158,32 @@ describe("isEarnEnabled", () => {
     "honors the opt-in value %s on both flags",
     (flag) => {
       expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
+    }
+  );
+});
+
+describe("isDvpEnabled", () => {
+  it("is disabled when both flags are unset", () => {
+    expect(isDvpEnabled({ MARKETS_ENABLED: undefined, DVP_ENABLED: undefined })).toBe(false);
+  });
+
+  it("is disabled when Markets is on but DvP is unset", () => {
+    expect(isDvpEnabled({ MARKETS_ENABLED: "true", DVP_ENABLED: undefined })).toBe(false);
+  });
+
+  // Same hierarchy as Earn: DvP is a Markets sub-module, so clearing the parent
+  // has to dark-launch it even with its own flag on.
+  it.each([undefined, "", "false", "0", "off"])(
+    "stays disabled when DvP is on but Markets is %s",
+    (markets) => {
+      expect(isDvpEnabled({ MARKETS_ENABLED: markets, DVP_ENABLED: "true" })).toBe(false);
+    }
+  );
+
+  it.each(["1", "true", " TRUE ", "yes", "on"])(
+    "honors the opt-in value %s on both flags",
+    (flag) => {
+      expect(isDvpEnabled({ MARKETS_ENABLED: flag, DVP_ENABLED: flag })).toBe(true);
     }
   );
 });
