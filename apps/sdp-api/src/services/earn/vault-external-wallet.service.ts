@@ -173,9 +173,10 @@ export type ExternalWalletDepositBuildResult =
   | {
       /**
        * The composed swap + deposit could not fit one Solana packet, even
-       * after re-routing for compactness. Nothing was persisted. The caller
-       * gets an unsigned SWAP-ONLY transaction to sign and broadcast itself,
-       * then requests an ordinary (unswapped) build for `swap.minOutAmount`.
+       * after re-routing for compactness. No submit-capable build or movement
+       * was persisted; only the recovery advisory was. The caller gets an
+       * unsigned SWAP-ONLY transaction to sign and broadcast itself, then
+       * requests an ordinary (unswapped) build for `swap.minOutAmount`.
        */
       kind: "swap_required";
       swap: JupiterSwapLeg;
@@ -370,6 +371,7 @@ export async function buildExternalWalletDepositTransaction(
     // detector to even look for.
     const swapLeg = attempt.swapLeg;
     const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
+    const depositTokenDecimals = requireWellKnownMintDecimals(input.tokenMint, "deposit token");
     // The baseline is read in parallel with the compile, so it costs the
     // partner's blockhash window nothing extra, and under the same deadline.
     // FAIL-CLOSED alongside the insert: a blind advisory could only ever page
@@ -393,6 +395,11 @@ export async function buildExternalWalletDepositTransaction(
         readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
       ),
     ]);
+    if (baseline.decimals !== null && baseline.decimals !== depositTokenDecimals) {
+      throw internalError(
+        `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`
+      );
+    }
     await createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env)).create({
       id: generateEarnSplitSwapAdvisoryId(),
       organizationId: input.organizationId,
@@ -404,7 +411,7 @@ export async function buildExternalWalletDepositTransaction(
       ownerAddress: input.ownerAddress,
       sourceTokenMint,
       depositTokenMint: input.tokenMint,
-      depositTokenDecimals: requireWellKnownMintDecimals(input.tokenMint, "deposit token"),
+      depositTokenDecimals,
       swapSourceAmount: swapLeg.sourceAmount,
       swapMinOutAmount: swapLeg.minOutAmount,
       swapMinOutAtoms: swapLeg.minOutAtoms,

@@ -533,6 +533,32 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(row?.advisories).toBe(0);
   });
 
+  it("refuses the split when the baseline balance uses a different mint scale", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+    readOwnerMintBalance.mockResolvedValue({ atoms: 500000n, decimals: 9 });
+
+    await expect(buildExternalWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
+      "reports 9 decimals for a 6-decimal deposit token"
+    );
+
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS advisories FROM earn_split_swap_advisories")
+      .first<{ advisories: number }>();
+    expect(row?.advisories).toBe(0);
+  });
+
   it("keeps an unswapped oversized provider plan a loud failure, not a split", async () => {
     buildVaultDeposit.mockResolvedValue(
       depositPlan({

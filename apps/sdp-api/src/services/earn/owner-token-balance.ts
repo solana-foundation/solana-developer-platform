@@ -1,6 +1,7 @@
 import { createRpc } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types";
-import { type Address, address } from "@solana/kit";
+import { address } from "@solana/kit";
+import { z } from "zod";
 import {
   assertClusterEndpoint,
   earnClusterFor,
@@ -34,23 +35,27 @@ export interface OwnerMintBalance {
   decimals: number | null;
 }
 
-type MintFilteredTokenAccountsRpc = {
-  getTokenAccountsByOwner: (
-    owner: Address,
-    filter: { mint: Address },
-    config: { encoding: "jsonParsed"; commitment: "confirmed" }
-  ) => {
-    send: () => Promise<{
-      value?: Array<{
-        account?: {
-          data?: {
-            parsed?: { info?: { tokenAmount?: { amount?: unknown; decimals?: unknown } } };
-          };
-        };
-      }>;
-    }>;
-  };
-};
+const mintFilteredTokenAccountsResponseSchema = z.object({
+  value: z.array(
+    z.object({
+      account: z.object({
+        data: z.object({
+          parsed: z.object({
+            type: z.literal("account"),
+            info: z.object({
+              mint: z.string(),
+              owner: z.string(),
+              tokenAmount: z.object({
+                amount: z.string().regex(/^\d+$/),
+                decimals: z.number().int().min(0).max(255),
+              }),
+            }),
+          }),
+        }),
+      }),
+    })
+  ),
+});
 
 export async function readOwnerMintBalance(
   env: Env,
@@ -61,26 +66,34 @@ export async function readOwnerMintBalance(
   const cluster = earnClusterFor(environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   await assertClusterEndpoint(env, cluster, rpcUrl);
-  const rpc = createRpc(env, { rpcUrl }) as unknown as MintFilteredTokenAccountsRpc;
-
-  const response = await rpc
+  const response = await createRpc(env, { rpcUrl })
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },
       { encoding: "jsonParsed", commitment: "confirmed" }
     )
     .send();
+  const parsed = mintFilteredTokenAccountsResponseSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new Error("Mint-filtered token-account RPC response was malformed", {
+      cause: parsed.error,
+    });
+  }
 
   let atoms = 0n;
   let decimals: number | null = null;
-  for (const entry of response.value ?? []) {
-    const tokenAmount = entry.account?.data?.parsed?.info?.tokenAmount;
-    const rawAmount = tokenAmount?.amount;
-    const rawDecimals = tokenAmount?.decimals;
-    if (typeof rawAmount !== "string" && typeof rawAmount !== "number") continue;
-    if (typeof rawDecimals !== "number" || !Number.isInteger(rawDecimals)) continue;
-    atoms += BigInt(String(rawAmount));
-    decimals = rawDecimals;
+  for (const [index, entry] of parsed.data.value.entries()) {
+    const info = entry.account.data.parsed.info;
+    if (info.mint !== mint || info.owner !== ownerAddress) {
+      throw new Error(`Mint-filtered token-account RPC response entry ${index} was out of scope`);
+    }
+    if (decimals !== null && decimals !== info.tokenAmount.decimals) {
+      throw new Error(
+        `Mint-filtered token-account RPC response entry ${index} used inconsistent decimals`
+      );
+    }
+    atoms += BigInt(info.tokenAmount.amount);
+    decimals = info.tokenAmount.decimals;
   }
   return { atoms, decimals };
 }
