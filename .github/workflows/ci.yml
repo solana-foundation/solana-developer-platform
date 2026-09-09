@@ -107,6 +107,9 @@ jobs:
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
+      - name: Check pinned dependencies
+        run: pnpm check:pinned-dependencies
+
   translation_agent:
     name: Translation Agent
     runs-on: ubuntu-latest
