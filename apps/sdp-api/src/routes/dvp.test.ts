@@ -549,6 +549,33 @@ describe("DvP routes", () => {
     expect(settlement.results).toHaveLength(0);
   });
 
+  // A rotated key stays `active` in the row; the deadline alone retires it.
+  it("refuses a key past its rotation deadline", async () => {
+    await getDb(env)
+      .prepare("UPDATE api_keys SET rotation_deadline = '2020-01-01T00:00:00.000Z' WHERE id = ?")
+      .bind(TEST_API_KEY.id)
+      .run();
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(
+          createBody({
+            partyA: { address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn" },
+            partyB: { address: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg" },
+          })
+        ),
+      },
+      env
+    );
+    expect(res.status).toBe(403);
+
+    const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
+    expect(trades.results).toHaveLength(0);
+  });
+
   it("rejects a ref string longer than the program's 64-byte field", async () => {
     const res = await app.request(
       "/v1/dvp/trades",
