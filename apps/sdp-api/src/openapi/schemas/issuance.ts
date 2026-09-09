@@ -887,7 +887,7 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
     signingCustodyWalletId: withOpenApi(updateTokenSchemaBase.shape.signingCustodyWalletId, {
       description:
-        "Optional exact SDP Wallet ID for this on-chain metadata update. Must control the current metadata authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Does not change the draft/deployment wallet and is unused for database-only edits.",
+        "Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. Must control the current metadata authority; omission requires exactly one matching in-scope custody record, otherwise returns 409.",
       example: "cwlt_example",
     }),
     name: withOpenApi(updateTokenSchemaBase.shape.name, {
@@ -909,10 +909,6 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
       description:
         "Updated image URL. For deployed tokens, this writes the on-chain `image` metadata field. Use null to clear the displayed value.",
       example: "https://example.com/token.png",
-    }),
-    status: withOpenApi(updateTokenSchemaBase.shape.status, {
-      description: "Token operational status.",
-      example: "active",
     }),
     requiresAllowlist: withOpenApi(updateTokenSchemaBase.shape.requiresAllowlist, {
       description:

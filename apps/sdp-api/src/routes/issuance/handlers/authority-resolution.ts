@@ -133,12 +133,7 @@ async function fetchMintAuthorities(
     { commitment: "confirmed" }
   );
   if (!mint.exists) {
-    return {
-      mintAuthority: null,
-      freezeAuthority: null,
-      permanentDelegate: null,
-      metadataAuthority: null,
-    };
+    throw new Error(`Mint account ${mintAddress} was not found on-chain`);
   }
 
   const extensions = unwrapOption(mint.data.extensions) ?? [];
@@ -200,6 +195,8 @@ export async function resolveMetadataAuthority(
   try {
     const { metadataAuthority } = await fetchMintAuthorities(env, token.mintAddress);
 
+    // The typed mint decoder distinguishes a revoked/absent authority from a
+    // failed read. Do not restore stale stored authority after revocation.
     return metadataAuthority;
   } catch (error) {
     throw new AppError(

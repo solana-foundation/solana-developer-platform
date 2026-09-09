@@ -99,6 +99,8 @@ export function useTokenActionRunner() {
           confirmationDescription:
             options.confirmationDescription ??
             t("DashboardIssuance.management.sendTransactionDescription"),
+          confirmationDetails: options.confirmationDetails,
+          confirmationWarning: options.confirmationWarning,
           confirmButtonLabel:
             options.confirmButtonLabel ?? t("DashboardIssuance.management.goAhead"),
           submitToast:

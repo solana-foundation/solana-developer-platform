@@ -89,7 +89,13 @@ describe("api key flash handoff", () => {
 
     it("rejects tampered values", async () => {
       const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
-      const tampered = sealed.slice(0, -2) + (sealed.endsWith("aa") ? "bb" : "aa");
+      // Flip a real ciphertext byte rather than the trailing base64url chars:
+      // the final chars can carry padding bits the decoder ignores, so editing
+      // them is sometimes a byte-level no-op that unseals fine (a CI flake).
+      const [version, ivPart, cipherPart] = sealed.split(".");
+      const cipherBytes = Buffer.from(cipherPart, "base64url");
+      cipherBytes[0] ^= 0xff;
+      const tampered = [version, ivPart, Buffer.from(cipherBytes).toString("base64url")].join(".");
 
       expect(await unsealApiKeyFlash(tampered, SESSION)).toBeNull();
       expect(await unsealApiKeyFlash("not-a-sealed-value", SESSION)).toBeNull();

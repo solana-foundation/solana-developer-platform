@@ -46,6 +46,7 @@ function renderColdLoad(pathname: string): string {
       flags={{
         assetProfiles: false,
         custody: false,
+        dvp: false,
         earn: false,
         heliusRings: false,
         issuance: false,

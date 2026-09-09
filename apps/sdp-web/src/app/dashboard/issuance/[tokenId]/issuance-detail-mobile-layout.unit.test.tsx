@@ -118,22 +118,18 @@ describe("issuance detail mobile layout", () => {
       text: (match[3] ?? "").trim(),
     }));
 
-    expect(markup.match(/data-testid="token-id-row"/g)).toHaveLength(2);
-    expect(tokenIdValues).toHaveLength(2);
+    expect(markup.match(/data-testid="token-id-row"/g)).toHaveLength(1);
+    expect(tokenIdValues).toHaveLength(1);
 
     // The legacy header prints the id whole, so it needs somewhere to break: at the
     // dashes first, anywhere only if that isn't enough, never mid-segment by default.
-    const [legacy, assetProfile] = tokenIdValues;
+    const [legacy] = tokenIdValues;
     expect(legacy?.text).toBe(TOKEN_ID);
     expect(legacy?.className).toContain("min-w-0");
     expect(legacy?.className).toContain("[overflow-wrap:anywhere]");
     expect(legacy?.className).not.toContain("break-all");
 
-    // The asset-profile header elides the middle instead, like the address it sits
-    // beside — one line at any width, whole value on hover and on the clipboard.
-    expect(assetProfile?.text).toBe("tok_d106fe22…0529");
-    expect(assetProfile?.attributes).toContain(`title="${TOKEN_ID}"`);
-    expect(assetProfile?.className).not.toContain("[overflow-wrap:anywhere]");
+    // The consolidated asset header intentionally omits the internal ID.
   });
 
   it("contains long overview addresses while exposing their full values", () => {

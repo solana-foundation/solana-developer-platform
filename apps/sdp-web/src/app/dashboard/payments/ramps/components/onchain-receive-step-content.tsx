@@ -19,7 +19,7 @@ export function OnchainReceiveStepContent({ wizard }: { wizard: OnchainReceiveWi
     return (
       <Combobox
         label={t("DashboardPayments.ramps.destinationWallet")}
-        value={walletId || null}
+        value={walletId === "" ? null : walletId}
         onChange={setWalletId}
         options={walletOptions}
         placeholder={t("DashboardPayments.ramps.selectDestinationWallet")}
@@ -30,5 +30,8 @@ export function OnchainReceiveStepContent({ wizard }: { wizard: OnchainReceiveWi
     );
   }
 
-  return <WalletReceiveCard address={selectedWallet?.publicKey ?? ""} />;
+  if (selectedWallet === null) {
+    return null;
+  }
+  return <WalletReceiveCard address={selectedWallet.publicKey} />;
 }

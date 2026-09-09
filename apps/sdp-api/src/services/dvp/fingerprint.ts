@@ -1,0 +1,63 @@
+/**
+ * The fingerprint of a keyed create request.
+ *
+ * An Idempotency-Key on its own is a claim, not a proof: the same key sent with
+ * different terms must not hand back the earlier trade. That is not merely
+ * confusing. The stored trade names a custody wallet and publishes escrow
+ * addresses, so a wallet-scoped caller replaying another caller's key would
+ * receive a wallet and escrows outside their own scope.
+ *
+ * Every field that defines the trade goes in, `sdpWalletId` included: a replay
+ * naming a different wallet is a different request, and refusing it is what
+ * stops the key crossing a scope boundary.
+ */
+
+import { createHash } from "node:crypto";
+import type { CreateDvpTradeInput } from "./create";
+
+/**
+ * Hashes the terms a create request asked for.
+ *
+ * @param input - The trade as the caller wants it created.
+ * @returns A hex digest to compare a replay against.
+ */
+export function dvpCreateFingerprint(input: CreateDvpTradeInput): string {
+  // Listed explicitly rather than derived from object iteration, so reordering
+  // the interface can never silently invalidate every stored fingerprint.
+  //
+  // Held as values and hashed through JSON.stringify rather than joined into
+  // one string. Joining needs a separator no field can contain, and the
+  // separator this used was a raw NUL byte written literally into the source,
+  // which made git treat this file as binary and hid it from every diff. It
+  // also could not tell an omitted optional from one sent as "", because both
+  // became the same empty slot. Encoding keeps null and "" distinct and quotes
+  // the delimiters itself.
+  const material = [
+    input.sdpWalletId,
+    // The parties are described differently by kind, so the kind goes in too.
+    // Without it an agent trade and a principal trade could hash the same.
+    input.tradeKind,
+    ...(input.tradeKind === "agent"
+      ? [input.partyA, input.partyB]
+      : [input.sdpSide, input.counterparty]),
+    input.mintA,
+    input.tokenProgramA,
+    input.mintB,
+    input.tokenProgramB,
+    input.amountA.toString(),
+    input.amountB.toString(),
+    input.expiryTimestamp.toString(),
+    input.earliestSettlementTimestamp?.toString() ?? null,
+    input.refString ?? null,
+    // Where the proceeds go is a term of the trade, not a detail of it. Left
+    // out, a replay carrying the same key and the same amounts but a different
+    // destination would be handed the earlier trade and its escrow addresses,
+    // and the caller would then fund a trade delivering somewhere they did not
+    // ask for. Null stands for "omitted", which the program and the row both
+    // resolve to the party's own address.
+    input.userASettlementDestination ?? null,
+    input.userBSettlementDestination ?? null,
+  ];
+
+  return createHash("sha256").update(JSON.stringify(material)).digest("hex");
+}

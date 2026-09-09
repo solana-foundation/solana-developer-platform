@@ -10,6 +10,7 @@ import type {
   ProjectRing,
   ReadIdentityResult,
   RuntimeHealth,
+  SyncPhotonInput,
   SyncPhotonResult,
   TransitionGuard,
   VerifyIndexedResult,
@@ -18,6 +19,7 @@ import {
   DEFAULT_RING_NAME,
   HeliusRingsError,
   type HeliusRingsErrorCode,
+  isRingsIdentityMismatch,
   nextState,
   RING_NAME_PATTERN,
   type RingsGatewayPort,
@@ -25,6 +27,7 @@ import {
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
+import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
@@ -33,6 +36,7 @@ import {
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createPolicyRepository,
+  createPostgresHeliusRingsWalletRepository,
   type HeliusRingsAssetRepository,
   type HeliusRingsEventRepository,
   type HeliusRingsHealthRepository,
@@ -41,6 +45,7 @@ import {
   type HeliusRingsProjectRingRepository,
   type HeliusRingsProjectRingRow,
   type HeliusRingsWalletRepository,
+  type HeliusRingsWalletRow,
   mapHeliusRingsEventRow,
   mapHeliusRingsHealthRows,
   mapHeliusRingsProjectRingRow,
@@ -123,6 +128,13 @@ export interface WalletIdentityResult extends ReadIdentityResult {
 
 /** Op types that consume notes, and so can duplicate a payment. */
 const SPEND_OP_TYPES = new Set<string>(["transfer_registered", "withdraw", "merge"]);
+
+/**
+ * Why a paused wallet is not read. Says what to do about it, because the state
+ * is terminal until an operator acts: nothing about a mismatch resolves itself.
+ */
+const QUARANTINED_WALLET_MESSAGE =
+  "this rings wallet is paused because its material no longer derives the identity it was provisioned with; restore its original owner, organization, and project to derive that identity again, or re-key the wallet to abandon what it holds and start clean";
 
 function assertOperationEnabled(opType: PrivateOperationInput["opType"]): void {
   if (opType === "merge") {
@@ -288,6 +300,231 @@ export class HeliusRingsService {
     });
     // A lost CAS means an operator paused the wallet mid-provision; honour it.
     return mapHeliusRingsWalletRow(provisioned ?? (await this.requireWallet(wallet.id)));
+  }
+
+  /**
+   * Rotates a wallet's on-chain identity to the one its material derives now,
+   * trading whatever the published keys hold for a wallet that works again.
+   *
+   * Eligibility is the chain's answer, not this row's status: the record has to
+   * read `foreign`, meaning it exists and is not what this deployment derives.
+   * That covers both shapes the break takes — a wallet paused mid-life when sync
+   * stopped matching, and a wallet that never provisioned because the registry
+   * already held a record for its owner. A healthy wallet reads `ours` and is
+   * refused, which does not depend on a stored flag being up to date; a wallet
+   * still labelled `ready` can already be broken, because nothing re-checks the
+   * identity until the first sync quarantines it.
+   *
+   * The row is claimed before the transaction is sent. Ordering matters more
+   * than the guard itself here: once a rotation lands, no database check can
+   * undo it, so anything this service would refuse to adopt has to be refused
+   * while refusing still costs nothing. A rotation that lands but fails to
+   * persist is finished by `reconcileRotatedIdentity` on the next call rather
+   * than stranding the wallet.
+   *
+   * The confirmation is checked here rather than in the browser, because a
+   * dialog is a courtesy to the operator and not a control. The read position
+   * goes with the old identity: a cursor measures how far *that* identity was
+   * read, and keeping it would start the new one part-way through history.
+   *
+   * What is lost is lost: notes encrypted to the old keys stay on chain with
+   * nothing left that can open them.
+   */
+  async rekeyWalletIdentity(
+    walletId: string,
+    input: { confirmation: string; custodyOwner: string | null },
+    actor: HeliusRingsActor
+  ): Promise<PrivateWallet> {
+    const wallet = await this.requireWallet(walletId);
+    // A wallet that never provisioned has no owner of its own yet, so custody
+    // names the key the registry record hangs off.
+    const owner = wallet.owner_address ?? input.custodyOwner;
+    if (!owner) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "custody controls no active wallet for this rings wallet's owner"
+      );
+    }
+    if (input.confirmation.trim() !== wallet.name.trim()) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        `re-keying discards whatever this wallet's published keys hold; confirm by sending its name, "${wallet.name}"`
+      );
+    }
+
+    const published = await this.gateway.readIdentity({ walletId: wallet.id, owner });
+
+    if (published.status === "unregistered") {
+      throw new HeliusRingsError(
+        "conflict",
+        "no identity is published for this owner; provision the wallet instead of re-keying it"
+      );
+    }
+
+    if (published.status === "ours") {
+      return this.reconcileRotatedIdentity(wallet, published.derivedShieldedAddress, owner, actor);
+    }
+
+    // Claim the row before the chain is touched. Rotation cannot be taken back,
+    // so a status this service refuses to adopt has to be refused *first*: after
+    // the transaction lands, no database guard can undo it.
+    // Serialized per wallet, because exclusion has to outlive the claim: a
+    // rival claims *after* this one commits, so no guard on the row alone can
+    // stop it from sending a second irreversible transaction. The advisory
+    // lock is held across both the claim and the rotation, which is exactly
+    // what this helper exists for — the row is committed before the chain is
+    // touched, and the lock releases with the session, so a crash mid-rotation
+    // leaves no claim stuck behind.
+    //
+    // Waiters must not occupy pool connections while the winner rotates:
+    // `pg_advisory_lock` would hold a slot for every overlapping request, and
+    // the ten-connection pool then cannot check out the extra connection the
+    // winner needs to claim or adopt. A non-blocking lock refuses rivals
+    // immediately, the same conflict the row guard already uses.
+    const db = getDb(this.env);
+    const withRekeyLock = db.lockedTransactionWithPostCommit?.bind(db);
+    if (!withRekeyLock) {
+      throw new HeliusRingsError(
+        "config_error",
+        "this deployment cannot serialize a rings re-key, and re-keying unserialized risks a duplicate rotation"
+      );
+    }
+
+    let rekeyed: PrivateWallet | undefined;
+    try {
+      await withRekeyLock(
+        `rings-rekey:${wallet.id}`,
+        async (tx) => {
+          // Guarded by the row as it was before the registry read, so a rival
+          // that slipped in while this one was reading the chain loses here
+          // rather than rotating a wallet whose state it never saw. The claim
+          // runs on the lock's executor so it does not check out a second
+          // pool connection while this session still holds the lock.
+          const claimed = await createPostgresHeliusRingsWalletRepository(
+            asTransactionalClient(tx)
+          ).claimWalletForRekey({
+            ...this.tenant,
+            id: wallet.id,
+            expectedUpdatedAt: wallet.updated_at,
+          });
+          if (!claimed) {
+            throw new HeliusRingsError(
+              "conflict",
+              "this rings wallet is no longer in a state that can be re-keyed; read it again and retry"
+            );
+          }
+          return claimed;
+        },
+        async () => {
+          const rotated = await this.gateway.rekeyIdentity({ walletId: wallet.id, owner });
+
+          const adopted = await this.wallets.rekeyWallet({
+            ...this.tenant,
+            id: wallet.id,
+            shieldedAddress: rotated.identity.shieldedAddress,
+            ownerAddress: rotated.identity.owner,
+            materialTag: rotated.materialTag,
+          });
+
+          getLogger().warn(
+            {
+              walletId: wallet.id,
+              owner,
+              abandonedShieldedAddress: published.publishedShieldedAddress,
+              shieldedAddress: rotated.identity.shieldedAddress,
+              signatures: rotated.registrationSignatures,
+              apiKeyId: actor.apiKeyId,
+              actor: actor.actor,
+              adopted: Boolean(adopted),
+            },
+            "rings wallet re-keyed: whatever its previous keys held is unrecoverable"
+          );
+
+          if (!adopted) {
+            // The chain moved and the row did not. Reporting the stored identity
+            // as a success would hide that divergence behind a 200; say it
+            // instead, and point at the retry that reconciles it.
+            throw new HeliusRingsError(
+              "conflict",
+              "the re-key landed on chain but this wallet's stored identity was not updated; retry to adopt the published keys"
+            );
+          }
+
+          rekeyed = mapHeliusRingsWalletRow(adopted);
+        },
+        undefined,
+        { wait: false }
+      );
+    } catch (error) {
+      if (error instanceof SessionLockUnavailableError) {
+        throw new HeliusRingsError(
+          "conflict",
+          "this rings wallet is no longer in a state that can be re-keyed; read it again and retry"
+        );
+      }
+      throw error;
+    }
+
+    if (!rekeyed) {
+      throw new AppError("INTERNAL_ERROR", "rings re-key completed without adopting an identity");
+    }
+    return rekeyed;
+  }
+
+  /**
+   * Adopts an identity the chain already publishes, without rotating anything.
+   *
+   * This is the tail of a rotation that landed but whose persistence did not —
+   * a lost confirmation, a failed re-read, a dropped write. The registry is
+   * already correct, so re-sending would be a second irreversible write for no
+   * gain; the only thing missing is the row catching up. Without this the wallet
+   * is stranded: `readIdentity` answers `ours`, so the re-key path would refuse
+   * it, and provisioning returns early for anything but a pending wallet.
+   */
+  private async reconcileRotatedIdentity(
+    wallet: HeliusRingsWalletRow,
+    derivedShieldedAddress: string,
+    owner: string,
+    actor: HeliusRingsActor
+  ): Promise<PrivateWallet> {
+    const settled =
+      wallet.status === "ready" &&
+      wallet.owner_address === owner &&
+      wallet.shielded_address === derivedShieldedAddress;
+    if (settled) {
+      throw new HeliusRingsError(
+        "conflict",
+        "this rings wallet already derives its published identity; there is nothing to re-key"
+      );
+    }
+
+    const adopted = await this.wallets.rekeyWallet({
+      ...this.tenant,
+      id: wallet.id,
+      shieldedAddress: derivedShieldedAddress,
+      ownerAddress: owner,
+      materialTag: wallet.material_tag,
+    });
+    if (!adopted) {
+      throw new HeliusRingsError(
+        "conflict",
+        "this rings wallet is no longer in a state that can adopt its published identity; read it again and retry"
+      );
+    }
+
+    getLogger().warn(
+      {
+        walletId: wallet.id,
+        owner,
+        staleShieldedAddress: wallet.shielded_address,
+        shieldedAddress: derivedShieldedAddress,
+        apiKeyId: actor.apiKeyId,
+        actor: actor.actor,
+      },
+      "rings wallet adopted an already-published rotation: no new transaction was sent"
+    );
+
+    return mapHeliusRingsWalletRow(adopted);
   }
 
   async readWalletIdentity(walletId: string, owner: string | null): Promise<WalletIdentityResult> {
@@ -480,6 +717,13 @@ export class HeliusRingsService {
   ): Promise<PrivateOperation> {
     assertOperationEnabled(input.opType);
     const wallet = await this.requireWallet(input.walletId);
+    // Refused here rather than at prove time: a paused wallet cannot decrypt
+    // its own notes, so every operation on one is already lost. Letting it
+    // reserve an intent spends an intent key and a row to reach an error that
+    // says less than this one does.
+    if (wallet.status === "paused") {
+      throw new HeliusRingsError("conflict", QUARANTINED_WALLET_MESSAGE);
+    }
     await this.assertAssetAllowed(input);
     await this.assertNoUnresolvedOperation(input);
     // A retry re-runs the pinned ring, never the selector: the approver and
@@ -1456,10 +1700,13 @@ export class HeliusRingsService {
     if (!(wallet.owner_address && wallet.shielded_address)) {
       throw new HeliusRingsError("conflict", "this rings wallet has no provisioned identity yet");
     }
+    if (wallet.status === "paused") {
+      throw new HeliusRingsError("conflict", QUARANTINED_WALLET_MESSAGE);
+    }
 
     const allowlist = await this.assets.listActive();
 
-    const result = await this.gateway.syncPhoton({
+    const result = await this.readShieldedState({
       walletId: wallet.id,
       owner: wallet.owner_address,
       // Re-derived and compared inside the gateway. A wallet whose material no
@@ -1498,6 +1745,43 @@ export class HeliusRingsService {
     }
 
     return result;
+  }
+
+  /**
+   * The gateway read, with the one failure it can never recover from turned
+   * into a wallet state instead of a repeat.
+   *
+   * An identity mismatch is derived locally from fixed inputs, so it recurs
+   * identically on every read — and the dashboard syncs each wallet on load,
+   * which turns that into an error per wallet per visit forever. Pausing the
+   * wallet records the finding once and takes it out of the loop, leaving an
+   * operator a wallet to re-provision rather than a recurring failure.
+   */
+  private async readShieldedState(input: SyncPhotonInput): Promise<SyncPhotonResult> {
+    try {
+      return await this.gateway.syncPhoton(input);
+    } catch (error) {
+      if (!isRingsIdentityMismatch(error)) throw error;
+
+      // The mismatch is the finding worth surfacing, so the pause is
+      // best-effort: it is logged either way and the original error still
+      // reaches the caller. It is pinned to the identity this read was for,
+      // because a read that began before a re-key lands after it, and by then
+      // the mismatch describes keys the wallet has already abandoned —
+      // applying it would take the recovered wallet back out of service.
+      const paused = input.expectedShieldedAddress
+        ? await this.wallets.quarantineWallet({
+            ...this.tenant,
+            id: input.walletId,
+            expectedShieldedAddress: input.expectedShieldedAddress,
+          })
+        : null;
+      getLogger().warn(
+        { walletId: input.walletId, quarantined: Boolean(paused) },
+        "rings wallet paused: its material no longer derives its provisioned identity"
+      );
+      throw error;
+    }
   }
 
   /** The operation with its event feed joined in, for the detail panel. */

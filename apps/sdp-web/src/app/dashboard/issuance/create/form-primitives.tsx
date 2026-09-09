@@ -121,9 +121,7 @@ export function ReadOnlyField({
   return (
     <div className="grid gap-1.5">
       <Label>{label}</Label>
-      <div className="flex h-10 items-center rounded-[14px] border border-border-default bg-fill-subtle px-4 text-sm text-secondary">
-        {value || "—"}
-      </div>
+      <div className="py-2 text-sm text-secondary">{value || "—"}</div>
       {lockReason ? <p className="text-xs text-tertiary">{lockReason}</p> : null}
     </div>
   );

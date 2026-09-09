@@ -4,8 +4,10 @@ import {
   DEFAULT_TREE_ADDRESS,
   DepositAsset,
   depositInstruction,
+  SHIELDED_POOL_CPI_AUTHORITY,
   SHIELDED_POOL_PROGRAM_ID,
   SOL_INTERFACE,
+  SPL_TOKEN_2022_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
 import {
@@ -449,11 +451,18 @@ async function ringSpendWire(
 ): Promise<string> {
   const tableAddress = options.lookupTable ?? RING_LOOKUP_TABLE;
   const tables = {
+    // What zolana rents a new table with, so the compressed indexes here are
+    // the ones a real ring spend carries.
     [tableAddress]: [
-      ...(await ringLookupTableAddresses({
-        ringProgramId: RING_PROGRAM,
-        tree: DEFAULT_TREE_ADDRESS,
-      })),
+      ...new Set([
+        ...(await ringLookupTableAddresses({
+          ringProgramId: RING_PROGRAM,
+          tree: DEFAULT_TREE_ADDRESS,
+        })),
+        SHIELDED_POOL_CPI_AUTHORITY,
+        SPL_TOKEN_PROGRAM_ID,
+        SPL_TOKEN_2022_PROGRAM_ID,
+      ]),
     ],
   };
   const transaction = compileTransaction(
@@ -1001,14 +1010,22 @@ describe("validateOuterTransaction", () => {
   });
 
   describe("ring-bound spend", () => {
-    it("pins the locally derived table to zolana's ringLookupTableAddresses", async () => {
+    it("pins the locally derived table to the addresses zolana rents one with", async () => {
       // The wire gate resolves lookups against this list without RPC; upstream
-      // drift must break this build, never custody.
+      // drift must break this build, never custody. Zolana keeps the trailing
+      // settlement group private, so it is spelled out here; the bring-up gate
+      // in provision-ring.test.ts pins the whole list to the real builder's
+      // bytes.
       expect([...(await expectedRingTable(RING_PROGRAM, DEFAULT_TREE_ADDRESS))]).toEqual([
-        ...(await ringLookupTableAddresses({
-          ringProgramId: RING_PROGRAM,
-          tree: DEFAULT_TREE_ADDRESS,
-        })),
+        ...new Set([
+          ...(await ringLookupTableAddresses({
+            ringProgramId: RING_PROGRAM,
+            tree: DEFAULT_TREE_ADDRESS,
+          })),
+          SHIELDED_POOL_CPI_AUTHORITY,
+          SPL_TOKEN_PROGRAM_ID,
+          SPL_TOKEN_2022_PROGRAM_ID,
+        ]),
       ]);
     });
 

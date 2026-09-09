@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {
   getLockSupplyDisabledReason,
+  getMintValidationErrors,
   getRemainingMintableSupply,
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
@@ -49,6 +50,45 @@ function makeToken(overrides: Partial<Token> = {}): Token {
         : overrides.signingCustodyWalletId,
   };
 }
+
+describe("mint amount validation", () => {
+  it("does not reject an approved recipient because its list page is not loaded", () => {
+    const errors = getMintValidationErrors({
+      token: makeToken({ requiresAllowlist: true }),
+      amount: "1",
+      destination: "8NjftgbiNJbaNZRYYXDAZ5SFRBTRg3is9eue1g5RW8m1",
+      allowlistEntries: [],
+      t,
+    });
+    expect(errors.destination).toBeNull();
+  });
+
+  const validate = (amount: string) =>
+    getMintValidationErrors({
+      token: makeToken(),
+      amount,
+      destination: "",
+      allowlistEntries: [],
+      t,
+    }).amount;
+
+  it("rejects a pasted address", () => {
+    expect(validate("19pJbAo7bvnneW9uSnWgRpK4PMzFCJceYwdLxHRiDAqx2")).not.toBeNull();
+  });
+
+  it("explains the token's decimal limit", () => {
+    expect(validate("1.0000001")).toContain("6 decimal places");
+  });
+
+  it("rejects zero and amounts beyond the remaining supply", () => {
+    expect(validate("0")).toContain("greater than zero");
+    expect(validate("750001")).toContain("remaining supply cap");
+  });
+
+  it("accepts a positive amount at the token's precision", () => {
+    expect(validate("0.000001")).toBeNull();
+  });
+});
 
 describe("getRemainingMintableSupply", () => {
   it("returns null when the token has no cap", () => {

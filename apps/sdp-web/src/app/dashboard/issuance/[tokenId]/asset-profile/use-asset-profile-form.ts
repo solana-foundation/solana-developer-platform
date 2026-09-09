@@ -135,6 +135,7 @@ export function useAssetProfileForm({
             ? {}
             : {
                 symbol: draft.symbol.trim(),
+                ...(draft.signingWalletId ? { signingCustodyWalletId: draft.signingWalletId } : {}),
                 decimals: Number(draft.decimals),
                 requiresAllowlist: draft.accessControl === "allowlist",
               }),
@@ -204,6 +205,7 @@ export function useAssetProfileForm({
 // carry the token's own value.
 function draftTokenPatch(draft: DraftState): Partial<Token> {
   return {
+    signingCustodyWalletId: draft.signingWalletId || null,
     name: draft.name.trim(),
     symbol: draft.symbol.trim(),
     decimals: Number(draft.decimals),

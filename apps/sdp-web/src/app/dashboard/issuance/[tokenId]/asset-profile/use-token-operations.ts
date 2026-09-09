@@ -3,26 +3,18 @@
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useSWRConfig } from "swr";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import type { FundManagementModalAction } from "../token-fund-management-section";
-import {
-  fetchTokenAuthorityWallets,
-  fetchTokenManagementSupportingData,
-  type TokenManagementSupportingData,
-} from "../token-management-workspace.data";
 import type {
   ActionExecutionInput,
   AdminAction,
-  PermissionControlStatus,
   PermissionRow,
   RunActionOptions,
 } from "../token-management-workspace.types";
 import {
   asOptionalString,
-  classifyAuthorityControl,
   createInitialAllowlistForm,
   createInitialAuthorityForm,
   createInitialBurnForm,
@@ -34,7 +26,6 @@ import {
   getBurnValidationErrors,
   getBurnValidationReason,
   getControlListCopy,
-  getDisplayedAuthorityAddress,
   getExplorerHref,
   getExtensionRows,
   getForceBurnValidationErrors,
@@ -42,74 +33,16 @@ import {
   getLockSupplyDisabledReason,
   getMintValidationErrors,
   getMintValidationReason,
-  getPermissionRows,
   getRemainingMintableSupply,
   getSeizeValidationErrors,
   getSeizeValidationReason,
   getSignerSelectionForAction,
-  getTokenActionDisabledReasons,
   isPositiveAmount,
   resolveAuthorityAddressForRole,
-  summarizeAuthorityControl,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
-import { fetchTokenAllowlistLabels } from "./allowlist.data";
-import { isTokenAllowlistKey, TOKEN_ALLOWLIST_LABELS_KEY } from "./allowlist-cache";
-import { isTokenTransactionsKey } from "./transactions-cache";
-
-// Same cache keys and TTLs as the old TokenManagementWorkspace, so the two UIs
-// share warm caches for a given token.
-const TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS = 60_000;
-const TOKEN_SUPPORTING_DATA_CACHE_TTL_MS = 60_000;
-const TOKEN_ALLOWLIST_LABELS_CACHE_TTL_MS = 30_000;
-
-const EMPTY_SUPPORTING_DATA: TokenManagementSupportingData = {
-  authorityWallets: [],
-  authorityWalletsError: null,
-  transactions: [],
-  transactionsError: null,
-  transactionsTotal: null,
-  transactionsHasMore: false,
-  allowlistEntries: [],
-  allowlistError: null,
-  allowlistTotal: null,
-  allowlistHasMore: false,
-  frozenAccounts: [],
-  frozenAccountsError: null,
-  frozenAccountsTotal: null,
-  frozenAccountsHasMore: false,
-};
-
-function mergeWalletsPreferBalances(
-  primaryWallets: PaymentsDashboardWallet[],
-  secondaryWallets: PaymentsDashboardWallet[]
-): PaymentsDashboardWallet[] {
-  if (primaryWallets.length === 0) {
-    return secondaryWallets;
-  }
-  if (secondaryWallets.length === 0) {
-    return primaryWallets;
-  }
-
-  const secondaryById = new Map(secondaryWallets.map((wallet) => [wallet.id, wallet]));
-  const merged = primaryWallets.map((wallet) => {
-    const richerWallet = secondaryById.get(wallet.id);
-    if (!richerWallet) {
-      return wallet;
-    }
-    return Array.isArray(richerWallet.balances)
-      ? { ...wallet, balances: richerWallet.balances }
-      : wallet;
-  });
-
-  const primaryIds = new Set(primaryWallets.map((wallet) => wallet.id));
-  for (const wallet of secondaryWallets) {
-    if (!primaryIds.has(wallet.id)) {
-      merged.push(wallet);
-    }
-  }
-  return merged;
-}
+import { getTokenOperationPermissions } from "./token-operation-permissions";
+import { useTokenOperationData } from "./use-token-operation-data";
 
 /**
  * The operational core of token management (deploy, mint, burn, seize,
@@ -118,7 +51,6 @@ function mergeWalletsPreferBalances(
  * TokenManagementWorkspace against the same API endpoints and shared utils —
  * the monolith itself is intentionally untouched.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: mirrors the legacy workspace's centralized action orchestration.
 export function useTokenOperations({
   token,
   shouldLoadSupportingData,
@@ -131,7 +63,7 @@ export function useTokenOperations({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
-  const { mutate: globalMutate } = useSWRConfig();
+  const { sdpEnvironment } = useDashboardWorkspace();
   const {
     isPending,
     actionConfirmation,
@@ -141,6 +73,7 @@ export function useTokenOperations({
     confirmAction,
     selectConfirmationWallet,
   } = useTokenActionRunner();
+  const { isPending: isRefreshingSupply, runAction: refreshSupply } = useTokenActionRunner();
 
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
   const [authorityModalCurrentAuthority, setAuthorityModalCurrentAuthority] = useState<
@@ -179,89 +112,31 @@ export function useTokenOperations({
   const showControlList = hasAccessControlList(accessControlMode);
 
   const {
-    data: authorityWalletsData,
-    error: authorityWalletsRequestError,
-    mutate: mutateAuthorityWallets,
-  } = usePersistedDashboardSWR(
-    shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
-    {
-      refreshInterval: 60_000,
-      revalidateOnFocus: true,
-      revalidateIfStale: true,
-    },
-    {
-      key: `token.${token.id}.authority-wallets`,
-      ttlMs: TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS,
-    }
-  );
-  const {
-    data: supportingData,
-    error: supportingDataRequestError,
-    mutate: mutateSupportingData,
-  } = usePersistedDashboardSWR(
-    shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
-    // Skip the allowlist and transactions here — the control list is owned by
-    // ControlListEntries (paged/search), transactions by TokenTransactionsBrowser
-    // (paged/filtered), and the allowlist count comes from the labels endpoint below.
-    ([, tokenId]: readonly [string, string]) =>
-      fetchTokenManagementSupportingData(tokenId, t, {
-        includeAllowlist: false,
-        includeTransactions: false,
-      }),
-    {
-      refreshInterval: 60_000,
-      revalidateOnFocus: true,
-      revalidateIfStale: true,
-    },
-    {
-      key: `token.${token.id}.supporting-data`,
-      ttlMs: TOKEN_SUPPORTING_DATA_CACHE_TTL_MS,
-    }
-  );
-
-  // Distinct labels + unfiltered entry count for the control list. Same SWR key
-  // ControlListEntries uses, so its dropdown fetch is deduped; here it feeds the
-  // compliance tab's summary count without touching supporting-data.
-  const { data: allowlistLabelsData, error: allowlistLabelsRequestError } =
-    usePersistedDashboardSWR(
-      showControlList ? [TOKEN_ALLOWLIST_LABELS_KEY, token.id] : null,
-      ([, tokenId]: readonly [string, string]) => fetchTokenAllowlistLabels(tokenId),
-      { revalidateOnFocus: true, revalidateIfStale: true },
-      { key: `token.${token.id}.allowlist-labels`, ttlMs: TOKEN_ALLOWLIST_LABELS_CACHE_TTL_MS }
-    );
-
-  const supportingDataError = supportingDataRequestError
-    ? supportingDataRequestError instanceof Error
-      ? supportingDataRequestError.message
-      : t("DashboardIssuance.management.unableToLoadData")
-    : null;
-  const supportingDataLoading =
-    shouldLoadSupportingData && supportingData === undefined && !supportingDataError;
-  const resolvedSupportingData = supportingData ?? EMPTY_SUPPORTING_DATA;
-  const authorityWalletsFetchError = authorityWalletsRequestError
-    ? authorityWalletsRequestError instanceof Error
-      ? authorityWalletsRequestError.message
-      : t("DashboardIssuance.management.unableToLoadSignerWallets")
-    : null;
-  const authorityWalletsLoading =
-    shouldLoadAuthorityWallets && authorityWalletsData === undefined && !authorityWalletsFetchError;
-
-  const revalidateAfterSuccess = async () => {
-    if (shouldLoadAuthorityWallets) {
-      await mutateAuthorityWallets();
-    }
-    if (shouldLoadSupportingData) {
-      await mutateSupportingData();
-    }
-    // The control-list search/labels fetch lives inside ControlListEntries with
-    // its own SWR keys; refresh every cached page + labels facet for this token
-    // so add/remove is reflected there and in the count.
-    await globalMutate((key) => isTokenAllowlistKey(key, token.id));
-    // TokenTransactionsBrowser owns its own paged/filtered SWR keys; refresh them
-    // so a mint/burn/etc. shows up in the transactions list right away.
-    await globalMutate((key) => isTokenTransactionsKey(key, token.id));
-  };
+    authorityWallets,
+    authorityWalletsData,
+    authorityWalletsFetchError,
+    authorityWalletsError,
+    authorityWalletsLoading,
+    supportingDataLoading,
+    transactions,
+    transactionsError,
+    transactionsTotal,
+    transactionsHasMore,
+    allowlistEntries,
+    allowlistError,
+    allowlistTotal,
+    allowlistHasMore,
+    frozenAccounts,
+    frozenAccountsError,
+    frozenAccountsTotal,
+    frozenAccountsHasMore,
+    revalidateAfterSuccess,
+  } = useTokenOperationData({
+    token,
+    shouldLoadAuthorityWallets,
+    shouldLoadSupportingData,
+    showControlList,
+  });
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
     runActionBase(input, {
       ...options,
@@ -279,74 +154,39 @@ export function useTokenOperations({
       },
     });
 
-  const authorityWallets = mergeWalletsPreferBalances(
-    authorityWalletsData?.authorityWallets ?? [],
-    resolvedSupportingData.authorityWallets
-  );
-  const authorityWalletsError =
-    authorityWalletsFetchError ??
-    authorityWalletsData?.authorityWalletsError ??
-    supportingDataError ??
-    resolvedSupportingData.authorityWalletsError;
-  const transactions = resolvedSupportingData.transactions;
-  const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
-  const transactionsTotal = resolvedSupportingData.transactionsTotal;
-  const transactionsHasMore = resolvedSupportingData.transactionsHasMore;
-  // The control list is served by ControlListEntries (paged/search); asset-profile
-  // no longer pulls entries through supporting-data. Count + error come from the
-  // labels fetch above.
-  const allowlistEntries = resolvedSupportingData.allowlistEntries;
-  const allowlistError = allowlistLabelsRequestError
-    ? allowlistLabelsRequestError instanceof Error
-      ? allowlistLabelsRequestError.message
-      : t("DashboardIssuance.management.unableToLoadData")
-    : null;
-  const allowlistTotal = allowlistLabelsData?.total ?? null;
-  const allowlistHasMore = false;
-  const frozenAccounts = resolvedSupportingData.frozenAccounts;
-  const frozenAccountsError = supportingDataError ?? resolvedSupportingData.frozenAccountsError;
-  const frozenAccountsTotal = resolvedSupportingData.frozenAccountsTotal;
-  const frozenAccountsHasMore = resolvedSupportingData.frozenAccountsHasMore;
-
   const tokenBasePath = `/api/dashboard/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
   const canDeployToken = token.status === "pending" && !token.mintAddress;
   const {
-    mintDisabledReason,
-    burnDisabledReason,
-    seizeDisabledReason,
-    forceBurnDisabledReason,
     pauseDisabledReason,
-    freezeDisabledReason,
-  } = getTokenActionDisabledReasons(token, t);
-  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
-
-  const withWalletLoadError = <T extends { unavailableReason: string | null }>(selection: T): T => {
-    if (authorityWalletsLoading && selection.unavailableReason) {
-      return {
-        ...selection,
-        unavailableReason: t("DashboardIssuance.management.loadingSignerWallets"),
-      };
-    }
-    if (authorityWalletsError && selection.unavailableReason) {
-      return { ...selection, unavailableReason: authorityWalletsError };
-    }
-    return selection;
-  };
-  const signerSelectionFor = (
-    action: Parameters<typeof getSignerSelectionForAction>[0]["action"]
-  ) =>
-    withWalletLoadError(
-      getSignerSelectionForAction({ action, token, authorityWallets, metadataAuthority, t })
-    );
-  const deploySignerSelection = signerSelectionFor("deploy");
-  const deployDisabledReason = deploySignerSelection.unavailableReason;
-  const mintSignerSelection = signerSelectionFor("mint");
-  const burnSignerSelection = signerSelectionFor("burn");
-  const seizeSignerSelection = signerSelectionFor("seize");
-  const forceBurnSignerSelection = signerSelectionFor("force-burn");
-  const freezeSignerSelection = signerSelectionFor("freeze");
-  const pauseSignerSelection = signerSelectionFor("pause");
+    metadataAuthority,
+    withWalletLoadError,
+    deploySignerSelection,
+    deployDisabledReason,
+    mintSignerSelection,
+    burnSignerSelection,
+    seizeSignerSelection,
+    forceBurnSignerSelection,
+    freezeSignerSelection,
+    pauseSignerSelection,
+    permissionRows,
+    authoritySummary,
+    displayedMintAuthority,
+    effectiveMintDisabledReason,
+    effectiveBurnDisabledReason,
+    effectiveSeizeDisabledReason,
+    effectiveForceBurnDisabledReason,
+    effectiveFreezeDisabledReason,
+    effectivePauseDisabledReason,
+  } = getTokenOperationPermissions({
+    token,
+    authorityWallets,
+    authorityWalletsLoading,
+    authorityWalletsError,
+    canManageTokenAdmin,
+    t,
+  });
+  const extensionRows = useMemo(() => getExtensionRows(token, t), [token, t]);
   const metadataSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "metadata",
@@ -372,69 +212,6 @@ export function useTokenOperations({
       t,
     })
   );
-
-  // Custody control is only knowable once the authority wallets have loaded
-  // without error; until then a row's control status is "unknown" (no badge).
-  const authorityControlKnown = !authorityWalletsLoading && !authorityWalletsError;
-  const permissionRows = getPermissionRows(token, metadataAuthority, t).map((row) => {
-    const displayedAuthorityAddress = getDisplayedAuthorityAddress({
-      token,
-      role: row.authorityRole,
-      metadataAuthority,
-      authorityWallets,
-    });
-    const rowWithDisplayedValue = { ...row, value: displayedAuthorityAddress };
-    const controlStatus: PermissionControlStatus = classifyAuthorityControl(
-      displayedAuthorityAddress,
-      authorityWallets,
-      authorityControlKnown
-    );
-
-    return {
-      ...rowWithDisplayedValue,
-      controlStatus,
-      editDisabledReason: canManageTokenAdmin
-        ? withWalletLoadError(
-            getSignerSelectionForAction({
-              action: "authority",
-              token,
-              authorityWallets,
-              metadataAuthority,
-              permissionRow: rowWithDisplayedValue,
-              t,
-            })
-          ).unavailableReason
-        : t("DashboardIssuance.management.onlyAdminsCanEditAuthorities"),
-    };
-  });
-
-  // Roll-up for the overview "Managed authorities: N of M" tile and the
-  // permissions-tab external-authority warning. Shared with the issuance list's
-  // expanded card so both surfaces count identically.
-  const authoritySummary = summarizeAuthorityControl({
-    token,
-    authorityWallets,
-    controlKnown: authorityControlKnown,
-    t,
-  });
-  const displayedMintAuthority = getDisplayedAuthorityAddress({
-    token,
-    role: "mint",
-    metadataAuthority,
-    authorityWallets,
-  });
-  const extensionRows = useMemo(() => getExtensionRows(token, t), [token, t]);
-
-  const effectiveMintDisabledReason = mintDisabledReason ?? mintSignerSelection.unavailableReason;
-  const effectiveBurnDisabledReason = burnDisabledReason ?? burnSignerSelection.unavailableReason;
-  const effectiveSeizeDisabledReason =
-    seizeDisabledReason ?? seizeSignerSelection.unavailableReason;
-  const effectiveForceBurnDisabledReason =
-    forceBurnDisabledReason ?? forceBurnSignerSelection.unavailableReason;
-  const effectiveFreezeDisabledReason =
-    freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
-  const effectivePauseDisabledReason =
-    pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
 
   // Lock supply = mint the remainder, then revoke the mint authority. Both legs
   // are signed by the current mint authority, so mintSignerSelection covers the
@@ -591,12 +368,19 @@ export function useTokenOperations({
   };
 
   const handleRefreshSupply = () => {
-    runAction({
-      label: t("DashboardIssuance.management.refreshSupply"),
-      method: "POST",
-      path: `${tokenBasePath}/refresh-supply`,
-      body: {},
-    });
+    if (isRefreshingSupply || isPending) return;
+    refreshSupply(
+      {
+        label: t("DashboardIssuance.management.refreshSupply"),
+        method: "POST",
+        path: `${tokenBasePath}/refresh-supply`,
+        body: {},
+      },
+      {
+        submitToast: t("DashboardIssuance.management.refreshingSupply"),
+        successToast: t("DashboardIssuance.management.supplyUpdated"),
+      }
+    );
   };
 
   const handleMint = () => {
@@ -639,6 +423,22 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.mintConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.mintConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.destination"), value: destination },
+          ...(token.requiresAllowlist
+            ? [
+                {
+                  label: t("DashboardIssuance.management.recipientApproval"),
+                  value: t("DashboardIssuance.management.recipientApprovalAutomatic"),
+                },
+              ]
+            : []),
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.mintNow"),
         submitToast: t("DashboardIssuance.management.submittingMint"),
         successToast: t("DashboardIssuance.management.mintFinalized"),
@@ -685,6 +485,14 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.burnConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.burnConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.source"), value: source },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.burnNow"),
         submitToast: t("DashboardIssuance.management.submittingBurn"),
         successToast: t("DashboardIssuance.management.burnFinalized"),
@@ -835,6 +643,9 @@ export function useTokenOperations({
         confirmationTitle: pause
           ? t("DashboardIssuance.management.pauseConfirmationTitle")
           : t("DashboardIssuance.management.unpauseConfirmationTitle"),
+        confirmationWarning: pause
+          ? t("DashboardIssuance.management.pauseImpactWarning")
+          : t("DashboardIssuance.management.unpauseImpactWarning"),
         confirmationDescription: pause
           ? t("DashboardIssuance.management.pauseConfirmationDescription")
           : t("DashboardIssuance.management.unpauseConfirmationDescription"),
@@ -1271,6 +1082,7 @@ export function useTokenOperations({
   return {
     // action runner
     isPending,
+    isRefreshingSupply,
     actionConfirmation,
     dismissActionConfirmation,
     confirmAction,
@@ -1288,6 +1100,13 @@ export function useTokenOperations({
     effectiveFreezeDisabledReason,
     complianceActionDisabledReasons,
     fundManagementDisabledReasons,
+    // Incomplete form values must not prevent reopening an operation.
+    operationAvailability: {
+      mint: effectiveMintDisabledReason,
+      burn: effectiveBurnDisabledReason,
+      seize: effectiveSeizeDisabledReason,
+      "force-burn": effectiveForceBurnDisabledReason,
+    },
     // wallets + supporting data
     authorityWallets,
     authorityWalletsError,

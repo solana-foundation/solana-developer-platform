@@ -45,6 +45,8 @@ export interface RunActionOptions {
   requiresConfirmation?: boolean;
   confirmationTitle?: string;
   confirmationDescription?: string;
+  confirmationWarning?: string;
+  confirmationDetails?: Array<{ label: string; value: string }>;
   confirmButtonLabel?: string;
   submitToast?: string;
   successToast?: string;
@@ -65,7 +67,7 @@ export interface ActionConfirmationState {
       | "successToast"
     >
   > &
-    Pick<RunActionOptions, "onSuccess">;
+    Pick<RunActionOptions, "onSuccess" | "confirmationDetails" | "confirmationWarning">;
 }
 
 export interface TokenManagementWorkspaceProps {
@@ -199,6 +201,7 @@ export interface PermissionRow {
   value: string | null;
   authorityRole: AuthorityFormState["role"];
   editDisabledReason?: string | null;
+  removalDisabledReason?: string | null;
   controlStatus?: PermissionControlStatus;
 }
 

@@ -1,10 +1,16 @@
+import { listSettingsForType } from "@sdp/issuance/capabilities";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { AdvancedSettingsEditor } from "./advanced-settings-editor";
-import { createInitialCapacities } from "./issuance-draft-wizard.types";
+import { TokenControlRow } from "./token-control-row";
+import {
+  findControlConflict,
+  groupTokenControls,
+  toggleTokenControl,
+} from "./token-controls-model";
 
 function renderWithI18n(children: ReactNode) {
   return renderToStaticMarkup(
@@ -13,115 +19,108 @@ function renderWithI18n(children: ReactNode) {
     </I18nProvider>
   );
 }
-
 const baseProps = {
   category: "stablecoin" as const,
   type: "fiat_backed",
   settings: {},
   onSettingsChange: () => undefined,
-  capacities: createInitialCapacities(),
-  onCapacitiesChange: () => undefined,
+  mode: "editable" as const,
 };
-
-describe("AdvancedSettingsEditor", () => {
-  it("renders one collapsed list with permanent and ongoing sections (no mode tabs)", () => {
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(markup).toContain("Permanent");
-    expect(markup).toContain("Ongoing");
-    // The Basic/Detailed/Expert tabs are gone.
-    expect(markup).not.toContain("Detailed");
-    expect(markup).not.toContain("Expert");
+describe("token controls editor", () => {
+  it("locks a required control toggle without disabling its draft parameters", () => {
+    const fee = listSettingsForType("generic", "generic").find(
+      (entry) => entry.key === "transferFee"
+    );
+    if (!fee) throw new Error("Missing transfer-fee capability");
+    const markup = renderWithI18n(
+      <TokenControlRow
+        entry={{ ...fee, availability: "locked" }}
+        selection={{ params: { basisPoints: "50", maxFee: "100" } }}
+        variant="advanced"
+        mode="editable"
+        showErrors={false}
+        onToggle={() => undefined}
+        onParam={() => undefined}
+      />
+    );
+    const inputs = markup.match(/<input[^>]*>/g) ?? [];
+    expect(inputs.find((input) => input.includes('type="checkbox"'))).toContain('disabled=""');
+    expect(inputs.find((input) => input.includes('value="50"'))).not.toContain('disabled=""');
   });
-
-  it("keeps setting labels human and hides technical extension names until toggled", () => {
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(markup).toContain(">View<");
-    // stablecoin locks the pausable extension; its raw name only shows in technical mode.
-    expect(markup).not.toContain("pausable");
+  it("keeps advanced controls collapsed without repeated descriptions", () => {
+    const markup = renderWithI18n(
+      <AdvancedSettingsEditor {...baseProps} category="generic" type="generic" />
+    );
+    const advanced = markup.match(/<details[\s\S]*?<\/details>/)?.[0];
+    expect(advanced).toContain("Advanced controls");
+    expect(advanced).not.toContain('open=""');
+    expect(advanced).not.toContain("mt-0.5 block text-xs text-tertiary");
+    expect(advanced).toContain('type="checkbox"');
   });
-
-  it("renders the access-control row only when a change handler is provided", () => {
-    const withAccess = renderWithI18n(
+  it("keeps required stablecoin controls in a compact list, without retired modes", () => {
+    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
+    for (const label of ["Emergency pause capability", "Freeze balances", "Recovery authority"])
+      expect(markup).toContain(label);
+    for (const label of [
+      "Ongoing",
+      "Advanced settings",
+      "Recommended",
+      "Common add-ons",
+      "Verified holders",
+    ])
+      expect(markup).not.toContain(label);
+  });
+  it("renders the recipient selector only when supplied", () => {
+    const markup = renderWithI18n(
       <AdvancedSettingsEditor
         {...baseProps}
-        accessControl=""
+        accessControl="disabled"
         onAccessControlChange={() => undefined}
       />
     );
-    expect(withAccess).toContain("Access control");
-    expect(withAccess).toContain("Allowlist");
-    // The single-select control is backed by native radio inputs, not tab-role
-    // buttons (there are no tabpanels behind it) — a screen-reader correctness guard.
-    expect(withAccess).toContain('type="radio"');
-    expect(withAccess).not.toContain('role="tablist"');
-    expect(withAccess).not.toContain('role="tab"');
-
-    const withoutAccess = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(withoutAccess).not.toContain("Access control");
-  });
-
-  it("renders off-chain capacities as plain toggles (no not-enforced badge)", () => {
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(markup).toContain("Verified holders"); // the kyc capacity label
-    expect(markup).not.toContain("Not enforced yet");
-  });
-
-  it("uses jargon-free capacity descriptions in the default (non-technical) view", () => {
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    // Institutional wording is shown by default...
-    expect(markup).toContain("issue new units or retire existing ones");
-    // ...the token/mint/burn phrasing is reserved for the technical view.
-    expect(markup).not.toContain("mint new tokens or burn existing supply");
-  });
-
-  it("reveals a Configure affordance for a configurable capacity when config is allowed", () => {
-    const capacities = createInitialCapacities();
-    capacities.restrictTradingHours = { enabled: true };
-    const markup = renderWithI18n(
-      <AdvancedSettingsEditor {...baseProps} capacities={capacities} allowCapacityConfig />
+    expect(markup).toContain("Any recipient");
+    expect(markup).toContain('role="combobox"');
+    expect(renderWithI18n(<AdvancedSettingsEditor {...baseProps} />)).not.toContain(
+      'role="combobox"'
     );
-    expect(markup).toContain("Configure");
-    expect(markup).toContain("Not configured yet");
   });
-
-  it("keeps capacities declaration-only in the wizard: no per-card config UI", () => {
-    const capacities = createInitialCapacities();
-    capacities.restrictTradingHours = { enabled: true };
+  it("hides unselected controls after deployment and keeps selected parameters disabled", () => {
     const markup = renderWithI18n(
-      <AdvancedSettingsEditor {...baseProps} capacities={capacities} />
+      <AdvancedSettingsEditor
+        {...baseProps}
+        category="generic"
+        type="generic"
+        mode="readonly"
+        settings={{ transferFee: { params: { basisPoints: "50", maxFee: "100" } } }}
+      />
     );
-    // No per-card Configure / summary in the wizard...
-    expect(markup).not.toContain("Not configured yet");
-    // ...the section subtitle explains config happens later on the compliance tab.
-    expect(markup).toContain("configured later on the compliance tab");
+    expect(markup).toContain("Transfer fee");
+    expect(markup).toContain('value="50"');
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain("Interest-bearing");
   });
-
-  it("offers add-on bundles, hidden once the on-chain settings are read-only", () => {
-    const editable = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(editable).toContain("Common add-ons");
-
-    const readOnly = renderWithI18n(<AdvancedSettingsEditor {...baseProps} settingsReadOnly />);
-    expect(readOnly).not.toContain("Common add-ons");
+  it("initializes setting parameters and never toggles a required setting", () => {
+    const entries = listSettingsForType("generic", "generic");
+    const fee = entries.find((entry) => entry.key === "transferFee");
+    expect(fee).toBeDefined();
+    if (!fee) throw new Error("Missing transfer-fee capability");
+    const enabled = toggleTokenControl({}, fee, true);
+    expect(enabled.transferFee).toHaveProperty("params");
+    expect(toggleTokenControl(enabled, fee, false)).not.toHaveProperty("transferFee");
+    const locked = listSettingsForType("stablecoin", "fiat_backed").find(
+      (entry) => entry.availability === "locked"
+    );
+    if (!locked) throw new Error("Missing required stablecoin capability");
+    const settings = {};
+    expect(toggleTokenControl(settings, locked, false)).toBe(settings);
   });
-
-  it("excludes the profile-applied default combo from the add-on chips", () => {
-    const markup = renderWithI18n(<AdvancedSettingsEditor {...baseProps} />);
-    expect(markup).not.toContain("Regulated stablecoin");
-    expect(markup).toContain("Closed network");
-  });
-
-  it("hides unselected on-chain options once deployed, keeping required ones", () => {
-    // tokenized_security locks freeze/reclaim and marks scaledUiAmount recommended.
-    const securityProps = { ...baseProps, category: "tokenized_security" as const, type: "equity" };
-
-    // Editable draft: the recommended-but-unselected option is still offered.
-    const editable = renderWithI18n(<AdvancedSettingsEditor {...securityProps} />);
-    expect(editable).toContain("Scaled display amount");
-    expect(editable).toContain("Freeze transfers");
-
-    // Deployed (read-only): the unselected option is dropped; required stays.
-    const deployed = renderWithI18n(<AdvancedSettingsEditor {...securityProps} settingsReadOnly />);
-    expect(deployed).not.toContain("Scaled display amount");
-    expect(deployed).toContain("Freeze transfers");
+  it("preserves conflict restrictions and groups only deployed settings in read-only mode", () => {
+    const entries = listSettingsForType("generic", "generic");
+    const fee = entries.find((entry) => entry.key === "transferFee");
+    if (!fee) throw new Error("Missing transfer-fee capability");
+    expect(findControlConflict(fee, entries, { nonTransferable: {} })?.key).toBe("nonTransferable");
+    expect(findControlConflict(fee, entries, { transferFee: {} })).toBeUndefined();
+    const groups = groupTokenControls(entries, { transferFee: {} }, "readonly");
+    expect(groups.advanced.map((entry) => entry.key)).toEqual(["transferFee"]);
   });
 });

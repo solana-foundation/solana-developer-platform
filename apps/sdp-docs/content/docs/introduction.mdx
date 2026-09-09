@@ -44,8 +44,8 @@ const response = await fetch(
     body: JSON.stringify({
       provider: "moonpay",
       counterpartyId: "cp_...",
-      destinationWallet: "wal_...",
-      cryptoToken: "USDC",
+      destinationCustodyWalletId: "cwlt_...",
+      assetRail: "usdc.solana",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     }),
@@ -64,8 +64,8 @@ response = requests.post(
     json={
         "provider": "moonpay",
         "counterpartyId": "cp_...",
-        "destinationWallet": "wal_...",
-        "cryptoToken": "USDC",
+        "destinationCustodyWalletId": "cwlt_...",
+        "assetRail": "usdc.solana",
         "fiatCurrency": "USD",
         "fiatAmount": "100.00",
     },
@@ -81,8 +81,8 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -d '{
     "provider": "moonpay",
     "counterpartyId": "cp_...",
-    "destinationWallet": "wal_...",
-    "cryptoToken": "USDC",
+    "destinationCustodyWalletId": "cwlt_...",
+    "assetRail": "usdc.solana",
     "fiatCurrency": "USD",
     "fiatAmount": "100.00"
   }'

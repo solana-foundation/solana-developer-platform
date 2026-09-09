@@ -432,12 +432,12 @@ export interface CreateTokenRequest {
  * PATCH /v1/issuance/tokens/:id
  */
 export interface UpdateTokenRequest {
+  /** Draft deployment wallet; after deploy, a per-request metadata signer only. */
+  signingCustodyWalletId?: string;
   name?: string;
   description?: string | null;
   uri?: string | null;
   imageUrl?: string | null;
-  /** Pause or resume the token */
-  status?: "active" | "paused";
 }
 
 /**

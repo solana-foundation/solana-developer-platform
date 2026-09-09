@@ -462,7 +462,7 @@ describe("authority-resolution", () => {
     ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
   });
 
-  it("returns no authority when the mint account is not available yet", async () => {
+  it("fails closed when the mint account cannot be found", async () => {
     fetchMaybeMintMock.mockResolvedValue({ exists: false });
 
     await expect(
@@ -475,7 +475,7 @@ describe("authority-resolution", () => {
         createToken(),
         "mint"
       )
-    ).resolves.toBeNull();
+    ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
   });
 
   it("resolves a unique authority to its exact custody wallet row", async () => {

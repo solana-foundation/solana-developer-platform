@@ -23,7 +23,11 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
 } from "@sdp/types";
-import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
+import {
+  earnDepositStyle,
+  earnWithdrawSlippageFloor,
+  isVaultDirectDepositEnabled,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnExternalWalletTransactionRow } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -69,6 +73,12 @@ import {
   type earnVaultWithdrawalPreviewSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import {
+  beginEarnDepositAudit,
+  completeEarnDepositAudit,
+  concludeEarnDepositAuditOnError,
+  recordEarnWithdrawalAudit,
+} from "./movement-audit";
 import { decodeMovementCursor } from "./movements";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import {
@@ -706,6 +716,15 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     throw notFound("Earn external-wallet position");
   }
 
+  // Same provider-policy exit floor as the custody withdrawal: a non-null
+  // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
+  // derived from the withdrawal preview — never an admission gate).
+  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+    throw badRequest(
+      `minAmountOut is required for this withdrawal because ${position.provider} declares a withdrawal slippage policy.`
+    );
+  }
+
   // Same owner-is-the-default normalization as the deposit build.
   const feePayer = body.feePayer === position.ownerAddress ? undefined : body.feePayer;
 
@@ -808,15 +827,53 @@ export async function createEarnExternalWalletDeposit(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const result = await submitExternalWalletDeposit(c.env, {
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    transactionId: body.transactionId,
-    signedTransaction: body.signedTransaction,
-    requestId,
-    userId: auth.userId ?? null,
-    apiKeyId: auth.apiKeyId ?? null,
+  // Fail-closed audit admission (PRO-1866): no durable intent, no broadcast.
+  const auditIntent = await beginEarnDepositAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      requestId,
+    }
+  );
+
+  let result: Awaited<ReturnType<typeof submitExternalWalletDeposit>>;
+  try {
+    result = await submitExternalWalletDeposit(c.env, {
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      transactionId: body.transactionId,
+      signedTransaction: body.signedTransaction,
+      requestId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    });
+  } catch (error) {
+    // A 4xx is a definitive pre-broadcast refusal (verification, build
+    // consumption, recording): close the intent instead of paging
+    // verification over it. Anything else stays UNRESOLVED (the submit can
+    // 5xx after a successful send; see movement-audit.ts).
+    await concludeEarnDepositAuditOnError(c, auditIntent, error);
+    throw error;
+  }
+
+  await completeEarnDepositAudit(c, auditIntent, {
+    resourceId: result.movement.id,
+    metadata: {
+      movementId: result.movement.id,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      replayed: result.replayed,
+    },
   });
 
   const response: EarnExternalWalletDepositResponse = {
@@ -845,6 +902,30 @@ export async function createEarnExternalWalletWithdrawal(
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
+
+  // Best-effort and post-effect (PRO-1866): a fail-closed audit write would
+  // be a new way for the exit submit to 5xx (ADR 0002). A replay only
+  // backfills an audit row the crashed original never wrote.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: result.movement.created_by,
+      apiKeyId: result.movement.initiated_by_key_id,
+    },
+    result.movement.id,
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      requestId,
+    },
+    { replayed: result.replayed }
+  );
 
   const response: EarnExternalWalletWithdrawalResponse = {
     withdrawal: toExternalWalletMovementWire(result.movement, result.replayed),

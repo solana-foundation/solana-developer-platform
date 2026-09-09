@@ -158,7 +158,7 @@ describe("profileToDraftState", () => {
     expect(draft.description).toBe("");
     expect(draft.documents).toEqual([]);
     expect(draft.customFields).toEqual([]);
-    expect(draft.accessControl).toBe("");
+    expect(draft.accessControl).toBe("blocklist");
   });
 
   it("falls back to the registry default public fields when visibility is absent", () => {

@@ -775,6 +775,107 @@ describe("TokenService", () => {
       ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
     });
 
+    // HOO-1013 follow-up: converge/no-slot repair paths mirror OBSERVED chain
+    // state, vetoed by any settled lifecycle transaction newer than the
+    // observation slot.
+    describe("reconcileObservedTokenPauseState", () => {
+      const storedStatus = (id: string) =>
+        db
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(id)
+          .first<{ status: string }>();
+
+      it("repairs a stale status when nothing newer is recorded", async () => {
+        await insertCappedToken("tok_observe_repair", "0", null);
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_repair",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(true);
+        expect(await storedStatus("tok_observe_repair")).toMatchObject({ status: "paused" });
+      });
+
+      it("is vetoed by a settled lifecycle transaction newer than the observation", async () => {
+        await insertCappedToken("tok_observe_veto", "0", null);
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions (
+               id, token_id, organization_id, type, status, operation_params, slot, initiated_by_key_id
+             ) VALUES (?, ?, ?, 'unpause', 'confirmed', '{}', 600, ?)`
+          )
+          .bind("ttx_observe_veto", "tok_observe_veto", TEST_ORG.id, TEST_PROJECT_API_KEY.id)
+          .run();
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_veto",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(false);
+        expect(await storedStatus("tok_observe_veto")).toMatchObject({ status: "active" });
+      });
+
+      it("is not vetoed by settled rows without a slot — those are what it repairs around", async () => {
+        await insertCappedToken("tok_observe_null_slot", "0", null);
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions (
+               id, token_id, organization_id, type, status, operation_params, slot, initiated_by_key_id
+             ) VALUES (?, ?, ?, 'pause', 'confirmed', '{}', NULL, ?)`
+          )
+          .bind(
+            "ttx_observe_null_slot",
+            "tok_observe_null_slot",
+            TEST_ORG.id,
+            TEST_PROJECT_API_KEY.id
+          )
+          .run();
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_null_slot",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(true);
+        expect(await storedStatus("tok_observe_null_slot")).toMatchObject({ status: "paused" });
+      });
+
+      it("is a no-op when the row already matches the observation", async () => {
+        await insertCappedToken("tok_observe_consistent", "0", null);
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_consistent",
+          "active",
+          500
+        );
+
+        expect(repaired).toBe(false);
+        expect(await storedStatus("tok_observe_consistent")).toMatchObject({ status: "active" });
+      });
+
+      it("never touches a token outside the active/paused pair", async () => {
+        await insertCappedToken("tok_observe_pending", "0", null);
+        await db
+          .prepare("UPDATE issued_tokens SET status = 'pending' WHERE id = ?")
+          .bind("tok_observe_pending")
+          .run();
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_pending",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(false);
+        expect(await storedStatus("tok_observe_pending")).toMatchObject({ status: "pending" });
+      });
+    });
+
     it("does not replay an older unfreeze over a newer settled refreeze", async () => {
       const tokenId = "tok_freeze_replay_order";
       const accountAddress = "account_freeze_replay_order";
@@ -1221,6 +1322,22 @@ describe("TokenService", () => {
       });
     });
 
+    it("claims legacy confirmation without replacing its saved wallet identities", async () => {
+      await insertToken("tok_claim_legacy_wallet", { status: "pending", mintAddress: null });
+      await db
+        .prepare(
+          `UPDATE issued_tokens SET signing_custody_wallet_id = 'cwlt_issuance_previous',
+         signing_wallet_id = 'provider_issuance_previous' WHERE id = 'tok_claim_legacy_wallet'`
+        )
+        .run();
+
+      expect(await tokenService.beginTokenDeploy("tok_claim_legacy_wallet", null)).toMatchObject({
+        status: "deploying",
+        signingCustodyWalletId: "cwlt_issuance_previous",
+        signingWalletId: "provider_issuance_previous",
+      });
+    });
+
     it("returns null when the token is already claimed for deploy", async () => {
       await insertToken("tok_claim_twice", { status: "pending", mintAddress: null });
 
@@ -1336,6 +1453,53 @@ describe("TokenService", () => {
       await tokenService.releaseTokenDeploy("tok_claim_release_noop");
 
       expect(await readStatus("tok_claim_release_noop")).toBe("active");
+    });
+
+    // HOO-1013: the commit is only valid while the caller holds the deploying
+    // claim — a confirm that skipped the claim used to pass its read-time
+    // guards concurrently and overwrite the winner's mint.
+    it("refuses to commit a deploy on an unclaimed token", async () => {
+      await insertToken("tok_deploy_unclaimed", { status: "pending", mintAddress: null });
+
+      await expect(
+        tokenService.setTokenDeployed(
+          "tok_deploy_unclaimed",
+          "11111111111111111111111111111111",
+          "11111111111111111111111111111111",
+          null
+        )
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(await readStatus("tok_deploy_unclaimed")).toBe("pending");
+    });
+
+    it("never overwrites an established mint, even from a raced second confirmation", async () => {
+      await insertToken("tok_deploy_once", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_deploy_once", null);
+      await tokenService.setTokenDeployed(
+        "tok_deploy_once",
+        "11111111111111111111111111111111",
+        "11111111111111111111111111111111",
+        null
+      );
+
+      await expect(
+        tokenService.setTokenDeployed(
+          "tok_deploy_once",
+          "Attacker11111111111111111111111111111111111",
+          "Attacker11111111111111111111111111111111111",
+          null
+        )
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const row = await db
+        .prepare("SELECT mint_address, mint_authority, status FROM issued_tokens WHERE id = ?")
+        .bind("tok_deploy_once")
+        .first<{ mint_address: string; mint_authority: string; status: string }>();
+      expect(row).toEqual({
+        mint_address: "11111111111111111111111111111111",
+        mint_authority: "11111111111111111111111111111111",
+        status: "active",
+      });
     });
 
     it("applies tenant predicates before deployment and supply mutations", async () => {

@@ -357,7 +357,7 @@ async function assertRingLookupTableBringUp(
 
   // Extend: the same table, extended with exactly `expectedRingTable(ring,
   // tree)` in order — the list the wire policy re-derives locally for every
-  // ring spend.
+  // ring spend, which since 0.1.6 ends with the settlement statics.
   const expected = await expectedRingTable(expect.ringProgramId, expect.tree);
   const extendData = new Uint8Array(extend.data ?? []);
   if (extendData.length !== 12 + expected.length * 32) refuse();

@@ -3,6 +3,19 @@ import { describe, expect, it } from "vitest";
 import { CenteredDashboardTopBar, StandardDashboardTopBar } from "./dashboard-header";
 
 describe("CenteredDashboardTopBar", () => {
+  it("hides the redundant title on mobile and tablet while retaining its accessible heading", () => {
+    const markup = renderToStaticMarkup(
+      <CenteredDashboardTopBar
+        title="Asset management"
+        leadingContent={<span>Back</span>}
+        trailingContent={<span>Notifications</span>}
+        hideTitleOnMobile
+      />
+    );
+    expect(markup).toContain("max-xl:sr-only");
+    expect(markup).toContain("Asset management</h1>");
+    expect(markup.match(/<h1/g)).toHaveLength(1);
+  });
   it("gives a 390px viewport a full-width title row without widening the document", () => {
     const markup = renderToStaticMarkup(
       <CenteredDashboardTopBar

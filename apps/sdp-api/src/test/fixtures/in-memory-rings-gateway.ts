@@ -7,6 +7,7 @@ import type {
   ProvisionRingResult,
   ReadIdentityInput,
   ReadIdentityResult,
+  RekeyIdentityInput,
   RingsGatewayPort,
   RuntimeHealth,
   SyncPhotonInput,
@@ -113,6 +114,24 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       lookupTableAddress:
         input.lookupTableAddress ??
         `Lt${hashHex(`lookup:${input.ringProgramId}`, 20).replaceAll("0", "z")}`,
+    };
+  }
+
+  /**
+   * Lands on the same identity `readIdentity` derives, which is what a real
+   * rotation does: the record moves off whatever stale keys it published and
+   * onto the ones this wallet's material derives now.
+   */
+  async rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult> {
+    const seed = `${input.walletId}:${input.owner}`;
+    return {
+      identity: {
+        shieldedAddress: `rings1${hashHex(`${seed}:address`, 16)}`,
+        owner: input.owner,
+      },
+      registrationSignatures: [`sig:${hashHex(`${seed}:rekey`, 8)}`],
+      mergingEnabled: true,
+      materialTag: "simulated",
     };
   }
 

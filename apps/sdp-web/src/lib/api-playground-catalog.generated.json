@@ -477,7 +477,7 @@
       {
         "id": "check-wallet-signer",
         "operationId": "checkWalletSigner",
-        "title": "Check signer via memo transaction",
+        "title": "Check signer via simulated memo transaction",
         "method": "POST",
         "path": "/v1/wallets/signer-check",
         "pathFields": [],
@@ -499,8 +499,8 @@
             "feePayer": "So11111111111111111111111111111111111111112",
             "memo": "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
             "signature": "sig_example",
-            "slot": 123456789,
-            "blockTime": "2026-02-20T00:00:00.000Z"
+            "simulated": true,
+            "checkedAt": "2026-02-20T00:00:00.000Z"
           },
           "meta": {
             "requestId": "req_example",
@@ -5302,7 +5302,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -5626,7 +5626,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&cryptoToken={cryptoToken}&fiatCurrency={fiatCurrency}&destinationWallet={destinationWallet}&destinationCountry={destinationCountry}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}&destinationCountry={destinationCountry}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5661,11 +5661,34 @@
             ]
           },
           {
-            "key": "cryptoToken",
-            "label": "cryptoToken",
-            "description": "Crypto asset symbol.",
-            "defaultValue": "USDC",
-            "required": true
+            "key": "assetRail",
+            "label": "assetRail",
+            "description": "Canonical SDP crypto asset rail.",
+            "defaultValue": "usdc.solana",
+            "required": true,
+            "kind": "select",
+            "options": [
+              {
+                "label": "sol.solana",
+                "value": "sol.solana"
+              },
+              {
+                "label": "usdc.solana",
+                "value": "usdc.solana"
+              },
+              {
+                "label": "usdt.solana",
+                "value": "usdt.solana"
+              },
+              {
+                "label": "usdg.solana",
+                "value": "usdg.solana"
+              },
+              {
+                "label": "pyusd.solana",
+                "value": "pyusd.solana"
+              }
+            ]
           },
           {
             "key": "fiatCurrency",
@@ -6274,10 +6297,10 @@
             ]
           },
           {
-            "key": "destinationWallet",
-            "label": "destinationWallet",
-            "description": "Destination wallet ID. Required when direction is onramp.",
-            "defaultValue": "privy_wallet_123",
+            "key": "destinationCustodyWalletId",
+            "label": "destinationCustodyWalletId",
+            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "defaultValue": "cwlt_example",
             "required": false
           },
           {
@@ -8327,7 +8350,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
             "required": true
           }
         ],
