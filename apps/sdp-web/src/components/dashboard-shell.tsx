@@ -23,6 +23,9 @@ import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail
 import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import DashboardLoading from "@/app/dashboard/loading";
 import {
+  DvpCreateSkeleton,
+  DvpTradeDetailSkeleton,
+  DvpTradesSkeleton,
   EarnIntegrationGuideSkeleton,
   EmbeddedYieldPortfolioSkeleton,
   MarketsLandingSkeleton,
@@ -160,6 +163,12 @@ function resolvePageLoadingComponent(
       return EarnIntegrationGuideSkeleton;
     case "embedded-yield-integrate":
       return EarnIntegrationGuideSkeleton;
+    case "dvp-trades":
+      return DvpTradesSkeleton;
+    case "dvp-trade-create":
+      return DvpCreateSkeleton;
+    case "dvp-trade-detail":
+      return DvpTradeDetailSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":
@@ -514,6 +523,7 @@ export function DashboardShell({
   const {
     assetProfiles: assetProfilesEnabled,
     custody: custodyEnabled,
+    dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
@@ -552,11 +562,13 @@ export function DashboardShell({
     privateChannelsEnabled,
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled
+    policiesEnabled,
+    dvpEnabled
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     custodyEnabled,
+    dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
     issuanceEnabled,
@@ -795,6 +807,7 @@ export function DashboardShell({
             pathname={pathname}
             canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+            dvpEnabled={dvpEnabled}
             earnEnabled={earnEnabled}
             heliusRingsEnabled={heliusRingsEnabled}
             marketsEnabled={marketsEnabled}

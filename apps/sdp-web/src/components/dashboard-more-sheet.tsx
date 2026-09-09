@@ -45,6 +45,7 @@ function getMoreGroups(
   options: {
     canReadApprovals: boolean;
     canManageOrgSettings: boolean;
+    dvpEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
@@ -55,7 +56,8 @@ function getMoreGroups(
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        ...(options.marketsEnabled && options.earnEnabled
+        // Markets shows for any enabled sub-module, not Earn specifically.
+        ...(options.marketsEnabled && (options.earnEnabled || options.dvpEnabled)
           ? [
               {
                 label: t("Shared.dashboardShell.markets"),
@@ -168,6 +170,7 @@ export function DashboardMoreSheet({
   pathname,
   canReadApprovals,
   canManageOrgSettings,
+  dvpEnabled,
   earnEnabled,
   heliusRingsEnabled,
   marketsEnabled,
@@ -177,6 +180,7 @@ export function DashboardMoreSheet({
   pathname: string;
   canReadApprovals: boolean;
   canManageOrgSettings: boolean;
+  dvpEnabled: boolean;
   earnEnabled: boolean;
   heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
@@ -187,6 +191,7 @@ export function DashboardMoreSheet({
   const groups = getMoreGroups(t, {
     canReadApprovals,
     canManageOrgSettings,
+    dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,

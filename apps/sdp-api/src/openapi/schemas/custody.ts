@@ -217,8 +217,19 @@ const custodyWalletBaseSchema = z.object({
     description: "Optional wallet label.",
     example: "Root Signing Wallet",
   }),
+  // Response shape, so it lists every purpose a wallet may actually carry —
+  // including one only SDP mints. The CREATE schemas stay closed on purpose: a
+  // caller must not be able to mint a wallet claiming to be a settlement
+  // authority, which is why they are not simply kept in step with this.
   purpose: z
-    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .enum([
+      "root",
+      "mint_authority",
+      "freeze_authority",
+      "fee_payer",
+      "transfer",
+      "dvp_settlement_authority",
+    ])
     .nullable()
     .openapi({ description: "Optional wallet purpose.", example: "root" }),
   status: z.enum(["active", "inactive"]).openapi({

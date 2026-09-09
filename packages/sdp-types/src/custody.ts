@@ -374,7 +374,18 @@ export type CustodyWalletPurpose =
   | "mint_authority"
   | "freeze_authority"
   | "fee_payer"
-  | "transfer";
+  | "transfer"
+  /**
+   * Signs DvP settlement for a project.
+   *
+   * Its own purpose because it is not an ordinary transfer wallet: it holds the
+   * only key that can settle or cancel any trade in the project, it is baked
+   * into every trade's address as a PDA seed, and deactivating it makes every
+   * open trade under it unsettleable by anyone. A wallet carrying that much
+   * consequence should not be indistinguishable from one somebody made to move
+   * tokens around.
+   */
+  | "dvp_settlement_authority";
 export type CustodyConfigStatus = "active" | "inactive";
 export type CustodyWalletStatus = "active" | "inactive";
 
