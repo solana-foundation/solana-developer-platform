@@ -88,16 +88,23 @@ function StepAction({
   );
 }
 
+function isQuickStartEligible(workspace: ReturnType<typeof useDashboardWorkspace>) {
+  return Boolean(
+    workspace.initialQuickStartStep &&
+      workspace.initialQuickStartStep !== "done" &&
+      workspace.dashboardCacheScope.orgId &&
+      workspace.selectedProjectId &&
+      workspace.sdpEnvironment === "sandbox" &&
+      workspace.dashboardAccess.capabilities.canManageApiKeys
+  );
+}
+
 export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
   const t = useTranslations();
-  const {
-    dashboardCacheScope,
-    selectedProjectId,
-    dashboardAccess,
-    flags,
-    sdpEnvironment,
-    initialQuickStartStep,
-  } = useDashboardWorkspace();
+  const workspace = useDashboardWorkspace();
+  const { dashboardCacheScope, selectedProjectId, dashboardAccess, flags, initialQuickStartStep } =
+    workspace;
+  const eligible = isQuickStartEligible(workspace);
   const pathname = usePathname();
   const storageKey = quickStartKey(dashboardCacheScope, selectedProjectId);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -113,34 +120,14 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
     serverSnapshot
   );
   useEffect(() => {
-    if (
-      initialQuickStartStep &&
-      dashboardCacheScope.orgId &&
-      sdpEnvironment === "sandbox" &&
-      dashboardAccess.capabilities.canManageApiKeys
-    ) {
+    if (eligible && initialQuickStartStep && dashboardCacheScope.orgId) {
       const orgId = dashboardCacheScope.orgId;
       initializeQuickStart(storageKey, initialQuickStartStep, (nextStep) =>
         saveQuickStartProgress(orgId, nextStep)
       );
     }
-  }, [
-    storageKey,
-    dashboardCacheScope.orgId,
-    initialQuickStartStep,
-    sdpEnvironment,
-    dashboardAccess.capabilities.canManageApiKeys,
-  ]);
-  if (
-    !initialQuickStartStep ||
-    initialQuickStartStep === "done" ||
-    !step ||
-    step === "done" ||
-    !selectedProjectId ||
-    sdpEnvironment !== "sandbox" ||
-    !dashboardAccess.capabilities.canManageApiKeys
-  )
-    return null;
+  }, [storageKey, dashboardCacheScope.orgId, initialQuickStartStep, eligible]);
+  if (!eligible || !step || step === "done") return null;
 
   const current = stepCopy[step];
   const stepNumber = current.number;
@@ -148,8 +135,7 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
     (placement === "modal" && pathname === "/dashboard") || (docked && expandedKey === storageKey);
   const isRight =
     docked ||
-    placement === "right" ||
-    placement === "right-collapsed" ||
+    ["right", "right-collapsed"].includes(placement ?? "") ||
     (placement === "modal" && !isModal);
   const position = isRight ? "right-4" : "left-4";
   const minimize = () => {

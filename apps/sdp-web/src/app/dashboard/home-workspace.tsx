@@ -599,11 +599,6 @@ export function HomeWorkspace({
       ? t("Shared.homeWorkspace.noTrackedBalances")
       : null;
   const todaysVolume = activitySnapshot?.todaysVolume ?? null;
-  const todaysVolumeError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
-      : t("Shared.homeWorkspace.activityUnavailable")
-    : (activitySnapshot?.activityError ?? null);
   const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
     issuance: issuanceEnabled,
   });
@@ -635,7 +630,7 @@ export function HomeWorkspace({
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
             todaysVolume={todaysVolume}
-            todaysVolumeError={todaysVolumeError}
+            todaysVolumeError={activityError}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
