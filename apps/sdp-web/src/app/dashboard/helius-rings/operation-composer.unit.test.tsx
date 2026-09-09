@@ -214,4 +214,28 @@ describe("OperationComposer merge", () => {
     expect("ring" in sent).toBe(false);
     expect(sent.to).toBeUndefined();
   });
+
+  it("does not offer USDC, even if the previous op had it selected", async () => {
+    renderComposer([]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Asset" }));
+    await user.click(await screen.findByRole("option", { name: "USDC" }));
+    await user.click(screen.getByRole("tab", { name: "Merge" }));
+
+    await user.click(screen.getByRole("combobox", { name: "Asset" }));
+    expect(screen.queryByRole("option", { name: "USDC" })).toBeNull();
+    expect(await screen.findByRole("option", { name: "SOL" })).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        opType: "merge",
+        asset: { mint: "So11111111111111111111111111111111111111112" },
+      })
+    );
+  });
 });

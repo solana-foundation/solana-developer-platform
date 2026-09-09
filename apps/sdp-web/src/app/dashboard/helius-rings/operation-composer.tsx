@@ -46,11 +46,20 @@ interface ComposerDraft {
   ring: string | null;
 }
 
+const NATIVE_SOL_MINT = RINGS_ALLOWLISTED_ASSETS[0].mint;
+
+/** Merge is SOL-only; the API rejects any other mint on that arm. */
+function assetsFor(opType: RingsOpType) {
+  return opType === "merge"
+    ? RINGS_ALLOWLISTED_ASSETS.filter((entry) => entry.mint === NATIVE_SOL_MINT)
+    : RINGS_ALLOWLISTED_ASSETS;
+}
+
 function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
   return {
     walletId,
     opType,
-    assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
+    assetMint: NATIVE_SOL_MINT,
     amountDecimal: "",
     recipient: "",
     ring: null,
@@ -224,7 +233,13 @@ export function OperationComposer({
                 // destination, a spend's source of funds — so a carried-over
                 // choice would silently redirect value. Every switch starts
                 // from the default pool.
-                patchDraft({ opType, ring: null });
+                patchDraft({
+                  opType,
+                  ring: null,
+                  // A shield can name USDC; merge cannot, so a carried mint
+                  // would 400. Other switches keep the current asset.
+                  ...(opType === "merge" ? { assetMint: NATIVE_SOL_MINT } : {}),
+                });
               }}
             />
             <ComposeStep
@@ -333,7 +348,7 @@ function ComposeStep({
               if (value) onPatch({ assetMint: value });
             }}
           >
-            {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
+            {assetsFor(draft.opType).map((entry) => (
               <SelectItem key={entry.mint} value={entry.mint}>
                 {entry.symbol}
               </SelectItem>

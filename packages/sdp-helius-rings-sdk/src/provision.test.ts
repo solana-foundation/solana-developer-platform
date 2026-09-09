@@ -2,10 +2,13 @@ import { HeliusRingsError } from "@sdp/helius-rings";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buildRegistrationTransaction = vi.fn();
+const buildSetMergingEnabledTransaction = vi.fn();
 const fetchUserRecord = vi.fn();
 
 vi.mock("@heliuslabs/zolana/wallet", () => ({
   buildRegistrationTransaction: (...args: unknown[]) => buildRegistrationTransaction(...args),
+  buildSetMergingEnabledTransaction: (...args: unknown[]) =>
+    buildSetMergingEnabledTransaction(...args),
   fetchUserRecord: (...args: unknown[]) => fetchUserRecord(...args),
 }));
 
@@ -135,5 +138,28 @@ describe("provisionRingsIdentity", () => {
     // pre-registration state and reject a provision that in fact succeeded.
     expect(order.at(-1)).toBe("fetch");
     expect(order.at(-2)).toBe("confirm");
+  });
+
+  it("enables merging when a freshly registered record still refuses it", async () => {
+    const disabled = { ...(await honestRecord()), mergingEnabled: false };
+    const enabled = { ...disabled, mergingEnabled: true };
+    buildRegistrationTransaction.mockResolvedValue({ kind: "registration" });
+    buildSetMergingEnabledTransaction.mockResolvedValue({ kind: "set-merging" });
+    fetchUserRecord
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(disabled)
+      .mockResolvedValueOnce(disabled)
+      .mockResolvedValueOnce(enabled);
+
+    const wiring = deps();
+    const result = await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
+
+    // Registration cannot set the flag, so a second custody-signed transaction
+    // is what makes the new wallet mergeable. Its signature has to be in the
+    // result, or a crash after enable would look like a wallet that never did.
+    expect(result.registrationSignatures).toHaveLength(2);
+    expect(buildSetMergingEnabledTransaction).toHaveBeenCalledTimes(1);
+    expect(wiring.signTransaction).toHaveBeenCalledTimes(2);
+    expect(wiring.submitTransaction).toHaveBeenCalledTimes(2);
   });
 });
