@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeftIcon, type LucideIcon } from "lucide-react";
+import { ChevronLeftIcon, ExternalLinkIcon, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ export interface WizardSummaryDetail {
   label: string;
   /** Omitted for rows whose payload is reached through the JSON drill-in. */
   value?: string;
+  /** When set, the value links out to this URL (e.g. the provider's landing page). */
+  href?: string;
   /** When set, the row offers a View JSON drill-in rendering this payload. */
   json?: Record<string, string>;
 }
@@ -90,10 +92,20 @@ export function WizardSummaryList({ details }: { details: WizardSummaryDetail[] 
             )}
             <span className="shrink-0 text-sm text-tertiary">{detail.label}</span>
             <span className="ml-auto flex min-w-0 items-start gap-3">
-              {detail.value === undefined ? null : (
+              {detail.value === undefined ? null : detail.href === undefined ? (
                 <span className="min-w-0 break-words text-right text-sm font-medium text-primary">
                   {detail.value}
                 </span>
+              ) : (
+                <a
+                  href={detail.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 items-center gap-1 text-right text-sm font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  <span className="min-w-0 break-words">{detail.value}</span>
+                  <ExternalLinkIcon className="size-3.5 shrink-0 text-muted" />
+                </a>
               )}
               {detail.json ? (
                 <Button type="button" size="xs" onClick={() => setJsonDetail(detail)}>

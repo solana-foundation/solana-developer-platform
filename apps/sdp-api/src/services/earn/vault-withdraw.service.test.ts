@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -219,6 +220,38 @@ describe("withdrawFromVault", () => {
   });
 
   /**
+   * Exit safety (ADR 0002, EARN-012): the service has NO catalogue dependency,
+   * so a paused row for the position's own vault must change nothing. The
+   * route suite pins the same invariant at the gate layer with the service
+   * mocked away; this is the seam a future admission check would actually
+   * land in, so the REAL service is pinned against it here.
+   */
+  it("withdraws while the position's strategy is paused in the catalogue", async () => {
+    await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+      provider: "kamino",
+      providerReference: VAULT,
+      name: "Paused Exit Vault",
+      sourceKind: "defi",
+      underlyingSource: "kamino",
+      depositMints: [TOKEN_MINT],
+      shareMint: SHARE_MINT,
+      apyType: "variable",
+      currentApy: "0.062",
+      liquidityTerm: "instant",
+      redemptionDelayDays: null,
+      riskMetadata: {},
+      status: "paused",
+      hostCluster: "devnet",
+      environment: "sandbox",
+    });
+
+    const result = await withdrawFromVault(env, input());
+
+    expect(result.movement).toMatchObject({ status: "submitted", signature: SIGNATURE });
+    expect(broadcastVaultTransaction).toHaveBeenCalledOnce();
+  });
+
+  /**
    * Refuses BEFORE the build, because the position is where the rent-refund
    * destination comes from. Falling back to the owner would hand the customer
    * lamports a sponsor put up.
@@ -256,5 +289,48 @@ describe("withdrawFromVault", () => {
 
       expect(buildVaultWithdrawal.mock.calls[0]?.[1]).not.toHaveProperty("rentRefundTo");
     });
+  });
+});
+
+describe("withdrawFromVault — the exit slippage floor", () => {
+  it("cross-checks the encoded minAmountOut against the request in both directions", async () => {
+    // Requested floor the builder silently dropped: fail closed, sign nothing.
+    buildVaultWithdrawal.mockResolvedValue(plan());
+    await expect(
+      withdrawFromVault(env, input({ minAmountOut: "9.9", requestId: crypto.randomUUID() }))
+    ).rejects.toThrow("omitted the canonical minAmountOut");
+
+    // Floor the builder invented without a request: equally fail closed.
+    buildVaultWithdrawal.mockResolvedValue(
+      plan({ accepted: { shares: "10", minAmountOut: "9.9" } })
+    );
+    await expect(withdrawFromVault(env, input({ requestId: crypto.randomUUID() }))).rejects.toThrow(
+      "does not match the policy-approved slippage floor"
+    );
+
+    // Matching floor signs and records it.
+    const result = await withdrawFromVault(
+      env,
+      input({ minAmountOut: "9.9", requestId: crypto.randomUUID() })
+    );
+    expect(result.movement).toMatchObject({ status: "submitted" });
+    expect(buildVaultWithdrawal.mock.calls.at(-1)?.[1]).toMatchObject({
+      shares: "10",
+      minAmountOut: "9.9",
+    });
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a provider exit refusal into the caller's 400, in the provider's words", async () => {
+    const { SdpVedaError } = await import("@sdp/veda");
+    buildVaultWithdrawal.mockRejectedValue(
+      new SdpVedaError("WITHDRAW_REFUSED", "Shares are locked until the unlock timestamp")
+    );
+
+    await expect(withdrawFromVault(env, input({ minAmountOut: "9.9" }))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("Shares are locked"),
+    });
+    expect(signVaultPlan).not.toHaveBeenCalled();
   });
 });

@@ -19,6 +19,8 @@ interface WizardFrameProps {
   progressLabel: string;
   /** Selection recap opened from the "View summary" button in a modal. */
   summary?: ReactNode;
+  /** Replaces the "View summary" button text (e.g. a provider-branded chip). */
+  summaryTrigger?: ReactNode;
   steps: readonly { label: string; title: string }[];
   titleBadge?: ReactNode;
   /** Actions rendered to the right of the step progress indicator. */
@@ -42,6 +44,7 @@ export function WizardFrame({
   maxWidthClassName = "max-w-3xl",
   progressLabel,
   summary,
+  summaryTrigger,
   steps,
   titleBadge,
   toolbarActions,
@@ -86,9 +89,10 @@ export function WizardFrame({
               <button
                 type="button"
                 onClick={() => setSummaryOpen(true)}
-                className="text-sm font-medium text-secondary underline-offset-4 hover:text-primary hover:underline"
+                aria-label={t("DashboardPayments.viewSummary")}
+                className="flex items-center gap-1.5 text-sm font-medium text-secondary underline-offset-4 hover:text-primary hover:underline"
               >
-                {t("DashboardPayments.viewSummary")}
+                {summaryTrigger ?? t("DashboardPayments.viewSummary")}
               </button>
             ) : null}
           </div>

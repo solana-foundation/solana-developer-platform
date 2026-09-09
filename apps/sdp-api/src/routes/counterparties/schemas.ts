@@ -1,7 +1,12 @@
 import { COUNTERPARTY_ACCOUNT_SUMMARY_TYPES, COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
 import { z } from "zod";
 import { queryBooleanSchema } from "@/openapi/schemas/base";
-import { rampCurrencyCodeSchema, rampFiatCurrencySchema } from "@/routes/payments/schemas";
+import {
+  offrampCryptoRailSchema,
+  onrampCryptoRailSchema,
+  rampDestinationCountrySchema,
+  rampFiatCurrencySchema,
+} from "@/routes/payments/schemas";
 
 export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);
 
@@ -12,28 +17,43 @@ export const counterpartyIdParamsSchema = z.object({
 });
 
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
-  z.object({
-    provider: z.enum(
-      ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
-      {
-        error: "provider does not support onramp requirements",
-      }
-    ),
-    direction: z.literal("onramp"),
-    cryptoToken: rampCurrencyCodeSchema,
-    fiatCurrency: rampFiatCurrencySchema,
-    destinationWallet: z
-      .string({ error: "destinationWallet is required for onramp requirements" })
-      .min(1, { error: "destinationWallet is required for onramp requirements" }),
-  }),
-  z.object({
-    provider: z.enum(["moonpay", "lightspark", "bvnk", "moneygram", "mural"], {
-      error: "provider does not support offramp requirements",
-    }),
-    direction: z.literal("offramp"),
-    cryptoToken: rampCurrencyCodeSchema,
-    fiatCurrency: rampFiatCurrencySchema,
-  }),
+  z
+    .object({
+      provider: z.enum(
+        ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
+        {
+          error: "provider does not support onramp requirements",
+        }
+      ),
+      direction: z.literal("onramp"),
+      assetRail: onrampCryptoRailSchema,
+      fiatCurrency: rampFiatCurrencySchema,
+      destinationCustodyWalletId: z
+        .string({ error: "destinationCustodyWalletId is required for onramp requirements" })
+        .min(1, { error: "destinationCustodyWalletId is required for onramp requirements" }),
+    })
+    .strict(),
+  z.discriminatedUnion("provider", [
+    z
+      .object({
+        provider: z.literal("lightspark"),
+        direction: z.literal("offramp"),
+        assetRail: offrampCryptoRailSchema,
+        fiatCurrency: rampFiatCurrencySchema,
+        destinationCountry: rampDestinationCountrySchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.enum(["moonpay", "bvnk", "moneygram", "mural"], {
+          error: "provider does not support offramp requirements",
+        }),
+        direction: z.literal("offramp"),
+        assetRail: offrampCryptoRailSchema,
+        fiatCurrency: rampFiatCurrencySchema,
+      })
+      .strict(),
+  ]),
 ]);
 
 export const createCounterpartySchema = z.object({

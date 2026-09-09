@@ -55,7 +55,7 @@ export async function resolveEventViewer(c: AppContext): Promise<EventViewer> {
   const userRepository = getPrivateChannelUserRepository(c);
 
   return resolveEventViewerForAuth(auth, projectId, {
-    findPrivateChannelUser: (scope, userId) => userRepository.findByProjectAndUser(scope, userId),
+    findPrivateChannelUser: (scope) => userRepository.findDefaultPrincipalByProject(scope),
     listMemberships: (privateChannelUserId) =>
       userRepository.listMembershipsForUser(privateChannelUserId),
   });

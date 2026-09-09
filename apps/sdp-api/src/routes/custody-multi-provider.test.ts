@@ -495,6 +495,44 @@ describe("Custody multi-provider routes", () => {
     expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
   });
 
+  it("rejects an exact Connection switch without changing the target when entitlement is revoked", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const connection = await seedActivePrivyConnection("unentitled");
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG.id)
+      .run();
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id)
+        .first()
+    ).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: null,
+    });
+  });
+
   it.each([null, "", 42])("rejects a malformed Connection selector: %s", async (connectionId) => {
     const res = await app.request(
       "/v1/wallets/switch",
@@ -656,6 +694,18 @@ describe("Custody multi-provider routes", () => {
     });
 
     env.PRIVY_BYOK_ENABLED = "false";
+    await expect(readWallet()).resolves.toMatchObject({
+      custodyConnectionId: connection.connectionId,
+      isDefaultProvider: false,
+      isRuntimeExecutionAllowed: false,
+      provider: "privy",
+    });
+
+    env.PRIVY_BYOK_ENABLED = "true";
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG.id)
+      .run();
     await expect(readWallet()).resolves.toMatchObject({
       custodyConnectionId: connection.connectionId,
       isDefaultProvider: false,

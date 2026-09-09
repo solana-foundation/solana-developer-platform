@@ -17,6 +17,27 @@ const FEE_PAYER = "11111111111111111111111111111111" as Address;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 
 /**
+ * Unsigned outer transaction wire bytes for a given fee payer.
+ *
+ * Used where a test needs to sign locally and derive the signature the service
+ * will persist before broadcast.
+ */
+export function unsignedRingsTransaction(feePayer: Address): string {
+  const compiled = compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(feePayer, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
+          message
+        )
+    )
+  );
+  return getBase64Codec().decode(getTransactionEncoder().encode(compiled));
+}
+
+/**
  * A signed outer transaction as base64 wire bytes, plus the signature the
  * service derives from them.
  *

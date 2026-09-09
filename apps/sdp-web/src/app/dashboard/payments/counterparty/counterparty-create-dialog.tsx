@@ -26,7 +26,7 @@ export function CounterpartyCreateDialog({
       ariaLabel={t("DashboardPayments.counterparty.addCounterparty")}
       size="lg"
     >
-      <div className="px-6 pt-12 pb-6">
+      <div className="p-6">
         <CounterpartyCreateProvider onCreated={onCreated}>
           <CounterpartyCreatePage embedded onCancel={onClose} />
         </CounterpartyCreateProvider>

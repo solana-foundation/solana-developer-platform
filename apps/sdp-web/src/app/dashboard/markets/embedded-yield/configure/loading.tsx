@@ -1,1 +1,5 @@
-export { default } from "../../earn/configure/loading";
+import { EarnIntegrationGuideSkeleton } from "../../markets-route-skeletons";
+
+export default function EmbeddedYieldConfigureLoading() {
+  return <EarnIntegrationGuideSkeleton />;
+}

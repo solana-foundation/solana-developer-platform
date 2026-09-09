@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  getCryptoRailAssetLabel,
   isMuralSandboxPayinCurrency,
   type PaymentOnrampQuoteRequest,
   type PaymentTransferSummary,
@@ -14,9 +15,10 @@ import {
   fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { onrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
@@ -60,30 +62,38 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: ONRAMP_PAIRS,
+    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
       step: getOnrampRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "DEPOSIT",
       direction: "onramp",
     },
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
+    buildQuotePayload: ({
+      fields,
+      selectedWallet,
+      provider,
+      selectedRampPair,
+      assetRail,
+      rampsMemo,
+    }) =>
       ({
         provider,
         counterpartyId: fields.counterpartyId,
-        destinationWallet: fields.walletId,
-        cryptoToken,
+        destinationCustodyWalletId: selectedWallet.id,
+        assetRail,
         fiatCurrency: selectedRampPair.fiatCurrency,
         fiatAmount: fields.amount.trim(),
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
@@ -111,7 +121,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     {
       icon: CoinsIcon,
       label: t("DashboardPayments.onchainReceive.receive"),
-      value: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+      value: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
     },
     ...providerSummaryDetail(t, wizard.fields.provider),
     ...memoSummaryDetails(t, wizard.memoRows),
@@ -138,6 +148,9 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       quote?.provider !== "bvnk" &&
       quote?.provider !== "mural"
     ) {
+      return;
+    }
+    if (!wizard.selectedWallet) {
       return;
     }
 
@@ -183,8 +196,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
               counterpartyId: wizard.fields.counterpartyId,
               amount: Number(wizard.fields.amount.trim()),
               fiatCurrency: wizard.selectedRampPair.fiatCurrency,
-              cryptoToken: toRampCryptoToken(wizard.selectedRampPair.assetRail),
-              destinationWallet: wizard.fields.walletId,
+              assetRail: wizard.selectedRampPair.assetRail,
+              destinationCustodyWalletId: wizard.selectedWallet.id,
             },
           },
           t

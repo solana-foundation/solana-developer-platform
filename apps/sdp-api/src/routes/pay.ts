@@ -54,7 +54,7 @@ pay.get("/:token", async (c) => {
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
-  const payable = status === "awaiting_payment";
+  const payable = status === "awaiting_payment" && request.custody_wallet_id !== null;
 
   let solanaPayUrl: string | null = null;
   if (payable) {

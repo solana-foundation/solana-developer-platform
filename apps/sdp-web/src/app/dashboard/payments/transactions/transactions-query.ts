@@ -30,16 +30,15 @@ export interface TransactionFilters {
   status?: TransactionStatusFilter;
   direction?: "inbound" | "outbound";
   type?: TransactionTypeFilter;
-  walletId?: string;
+  custodyWalletId?: string;
   counterpartyId?: string;
   asset?: string;
   provider?: string;
   from?: string;
   to?: string;
   /**
-   * On-chain deposits the indexer observed but that have no ledger row. Home
-   * shows these; this table hid them unconditionally, so the same wallet read
-   * differently on the two screens. Defaults on to match Home.
+   * Address-level chain activity with no exact wallet attribution. Persisted
+   * exact rows stay the default; callers opt in when they need observed history.
    */
   includeObserved: boolean;
   sortBy: TransactionSortField;
@@ -53,6 +52,10 @@ type RawSearchParams = Record<string, string | string[] | undefined>;
 
 const DEFAULT_PAGE_SIZE = 25;
 export const MIN_TRANSACTION_SEARCH_LENGTH = 3;
+
+export function hasRemovedTransactionWalletFilter(searchParams: RawSearchParams): boolean {
+  return Object.hasOwn(searchParams, "wallet") || Object.hasOwn(searchParams, "walletAddress");
+}
 
 function firstValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -96,19 +99,20 @@ export function parseTransactionFilters(
   searchParams: RawSearchParams,
   now = new Date()
 ): TransactionFilters {
+  const custodyWalletId = parseTrimmed(firstValue(searchParams.custodyWalletId));
   return {
     search: normalizeTransactionSearch(firstValue(searchParams.search)),
     status: parseEnum(firstValue(searchParams.status), TRANSACTION_STATUSES),
     direction: parseEnum(firstValue(searchParams.direction), ["inbound", "outbound"] as const),
     type: parseEnum(firstValue(searchParams.type), TRANSACTION_TYPES),
-    walletId: parseTrimmed(firstValue(searchParams.wallet)),
+    custodyWalletId,
     counterpartyId: parseTrimmed(firstValue(searchParams.counterparty)),
     asset: parseTrimmed(firstValue(searchParams.asset), 64),
     provider: parseTrimmed(firstValue(searchParams.provider), 64),
     from: parseDate(firstValue(searchParams.from)),
     to: parseDate(firstValue(searchParams.to)),
-    // Absent means on; only an explicit "false" turns it off.
-    includeObserved: firstValue(searchParams.includeObserved) !== "false",
+    includeObserved:
+      Boolean(custodyWalletId) && firstValue(searchParams.includeObserved) === "true",
     sortBy: parseEnum(firstValue(searchParams.sortBy), TRANSACTION_SORT_FIELDS) ?? "createdAt",
     sortDirection:
       parseEnum(firstValue(searchParams.sortDirection), ["asc", "desc"] as const) ?? "desc",
@@ -128,14 +132,13 @@ export function serializeTransactionFilters(filters: TransactionFilters): URLSea
   set("status", filters.status);
   set("direction", filters.direction);
   set("type", filters.type);
-  set("wallet", filters.walletId);
+  set("custodyWalletId", filters.custodyWalletId);
   set("counterparty", filters.counterpartyId);
   set("asset", filters.asset);
   set("provider", filters.provider);
   set("from", filters.from);
   set("to", filters.to);
-  // Only serialise the non-default, so a plain URL stays clean.
-  if (!filters.includeObserved) set("includeObserved", "false");
+  if (filters.custodyWalletId && filters.includeObserved) set("includeObserved", "true");
   if (filters.sortBy !== "createdAt") set("sortBy", filters.sortBy);
   if (filters.sortDirection !== "desc") set("sortDirection", filters.sortDirection);
   set("snapshot", filters.snapshot);
@@ -148,7 +151,7 @@ export function toTransactionsApiQuery(filters: TransactionFilters): URLSearchPa
   const query = new URLSearchParams({
     page: String(filters.page),
     pageSize: String(filters.pageSize),
-    includeObserved: String(filters.includeObserved),
+    includeObserved: String(Boolean(filters.custodyWalletId) && filters.includeObserved),
     sortBy: filters.sortBy,
     sortDirection: filters.sortDirection,
   });
@@ -160,7 +163,7 @@ export function toTransactionsApiQuery(filters: TransactionFilters): URLSearchPa
   set("status", filters.status);
   set("direction", filters.direction);
   set("type", filters.type);
-  set("wallet", filters.walletId);
+  set("custodyWalletId", filters.custodyWalletId);
   set("counterpartyId", filters.counterpartyId);
   set("token", filters.asset);
   set("provider", filters.provider);
@@ -175,13 +178,12 @@ export function countActiveTransactionFilters(filters: TransactionFilters): numb
     filters.status,
     filters.direction,
     filters.type,
-    filters.walletId,
+    filters.custodyWalletId,
     filters.counterpartyId,
     filters.asset,
     filters.provider,
     filters.from,
     filters.to,
-    // Counted only when switched off, since on is the default state.
-    filters.includeObserved ? undefined : "excluded",
+    filters.custodyWalletId && filters.includeObserved ? "included" : undefined,
   ].filter(Boolean).length;
 }

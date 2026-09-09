@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   fetchCounterparties: vi.fn(),
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
   fetchProviderAvailability: vi.fn(),
+  getEnabledRampProviders: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -19,8 +20,15 @@ vi.mock("@/app/dashboard/payments/counterparty/counterparty-page.data", () => ({
 vi.mock("@/app/dashboard/payments/payments-page.data", () => ({
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
 }));
-vi.mock("@/lib/provider-availability", () => ({
-  fetchProviderAvailability: mocks.fetchProviderAvailability,
+vi.mock(import("@/lib/provider-availability"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    fetchProviderAvailability: mocks.fetchProviderAvailability,
+  };
+});
+vi.mock("@/flags/ramps", () => ({
+  getEnabledRampProviders: mocks.getEnabledRampProviders,
 }));
 
 import { loadPaymentsActionPageData } from "./payments-action-page.server";
@@ -45,7 +53,11 @@ describe("loadPaymentsActionPageData", () => {
     const counterpartiesResult = { ok: true as const, data: [], total: 0 as const };
     const providerAvailability = {
       enabledComplianceProviders: [],
-      rampProviderAccess: {},
+      rampProviderAccess: {
+        moonpay: { entitled: true, configured: true, enabled: true },
+        mural: { entitled: true, configured: true, enabled: true },
+        stripe: { entitled: true, configured: true, enabled: true },
+      },
     };
 
     mocks.createOrgSdpApiClient.mockResolvedValue({
@@ -59,6 +71,7 @@ describe("loadPaymentsActionPageData", () => {
     mocks.fetchPaymentsIssuedTokenSymbols.mockReturnValue(issuedTokens.promise);
     mocks.fetchCounterparties.mockReturnValue(counterparties.promise);
     mocks.fetchProviderAvailability.mockResolvedValue(providerAvailability);
+    mocks.getEnabledRampProviders.mockResolvedValue(["moonpay", "stripe"]);
 
     const resultPromise = loadPaymentsActionPageData();
 
@@ -77,7 +90,11 @@ describe("loadPaymentsActionPageData", () => {
     await expect(resultPromise).resolves.toEqual({
       issuedTokenSymbolsByMint: { mint_usdc: "USDC" },
       enabledComplianceProviders: [],
-      rampProviderAccess: {},
+      enabledRampProviders: ["moonpay", "stripe"],
+      rampProviderAccess: {
+        moonpay: { entitled: true, configured: true, enabled: true },
+        stripe: { entitled: true, configured: true, enabled: true },
+      },
       counterpartiesResult,
     });
   });

@@ -2,7 +2,8 @@ import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import { resolveIdempotencyReplay } from "@/lib/idempotency";
+import { AppError } from "@/lib/errors";
+import { resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -22,7 +23,8 @@ export function mapBatchRow(row: PaymentTransferBatchRow) {
     organizationId: row.organization_id,
     projectId: row.project_id,
     externalId: row.external_id,
-    sourceWalletId: row.source_wallet_id,
+    sourceCustodyWalletId: row.source_custody_wallet_id,
+    sourceProviderWalletId: row.source_wallet_id,
     sourceAddress: row.source_address,
     token: row.token,
     status: row.status,
@@ -71,11 +73,15 @@ export async function resolveTransferBatchIdempotencyReplay(
   organizationId: string,
   projectId: string,
   idempotencyKey: string,
-  fingerprint: string
+  fingerprint: string,
+  legacyFingerprint: string,
+  sourceCustodyWalletId: string
 ): Promise<PaymentTransferBatchRow | null> {
-  return resolveIdempotencyReplay(
+  return resolveIdentityBoundIdempotencyReplay(
     () => repository.findTransferBatchByIdempotency({ organizationId, projectId, idempotencyKey }),
-    fingerprint
+    fingerprint,
+    legacyFingerprint,
+    (row) => row.source_custody_wallet_id === sourceCustodyWalletId
   );
 }
 
@@ -112,6 +118,11 @@ export async function buildTransferBatchResponse(
     organizationId,
     projectId,
   });
+  if (
+    transferRows.some((transfer) => transfer.custody_wallet_id !== batch.source_custody_wallet_id)
+  ) {
+    throw new AppError("CONFLICT", "Transfer batch wallet identity is inconsistent");
+  }
 
   return {
     batch: mapBatchRow(batch),

@@ -1,7 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
@@ -10,7 +10,6 @@ import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
-import type { Env } from "@/types/env";
 
 const THROW_PATH = "/__internal_error_test_throw";
 const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
@@ -21,6 +20,7 @@ const SECRET_PAYMENTS_ERROR_PATH = "/__secret_payments_error_test_throw";
 const SECRET_SIGNING_ERROR_PATH = "/__secret_signing_error_test_throw";
 const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
+const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 
 function makeObservability(): {
   obs: Observability;
@@ -81,6 +81,19 @@ function buildApp(observability: Observability) {
     throw Object.assign(new Error("privateKey=raw-private-key"), {
       context: { authorization: "Bearer raw-token" },
       cause: { password: "pw" },
+    });
+  });
+  // A counterparty failure as a provider actually reports it: the submitted
+  // identity echoed back in the message, and the request payload hung off the
+  // error as `context`.
+  app.all(PII_UNEXPECTED_ERROR_PATH, () => {
+    throw Object.assign(new Error("Mural rejected jane.doe@example.com (phone=+15551234567)"), {
+      context: {
+        counterpartyId: "cp_1",
+        identity: { firstName: "Jane", lastName: "Doe", dateOfBirth: "1988-04-02" },
+        walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      },
+      cause: { accountNumber: "000123456789" },
     });
   });
   app.all(FEE_ERROR_PATH, () => {
@@ -157,55 +170,22 @@ describe("createApp plugin registration", () => {
   });
 });
 
-describe("createApp onError Sentry guard", () => {
+describe("createApp onError capture", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("NODE_ENV", "production");
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("calls observability.captureException when SENTRY_DSN is set", async () => {
+  it("captures unexpected errors through the injected observability", async () => {
     const { obs, captureException, withScope } = makeObservability();
     const app = buildApp(obs);
-    const env: Env = { ...baseEnv, SENTRY_DSN: "https://test@sentry.example/1" };
 
-    const res = await app.request(THROW_PATH, {}, env);
+    const res = await app.request(THROW_PATH, {}, baseEnv);
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INTERNAL_ERROR");
     expect(withScope).toHaveBeenCalledTimes(1);
     expect(captureException).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not invoke observability under a development NODE_ENV (local dev)", async () => {
-    vi.stubEnv("NODE_ENV", "development");
-    const { obs, captureException, withScope } = makeObservability();
-    const app = buildApp(obs);
-    const env: Env = { ...baseEnv, SENTRY_DSN: "https://test@sentry.example/1" };
-
-    const res = await app.request(THROW_PATH, {}, env);
-
-    expect(res.status).toBe(500);
-    expect(withScope).not.toHaveBeenCalled();
-    expect(captureException).not.toHaveBeenCalled();
-  });
-
-  it("does not invoke observability when SENTRY_DSN is unset", async () => {
-    const { obs, captureException, withScope } = makeObservability();
-    const app = buildApp(obs);
-    const env: Env = { ...baseEnv, SENTRY_DSN: undefined };
-
-    const res = await app.request(THROW_PATH, {}, env);
-
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
-    expect(withScope).not.toHaveBeenCalled();
-    expect(captureException).not.toHaveBeenCalled();
   });
 
   it("maps fee payment program errors to product-safe messages", async () => {
@@ -299,11 +279,7 @@ describe("createApp onError Sentry guard", () => {
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 
-    await app.request(
-      SECRET_UNEXPECTED_ERROR_PATH,
-      {},
-      { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
-    );
+    await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
 
     const logged = JSON.stringify(consoleError.mock.calls);
     const captured = JSON.stringify(captureException.mock.calls);
@@ -316,5 +292,45 @@ describe("createApp onError Sentry guard", () => {
     expect(logged).toContain("[REDACTED]");
     expect(captured).toContain("[REDACTED]");
     consoleError.mockRestore();
+  });
+
+  it("scrubs counterparty PII from the unexpected-error log and Sentry capture", async () => {
+    const loggerError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    const { obs, captureException } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(
+      PII_UNEXPECTED_ERROR_PATH,
+      {},
+      { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
+    );
+
+    const logged = JSON.stringify(loggerError.mock.calls);
+    const capturedError = captureException.mock.calls[0][0] as Error & {
+      context?: unknown;
+      cause?: unknown;
+    };
+    const captured = JSON.stringify([
+      capturedError.message,
+      capturedError.stack,
+      capturedError.context,
+      capturedError.cause,
+    ]);
+
+    for (const sink of [logged, captured]) {
+      expect(sink).not.toContain("jane.doe@example.com");
+      expect(sink).not.toContain("+15551234567");
+      expect(sink).not.toContain("Jane");
+      expect(sink).not.toContain("1988-04-02");
+      expect(sink).not.toContain("000123456789");
+      // Still diagnosable: the resource id and the on-chain address survive.
+      expect(sink).toContain("cp_1");
+      expect(sink).toContain("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+    }
+
+    // The caller learns nothing about the failure beyond the trace id.
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await res.json())).not.toContain("jane.doe@example.com");
+    loggerError.mockRestore();
   });
 });

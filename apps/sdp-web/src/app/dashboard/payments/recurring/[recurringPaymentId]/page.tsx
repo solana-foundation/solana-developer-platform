@@ -99,7 +99,7 @@ export default async function RecurringPaymentDetailRoute({
 
       const wallets = walletsResult.data ?? [];
       const wallet =
-        wallets.find((entry) => entry.walletId === recurringPayment.sourceWalletId) ?? null;
+        wallets.find((entry) => entry.id === recurringPayment.sourceCustodyWalletId) ?? null;
       const subscriptionId = recurringPayment.subscriptionId;
       const [counterparty, counterpartyAccounts, collectionAttemptsResult] = await Promise.all([
         trace.step("fetch_recurring_payment_counterparty", () =>

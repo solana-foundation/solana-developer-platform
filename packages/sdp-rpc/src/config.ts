@@ -72,7 +72,7 @@ type ManagedRpcProvider = {
   url: string;
 };
 
-export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
+function buildManagedRpcProviders(env: RpcEnv): ManagedRpcProvider[] {
   const providers: ManagedRpcProvider[] = [];
 
   if (env.SOLANA_RPC_TRITON_URL) {
@@ -130,15 +130,22 @@ export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
     });
   }
 
-  const preferredDefault = env.SOLANA_RPC_DEFAULT_PROVIDER;
-  if (preferredDefault) {
-    const preferredProvider = providers.find((provider) => provider.id === preferredDefault);
-    if (preferredProvider) {
-      return preferredProvider.url;
-    }
-  }
+  return providers;
+}
 
-  return providers[0]?.url ?? null;
+export function resolveSolanaRpcProviderUrls(env: RpcEnv): string[] {
+  const providers = buildManagedRpcProviders(env);
+  const preferred = env.SOLANA_RPC_DEFAULT_PROVIDER
+    ? providers.find((provider) => provider.id === env.SOLANA_RPC_DEFAULT_PROVIDER)
+    : undefined;
+  const ordered = preferred
+    ? [preferred, ...providers.filter((provider) => provider !== preferred)]
+    : providers;
+  return [...new Set(ordered.map((provider) => provider.url))];
+}
+
+export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
+  return resolveSolanaRpcProviderUrls(env)[0] ?? null;
 }
 
 export function getSolanaConfig(env: RpcEnv): SolanaConfig {

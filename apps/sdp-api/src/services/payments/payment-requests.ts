@@ -39,8 +39,10 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
  * @param options.bestEffort - When true, unexpected infra failures (e.g. an
  *   RPC outage) degrade to the stored row with a log so one bad row cannot
  *   take down a whole list read or the public pay page; the next read
- *   retries. Invariant violations (AppError) always rethrow — they do not
- *   self-heal and must not hide behind a stale row. When false, every
+ *   retries. An unresolved legacy wallet also returns the stored row because
+ *   the exact-identity backfill intentionally leaves ambiguous rows unpinned.
+ *   Other invariant violations (AppError) always rethrow — they do
+ *   not self-heal and must not hide behind a stale row. When false, every
  *   failure rethrows, for paths that must not act on stale state.
  * @returns The settled row when a valid payment was found, otherwise the
  *   stored row.
@@ -56,9 +58,15 @@ export async function reconcilePaymentRequest(
   if (isPaymentRequestExpired(row.expires_at)) {
     return row;
   }
+  if (row.custody_wallet_id === null) {
+    if (options.bestEffort) {
+      return row;
+    }
+    throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
+  }
 
   try {
-    return await settlePaymentRequestIfPaid(env, row);
+    return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
   } catch (err) {
     if (!options.bestEffort || err instanceof AppError) {
       throw err;
@@ -84,7 +92,8 @@ export async function reconcilePaymentRequest(
  */
 async function settlePaymentRequestIfPaid(
   env: Env,
-  row: PaymentRequestRow
+  row: PaymentRequestRow,
+  custodyWalletId: string
 ): Promise<PaymentRequestRow> {
   const projectId = row.project_id;
   if (projectId === null) {
@@ -120,7 +129,7 @@ async function settlePaymentRequestIfPaid(
     return row;
   }
 
-  const transfer = await recordInboundTransfer(env, row, projectId, found);
+  const transfer = await recordInboundTransfer(env, row, projectId, custodyWalletId, found);
 
   const scope = createTenantScope({
     organizationId: row.organization_id,
@@ -164,6 +173,7 @@ async function recordInboundTransfer(
   env: Env,
   row: PaymentRequestRow,
   projectId: string,
+  custodyWalletId: string,
   found: Awaited<ReturnType<typeof findReference>>
 ): Promise<PaymentTransferRow> {
   const paymentsRepo = createPaymentsRepository(
@@ -178,6 +188,7 @@ async function recordInboundTransfer(
       id: generatePaymentTransferId(),
       organizationId: row.organization_id,
       projectId,
+      custodyWalletId,
       walletId: row.wallet_id,
       counterpartyId: row.counterparty_id,
       sourceAddress: null,
@@ -215,6 +226,18 @@ async function recordInboundTransfer(
     const existing = recorded[0];
     if (!existing) {
       throw err;
+    }
+    if (
+      existing.custody_wallet_id !== row.custody_wallet_id ||
+      existing.wallet_id !== row.wallet_id ||
+      existing.counterparty_id !== row.counterparty_id ||
+      existing.destination_address !== row.destination_address ||
+      existing.token !== row.token ||
+      existing.amount !== row.amount ||
+      existing.type !== "transfer" ||
+      existing.direction !== "inbound"
+    ) {
+      throw new AppError("CONFLICT", "Recorded transfer does not match payment request");
     }
     return existing;
   }

@@ -3,6 +3,7 @@
 import type {
   CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
+  PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
@@ -107,9 +108,20 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderForm(props: ComponentProps<typeof TransferForm>) {
-  return render(<TransferForm {...props} />, { wrapper: I18nWrapper });
+function renderForm(props: Omit<ComponentProps<typeof TransferForm>, "tokens">) {
+  return render(<TransferForm {...props} tokens={eligibleTokens} />, { wrapper: I18nWrapper });
 }
+
+const eligibleTokens: PrivateChannelTokenEligibility[] = [
+  {
+    symbol: "USDC",
+    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    decimals: 6,
+    tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    enabled: true,
+    exclusionReasons: [],
+  },
+];
 
 const channels: PrivateChannelMembershipChannelDto[] = [
   { id: "channel_alpha", name: "Alpha", isDefault: true },
@@ -546,6 +558,7 @@ describe("TransferForm", () => {
         channels={nextChannels}
         scopeKey="org_two:project_two:instance_two"
         sourceWallets={nextSourceWallets}
+        tokens={eligibleTokens}
       />
     );
 

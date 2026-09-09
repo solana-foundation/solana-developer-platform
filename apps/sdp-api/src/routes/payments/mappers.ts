@@ -10,7 +10,8 @@ export function mapTransferRow(row: TransferRow) {
   const base = {
     id: row.id,
     organizationId: row.organization_id,
-    walletId: row.wallet_id,
+    custodyWalletId: row.custody_wallet_id,
+    providerWalletId: row.wallet_id,
     ...(row.project_id ? { projectId: row.project_id } : {}),
     type: row.type,
     direction: row.direction,

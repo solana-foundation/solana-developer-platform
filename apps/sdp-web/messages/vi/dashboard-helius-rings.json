@@ -36,7 +36,8 @@
       "createFailed": "Không thể tạo Wallet. Kiểm tra thông tin và thử lại.",
       "noCustodyWallets": "Không có custody wallet nào khả dụng. Hãy tạo Wallet trong mục Wallets trước.",
       "copyShieldedAddress": "Sao chép shielded address",
-      "shieldedAddressCopied": "Đã sao chép shielded address"
+      "shieldedAddressCopied": "Đã sao chép shielded address",
+      "allCustodyWalletsBound": "Tất cả custody wallet đều đã được gắn với một private wallet."
     },
     "identity": {
       "column": "On-chain identity",
@@ -102,7 +103,14 @@
       "state_submitted": "Đã gửi",
       "state_indexing": "Đang index",
       "state_completed": "Hoàn tất",
-      "state_failed": "Thất bại"
+      "state_failed": "Thất bại",
+      "action": "Thao tác",
+      "working": "Vẫn đang xử lý",
+      "retryOf": "Thử lại của {id}",
+      "retriedAs": "Đã thử lại thành {id}",
+      "state_voided": "Đã void",
+      "ring": "Ring",
+      "ringDefault": "Ring mặc định"
     },
     "errors": {
       "loadFailed": "Không thể tải dữ liệu Helius Rings. Vui lòng thử lại sau.",
@@ -138,7 +146,23 @@
       "summaryUnlockAt": "Mở khóa lúc",
       "summaryBeneficiary": "Người thụ hưởng",
       "anonymousWarning": "Tôi hiểu rằng counterparty không được công khai on-chain. Các chuyển khoản ẩn danh chịu cùng chính sách wallet và quy tắc phê duyệt như mọi chuyển khoản khác — chúng không có rủi ro thấp hơn.",
-      "gatewayRedNotice": "Gateway Rings hiện không khả dụng. Bạn vẫn có thể soạn và xác nhận — thao tác sẽ chạy qua policy và ghi lại lỗi gateway trung thực."
+      "gatewayRedNotice": "Gateway Rings hiện không khả dụng. Bạn vẫn có thể soạn và xác nhận — thao tác sẽ chạy qua policy và ghi lại lỗi gateway trung thực.",
+      "description_shield": "Chuyển tiền từ custody wallet vào private wallet này.",
+      "description_withdraw": "Chuyển tiền trở lại custody wallet liên kết.",
+      "description_transfer_registered": "Gửi tiền một cách riêng tư đến một private wallet khác trong project này.",
+      "opTab_shield": "Shield",
+      "opTab_withdraw": "Rút",
+      "opTab_transfer_registered": "Gửi (đã đăng ký)",
+      "recipientPrivateWallet": "Private wallet người nhận",
+      "recipientPrivateWalletPlaceholder": "Chọn một private wallet",
+      "privateTransferNoRecipients": "Không có private wallet nào khác đã được cấp phát trong project này để chuyển đến.",
+      "started": "Thao tác đã bắt đầu. Theo dõi trong mục Activity bên dưới.",
+      "ring": "Ring",
+      "ringDefault": "Ring mặc định",
+      "ringShieldHint": "Ring nơi các shielded notes được ghi vào.",
+      "ringSpendHint": "Nguồn tiền: chỉ các note gắn với ring đã chọn mới có thể được chi tiêu từ ring này.",
+      "ringNoneActive": "Chưa có ring nào hoạt động; hãy hoàn tất khởi tạo trong thẻ Custom rings trước khi chọn một ring.",
+      "summaryRing": "Ring"
     },
     "zones": {
       "title": "Zones",
@@ -157,7 +181,29 @@
       "timeline": "Dòng thời gian",
       "timelineEmpty": "Chưa có sự kiện nào được ghi.",
       "retryable": "Việc thử lại có thể thành công.",
-      "notRetryable": "Không thể thử lại."
+      "notRetryable": "Không thể thử lại.",
+      "retryOf": "Thử lại của",
+      "timelineState_draft": "Bản nháp",
+      "timelineState_preparing": "Đang chuẩn bị",
+      "timelineState_approval_required": "Chờ phê duyệt",
+      "timelineState_proving": "Đang chứng minh",
+      "timelineState_ready_to_sign": "Sẵn sàng ký",
+      "timelineState_submitted": "Đã gửi",
+      "timelineState_indexing": "Đang index",
+      "timelineState_completed": "Hoàn tất",
+      "timelineState_failed": "Thất bại",
+      "timelineState_voided": "Đã void",
+      "event_created": "Đã tạo",
+      "event_retried": "Đã thử lại",
+      "event_policyEvaluated": "Đã kiểm tra policy",
+      "event_approvalRequested": "Đã yêu cầu phê duyệt",
+      "event_approvalGranted": "Đã phê duyệt",
+      "event_proofReceived": "Đã chứng minh",
+      "event_transactionSubmitted": "Đã broadcast",
+      "event_completed": "Hoàn tất",
+      "event_failed": "Thất bại",
+      "event_voided": "Đã void",
+      "event_escalated": "Đã escalate"
     },
     "recovery": {
       "title": "Cần chú ý",
@@ -166,7 +212,51 @@
       "retry": "Thử lại",
       "retrying": "Đang thử lại…",
       "execute": "Thực thi",
-      "executing": "Đang thực thi…"
+      "executing": "Đang thực thi…",
+      "void": "Void",
+      "voiding": "Đang void…",
+      "voidConfirm": "Void xác nhận giao dịch đã ký này chưa từng lên on-chain và giải phóng spend slot của Wallet. Chỉ tiếp tục nếu bạn đã đối chiếu chữ ký và xác nhận chắc chắn giao dịch không tồn tại.",
+      "recheck": "Kiểm tra indexer",
+      "rechecking": "Đang kiểm tra…",
+      "recheckFound": "Indexer đã bắt kịp — thao tác này hiện đã hoàn tất.",
+      "recheckStillMissing": "Indexer vẫn chưa có bản ghi về giao dịch này. Indexer có thể đang chậm hơn chuỗi; hãy kiểm tra lại trước khi void."
+    },
+    "workspace": {
+      "selectPrompt": "Chọn một private wallet ở trên để xem chi tiết, thao tác và hoạt động của nó."
+    },
+    "overview": {
+      "loading": "Đang đọc số dư shielded…",
+      "failed": "Không thể đọc số dư. Hãy thử lại từ hàng của wallet đó.",
+      "empty": "0",
+      "notProvisioned": "Chưa được cấp phát.",
+      "unpriced": "—",
+      "privateBalanceLabel": "Số dư private",
+      "defaultRing": "Ring mặc định",
+      "customRing": "Custom ring {id}"
+    },
+    "ring": {
+      "title": "Custom ring",
+      "description": "Các custom ring có tên cho project này. Ops triển khai program của từng ring và bàn giao id của nó; ghi lại tên và id tại đây sẽ hoàn tất quá trình khởi tạo (auditor key, ring config, quyền đọc, lookup table) thông qua custody. Khi hoạt động, mọi thao tác đều có thể nhắm đến ring theo tên — các thao tác của ring mặc định không bao giờ bị chặn bởi ring này.",
+      "none": "Chưa có custom ring nào được ghi lại. Mọi thao tác đều dùng ring mặc định.",
+      "openList": "Xem custom ring",
+      "dialogDescription": "Chọn một ring để xem program, auditor key và lookup table của nó.",
+      "nameLabel": "Tên ring",
+      "namePlaceholder": "treasury",
+      "programIdLabel": "Program id của ring",
+      "programIdPlaceholder": "Program id Base58 từ bản deployment của ops",
+      "programId": "Program của ring",
+      "auditorKey": "Auditor public key",
+      "lookupTable": "Lookup table",
+      "submit": "Ghi lại và khởi tạo",
+      "submitting": "Đang khởi tạo…",
+      "retry": "Thử khởi tạo lại",
+      "repointHint": "Gửi lại một tên đã ghi sẽ tiếp tục quá trình khởi tạo của ring. Nhập id khác dưới tên đó sẽ thay thế program của ring — chỉ khả thi khi ring chưa từng hoạt động.",
+      "submitFailed": "Khởi tạo ring thất bại.",
+      "status_pending": "Đang chờ",
+      "status_active": "Hoạt động",
+      "status_failed": "Thất bại",
+      "explain_pending": "Quá trình khởi tạo chưa hoàn tất. Các thao tác chưa thể nhắm đến ring này; các thao tác của ring mặc định không bị ảnh hưởng.",
+      "explain_failed": "Khởi tạo thất bại; các thao tác không thể nhắm đến ring này cho đến khi thử lại thành công. Các thao tác của ring mặc định không bị ảnh hưởng."
     }
   }
 }

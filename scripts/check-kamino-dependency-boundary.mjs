@@ -1,57 +1,24 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { assertExactConsumers } from "./lib/dependency-boundary.mjs";
 
 const ROOT = process.cwd();
 const LOCKFILE = "pnpm-lock.yaml";
 const KAMINO_PACKAGE = "packages/sdp-kamino/package.json";
+const JUPITER_LEND_PACKAGE = "packages/sdp-jupiter-lend/package.json";
 const API_PACKAGE = "apps/sdp-api/package.json";
 const API_DOCKERFILE = "apps/sdp-api/Dockerfile";
 const API_DOCKERIGNORE = "apps/sdp-api/Dockerfile.dockerignore";
 const SAFE_BIGINT_PACKAGE = "packages/bigint-buffer/package.json";
 const SAFE_BIGINT_RESOLUTION = "link:packages/bigint-buffer";
 
-function packageJsonFiles(parent) {
-  return readdirSync(path.join(ROOT, parent), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(parent, entry.name, "package.json"))
-    .filter((file) => {
-      try {
-        readFileSync(path.join(ROOT, file));
-        return true;
-      } catch {
-        return false;
-      }
-    });
-}
-
-const manifests = ["package.json", ...packageJsonFiles("apps"), ...packageJsonFiles("packages")];
-
-function directConsumers(dependency) {
-  return manifests.filter((file) => {
-    const manifest = JSON.parse(readFileSync(path.join(ROOT, file), "utf8"));
-    return [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies].some(
-      (dependencies) => dependencies && Object.hasOwn(dependencies, dependency)
-    );
-  });
-}
-
-function assertExactConsumers(dependency, expected) {
-  const actual = directConsumers(dependency).sort();
-  const wanted = [...expected].sort();
-  if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
-    throw new Error(
-      `${dependency} dependency boundary changed. Expected ${wanted.join(", ")}; found ${
-        actual.join(", ") || "none"
-      }.`
-    );
-  }
-}
-
 // Only the private Kamino package may own klend-sdk, and only the API may ship
 // that package. bigint-buffer itself is replaced workspace-wide so unbundled
 // tools and tests cannot reach the abandoned package's native binding either.
 assertExactConsumers("@kamino-finance/klend-sdk", [KAMINO_PACKAGE]);
 assertExactConsumers("@sdp/kamino", [API_PACKAGE]);
+assertExactConsumers("@jup-ag/lend", [JUPITER_LEND_PACKAGE]);
+assertExactConsumers("@sdp/jupiter-lend", [API_PACKAGE]);
 
 const safeBigintManifest = JSON.parse(readFileSync(path.join(ROOT, SAFE_BIGINT_PACKAGE), "utf8"));
 if (
@@ -68,6 +35,8 @@ const dockerfile = readFileSync(path.join(ROOT, API_DOCKERFILE), "utf8");
 for (const requiredCopy of [
   "COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/",
   "COPY packages/bigint-buffer ./packages/bigint-buffer",
+  "COPY packages/sdp-jupiter-lend/package.json ./packages/sdp-jupiter-lend/",
+  "COPY packages/sdp-jupiter-lend ./packages/sdp-jupiter-lend",
 ]) {
   if (!dockerfile.includes(requiredCopy)) {
     throw new Error(`${API_DOCKERFILE} must include: ${requiredCopy}`);
@@ -76,6 +45,11 @@ for (const requiredCopy of [
 const dockerignore = readFileSync(path.join(ROOT, API_DOCKERIGNORE), "utf8");
 if (!dockerignore.includes("!packages/bigint-buffer")) {
   throw new Error(`${API_DOCKERIGNORE} must include packages/bigint-buffer in the build context.`);
+}
+if (!dockerignore.includes("!packages/sdp-jupiter-lend")) {
+  throw new Error(
+    `${API_DOCKERIGNORE} must include packages/sdp-jupiter-lend in the build context.`
+  );
 }
 
 const lines = readFileSync(path.join(ROOT, LOCKFILE), "utf8").split(/\r?\n/);
@@ -140,6 +114,6 @@ if (
 }
 
 console.log(
-  "Kamino dependency boundary OK: API -> @sdp/kamino -> klend-sdk -> " +
-    "@solana/buffer-layout-utils -> workspace bigint-buffer@1.1.6 (pure JS)"
+  "Earn SDK boundaries OK: API -> @sdp/kamino -> klend-sdk and " +
+    "API -> @sdp/jupiter-lend -> @jup-ag/lend; bigint-buffer remains the workspace pure-JS replacement."
 );

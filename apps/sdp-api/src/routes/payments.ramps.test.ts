@@ -13,6 +13,7 @@ import {
   seedCounterparty,
   TEST_API_KEY,
   TEST_CONFIG_ID,
+  TEST_CUSTODY_WALLET_ID,
   TEST_MOONPAY_API_KEY,
   TEST_MOONPAY_OFFRAMP_URL,
   TEST_MOONPAY_ONRAMP_URL,
@@ -26,6 +27,7 @@ import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
+const TEST_CONNECTION_CUSTODY_WALLET_ID = "cwlt_payments_connection_balance";
 
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 
@@ -44,10 +46,14 @@ function assertMoonPaySignature(url: URL): void {
   expect(signature).toBe(expectedSignature);
 }
 
-async function seedActiveConnectionWallet(): Promise<void> {
+async function seedActiveConnectionWallet(params?: {
+  walletId?: string;
+  publicKey?: string;
+}): Promise<void> {
   const credentialId = "pcred_payments_connection_balance";
   const connectionId = "cconn_payments_connection_balance";
-  const custodyWalletId = "cwlt_payments_connection_balance";
+  const walletId = params?.walletId ?? TEST_CONNECTION_WALLET_ID;
+  const publicKey = params?.publicKey ?? TEST_SOLANA_ADDRESSES.wallet2;
 
   await getDb(env).batch([
     getDb(env)
@@ -80,12 +86,7 @@ async function seedActiveConnectionWallet(): Promise<void> {
            id, custody_connection_id, wallet_id, public_key, label, purpose, status
          ) VALUES (?, ?, ?, ?, 'Connection balance wallet', 'transfer', 'active')`
       )
-      .bind(
-        custodyWalletId,
-        connectionId,
-        TEST_CONNECTION_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet2
-      ),
+      .bind(TEST_CONNECTION_CUSTODY_WALLET_ID, connectionId, walletId, publicKey),
     getDb(env)
       .prepare(
         `UPDATE custody_connections
@@ -98,7 +99,7 @@ async function seedActiveConnectionWallet(): Promise<void> {
              updated_at = sdp_iso_now()
          WHERE id = ?`
       )
-      .bind(custodyWalletId, connectionId),
+      .bind(TEST_CONNECTION_CUSTODY_WALLET_ID, connectionId),
   ]);
 }
 
@@ -150,6 +151,200 @@ async function seedRampEventTransfer(params: {
 
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
+
+  it("rejects the retired symbol-shaped onramp quote request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId: "cpty_asset_rail_validation",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped onramp estimate request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped offramp estimate request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired symbol-shaped offramp quote request", async () => {
+    const response = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId: "cpty_asset_rail_validation",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
+  });
+
+  it("rejects the retired destinationWallet key on the onramp quote endpoint", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "retired_destination_wallet_key",
+    });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          assetRail: "sol.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
+  });
+
+  it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "provider_walletid_as_custody_id",
+    });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationCustodyWalletId: TEST_WALLET_ID,
+          assetRail: "sol.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+  });
+
+  it("creates a hosted quote for an exact Connection wallet row", async () => {
+    await seedActiveConnectionWallet();
+    const counterpartyId = await seedCounterparty({ externalId: "connection_ramp_wallet" });
+
+    const response = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationCustodyWalletId: TEST_CONNECTION_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await getDb(env)
+        .prepare("SELECT custody_wallet_id FROM payment_transfers")
+        .first<{ custody_wallet_id: string | null }>()
+    ).toEqual({ custody_wallet_id: TEST_CONNECTION_CUSTODY_WALLET_ID });
+  });
 
   it("reads an active Connection wallet balance and preserves API-key wallet scope", async () => {
     await seedActiveConnectionWallet();
@@ -416,8 +611,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           rampsMemo: { invoice: "INV-123", po: "PO-9" },
@@ -453,7 +648,6 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("120.50");
     expect(hostedUrl.searchParams.get("currencyCode")).toBe("sol");
     expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
-    expect(hostedUrl.searchParams.has("redirectURL")).toBe(false);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
@@ -481,6 +675,12 @@ describe("Payments routes — ramps", () => {
     expect(transfersBody.data.transfer.id).toBe(body.data.transferId);
     expect(transfersBody.data.transfer.providerReference).toBeUndefined();
     expect(transfersBody.data.transfer.rampsMemo).toEqual({ invoice: "INV-123", po: "PO-9" });
+    expect(
+      await getDb(env)
+        .prepare("SELECT custody_wallet_id FROM payment_transfers WHERE id = ?")
+        .bind(transfersBody.data.transfer.id)
+        .first<{ custody_wallet_id: string | null }>()
+    ).toEqual({ custody_wallet_id: TEST_CUSTODY_WALLET_ID });
   });
 
   it("creates a hosted MoonPay off-ramp quote with the transfer id", async () => {
@@ -497,8 +697,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -526,20 +726,24 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.origin).toBe(TEST_MOONPAY_OFFRAMP_URL);
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
-    expect(hostedUrl.searchParams.has("redirectURL")).toBe(false);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");
     assertMoonPaySignature(hostedUrl);
 
     const transfer = await getDb(env)
       .prepare(
-        `SELECT id, provider_reference
+        `SELECT id, custody_wallet_id, provider_reference
          FROM payment_transfers
          WHERE id = ? AND organization_id = ? AND project_id = ?`
       )
       .bind(body.data.transferId, TEST_ORG.id, TEST_PROJECT.id)
-      .first<{ id: string; provider_reference: string | null }>();
+      .first<{
+        id: string;
+        custody_wallet_id: string | null;
+        provider_reference: string | null;
+      }>();
     expect(transfer).toEqual({
       id: body.data.transferId,
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       provider_reference: null,
     });
   });
@@ -559,8 +763,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -600,8 +804,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -660,8 +864,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -693,8 +897,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "SOL",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "sol.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           rampsMemo,
@@ -722,8 +926,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -746,8 +950,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "moonpay",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -760,7 +964,7 @@ describe("Payments routes — ramps", () => {
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 
-  it("fails loudly when a BVNK off-ramp quote reaches the unwired JIT seam", async () => {
+  it("fails loudly when a BVNK off-ramp quote has no customer-link row", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
       providerData: {
@@ -793,8 +997,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "bvnk",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           rampsMemo: { invoice: "INV-123", po: "PO-9" },
@@ -803,12 +1007,10 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error).toEqual({
-      code: "BAD_REQUEST",
-      message: `BVNK offramp requires identity fields for counterparty ${counterpartyId} that are no longer stored; JIT collection is not wired yet`,
-    });
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.message).toContain("not provisioned for bvnk offramp");
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -835,8 +1037,8 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "bvnk",
           counterpartyId,
-          sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -896,7 +1098,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_1" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_pending" }),
       },
       env
     );
@@ -928,7 +1130,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ provider: "bvnk", providerReference: "bvnk_ref_cancel_2" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_settling" }),
       },
       env
     );
@@ -1107,11 +1309,11 @@ describe("Payments routes — ramps", () => {
           },
           body: JSON.stringify({
             provider: "bvnk",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "EUR",
             fiatAmount: "100",
             counterpartyId: "cpty_quota_test",
-            destinationWallet: TEST_WALLET_ID,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           }),
         },
         env
@@ -1262,8 +1464,8 @@ describe("Payments routes — ramps", () => {
           body: JSON.stringify({
             provider: "moneygram",
             counterpartyId,
-            destinationWallet: TEST_WALLET_ID,
-            cryptoToken: "USDC",
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             fiatAmount,
           }),
@@ -1419,6 +1621,295 @@ describe("Payments routes — ramps", () => {
       expect(res.status).toBe(409);
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toContain("expired");
+    });
+  });
+
+  describe("lightspark offramp quote account selection", () => {
+    /**
+     * Inserts one counterparty provider-account row with explicit values.
+     *
+     * @param input - Row values for the fixture.
+     * @returns The inserted row id.
+     */
+    async function seedLightsparkProviderAccount(input: {
+      id: string;
+      counterpartyId: string;
+      providerCustomerReference: string;
+      externalAccountReference: string | null;
+      fiatCurrency: string | null;
+      destinationCountry: string | null;
+      paymentRail: string | null;
+      providerStatus: string | null;
+    }): Promise<string> {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, external_account_reference, fiat_currency,
+             destination_country, payment_rail, provider_status, status, metadata
+           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, ?, 'active', '{}')`
+        )
+        .bind(
+          input.id,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          input.counterpartyId,
+          input.providerCustomerReference,
+          input.fiatCurrency === null ? "customer_link" : "payout_account",
+          input.externalAccountReference,
+          input.fiatCurrency,
+          input.destinationCountry,
+          input.paymentRail,
+          input.providerStatus
+        )
+        .run();
+      return input.id;
+    }
+
+    /**
+     * Seeds a lightspark counterparty with a Grid customer link and payout accounts.
+     *
+     * @param accounts - Corridor account fixtures to insert for the counterparty.
+     * @returns The counterparty id.
+     */
+    async function seedLightsparkCounterparty(
+      accounts: readonly {
+        id: string;
+        externalAccountReference: string;
+        paymentRail: string;
+      }[]
+    ): Promise<string> {
+      const counterpartyId = await seedCounterparty({
+        providerData: { lightspark: { purposeOfPayment: "SELF" } },
+      });
+      await seedLightsparkProviderAccount({
+        id: `${counterpartyId}_customer_link`,
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: null,
+        fiatCurrency: null,
+        destinationCountry: null,
+        paymentRail: null,
+        providerStatus: null,
+      });
+      for (const account of accounts) {
+        await seedLightsparkProviderAccount({
+          id: account.id,
+          counterpartyId,
+          providerCustomerReference: "Customer:cus_quote_test",
+          externalAccountReference: account.externalAccountReference,
+          fiatCurrency: "USD",
+          destinationCountry: "MY",
+          paymentRail: account.paymentRail,
+          providerStatus: "ACTIVE",
+        });
+      }
+      return counterpartyId;
+    }
+
+    /**
+     * Mocks the Grid quote endpoint with a valid locked-sending quote.
+     *
+     * @returns The installed fetch spy.
+     */
+    function mockGridQuote() {
+      const quotePage = JSON.stringify({
+        id: "Quote:qt_selection_test",
+        quoteStatus: "CREATED",
+        exchangeRate: 4.2,
+        totalSendingAmount: 25000000,
+        sendingCurrency: { code: "USDC", decimals: 6 },
+        totalReceivingAmount: 105,
+        receivingCurrency: { code: "USD", decimals: 2 },
+        feesIncluded: 0,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+      return vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+        Promise.resolve(
+          new Response(quotePage, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+      );
+    }
+
+    const quoteRequest = (body: Record<string, unknown>) =>
+      app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "lightspark",
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            cryptoAmount: "25",
+            fiatCurrency: "USD",
+            destinationCountry: "MY",
+            ...body,
+          }),
+        },
+        env
+      );
+
+    it("resolves an explicit providerAccountId and records it on the transfer", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_ach",
+          externalAccountReference: "ExternalAccount:ach",
+          paymentRail: "ACH",
+        },
+        {
+          id: "cpa_quote_swift",
+          externalAccountReference: "ExternalAccount:swift",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      const fetchSpy = mockGridQuote();
+
+      const res = await quoteRequest({ counterpartyId, providerAccountId: "cpa_quote_swift" });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { quote: { id: string }; transferId: string } };
+      expect(body.data.quote.id).toBe("Quote:qt_selection_test");
+      const gridBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+        destination: { accountId: string };
+      };
+      expect(gridBody.destination.accountId).toBe("ExternalAccount:swift");
+
+      const transfer = await getDb(env)
+        .prepare("SELECT provider_data FROM payment_transfers WHERE id = ?")
+        .bind(body.data.transferId)
+        .first<{ provider_data: unknown }>();
+      expect(transfer).not.toBeNull();
+      const providerData =
+        typeof transfer?.provider_data === "string"
+          ? (JSON.parse(transfer.provider_data) as Record<string, unknown>)
+          : (transfer?.provider_data as Record<string, unknown>);
+      expect(providerData.payoutProviderAccountId).toBe("cpa_quote_swift");
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects a providerAccountId owned by another counterparty", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_own",
+          externalAccountReference: "ExternalAccount:own",
+          paymentRail: "ACH",
+        },
+      ]);
+      const otherCounterpartyId = await seedCounterparty({
+        providerData: { lightspark: { purposeOfPayment: "SELF" } },
+      });
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_foreign",
+        counterpartyId: otherCounterpartyId,
+        providerCustomerReference: "Customer:cus_other",
+        externalAccountReference: "ExternalAccount:foreign",
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "SWIFT",
+        providerStatus: "ACTIVE",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await quoteRequest({ counterpartyId, providerAccountId: "cpa_quote_foreign" });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+      expect(body.error.message).toContain("providerAccountId");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects an explicitly selected account that is pending or provider-inactive", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_active",
+          externalAccountReference: "ExternalAccount:active",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_pending",
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: null,
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "ACH",
+        providerStatus: null,
+      });
+      await seedLightsparkProviderAccount({
+        id: "cpa_quote_created",
+        counterpartyId,
+        providerCustomerReference: "Customer:cus_quote_test",
+        externalAccountReference: "ExternalAccount:created",
+        fiatCurrency: "USD",
+        destinationCountry: "MY",
+        paymentRail: "ACH",
+        providerStatus: "CREATED",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      for (const providerAccountId of ["cpa_quote_pending", "cpa_quote_created"]) {
+        const res = await quoteRequest({ counterpartyId, providerAccountId });
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("BAD_REQUEST");
+        expect(body.error.message).toContain("providerAccountId");
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects an ambiguous corridor when no providerAccountId is given", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_multi_a",
+          externalAccountReference: "ExternalAccount:multi_a",
+          paymentRail: "ACH",
+        },
+        {
+          id: "cpa_quote_multi_b",
+          externalAccountReference: "ExternalAccount:multi_b",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await quoteRequest({ counterpartyId });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("explicit external-account selection is required");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("keeps implicit resolution for a single-account corridor", async () => {
+      const counterpartyId = await seedLightsparkCounterparty([
+        {
+          id: "cpa_quote_single",
+          externalAccountReference: "ExternalAccount:single",
+          paymentRail: "SWIFT",
+        },
+      ]);
+      const fetchSpy = mockGridQuote();
+
+      const res = await quoteRequest({ counterpartyId });
+
+      expect(res.status).toBe(200);
+      const gridBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+        destination: { accountId: string };
+      };
+      expect(gridBody.destination.accountId).toBe("ExternalAccount:single");
+      fetchSpy.mockRestore();
     });
   });
 });

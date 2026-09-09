@@ -7,9 +7,9 @@ export default defineConfig({
     alias: {
       // Must precede the "@sdp/types" prefix alias: the generated file's
       // suffix does not match the export subpath.
-      "@sdp/types/generated/ramp-support": path.resolve(
+      "@sdp/types/generated/ramp": path.resolve(
         __dirname,
-        "../../packages/sdp-types/src/generated/ramp-support.generated.ts"
+        "../../packages/sdp-types/src/generated/ramp.generated.ts"
       ),
       "@": path.resolve(__dirname, "./src"),
       "@sdp/types": path.resolve(__dirname, "../../packages/sdp-types/src"),

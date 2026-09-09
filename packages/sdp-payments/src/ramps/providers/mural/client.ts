@@ -28,11 +28,11 @@ import {
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -676,37 +676,35 @@ export class MuralRampClient implements RampProvider {
     return muralCounterpartyRequirements(counterparty, options);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const apiKey = requireEnv(env, "MURAL_PAY_SANDBOX_API_KEY");
-    const headers = { Authorization: `Bearer ${apiKey}` };
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    if (!context.offline) {
+      const { env, fetchJson, writeDump } = context;
+      const apiKey = requireEnv(env, "MURAL_PAY_SANDBOX_API_KEY");
+      const headers = { Authorization: `Bearer ${apiKey}` };
 
-    const entries = await Promise.all(
-      MURAL_FIAT_RAIL_CODES.map(
-        async (railCode) =>
-          [
-            railCode,
-            await fetchJson(
-              this.id,
-              `GET /api/utilities/countries/${railCode}`,
-              `${MURAL_SANDBOX_BASE_URL}/api/utilities/countries/${railCode}`,
-              { headers }
-            ),
-          ] as const
-      )
-    );
+      const entries = await Promise.all(
+        MURAL_FIAT_RAIL_CODES.map(
+          async (railCode) =>
+            [
+              railCode,
+              await fetchJson(
+                this.id,
+                `GET /api/utilities/countries/${railCode}`,
+                `${MURAL_SANDBOX_BASE_URL}/api/utilities/countries/${railCode}`,
+                { headers }
+              ),
+            ] as const
+        )
+      );
 
-    await writeDump(RAMP_RAIL_DUMPS.mural.countries.name, {
-      status: 200,
-      body: Object.fromEntries(entries),
-    });
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return distillMuralRailSupport(await readDump(RAMP_RAIL_DUMPS.mural.countries.file));
+      await writeDump(RAMP_RAIL_DUMPS.mural.countries.name, {
+        status: 200,
+        body: Object.fromEntries(entries),
+      });
+    }
+    return distillMuralRailSupport(await context.readDump(RAMP_RAIL_DUMPS.mural.countries.file));
   }
 
   parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {

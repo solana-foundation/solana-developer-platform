@@ -21,28 +21,25 @@ const MODULE_METADATA = [
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
+      "@sdp/dvp",
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
       "@sdp/helius-rings-sdk",
       "@sdp/issuance",
       "@sdp/kamino",
+      "@sdp/jupiter-lend",
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
+      "@sdp/redaction",
       "@sdp/rpc",
       "@sdp/solana",
       "@sdp/spc-escrow",
       "@sdp/spc-withdraw",
       "@sdp/types",
+      "@sdp/veda",
     ],
-  },
-  {
-    name: "@sdp/helius-gateway",
-    directory: "apps/sdp-helius-gateway",
-    purpose:
-      "Rust sidecar over the Helius Rings (zolana) SDK; builds unsigned Solana transactions. Built with cargo, not pnpm.",
-    allowedDependencies: [],
   },
   {
     name: "sdp-docs",
@@ -60,15 +57,10 @@ const MODULE_METADATA = [
       "@sdp/issuance",
       "@sdp/policy",
       "@sdp/private-channels",
+      "@sdp/redaction",
       "@sdp/solana",
       "@sdp/types",
     ],
-  },
-  {
-    name: "@sdp/kit-augment",
-    directory: "packages/kit-augment",
-    purpose: "Shared @solana/kit type augmentation for the generated Codama clients.",
-    allowedDependencies: [],
   },
   {
     name: "@sdp/api-integration",
@@ -93,7 +85,13 @@ const MODULE_METADATA = [
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
-    allowedDependencies: ["@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/types"],
+  },
+  {
+    name: "@sdp/dvp",
+    directory: "packages/sdp-dvp",
+    purpose: "Generated @solana/kit client for the DvP atomic swap program.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/earn",
@@ -126,10 +124,28 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
   {
+    name: "@sdp/jupiter-lend",
+    directory: "packages/sdp-jupiter-lend",
+    purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
+    allowedDependencies: ["@sdp/earn", "@sdp/types"],
+  },
+  {
+    name: "@sdp/veda",
+    directory: "packages/sdp-veda",
+    purpose: "Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk.",
+    // The arrow points INWARD and only inward: this package depends on
+    // @sdp/earn (for the provider contract and the catalogue client it extends),
+    // and @sdp/earn must never depend back — its hourly catalogue cron would
+    // then load a chain SDK built against a different @solana/kit major that it
+    // never calls. That one-way edge is also why the Veda deployment registry lives in
+    // @sdp/types, which both reach without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+  },
+  {
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
-    allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/policy",
@@ -157,6 +173,13 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
   },
   {
+    name: "@sdp/redaction",
+    directory: "packages/sdp-redaction",
+    purpose:
+      "Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies.",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/rpc",
     directory: "packages/sdp-rpc",
     purpose: "Solana RPC clients, errors, and relay helpers.",
@@ -172,13 +195,13 @@ const MODULE_METADATA = [
     name: "@sdp/spc-escrow",
     directory: "packages/sdp-spc-escrow",
     purpose: "Generated @solana/kit client for the Private Channels escrow program.",
-    allowedDependencies: ["@sdp/kit-augment"],
+    allowedDependencies: [],
   },
   {
     name: "@sdp/spc-withdraw",
     directory: "packages/sdp-spc-withdraw",
     purpose: "Generated @solana/kit client for the Private Channels withdraw program.",
-    allowedDependencies: ["@sdp/kit-augment"],
+    allowedDependencies: [],
   },
   {
     name: "@sdp/types",

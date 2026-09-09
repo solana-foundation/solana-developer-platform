@@ -9,14 +9,14 @@ steps:
 
 SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**.
 
-The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
+The `sourceCustodyWalletId` field is the exact SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`), resolved server-side from the caller's custody-wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
 Transfers are available through the Payments dashboard and the API.
 
 ## Prerequisites
 
 - A deployed token with minted supply
-- A custody wallet to use as the `source`, with a custody signer configured so SDP can sign and submit.
+- A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
 - An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — `POST /v1/payments/transfers` is gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
 ## How it works
@@ -60,7 +60,7 @@ Build the request body:
 
 ```typescript title="transfer-request.ts"
 const body = {
-  source: "privy_wallet_123",              // `walletId` from GET /v1/wallets
+  sourceCustodyWalletId: "cwlt_123",    // `id` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
   token: "9aBCd...4eEf",               // onchain mint address
   amount: "100.00",                    // human-readable units
@@ -97,8 +97,9 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payment-invoice-1234" \
   -d '{
-    "source": "privy_wallet_123",
+    "sourceCustodyWalletId": "cwlt_123",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -115,9 +116,10 @@ const response = await fetch(
     headers: {
       "Authorization": "Bearer sk_test_...",
       "Content-Type": "application/json",
+      "Idempotency-Key": "payment-invoice-1234",
     },
     body: JSON.stringify({
-      source: "privy_wallet_123",
+      sourceCustodyWalletId: "cwlt_123",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -135,9 +137,10 @@ HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "payment-invoice-1234")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "privy_wallet_123",
+          "sourceCustodyWalletId": "cwlt_123",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -193,10 +196,9 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 ## Deduplication
 
-Unlike the issuance endpoints, payments transfer endpoints do not currently honor an `Idempotency-Key` header — retrying a failed transfer request will produce a new `Transfer` record. To guarantee at-most-once execution from the client side:
+Send one stable `Idempotency-Key` per logical payment and reuse it for network retries. An identical request for the same exact `sourceCustodyWalletId` returns the original transfer; reusing the key with a different payload or wallet returns `409`. A request without a key creates a new transfer intent.
 
-1. Persist the SDP `Transfer.id` returned by the first successful response **before** retrying. On retry, skip submission if you already have a transfer ID for that logical payment.
-2. Rely on the on-chain `signature` (UNIQUE across SDP's transfers table) as the cross-source dedup key **once it is populated** on the record. `signature` is filled in when the transaction is submitted to the network, which can lag behind the initial `processing` status — treat its presence (not the `status` value) as the trigger for signature-based dedup.
+Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
 See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
 

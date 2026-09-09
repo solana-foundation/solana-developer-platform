@@ -128,7 +128,10 @@ function TransactionDetail({
       ),
     ],
     [t("DashboardPayments.transactions.direction"), formatDirection(transfer.direction, t)],
-    [t("DashboardPayments.transactions.wallet"), transfer.walletId],
+    [
+      t("DashboardPayments.transactions.wallet"),
+      transfer.custodyWalletId ?? transfer.providerWalletId,
+    ],
     [
       t("DashboardPayments.transactions.counterparty"),
       counterparty.displayName ?? transfer.counterpartyId,
@@ -338,10 +341,10 @@ function DesktopTable({
                   ) : null}
                 </TableCell>
                 <TableCell
-                  className="truncate font-mono text-xs text-secondary"
-                  title={transfer.walletId}
+                  className="truncate text-xs text-secondary"
+                  title={transfer.custodyWalletId ?? transfer.providerWalletId}
                 >
-                  {transfer.walletId ? shortenAddress(transfer.walletId) : "—"}
+                  {shortenAddress(transfer.custodyWalletId ?? transfer.providerWalletId)}
                 </TableCell>
                 <TableCell className="text-sm text-secondary">
                   <time dateTime={transfer.createdAt}>
@@ -457,16 +460,13 @@ export function TransactionsResults({
           serverFilters.status ||
           serverFilters.direction ||
           serverFilters.type ||
-          serverFilters.walletId ||
+          serverFilters.custodyWalletId ||
           serverFilters.counterpartyId ||
           serverFilters.asset ||
           serverFilters.provider ||
           serverFilters.from ||
           serverFilters.to ||
-          // Excluding observed deposits can be the sole reason a wallet looks
-          // empty, so the empty state must offer to clear filters rather than
-          // claim there is nothing to show.
-          !serverFilters.includeObserved
+          serverFilters.includeObserved
       ),
     [serverFilters]
   );

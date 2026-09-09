@@ -15,6 +15,7 @@ const { TEST_PROJECT } = apiTestSupport;
 type WalletListResponse = {
   data: {
     wallets: Array<{
+      id: string;
       walletId: string;
       publicKey: string;
       provider?: string;
@@ -155,7 +156,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        source: sourceWallet.walletId,
+        sourceCustodyWalletId: sourceWallet.id,
         destination: DESTINATION_WALLET,
         token: mintAddress,
         amount: "1",

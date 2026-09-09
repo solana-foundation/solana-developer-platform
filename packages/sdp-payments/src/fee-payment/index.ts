@@ -46,8 +46,12 @@ const DEFAULT_KORA_URLS: Record<string, string> = {
  * Create a fee payment adapter from environment variables.
  * Uses Kora if configured, falls back to native adapter.
  */
+export function resolveFeePaymentProvider(env: FeePaymentEnv): FeePaymentProviderType {
+  return (env.FEE_PAYMENT_PROVIDER ?? "kora") as FeePaymentProviderType;
+}
+
 export function createFeePaymentAdapter(env: FeePaymentEnv, userId?: string): FeePaymentPort {
-  const provider = (env.FEE_PAYMENT_PROVIDER ?? "kora") as FeePaymentProviderType;
+  const provider = resolveFeePaymentProvider(env);
 
   switch (provider) {
     case "kora":

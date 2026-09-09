@@ -70,8 +70,8 @@ export function walletComboboxOptions(wallets: PaymentsDashboardWallet[]): Combo
   return wallets.map((wallet) => {
     const total = resolveTotalBalance(wallet.balances ?? []);
     return {
-      value: wallet.walletId,
-      label: wallet.label ?? wallet.walletId,
+      value: wallet.id,
+      label: wallet.label ?? wallet.publicKey,
       description: total !== null ? formatCurrencyAmount(total) : undefined,
     };
   });

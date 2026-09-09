@@ -22,8 +22,12 @@ export function CounterpartySelector({
     () =>
       counterpartiesResult.data
         .filter((cp) => cp.status === "active")
-        .map((cp) => ({ value: cp.id, label: cp.displayName })),
-    [counterpartiesResult.data]
+        .map((cp) => ({
+          value: cp.id,
+          label: cp.displayName,
+          description: t(`DashboardPayments.counterparty.${cp.entityType}`),
+        })),
+    [counterpartiesResult.data, t]
   );
 
   return (
@@ -34,7 +38,6 @@ export function CounterpartySelector({
       options={options}
       placeholder={t("DashboardPayments.ramps.selectCounterparty")}
       searchPlaceholder={t("DashboardPayments.ramps.searchCounterparties")}
-      variant="dialog"
       icon={<UsersIcon className="size-5 shrink-0 text-tertiary" />}
       error={
         counterpartiesResult.ok

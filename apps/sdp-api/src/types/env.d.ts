@@ -33,12 +33,12 @@ export interface Env {
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
 
-  // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
-  // it overrides the request-derived origin used to build the SDP-hosted token
-  // metadata URL that gets burned into the on-chain MetadataPointer. Set this in
-  // any environment fronted by a proxy that rewrites Host/scheme, so the URI
-  // can't capture an internal, unreachable address. Falls back to the request
-  // origin when unset.
+  // Public-facing origin of this API (e.g. "https://api.example.com"). The
+  // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
+  // built from this value and nothing else — it is never derived from the
+  // incoming request, so a spoofed Host header can't pin a hostile origin into
+  // a mint. Deploys that need the SDP-hosted metadata fallback fail closed when
+  // it is unset or not a valid http(s) origin.
   PUBLIC_API_ORIGIN?: string;
 
   // Deployment mode. "managed" (default) uses tier-based provider entitlements
@@ -68,9 +68,6 @@ export interface Env {
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
   SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
-  SENTRY_DSN?: string;
-  SENTRY_TRACES_SAMPLE_RATE?: string;
-
   // Email configuration
   EMAIL_FROM?: string;
   RESEND_API_KEY?: string;
@@ -109,6 +106,15 @@ export interface Env {
   /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
+  /**
+   * Jupiter Swap API (swap-funded Earn deposits). Fail-closed: with no key
+   * present, a deposit that names a `sourceTokenMint` is refused before any
+   * network request — the same posture as an absent provider credential.
+   * The URL defaults to the keyed production base; override it only to pin a
+   * different deployment (e.g. a mock in tests).
+   */
+  JUPITER_SWAP_API_URL?: string;
+  JUPITER_SWAP_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_RPC_QUICKNODE_URL?: string;
@@ -227,18 +233,14 @@ export interface Env {
   // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
   PRIVATE_CHANNELS_ENABLED?: string;
 
+  // Comma-separated origins (`scheme://host[:port]`) a Private Channels gateway
+  // or auth URL may point at. Projects supply those URLs, so this is the list
+  // that decides where a probe is allowed to go; the public sandbox is approved
+  // without configuring anything. See services/private-channels/egress.ts.
+  PRIVATE_CHANNEL_EGRESS_ALLOWLIST?: string;
+
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
-
-  // Rings upstreams, all required once Rings is enabled. Absence does not
-  // disable the gateway: it reports every component red naming what is missing.
-  HELIUS_RINGS_RPC_URL?: string;
-  HELIUS_RINGS_INDEXER_URL?: string;
-  HELIUS_RINGS_PROVER_URL?: string;
-
-  // Permits plain-http Rings upstreams; opt-in per environment because over
-  // plaintext an indexer response reveals which notes an identity owns.
-  HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -254,10 +256,6 @@ export interface Env {
 
   // Google address completion (Places API New + Maps Static API)
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
-
-  // Exact hostnames tenant-supplied ramp redirect URLs may target
-  // (comma-separated). Unset means every redirectUrl is rejected — fail closed.
-  RAMP_REDIRECT_ALLOWED_HOSTS?: string;
 
   // MoonPay ramps configuration
   MOONPAY_API_KEY?: string;
@@ -310,18 +308,24 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
 
-  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
-  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  // Markets module gate (parent) and its sub-module gates (children). Each
+  // sub-module needs both; clearing MARKETS_ENABLED dark-launches them all.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+  // Atomic delivery-versus-payment settlement. The on-chain program is deployed
+  // on devnet only, so this stays off anywhere pointed at mainnet until Exo
+  // deploys there (PRO-1798).
+  DVP_ENABLED?: string;
+  // Settlement authority for DvP trades. Only this key can Settle or Cancel;
+  // the parties can only unwind. It cannot be either party or an executable
+  // account. Where it ultimately lives is still an open decision (PRO-1796).
+  DVP_SETTLEMENT_AUTHORITY?: string;
   // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
 
   // Earn vault-infra provider configuration
-  VEDA_API_KEY?: string;
-  VEDA_SANDBOX_API_KEY?: string;
   UPSHIFT_API_KEY?: string;
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;

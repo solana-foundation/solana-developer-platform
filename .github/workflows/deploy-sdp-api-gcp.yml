@@ -2,15 +2,7 @@ name: Deploy sdp-api to Cloud Run (dev)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "apps/sdp-api/**"
-      - "packages/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".github/workflows/deploy-sdp-api-gcp.yml"
+  workflow_call:
 
 permissions:
   contents: read
@@ -93,11 +85,3 @@ jobs:
             exit 1
           fi
 
-  smoke:
-    name: Post-deploy dev smoke
-    needs: deploy
-    permissions:
-      contents: read
-    uses: ./.github/workflows/sdp-dev-smoke.yml
-    secrets:
-      DOPPLER_TOKEN_CI: ${{ secrets.DOPPLER_TOKEN_CI }}

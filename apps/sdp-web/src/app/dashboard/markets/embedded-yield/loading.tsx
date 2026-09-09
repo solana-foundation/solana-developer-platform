@@ -1,5 +1,5 @@
-import { EarnProgramSkeleton } from "../markets-route-skeletons";
+import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 
 export default function EmbeddedYieldLoading() {
-  return <EarnProgramSkeleton />;
+  return <EmbeddedYieldPortfolioSkeleton />;
 }

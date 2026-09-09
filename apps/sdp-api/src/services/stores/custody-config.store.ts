@@ -23,9 +23,8 @@ import type { Env } from "@/types/env";
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface CustodyWallet {
+interface CustodyWalletFields {
   id: string;
-  custodyConfigId: string;
   walletId: string;
   publicKey: string;
   label: string | null;
@@ -34,17 +33,29 @@ export interface CustodyWallet {
   createdAt: string;
 }
 
-export interface CustodyWalletLookup extends CustodyWallet {
+export type CustodyWallet = CustodyWalletFields &
+  (
+    | { custodyConfigId: string; custodyConnectionId?: never }
+    | { custodyConfigId?: never; custodyConnectionId: string }
+  );
+
+export interface CustodyConfigWallet extends CustodyWalletFields {
+  custodyConfigId: string;
+}
+
+export interface CustodyWalletLookup extends CustodyConfigWallet {
   provider: SigningProviderType;
   projectId: string | null;
 }
 
-export type WalletPurpose =
-  | "root"
-  | "mint_authority"
-  | "freeze_authority"
-  | "fee_payer"
-  | "transfer";
+/**
+ * Aliased rather than restated. This was a second copy of the same union, and a
+ * purpose added to one of them silently failed to typecheck against the other —
+ * which is what a duplicated union is for.
+ */
+import type { CustodyWalletPurpose } from "@sdp/types";
+
+export type WalletPurpose = CustodyWalletPurpose;
 
 export interface CreateWalletParams {
   walletId: string;
@@ -423,7 +434,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     configId: string,
     params: CreateWalletParams,
     options: { setDefault?: boolean } = {}
-  ): Promise<CustodyWallet> {
+  ): Promise<CustodyConfigWallet> {
     const id = `cwlt_${crypto.randomUUID()}`;
 
     const statements: PreparedStatement[] = [
@@ -480,7 +491,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   /**
    * Get all wallets for a custody config.
    */
-  async getWallets(configId: string): Promise<CustodyWallet[]> {
+  async getWallets(configId: string): Promise<CustodyConfigWallet[]> {
     const { results } = await this.db
       .prepare(`SELECT * FROM custody_wallets WHERE custody_config_id = ? AND status = 'active'`)
       .bind(configId)
@@ -489,7 +500,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     return results.map(this.mapWalletRow);
   }
 
-  async getWalletsForConfigs(configIds: string[]): Promise<Map<string, CustodyWallet[]>> {
+  async getWalletsForConfigs(configIds: string[]): Promise<Map<string, CustodyConfigWallet[]>> {
     if (configIds.length === 0) {
       return new Map();
     }
@@ -505,7 +516,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .all<CustodyWalletRow>();
 
     const walletsByConfigId = new Map(
-      configIds.map((configId) => [configId, [] as CustodyWallet[]])
+      configIds.map((configId) => [configId, [] as CustodyConfigWallet[]])
     );
 
     for (const row of results) {
@@ -679,6 +690,8 @@ export class CustodyConfigStore implements SigningConfigStore {
       throw new Error("Wallet not found");
     }
 
+    await this.assertNotLoadBearingDvpAuthority(existing.id);
+
     await this.db
       .prepare(
         `UPDATE custody_wallets
@@ -687,6 +700,38 @@ export class CustodyConfigStore implements SigningConfigStore {
       )
       .bind(existing.id)
       .run();
+  }
+
+  /**
+   * Refuses to deactivate a settlement authority that open trades depend on.
+   *
+   * The authority is a PDA seed on every trade created under it, so it cannot
+   * be swapped after the fact: deactivating one with open trades makes each of
+   * them permanently unsettleable and unrefundable BY ANYONE, including the
+   * counterparty who has already paid into an escrow. Nothing recovers that.
+   *
+   * Only trades that are still open block it. Once they are all closed the
+   * wallet is ordinary again and this stops caring.
+   */
+  private async assertNotLoadBearingDvpAuthority(custodyWalletId: string): Promise<void> {
+    const blocking = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS open_trades
+           FROM dvp_settlement_wallets s
+           JOIN dvp_trades t
+             ON t.project_id = s.project_id
+            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+          WHERE s.custody_wallet_id = ?`
+      )
+      .bind(custodyWalletId)
+      .first<{ open_trades: number | string }>();
+
+    const openTrades = Number(blocking?.open_trades ?? 0);
+    if (openTrades > 0) {
+      throw new Error(
+        `This wallet is the DvP settlement authority for ${openTrades} open trade(s). It is part of each trade's on-chain address, so deactivating it would leave them permanently unsettleable — settle or cancel them first.`
+      );
+    }
   }
 
   /**
@@ -758,7 +803,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   async getWalletByPurpose(
     configId: string,
     purpose: WalletPurpose
-  ): Promise<CustodyWallet | null> {
+  ): Promise<CustodyConfigWallet | null> {
     const row = await this.db
       .prepare(
         `SELECT * FROM custody_wallets
@@ -816,7 +861,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .first<CustodyScopeDefaultRow>();
   }
 
-  private mapWalletRow(row: CustodyWalletRow): CustodyWallet {
+  private mapWalletRow(row: CustodyWalletRow): CustodyConfigWallet {
     return {
       id: row.id,
       custodyConfigId: row.custody_config_id,

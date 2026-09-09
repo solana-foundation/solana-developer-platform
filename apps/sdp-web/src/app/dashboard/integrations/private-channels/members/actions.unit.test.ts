@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requirePrivateChannelsAccess: vi.fn(),
   createSdpApiClient: vi.fn(),
-  invitePrivateChannelUser: vi.fn(),
-  deletePrivateChannelUser: vi.fn(),
-  addChannelMembership: vi.fn(),
-  removeChannelMembership: vi.fn(),
+  createPrivateChannelPrincipal: vi.fn(),
+  disablePrivateChannelPrincipal: vi.fn(),
+  addPrincipalChannelMembership: vi.fn(),
+  removePrincipalChannelMembership: vi.fn(),
 }));
 
 vi.mock("../private-channels-access", () => ({
@@ -17,31 +17,32 @@ vi.mock("@/lib/sdp-api", () => ({
   extractSdpApiErrorMessage: vi.fn(),
 }));
 vi.mock("@/lib/private-channels", () => ({
-  invitePrivateChannelUser: mocks.invitePrivateChannelUser,
-  deletePrivateChannelUser: mocks.deletePrivateChannelUser,
-  addChannelMembership: mocks.addChannelMembership,
-  removeChannelMembership: mocks.removeChannelMembership,
+  createPrivateChannelPrincipal: mocks.createPrivateChannelPrincipal,
+  disablePrivateChannelPrincipal: mocks.disablePrivateChannelPrincipal,
+  addPrincipalChannelMembership: mocks.addPrincipalChannelMembership,
+  removePrincipalChannelMembership: mocks.removePrincipalChannelMembership,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import {
-  addToChannelAction,
-  deleteMemberAction,
-  inviteMemberAction,
-  removeFromChannelAction,
+  addPrincipalToChannelAction,
+  createPrincipalAction,
+  disablePrincipalAction,
+  removePrincipalFromChannelAction,
 } from "./actions";
 
-describe("private-channel member actions", () => {
+describe("private-channel principal actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createSdpApiClient.mockResolvedValue({ fetch: vi.fn() });
+    mocks.createPrivateChannelPrincipal.mockResolvedValue({ principal: {} });
   });
 
   it.each([
-    ["invite", () => inviteMemberAction("usr_test")],
-    ["delete", () => deleteMemberAction("pcu_test")],
-    ["add", () => addToChannelAction("pch_test", "pcu_test")],
-    ["remove", () => removeFromChannelAction("pch_test", "pcu_test")],
+    ["create", () => createPrincipalAction("Treasury")],
+    ["disable", () => disablePrincipalAction("pcp_test")],
+    ["add", () => addPrincipalToChannelAction("pch_test", "pcp_test")],
+    ["remove", () => removePrincipalFromChannelAction("pch_test", "pcp_test")],
   ])("requires project-members:write before the %s mutation", async (_name, action) => {
     await action();
 

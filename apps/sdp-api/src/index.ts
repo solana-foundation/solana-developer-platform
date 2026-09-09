@@ -7,8 +7,8 @@
  */
 
 import { createApp } from "@/app";
-import { nodeObservability } from "@/runtime/observability-node";
+import { noopObservability } from "@/runtime/observability";
 
-const app = createApp({ observability: nodeObservability });
+const app = createApp({ observability: noopObservability });
 
 export default app;

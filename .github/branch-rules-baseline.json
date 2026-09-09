@@ -1,0 +1,24 @@
+[
+  {
+    "type": "deletion"
+  },
+  {
+    "type": "non_fast_forward"
+  },
+  {
+    "parameters": {
+      "allowed_merge_methods": ["squash", "rebase"],
+      "dismiss_stale_reviews_on_push": true,
+      "require_code_owner_review": false,
+      "require_extra_approval_for_unattributed_changes": true,
+      "require_last_push_approval": true,
+      "required_approving_review_count": 1,
+      "required_review_thread_resolution": false,
+      "required_reviewers": []
+    },
+    "type": "pull_request"
+  },
+  {
+    "type": "required_signatures"
+  }
+]

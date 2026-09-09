@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
+  anyOf?: TestJsonSchema[];
   example?: unknown;
   items?: TestJsonSchema;
-  not?: { required?: string[] };
+  not?: TestJsonSchema;
   oneOf?: TestJsonSchema[];
   properties?: Record<string, TestJsonSchema>;
   required?: string[];
@@ -48,27 +49,23 @@ describe("OpenAPI spec", () => {
     expect(refreshPath?.operationId).toBe("refreshTokenSupply");
   });
 
-  it("keeps Earn button configuration internal while publishing caller-signed money routes", () => {
+  it("documents private-channel probe deployment addresses as a pair", () => {
+    const doc = createOpenApiDocument();
+    const probeSchema = getJsonSchema(doc.paths?.["/v1/private-channels/probe"]?.post?.requestBody);
+
+    expect(probeSchema.oneOf).toEqual([
+      { required: ["escrowProgramId", "escrowInstanceAddr"] },
+      {
+        not: {
+          anyOf: [{ required: ["escrowProgramId"] }, { required: ["escrowInstanceAddr"] }],
+        },
+      },
+    ]);
+  });
+
+  it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument();
-
-    const current = internal.paths?.["/v1/earn/button-configurations/current"];
-    expect(current?.get?.operationId).toBe("getEarnButtonConfiguration");
-    expect(current?.get?.security).toEqual([
-      { apiKeyAuth: [] },
-      { clerkBearerAuth: [] },
-      { sessionCookie: [] },
-    ]);
-    expect(current?.get?.responses?.["400"]).toBeDefined();
-    expect(current?.get?.responses?.["429"]).toBeDefined();
-    expect(current?.put?.operationId).toBe("upsertEarnButtonConfiguration");
-    expect(current?.put?.security).toEqual([
-      { apiKeyAuth: [] },
-      { clerkBearerAuth: [] },
-      { sessionCookie: [] },
-    ]);
-    expect(current?.put?.requestBody).toBeDefined();
-    expect(current?.put?.responses?.["429"]).toBeDefined();
 
     expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
       type: "http",
@@ -76,20 +73,15 @@ describe("OpenAPI spec", () => {
       bearerFormat: "JWT",
     });
 
-    const handoff = internal.paths?.["/v1/earn/button-configurations/public/{publicToken}"]?.get;
-    expect(handoff?.operationId).toBe("getPublicEarnButtonConfiguration");
-    expect(handoff?.security).toBeUndefined();
-    expect(handoff?.responses?.["404"]).toBeDefined();
-    expect(handoff?.responses?.["429"]).toBeDefined();
-    expect(handoff?.responses?.["503"]).toBeDefined();
-
-    expect(publicDocument.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
-    expect(
-      publicDocument.paths?.["/v1/earn/button-configurations/public/{publicToken}"]
-    ).toBeUndefined();
+    // Removed with the UI builder: neither document may resurrect them.
+    for (const doc of [internal, publicDocument]) {
+      expect(doc.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
+      expect(doc.paths?.["/v1/earn/button-configurations/public/{publicToken}"]).toBeUndefined();
+    }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
     for (const path of [
+      "/v1/earn/vault-deposit-previews",
       "/v1/earn/external-wallet/deposit-transactions",
       "/v1/earn/external-wallet/deposits",
       "/v1/earn/external-wallet/withdrawal-transactions",
@@ -106,6 +98,18 @@ describe("OpenAPI spec", () => {
         { sessionCookie: [] },
       ]);
     }
+
+    const depositPreviewRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.requestBody
+    );
+    expect(depositPreviewRequest.required).toEqual(
+      expect.arrayContaining(["strategyId", "amount"])
+    );
+    expect(
+      JSON.stringify(
+        publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
+      )
+    ).toContain("sharesOut");
 
     const submitRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
@@ -294,10 +298,29 @@ describe("OpenAPI spec", () => {
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 
-    const requirementsPath = doc.paths?.["/v1/counterparties/{counterpartyId}/requirements"]?.get;
-    expect(requirementsPath).toBeDefined();
-    expect(requirementsPath?.operationId).toBe("getCounterpartyRequirements");
-    expect(requirementsPath?.responses?.["200"]).toMatchSnapshot();
+    const paths = doc.paths;
+    if (paths === undefined) {
+      expect.fail("Expected OpenAPI paths");
+    }
+    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/requirements"];
+    if (requirementsPathItem === undefined) {
+      expect.fail("Expected counterparty requirements path");
+    }
+    const requirementsPath = requirementsPathItem.get;
+    if (requirementsPath === undefined) {
+      expect.fail("Expected counterparty requirements GET operation");
+    }
+    expect(requirementsPath.operationId).toBe("getCounterpartyRequirements");
+    const parameters = requirementsPath.parameters;
+    if (parameters === undefined) {
+      expect.fail("Expected counterparty requirements parameters");
+    }
+    expect(
+      parameters
+        .filter((parameter) => "in" in parameter && parameter.in === "query")
+        .map((parameter) => ("name" in parameter ? parameter.name : undefined))
+    ).toContain("destinationCountry");
+    expect(requirementsPath.responses["200"]).toMatchSnapshot();
   });
 
   it("documents every supported public wallet policy rule kind", () => {
@@ -357,6 +380,42 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
     expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
+  });
+
+  // DvP is documented internally and deliberately withheld from the public
+  // document: the swap program is devnet-only and the family is flag-gated off,
+  // so every environment a customer can reach answers 403. Publishing it would
+  // document an endpoint nobody can call. Promoting it is a product decision.
+  it("documents the DvP trade routes on the internal document only", () => {
+    const internal = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument();
+
+    expect(internal.paths?.["/v1/dvp/trades"]?.post).toBeDefined();
+    expect(internal.paths?.["/v1/dvp/trades"]?.get).toBeDefined();
+    expect(internal.paths?.["/v1/dvp/trades/{tradeId}"]?.get).toBeDefined();
+    expect(internal.components?.schemas?.DvpTrade).toBeDefined();
+
+    expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.includes("/dvp"))).toEqual([]);
+    expect((publicDocument.tags ?? []).map((tag) => tag.name)).not.toContain("DvP");
+  });
+
+  // Every 64-bit value on this surface is a string. A JSON number rounds above
+  // 2^53, and the nonce is a PDA seed, so a rounded value names an escrow
+  // address that does not exist. Documenting one as a number would hand a
+  // generated client the bug.
+  it("documents DvP u64 fields as strings, never numbers", () => {
+    const doc = createOpenApiDocument();
+    const trade = doc.components?.schemas?.DvpTrade as {
+      properties: Record<string, { type?: string }>;
+    };
+
+    for (const field of ["nonce", "expiryTimestamp"]) {
+      expect(trade.properties[field]?.type).toBe("string");
+    }
+
+    const createBody = JSON.stringify(doc.paths?.["/v1/dvp/trades"]?.post?.requestBody);
+    expect(createBody).not.toContain('"type":"number"');
+    expect(createBody).not.toContain('"type":"integer"');
   });
 
   it("documents the managed RPC round-robin order", () => {

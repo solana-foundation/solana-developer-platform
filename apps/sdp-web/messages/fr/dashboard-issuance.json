@@ -140,7 +140,9 @@
       "onchainAddress": "Adresse on-chain",
       "internalTokenId": "ID Token interne",
       "ticker": "Ticker",
-      "statusLabel": "Statut"
+      "statusLabel": "Statut",
+      "mint": "Mint",
+      "deployedOn": "Déployé le {date}"
     },
     "create": {
       "title": "Nouveau brouillon Token",

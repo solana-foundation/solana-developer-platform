@@ -43,7 +43,6 @@ At minimum, the configs used by local development and CI should contain the valu
 - Solana RPC URLs and API keys
 - Kora and custody-provider values used by integration tests
 - compliance and ramp-provider credentials used by live discovery or integration coverage
-- API observability values such as `SENTRY_DSN` and `SENTRY_TRACES_SAMPLE_RATE` when telemetry is enabled
 
 The web and docs configs additionally provide their public URLs and browser-safe configuration, including:
 
@@ -77,12 +76,12 @@ doppler run --config "${DOPPLER_CONFIG}" -- <command>
 
 ## CI Behavior
 
-- Secret-aware CI jobs use the repository secret `DOPPLER_TOKEN_CI` to read `dev_ci`.
-- Fork pull requests cannot access that secret and use the workflow's documented fork-safe paths or skip live provider coverage.
+- Secret-aware CI jobs authenticate to Doppler via OIDC: each job exchanges its GitHub Actions identity token for a short-lived Doppler session using the service-account identity in the `DOPPLER_CI_IDENTITY_ID` repository variable, then reads `dev_ci`.
+- Fork pull requests cannot mint the GitHub OIDC token and use the workflow's documented fork-safe paths or skip live provider coverage.
 - Vercel receives web/docs configuration through the configured Doppler integration.
 - Release automation does not need a Doppler token.
 
-Keep `DOPPLER_TOKEN_CI` narrowly scoped, rotate it through Doppler and GitHub together, and verify a secret-aware CI run after rotation.
+Keep the CI service account scoped to read-only `dev_ci` access. There is no long-lived token to rotate; changing the identity means updating `DOPPLER_CI_IDENTITY_ID` and verifying a secret-aware CI run.
 
 ## Cloud Run Boundary
 

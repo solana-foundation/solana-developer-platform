@@ -43,6 +43,7 @@ import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
+import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 
 export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
@@ -148,6 +149,7 @@ async function refreshProviderMetrics(
   const logContext = { provider: client.provider, environment: ctx.environment };
 
   let metrics: ProviderStrategyMetrics[] | undefined;
+  const startedAt = Date.now();
   try {
     metrics = await withDeadline(
       client.listStrategyMetrics(ctx),
@@ -164,6 +166,7 @@ async function refreshProviderMetrics(
     // Degrades per provider, exactly like the catalogue sync: one provider's
     // outage must not cost every other provider its refresh. The rows keep
     // their last-known figures until the next frequent tick, not for an hour.
+    logVendorCallFailure(client.provider, "listStrategyMetrics", err, startedAt);
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
       "refreshEarnStrategyMetrics: failed to list provider metrics"
@@ -172,6 +175,12 @@ async function refreshProviderMetrics(
   }
 
   if (metrics === undefined) {
+    logVendorCallFailure(
+      client.provider,
+      "listStrategyMetrics",
+      new Error(`provider metrics exceeded the ${EARN_PROVIDER_METRICS_DEADLINE_MS}ms deadline`),
+      startedAt
+    );
     // Logged at error, not warn: the whole point of this pass is that a rate is
     // stays bounded by the frequent refresh cadence, and a provider that
     // cannot answer

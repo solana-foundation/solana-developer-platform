@@ -1,6 +1,8 @@
 {
   "homepage-open-signup": { "env": "SDP_FLAG_HOMEPAGE_OPEN_SIGNUP", "value": true },
-  "organization-onboarding": { "env": "SDP_FLAG_ORGANIZATION_ONBOARDING", "value": true },
+  "custody": { "env": "CUSTODY_ENABLED", "value": true },
+  "issuance": { "env": "ISSUANCE_ENABLED", "value": true },
+  "policies": { "env": "POLICIES_ENABLED", "value": true },
   "privy-byok": { "env": "SDP_FLAG_PRIVY_BYOK", "value": false },
   "asset-profiles": { "env": "SDP_FLAG_ASSET_PROFILES", "value": true },
   "private-channels": { "env": "PRIVATE_CHANNELS_ENABLED", "value": false },

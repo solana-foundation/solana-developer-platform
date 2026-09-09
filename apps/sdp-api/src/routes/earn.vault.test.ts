@@ -1,6 +1,28 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Surfacing is real by default here — Kamino AND Veda are offered, so both
+ * providers' happy paths run against the shipped map with no help.
+ *
+ * `forceOn` remains for exactly one case: the unknown-provider dispatch test,
+ * which must get PAST the surfacing gate to measure the gate behind it. The
+ * surfacing gate itself keeps its own tests, pinned against the real map with
+ * upshift — registered and `vault_direct` but not offered. Same pattern as
+ * `earn-program.test.ts` (Ground plays that role for the program routes).
+ */
+const surfacing = vi.hoisted(() => ({ forceOn: false }));
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types")>();
+  return {
+    ...actual,
+    isEarnProviderSurfaced: (provider: string) =>
+      surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
+  };
+});
+
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
@@ -10,8 +32,10 @@ import {
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
+import { badRequest } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { AuditService } from "@/services/audit.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -22,6 +46,27 @@ vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-deposit.service")>()),
   depositIntoVault,
 }));
+
+/**
+ * Per-test override for the executing vault-direct client, delegating to the
+ * REAL registry when unset. The preview route reaches the client directly (no
+ * service seam to mock), and the real Veda client would quote against a live
+ * RPC. Kamino cases stay on the real registry, which is itself the fixture:
+ * its client genuinely lacks `quoteVaultDeposit`, so the 501 is measured, not
+ * staged.
+ */
+const vaultDirectClientOverride = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/earn/execution-registry")>();
+  return {
+    ...actual,
+    resolveVaultDirectClient: (...args: Parameters<typeof actual.resolveVaultDirectClient>) =>
+      (vaultDirectClientOverride.current as ReturnType<
+        typeof actual.resolveVaultDirectClient
+      > | null) ?? actual.resolveVaultDirectClient(...args),
+  };
+});
 
 /**
  * `POST /v1/earn/vault-deposits` — the gates and the idempotency contract.
@@ -48,6 +93,11 @@ const TEST_API_KEY = {
   raw: "sk_test_earn_vault",
   prefix: "sk_test_ear",
 };
+const PROD_API_KEY = {
+  id: "key_earn_vault_prod",
+  raw: "sk_live_earn_vault",
+  prefix: "sk_live_ear",
+};
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -60,6 +110,12 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   signingWalletId: null,
   status: "active",
   expiresAt: null,
+};
+const PROD_CACHED_API_KEY: CachedApiKey = {
+  ...TEST_CACHED_API_KEY,
+  id: PROD_API_KEY.id,
+  projectId: TEST_PRODUCTION_PROJECT.id,
+  environment: "production",
 };
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -145,6 +201,8 @@ async function seedConnectionWallet(): Promise<void> {
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, prodKeyHash, PROD_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -157,7 +215,9 @@ async function seedAuth(): Promise<void> {
         TEST_ORG.slug,
         "enterprise",
         "active",
-        JSON.stringify({ providerOverrides: { earn: { kamino: true } } })
+        JSON.stringify({
+          providerOverrides: { earn: { kamino: true, veda: true, jupiter_lend: true } },
+        })
       ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
@@ -208,6 +268,24 @@ async function seedAuth(): Promise<void> {
         JSON.stringify(["*"]),
         "active"
       ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        PROD_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PRODUCTION_PROJECT.id,
+        TEST_USER.id,
+        "Earn Vault Production Key",
+        PROD_API_KEY.prefix,
+        prodKeyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "active"
+      ),
   ]);
 }
 
@@ -236,7 +314,11 @@ async function seedStrategy(
   return strategy;
 }
 
-function postVaultDeposit(body: Record<string, unknown>, idempotencyKey?: string) {
+function postVaultDeposit(
+  body: Record<string, unknown>,
+  idempotencyKey?: string,
+  apiKey = TEST_API_KEY.raw
+) {
   const request = { ...body };
   const key =
     idempotencyKey ?? (typeof request.requestId === "string" ? request.requestId : undefined);
@@ -246,7 +328,7 @@ function postVaultDeposit(body: Record<string, unknown>, idempotencyKey?: string
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         ...(key === undefined ? {} : { "Idempotency-Key": key }),
       },
@@ -279,10 +361,66 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
+  surfacing.forceOn = false;
+  vaultDirectClientOverride.current = null;
   vi.restoreAllMocks();
 });
 
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
+  it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
+    await seedAuth();
+    await seedWallet({
+      configId: "cfg_earn_vault_jupiter",
+      custodyWalletId: "cwlt_earn_vault_jupiter",
+      providerWalletId: "privy_earn_vault_jupiter",
+      projectId: TEST_PRODUCTION_PROJECT.id,
+    });
+    const strategy = await seedStrategy({
+      provider: "jupiter_lend",
+      providerReference: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      name: "Jupiter Lend USDT",
+      underlyingSource: "Jupiter Lend",
+      depositMints: ["Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"],
+      shareMint: "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A",
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+
+    const missingFloor = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_jupiter",
+        amount: "10",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_jupiter",
+        amount: "10",
+        minSharesOut: "9.99",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environment: "production",
+        provider: "jupiter_lend",
+        minSharesOut: "9.99",
+      }),
+      expect.anything()
+    );
+  });
+
   /**
    * The operator stop switch. `paused` rows are deliberately retained by the
    * catalogue sync so a human can halt deposits during an exploit or a depeg;
@@ -743,5 +881,367 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
 
     expect(res.status).toBe(403);
     expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Veda's dispatch through the provider-neutral deposit route.
+ *
+ * The route names no provider — it resolves a catalogue row, applies the
+ * money-in gates and hands the resolved identity to `depositIntoVault`, which
+ * narrows on capability. So "does Veda work here?" is really "does a second
+ * `vault_direct` provider need any route change?", and the answer these cases
+ * pin is no.
+ */
+describe("POST /v1/earn/vault-deposits — Veda", () => {
+  const VEDA_SHARE_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
+
+  async function seedVedaStrategy() {
+    return seedStrategy({
+      provider: "veda",
+      name: "Veda USDC vault #7",
+      underlyingSource: undefined,
+      shareMint: VEDA_SHARE_MINT,
+      currentApy: null,
+      riskMetadata: { platformFeeBps: 25, performanceFeeBps: 1000 },
+    });
+  }
+
+  /**
+   * THE GATE, run against the unmocked map. Veda was this case's fixture until
+   * it was surfaced (2026-08-31); upshift inherits the role as the remaining
+   * un-surfaced `vault_direct` provider — registered, so it clears the id and
+   * style checks and fails on surfacing alone, before the provider is ever
+   * called. If upshift ever flips, move this to whichever provider is off
+   * rather than deleting it (same rule as the catalogue-visibility test in
+   * earn.test.ts).
+   */
+  it("is refused for a provider that is not currently offered (upshift)", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({
+      provider: "upshift",
+      name: "Upshift USDC vault",
+      underlyingSource: undefined,
+    });
+    await seedWallet({
+      configId: "cfg_earn_vault_unsurfaced_gate",
+      custodyWalletId: "cwlt_earn_vault_unsurfaced_gate",
+      providerWalletId: "privy_earn_vault_unsurfaced_gate",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_unsurfaced_gate",
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(403);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a surfaced Veda row with the catalogue's own asset identity", async () => {
+    await seedAuth();
+    const strategy = await seedVedaStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_veda",
+      custodyWalletId: "cwlt_earn_vault_veda",
+      providerWalletId: "privy_earn_vault_veda",
+    });
+    const requestId = crypto.randomUUID();
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_veda",
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId,
+    });
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledTimes(1);
+    expect(depositIntoVault.mock.calls[0]?.[1]).toMatchObject({
+      provider: "veda",
+      providerReference: strategy.provider_reference,
+      // Straight from the catalogue row, and the same values the builder's
+      // `assetIdentity` is later compared against.
+      tokenMint: USDC_MINT,
+      shareMint: VEDA_SHARE_MINT,
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId,
+    });
+  });
+
+  /**
+   * A row whose provider this deployment cannot execute must fail CLOSED at the
+   * provider gate, never reach dispatch. Catalogue rows persist `provider` as
+   * open TEXT, so a newer deploy's id can reach this route.
+   */
+  it("fails closed on a strategy naming a provider this deployment cannot execute", async () => {
+    surfacing.forceOn = true;
+    await seedAuth();
+    const strategy = await seedVedaStrategy();
+    await getDb(env)
+      .prepare("UPDATE earn_strategies SET provider = 'vedanext' WHERE id = ?")
+      .bind(strategy.id)
+      .run();
+    await seedWallet({
+      configId: "cfg_earn_vault_unknown",
+      custodyWalletId: "cwlt_earn_vault_unknown",
+      providerWalletId: "privy_earn_vault_unknown",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_unknown",
+      amount: "10",
+      minSharesOut: "9.5",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(503);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `POST /v1/earn/vault-deposit-previews` — the quote the dashboard derives its
+ * `minSharesOut` floor from. A read carrying the deposit's own money-in gates
+ * and the quote capability's fail-closed answers.
+ */
+describe("POST /v1/earn/vault-deposit-previews", () => {
+  function postVaultDepositPreview(body: Record<string, unknown>) {
+    return app.request(
+      "/v1/earn/vault-deposit-previews",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  }
+
+  function quoteCapableClient(quote: unknown) {
+    return {
+      buildVaultDeposit: vi.fn(),
+      readVaultPositions: vi.fn(),
+      // Required for the vault-direct capability (PRO-1736); the quote guard
+      // narrows through supportsVaultDirect first.
+      sponsoredPrograms: vi.fn(() => []),
+      quoteVaultDeposit: vi.fn().mockResolvedValue(quote),
+    };
+  }
+
+  it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ provider: "veda" });
+    const client = quoteCapableClient({
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }],
+    });
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({
+      strategyId: strategy.id,
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }],
+      // Sponsorship is unset in this harness, so the intent reads wallet-pays.
+      feeSponsored: false,
+    });
+    expect(client.quoteVaultDeposit).toHaveBeenCalledWith(expect.anything(), {
+      providerReference: strategy.provider_reference,
+      amount: "10",
+    });
+  });
+
+  it("answers a sanitized retryable 503 when live provider state is unreadable", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ provider: "veda" });
+    const client = quoteCapableClient(undefined);
+    client.quoteVaultDeposit.mockRejectedValue(
+      Object.assign(new Error("RPC returned 429 from a secret endpoint"), {
+        code: "VAULT_UNREADABLE",
+      })
+    );
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error).toEqual({
+      code: "PROVIDER_UNAVAILABLE",
+      message: "Earn provider is temporarily unavailable. Try again.",
+    });
+  });
+
+  it("refuses an un-surfaced provider before quoting anything", async () => {
+    await seedAuth();
+    // Upshift: registered and `vault_direct`, so it reaches the surfacing gate
+    // and stops there (Veda held this role until it was surfaced).
+    const strategy = await seedStrategy({ provider: "upshift" });
+    const client = quoteCapableClient({ sharesOut: "1", shareDecimals: 6, blockingIssues: [] });
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(403);
+    expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
+  });
+
+  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  it("answers 404 for a strategy this workspace cannot see", async () => {
+    await seedAuth();
+
+    const res = await postVaultDepositPreview({ strategyId: "earn_strategy_missing", amount: "1" });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
+  it("records intent and outcome around the deposit, keyed to the movement", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit",
+      custodyWalletId: "cwlt_earn_vault_audit",
+      providerWalletId: "privy_earn_vault_audit",
+    });
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(200);
+
+    // The outcome row is the feed-visible event, keyed to the recorded
+    // movement and attributed to the caller's key: the identity the
+    // movement's initiatedByKeyId carries on the wire.
+    const { results } = await getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>();
+    expect(results).toHaveLength(1);
+    expect(results?.[0]).toMatchObject({
+      resource_id: "earn_vault_movement_test",
+      organization_id: TEST_ORG.id,
+      api_key_id: TEST_API_KEY.id,
+      user_id: null,
+    });
+
+    // The org audit feed can surface it (PRO-1866 "done when").
+    const feed = await new AuditService(getDb(env)).getForOrganization(TEST_ORG.id, {
+      action: "deposit",
+    });
+    expect(feed.some((entry) => entry.resourceId === "earn_vault_movement_test")).toBe(true);
+  });
+
+  it("refuses the deposit when the audit intent cannot persist: money-in fails closed", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit_down",
+      custodyWalletId: "cwlt_earn_vault_audit_down",
+      providerWalletId: "privy_earn_vault_audit_down",
+    });
+    vi.spyOn(AuditService.prototype, "log").mockRejectedValue(new Error("audit ledger locked"));
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit_down",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+
+    expect(res.status).toBe(500);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
+  it("closes the intent as a failure when the service refuses the deposit with a 4xx", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit_fail",
+      custodyWalletId: "cwlt_earn_vault_audit_fail",
+      providerWalletId: "privy_earn_vault_audit_fail",
+    });
+    depositIntoVault.mockRejectedValue(badRequest("simulation failed"));
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit_fail",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(400);
+
+    // A 4xx is a definitive pre-broadcast refusal, so the intent closes as a
+    // failure outcome instead of paging verification as unresolved.
+    const { results } = await getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>();
+    expect(results).toHaveLength(1);
+    expect(results?.[0]).toMatchObject({ status: "failure" });
+    expect(String(results?.[0]?.metadata)).toContain("simulation failed");
+  });
+
+  it("leaves the intent unresolved on an ambiguous 5xx: the send may have landed", async () => {
+    // `broadcastRecordedVaultMovement` can throw AFTER a successful send (the
+    // post-broadcast ledger transition failed to verify), so a non-4xx must
+    // never be recorded as a failure outcome: unresolved is the signal that
+    // sends an operator to the movement ledger.
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedWallet({
+      configId: "cfg_earn_vault_audit_ambig",
+      custodyWalletId: "cwlt_earn_vault_audit_ambig",
+      providerWalletId: "privy_earn_vault_audit_ambig",
+    });
+    depositIntoVault.mockRejectedValue(
+      new Error("Vault deposit was broadcast but its ledger transition could not be verified")
+    );
+
+    const res = await postVaultDeposit({
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_audit_ambig",
+      amount: "10",
+      requestId: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(500);
+
+    const { results } = await getDb(env)
+      .prepare(
+        "SELECT * FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'"
+      )
+      .all<Record<string, unknown>>();
+    expect(results ?? []).toHaveLength(0);
   });
 });

@@ -1,6 +1,7 @@
 import type { PaymentTransferSummary } from "@sdp/types";
 import { NextResponse } from "next/server";
 import {
+  hasRemovedTransactionWalletFilter,
   parseTransactionFilters,
   toTransactionsApiQuery,
 } from "@/app/dashboard/payments/transactions/transactions-query";
@@ -10,9 +11,22 @@ const EXPORT_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 10_000;
 
 export async function GET(request: Request) {
-  const apiClient = await createSdpApiClient();
   const url = new URL(request.url);
-  const filters = parseTransactionFilters(Object.fromEntries(url.searchParams), new Date());
+  const searchParams = Object.fromEntries(url.searchParams);
+  if (hasRemovedTransactionWalletFilter(searchParams)) {
+    return NextResponse.json(
+      {
+        error: {
+          message:
+            "The wallet and walletAddress filters are no longer supported. Select a wallet again.",
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  const apiClient = await createSdpApiClient();
+  const filters = parseTransactionFilters(searchParams, new Date());
   const transfers: PaymentTransferSummary[] = [];
   let totalPages = Math.ceil(MAX_EXPORT_ROWS / EXPORT_PAGE_SIZE);
 
@@ -68,7 +82,8 @@ const COLUMNS = [
   ["direction", (transfer) => transfer.direction],
   ["amount", (transfer) => transfer.amount],
   ["token", (transfer) => transfer.token],
-  ["walletId", (transfer) => transfer.walletId],
+  ["custodyWalletId", (transfer) => transfer.custodyWalletId],
+  ["providerWalletId", (transfer) => transfer.providerWalletId],
   ["counterpartyId", (transfer) => transfer.counterpartyId],
   ["source", (transfer) => transfer.source],
   ["destination", (transfer) => transfer.destination],

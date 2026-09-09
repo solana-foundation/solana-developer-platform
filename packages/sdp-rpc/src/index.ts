@@ -1,6 +1,7 @@
 export {
   getSolanaConfig,
   resolveDefaultSolanaRpcUrl,
+  resolveSolanaRpcProviderUrls,
   type SolanaConfig,
 } from "./config";
 export { SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";

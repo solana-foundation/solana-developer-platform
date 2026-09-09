@@ -10,6 +10,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
 
 const TEST_ORG = {
   id: "org_pc_test",
@@ -115,8 +116,8 @@ function successProbe() {
     gateway: {
       status: "ready" as const,
       latencyMs: 42,
-      health: { status: 200, ok: true, body: { status: "ok" } },
-      ready: { status: 200, ok: true, body: { status: "ready" } },
+      health: { status: 200, ok: true },
+      ready: { status: 200, ok: true },
     },
     rpc: {
       ok: true as const,
@@ -135,6 +136,13 @@ describe("Private Channels routes", () => {
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
     probeConnectionMock.mockReset();
+    spcRegisterMock.mockReset();
+    spcRegisterMock.mockResolvedValue({
+      id: "spc_default_principal",
+      username: "default-test",
+      role: "user",
+      createdAt: "2026-08-31T12:00:00.000Z",
+    });
     await seedTestDatabase(env);
     await seedAuth();
     await seedPaymentsOnlyAuth();
@@ -244,6 +252,78 @@ describe("Private Channels routes", () => {
     expect(probeConnectionMock).toHaveBeenCalledTimes(1);
   });
 
+  it("PATCH /instance re-probes and updates the active instance in place", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    // A different port is a different origin, so the update destination has to
+    // be approved explicitly — PATCH runs the same egress gate as Connect.
+    const gatewayUrl = "http://34.71.147.163:9900";
+    const originalAllowlist = env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST;
+    env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = gatewayUrl;
+
+    const updated = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          instanceId: createdBody.data.instance.id,
+          gatewayUrl,
+        }),
+      },
+      env
+    );
+
+    expect(updated.status).toBe(200);
+    const updatedBody = (await updated.json()) as {
+      data: { instance: { id: string; gatewayUrl: string } };
+    };
+    expect(updatedBody.data.instance).toMatchObject({
+      id: createdBody.data.instance.id,
+      gatewayUrl,
+    });
+    expect(probeConnectionMock).toHaveBeenCalledTimes(2);
+    env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = originalAllowlist;
+  });
+
+  it("PATCH /instance refuses a destination that is not on the egress allowlist, without probing", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    probeConnectionMock.mockClear();
+
+    const updated = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          instanceId: createdBody.data.instance.id,
+          gatewayUrl: "http://169.254.169.254/latest/meta-data",
+        }),
+      },
+      env
+    );
+
+    expect(updated.status).toBe(400);
+    const body = (await updated.json()) as {
+      error: { details?: { fieldErrors?: Record<string, string[]> } };
+    };
+    expect(body.error.details?.fieldErrors?.gatewayUrl?.[0]).toMatch(/approved/i);
+    expect(probeConnectionMock).not.toHaveBeenCalled();
+  });
+
   it("POST /instance/disconnect flips is_active and returns the row", async () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     await app.request(
@@ -337,6 +417,66 @@ describe("Private Channels routes", () => {
     expect(getBody.data.instance).toBeNull();
   });
 
+  it("DELETE /instance drains first: in-flight movement → 409, admission closed, retry deletes", async () => {
+    probeConnectionMock.mockResolvedValueOnce(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const instanceId = createdBody.data.instance.id;
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           ) VALUES ('pcd_inflight', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId)
+      .run();
+
+    // In-flight movement: deletion refuses but the drain is durable.
+    const refused = await app.request(
+      "/v1/private-channels/instance",
+      { method: "DELETE", headers: authHeaders() },
+      env
+    );
+    expect(refused.status).toBe(409);
+    const refusedBody = (await refused.json()) as { error: { message: string } };
+    expect(refusedBody.error.message).toContain("draining for deletion");
+
+    // The barrier is atomic with admission: the guarded INSERT refuses now.
+    const admitted = await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           )
+           SELECT 'pcd_late', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb
+            WHERE EXISTS (
+              SELECT 1 FROM private_channel_instances i
+               WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+            )
+        RETURNING id`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId, instanceId)
+      .first<{ id: string }>();
+    expect(admitted).toBeNull();
+
+    // The in-flight movement settles; the retry now deletes cleanly.
+    await db
+      .prepare("UPDATE private_channel_deposits SET status = 'failed' WHERE id = 'pcd_inflight'")
+      .run();
+    const retried = await app.request(
+      "/v1/private-channels/instance",
+      { method: "DELETE", headers: authHeaders() },
+      env
+    );
+    expect(retried.status).toBe(200);
+  });
+
   it("DELETE /instance returns 404 when there is no active row", async () => {
     const res = await app.request(
       "/v1/private-channels/instance",
@@ -363,14 +503,54 @@ describe("Private Channels routes", () => {
     expect(probeConnectionMock).not.toHaveBeenCalled();
   });
 
+  it("POST /instance refuses a gateway that is not on the egress allowlist, without probing", async () => {
+    // A schema-valid URL that resolves inside the deployment: the shape check
+    // passes and the allowlist is what stops it. Nothing is dialled, so the
+    // probe is never reached.
+    const res = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...SANDBOX_DEFAULTS,
+          gatewayUrl: "http://169.254.169.254/latest/meta-data",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { details?: { fieldErrors?: Record<string, string[]> } };
+    };
+    expect(body.error.details?.fieldErrors?.gatewayUrl?.[0]).toMatch(/approved/i);
+    expect(probeConnectionMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /health reports an unapproved gateway as unreachable", async () => {
+    const res = await app.request(
+      `/v1/private-channels/health?gatewayUrl=${encodeURIComponent("http://127.0.0.1:8899")}`,
+      { headers: authHeaders() },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { status: string; error?: string };
+    };
+    expect(body.data.status).toBe("unreachable");
+    expect(body.data.error).toMatch(/approved/i);
+  });
+
   it("POST /instance returns 400 when the gateway probe reports degraded", async () => {
     probeConnectionMock.mockResolvedValueOnce({
       ok: false,
       gateway: {
         status: "degraded",
         latencyMs: 88,
-        health: { status: 200, ok: true, body: { status: "ok" } },
-        ready: { status: 503, ok: false, body: { status: "degraded", reason: "upstream" } },
+        health: { status: 200, ok: true },
+        ready: { status: 503, ok: false },
         reason: "upstream",
       },
       rpc: { ok: true, latencyMs: 11, version: "1.18.4" },
@@ -400,8 +580,8 @@ describe("Private Channels routes", () => {
       gateway: {
         status: "ready",
         latencyMs: 42,
-        health: { status: 200, ok: true, body: { status: "ok" } },
-        ready: { status: 200, ok: true, body: { status: "ready" } },
+        health: { status: 200, ok: true },
+        ready: { status: 200, ok: true },
       },
       rpc: { ok: false, latencyMs: 5000, error: "Timed out after 5000 ms." },
       auth: { ok: true, latencyMs: 15 },

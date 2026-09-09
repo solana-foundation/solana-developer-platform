@@ -46,7 +46,7 @@ const KAMINO_HOST_CLUSTER = "mainnet-beta" as const;
  *
  * Kamino's vault registry is permissionless, so `GET /kvaults/vaults` is a
  * census of everything ever created rather than a curated shelf. Measured
- * 2026-08-13: 170 vaults total, 114 in SDP's three stablecoins, and roughly 90
+ * 2026-08-13: 170 vaults total, 114 in SDP's then-three stablecoins, and roughly 90
  * of those 114 are dust or literal test vaults — `testfail4`, `vkjm_test`,
  * `silviu test vault`, `4dsfda`, plus 8 with blank names.
  *
@@ -344,8 +344,8 @@ export function distillKaminoVault(
   }
   // Screened here rather than left to `isStrategyWithinDeclaredSupport`, which
   // would also refuse it: the catalogue sync logs a warning per snapshot
-  // outside declared support, and Kamino's 56 non-stablecoin vaults (SOL, USDS,
-  // PYUSD, cbBTC…) would emit that warning every hour in both environments
+  // outside declared support, and Kamino's non-deposit-token vaults (SOL, USDS,
+  // cbBTC…) would emit that warning every hour in both environments
   // forever. Provider drift deserves a warning; a shelf we knowingly only cover
   // part of does not.
   if (!KAMINO_DEPOSIT_SYMBOLS.has(token.symbol)) {
@@ -450,8 +450,8 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
     // envelope states what this client can honestly emit, so it stays at one
     // kind until a verified source for the other lands.
     sourceKinds: ["defi"],
-    // Kamino's vaults span SOL, USDS, PYUSD, cbBTC and more; SDP Earn V1 is a
-    // stablecoin deposit facility, so the envelope stays at the three symbols
+    // Kamino's vaults span SOL, USDS, cbBTC and more; SDP Earn V1 is a
+    // stablecoin deposit facility, so the envelope stays at exactly the symbols
     // `EARN_DEPOSIT_TOKEN_SYMBOLS` declares. Widening this is a change to that
     // shared union, not to this client.
     depositTokens: [...EARN_DEPOSIT_TOKEN_SYMBOLS] as EarnDepositTokenSymbol[],

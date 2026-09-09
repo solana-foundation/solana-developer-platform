@@ -13,6 +13,8 @@ function renderStatus(status: PaymentTransferStatus): string {
         hosted
         transfer={{
           id: "xfr_status",
+          custodyWalletId: "cwlt_status",
+          providerWalletId: "wallet_status",
           status,
           signature: null,
           rampsMemo: {},

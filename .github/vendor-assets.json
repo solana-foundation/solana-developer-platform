@@ -2,7 +2,7 @@
   {
     "name": "moneygram-sdk",
     "url": "https://playground.xramps.moneygram.com/sdk/index.global.js",
-    "sha256": "7fb658f3553036d8eaf1788ea9ad6ef4b51b27e922c212d54d84c0c454c534c6",
+    "sha256": "c3ae724777935c9b2d5ed8b87aa465988915a53283efb56b254a148ec5777436",
     "pinnedIn": "apps/sdp-web/src/lib/moneygram-sdk.ts"
   }
 ]

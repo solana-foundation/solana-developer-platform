@@ -39,6 +39,8 @@ describe("payments command center", () => {
     expect(
       resolveCommandCenterCounterparty({
         id: "transfer-inbound",
+        custodyWalletId: "cwlt_1",
+        providerWalletId: "privy_1",
         status: "confirmed",
         signature: null,
         rampsMemo: {},
@@ -50,6 +52,8 @@ describe("payments command center", () => {
     expect(
       resolveCommandCenterCounterparty({
         id: "transfer-onramp",
+        custodyWalletId: "cwlt_1",
+        providerWalletId: "privy_1",
         status: "completed",
         signature: null,
         rampsMemo: {},

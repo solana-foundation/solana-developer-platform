@@ -4,8 +4,15 @@ import type {
   PaymentsDashboardWallet,
   PaymentTransferSummary,
 } from "@sdp/types";
+import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parsePaymentApiErrorText } from "./payment-api-errors";
+
+const paymentTransferRequiredFieldsSchema = z.object({
+  custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
+  providerWalletId: z.string().min(1).regex(/^\S+$/),
+  rampsMemo: z.record(z.string(), z.string()),
+});
 
 export interface FetchResult<T> {
   ok: boolean;
@@ -131,9 +138,13 @@ export async function fetchPaymentsAggregate(
 function normalizePaymentTransfer(
   transfer: Partial<PaymentTransferSummary>
 ): PaymentTransferSummary {
+  const requiredFields = paymentTransferRequiredFieldsSchema.safeParse(transfer);
+  if (!requiredFields.success) {
+    throw new Error("Malformed transfer response: required fields are missing or invalid");
+  }
+
   const {
     id,
-    walletId,
     status,
     signature,
     type,
@@ -143,7 +154,6 @@ function normalizePaymentTransfer(
     token,
     amount,
     memo,
-    rampsMemo,
     provider,
     counterpartyId,
     counterpartyDisplayName,
@@ -156,11 +166,13 @@ function normalizePaymentTransfer(
     createdAt,
     updatedAt,
   } = transfer;
+  const { custodyWalletId, providerWalletId, rampsMemo } = requiredFields.data;
 
   return Object.fromEntries(
     Object.entries({
       id: id ?? "",
-      walletId,
+      custodyWalletId,
+      providerWalletId,
       status: status ?? "pending",
       signature: signature ?? null,
       type,
@@ -190,7 +202,7 @@ export async function fetchPaymentTransfers(
   request: SdpApiClient["request"],
   pageSize = 20,
   options: {
-    walletId?: string;
+    custodyWalletId?: string;
     includeObserved?: boolean;
   } = {}
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
@@ -198,8 +210,8 @@ export async function fetchPaymentTransfers(
     const query = new URLSearchParams({
       page: "1",
       pageSize: String(pageSize),
-      ...(options.walletId ? { wallet: options.walletId } : {}),
-      ...(options.includeObserved === false ? { includeObserved: "false" } : {}),
+      ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
+      includeObserved: String(options.includeObserved ?? false),
     }).toString();
     const response = await request(`/v1/payments/transfers?${query}`);
     if (!response.ok) {
@@ -229,16 +241,16 @@ export async function fetchPaymentTransfers(
 }
 
 function dedupeTransfers(transfers: PaymentTransferSummary[]): PaymentTransferSummary[] {
-  const seen = new Set<string>();
-
-  return transfers.filter((transfer) => {
+  const byKey = new Map<string, PaymentTransferSummary>();
+  for (const transfer of transfers) {
     const key = transfer.signature?.trim() || transfer.id;
-    if (!key || seen.has(key)) {
-      return false;
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (!existing || (existing.custodyWalletId === null && transfer.custodyWalletId !== null)) {
+      byKey.set(key, transfer);
     }
-    seen.add(key);
-    return true;
-  });
+  }
+  return [...byKey.values()];
 }
 
 export async function fetchDashboardPaymentTransfers(
@@ -258,13 +270,23 @@ export async function fetchDashboardPaymentTransfersForWallets(
     return fetchPaymentTransfers(request, pageSize);
   }
 
-  const settledTransfers = await Promise.allSettled(
-    (walletsResult.data ?? []).map((wallet) =>
-      fetchPaymentTransfers(request, pageSize, { walletId: wallet.walletId })
-    )
-  );
+  const observedAddresses = new Set<string>();
+  const [persistedResult, settledTransfers] = await Promise.all([
+    fetchPaymentTransfers(request, pageSize),
+    Promise.allSettled(
+      (walletsResult.data ?? []).map((wallet) => {
+        const address = wallet.publicKey.trim();
+        const includeObserved = address.length > 0 && !observedAddresses.has(address);
+        if (includeObserved) observedAddresses.add(address);
+        return fetchPaymentTransfers(request, pageSize, {
+          custodyWalletId: wallet.id,
+          includeObserved,
+        });
+      })
+    ),
+  ]);
 
-  const mergedTransfers: PaymentTransferSummary[] = [];
+  const mergedTransfers: PaymentTransferSummary[] = persistedResult.data ?? [];
   let lastError: string | undefined;
 
   for (const result of settledTransfers) {
@@ -282,9 +304,8 @@ export async function fetchDashboardPaymentTransfersForWallets(
   }
 
   if (mergedTransfers.length === 0) {
-    const fallback = await fetchPaymentTransfers(request, pageSize);
-    if (fallback.ok || !lastError) {
-      return fallback;
+    if (persistedResult.ok || !lastError) {
+      return persistedResult;
     }
 
     return {

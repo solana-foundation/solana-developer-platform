@@ -34,7 +34,12 @@ const SECURITY_SETTINGS = settings({
   pauseTransfers: "locked",
   freezeAccounts: "locked",
   permanentDelegate: "locked",
-  scaledUiAmount: "recommended",
+  // Available rather than recommended: a mint carrying ScaledUiAmount cannot be
+  // traded through the DvP settlement program, which rejects it at CreateDvp
+  // with BlockedMintExtension. Pre-selecting it meant every security issued on
+  // the defaults was born unsettleable. Still offered, because share splits and
+  // redenomination are a real use for it, but the issuer opts in knowingly.
+  scaledUiAmount: "available",
   transferFee: "unsupported",
   interestBearing: "unsupported",
   nonTransferable: "unsupported",

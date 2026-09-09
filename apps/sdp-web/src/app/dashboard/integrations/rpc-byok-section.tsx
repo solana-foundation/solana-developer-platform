@@ -1,12 +1,19 @@
 "use client";
 
 import { rpcProviderNeedsEndpoint, type SafeRpcConnection } from "@sdp/types";
-import { EyeIcon, EyeOffIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  CircleSlashIcon,
+  EyeIcon,
+  EyeOffIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
+import { Callout } from "@/components/ui/callout";
 import { Input } from "@/components/ui/input";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
@@ -263,72 +270,67 @@ function ConnectionRow({
   const isServing = connection.isDefault && connection.status === "active" && !isOrganizationScoped;
   // A withdrawn or stranded row has nothing worth checking or replacing.
   const isLive = !isDeactivated && !isOrganizationScoped;
+  // Delete used to fire on a single click with nothing in between. It only ever
+  // removes a row whose secret is already gone, so a second look is enough --
+  // but "enough" is not "none".
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
     <li className="space-y-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-primary">
-              {connection.providerCredential.label}
-            </span>
-            <ConnectionStatusBadge
-              connection={connection}
-              isLive={isLive}
-              isServing={isServing}
-              t={t}
-            />
-          </div>
-          <p className="text-xs text-tertiary">
-            {connection.network}
-            {typeof connection.displayMetadata.endpointHost === "string"
-              ? ` · ${connection.displayMetadata.endpointHost}`
-              : ""}
-            {typeof connection.displayMetadata.apiKeySuffix === "string"
-              ? ` · ····${connection.displayMetadata.apiKeySuffix}`
-              : ""}
-          </p>
-          <ConnectionRowNotes
-            notes={resolveRowNotes({
-              failsClosed,
-              hasSpare,
-              isDeactivated,
-              isOrganizationScoped,
-              isServing,
-            })}
-            testResult={testResult}
+      {/* The status block owns the full width and the controls sit on their own
+          line beneath it. Sharing one line only worked while the notes were
+          short: a row explaining why it is not routing pushed the buttons onto
+          a second line anyway, but ragged and full-bleed. */}
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-primary">
+            {connection.providerCredential.label}
+          </span>
+          <ConnectionStatusBadge
+            connection={connection}
+            isLive={isLive}
+            isServing={isServing}
             t={t}
           />
         </div>
+        <p className="text-xs text-tertiary">
+          {connection.network}
+          {typeof connection.displayMetadata.endpointHost === "string"
+            ? ` · ${connection.displayMetadata.endpointHost}`
+            : ""}
+          {typeof connection.displayMetadata.apiKeySuffix === "string"
+            ? ` · ····${connection.displayMetadata.apiKeySuffix}`
+            : ""}
+        </p>
+        <ConnectionRowNotes
+          notes={resolveRowNotes({
+            failsClosed,
+            hasSpare,
+            isDeactivated,
+            isOrganizationScoped,
+            isServing,
+          })}
+          testResult={testResult}
+          t={t}
+        />
+      </div>
 
-        {canManage ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {/* No per-key switch here. "Use this provider" above does the same
-                    thing on this page and also moves the organization's
-                    selection with it, so a key and the provider it belongs to
-                    can no longer be pointed in two directions. */}
-            {/* Live connections can be re-checked whenever somebody wants
-                    to know, rather than reading a stored verdict. */}
-            {isLive ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={pendingId === connection.id}
-                onClick={() => {
-                  onTest(connection.id);
-                }}
-              >
-                {t("Shared.integrations.rpcByokTest")}
-              </Button>
-            ) : null}
+      {canManage ? (
+        /* One action group, one place, whatever state the row is in. The
+           lifecycle controls keep a fixed order left to right -- rotate,
+           deactivate, delete -- so the same action never moves between states,
+           and the check sits apart on the right because it is both the most
+           reached for and the only one that changes nothing. */
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1">
             {/* Rotation asks for the replacement up front rather than
-                    leaving people to deactivate and re-add (HOO-1229). */}
+                  leaving people to deactivate and re-add (HOO-1229). */}
             {isLive ? (
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
+                variant="ghost"
+                iconLeft={<RefreshCwIcon />}
                 aria-expanded={isRotating}
                 disabled={pendingId === connection.id}
                 onClick={() => {
@@ -340,34 +342,109 @@ function ConnectionRow({
                   : t("Shared.integrations.rpcByokRotate")}
               </Button>
             ) : null}
-            {isDeactivated ? (
-              // Nothing left to destroy, so an ordinary button is enough.
+            {/* Offered on every row that is not already deactivated, which
+                  includes stranded organization-scoped rows -- those cannot be
+                  rotated or checked, so this is their only way out. */}
+            {isDeactivated ? null : (
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
+                variant="ghost"
+                iconLeft={<CircleSlashIcon />}
                 disabled={pendingId === connection.id}
                 onClick={() => {
-                  onAction(deleteRpcConnectionAction, connection.id);
+                  onAction(deactivateRpcConnectionAction, connection.id);
+                }}
+              >
+                {t("Shared.integrations.rpcByokDeactivate")}
+              </Button>
+            )}
+            {/* Secondary styling rather than red: this control only opens the
+                  question, and the strip it opens carries the warning. Red on
+                  both said "danger" twice for one decision. */}
+            {isDeactivated ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                iconLeft={<Trash2Icon />}
+                aria-expanded={confirmingDelete}
+                disabled={pendingId === connection.id}
+                onClick={() => {
+                  setConfirmingDelete(true);
                 }}
               >
                 {t("Shared.integrations.rpcByokDelete")}
               </Button>
-            ) : (
-              // Held rather than clicked: this destroys the stored key and
-              // there is no way back (HOO-1230).
-              <HoldToConfirmButton
-                label={t("Shared.integrations.rpcByokDeactivate")}
-                holdingLabel={t("Shared.integrations.rpcByokDeactivateHolding")}
-                disabled={pendingId === connection.id}
-                onConfirm={() => {
-                  onAction(deactivateRpcConnectionAction, connection.id);
-                }}
-              />
-            )}
+            ) : null}
           </div>
-        ) : null}
-      </div>
+          {/* No per-key switch here. "Use this provider" above does the same
+                thing on this page and also moves the organization's selection
+                with it, so a key and the provider it belongs to can no longer
+                be pointed in two directions. */}
+          {/* Live connections can be re-checked whenever somebody wants to
+                know, rather than reading a stored verdict. */}
+          {isLive ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              iconLeft={<ActivityIcon />}
+              disabled={pendingId === connection.id}
+              onClick={() => {
+                onTest(connection.id);
+              }}
+            >
+              {t("Shared.integrations.rpcByokTest")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Answered where it was asked, rather than over the top of the page. The
+          row is already the thing being talked about, so a modal would only
+          hide it behind the question about it. */}
+      {confirmingDelete ? (
+        <Callout
+          live
+          variant="danger"
+          className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p>{t("Shared.integrations.rpcByokDeleteConfirm")}</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setConfirmingDelete(false);
+              }}
+            >
+              {t("Shared.integrations.rpcByokCancel")}
+            </Button>
+            {/* Named for the connection rather than just "Delete": while the
+                strip is open the row carries two buttons reading Delete, and
+                the one that actually destroys the record should not be the
+                ambiguous one to anything reading the page aloud. */}
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              iconLeft={<Trash2Icon />}
+              aria-label={t("Shared.integrations.rpcByokDeleteNamed", {
+                name: connection.providerCredential.label,
+              })}
+              disabled={pendingId === connection.id}
+              onClick={() => {
+                setConfirmingDelete(false);
+                onAction(deleteRpcConnectionAction, connection.id);
+              }}
+            >
+              {t("Shared.integrations.rpcByokDelete")}
+            </Button>
+          </div>
+        </Callout>
+      ) : null}
 
       {isRotating ? (
         <RotateForm

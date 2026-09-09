@@ -1,1 +1,1 @@
-export { default } from "../loading";
+export { default } from "../../embedded-yield/configure/loading";

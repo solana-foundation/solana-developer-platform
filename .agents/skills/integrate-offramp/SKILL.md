@@ -8,9 +8,9 @@ disable-model-invocation: true
 
 Off-ramp = a counterparty sells crypto from an SDP wallet for fiat paid to a payout account. Implement `createOfframpQuote` and add a branch to the API dispatch. There is no `executeOfframp` method in the current provider contract.
 
-`createOfframpQuote` is **required** on `RampProvider` (unlike `createOnrampQuote`, which is optional) — even a provider that doesn't support off-ramp must implement it; the dispatch `case` for that provider can throw instead of calling it (Mural, Coinbase, and Stripe all currently throw "not supported" from the handler rather than reaching the client method).
+`createOfframpQuote` is **required** on `RampProvider` (unlike `createOnrampQuote`, which is optional) — even a provider that doesn't support off-ramp must implement it; the dispatch `case` for that provider can throw instead of calling it (several registered providers do exactly that today rather than reaching the client method).
 
-Choose the closest package client under `packages/sdp-payments/src/ramps/providers/`: Lightspark/BVNK for manual instructions and payout provisioning, or MoonPay for a hosted off-ramp.
+Choose the closest package client under `packages/sdp-payments/src/ramps/providers/` by delivery mode: manual instructions with payout provisioning, a hosted widget, or a session widget.
 
 ## Contract
 
@@ -22,22 +22,21 @@ Output `PaymentRampQuote` is closed by `provider` and `deliveryMode`; add the pr
 
 1. **Source wallet.** The shared policy extraction resolves `sourceWallet` to an SDP wallet/address and gates the value-moving operation through `policyGate`. Do not accept a provider account id in place of the SDP source wallet.
 
-2. **Payout account.** The fiat needs a destination bank account. Lightspark resolves `payoutAccountId` from the counterparty's most recent active account (`latestLightsparkPayoutAccount`), JIT-created by `ensureLightsparkPayoutAccount` — content-addressed by a hash of the collected bank details, and **the raw bank details are sent to the provider and never stored**. That provisioning is `counterparty-requirements`; the quote consumes the resolved id and throws `counterpartyNotProvisioned` if it's missing or inactive.
+2. **Payout account.** The fiat needs a destination bank account, and a counterparty may hold several active accounts per corridor (per rail). The quote request takes an optional `providerAccountId` (the `counterparty_provider_accounts` row id): when present, the handler resolves it parent-scoped and rejects a mismatched corridor; when absent, it lists the corridor's active rows and applies the provider's selection helper. Accounts are JIT-created by the requirements advance flow — **the raw bank details are sent to the provider and never stored**. Missing/inactive account throws `counterpartyNotProvisioned`; the transfer records the chosen row id as `payoutProviderAccountId` in its provider data.
 
 ## Handler wiring (the DB side)
 
-Add a branch to `apps/sdp-api/src/routes/payments/handlers/ramps.ts`. The handler resolves counterparty + source wallet + payout account, calls the HTTP-only package method, and persists via `persistRampQuoteTransfer` (off-ramp writes `sourceAddress` + `cryptoAmount`, `direction: "outbound"`).
+Add a branch to `apps/sdp-api/src/routes/payments/handlers/ramps.ts`. The handler resolves counterparty + source wallet + payout account, calls the HTTP-only package method, and persists the transfer. A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference (pass it in a description/reference field where the upstream accepts one); persistence then takes one of two paths: default `persistRampQuoteTransfer` after the quote (off-ramp writes `sourceAddress` + `cryptoAmount`, `direction: "outbound"`, plus `providerData` such as `payoutProviderAccountId`), or a pending transfer created **before** the provider call and completed/failed after it (a `createPending*` → `completePending*` helper pair) when the provider call must be attributable to a row even on failure.
 
 Dashboard runtime route: `POST /v1/payments/ramps/offramp/quote`, gated by provider availability, metered quota, permissions, and `policyGate`. It is not currently in public OpenAPI; do not advertise it as public unless the OpenAPI policy changes.
 
 ## Variety
 
-| Provider | deliveryMode | Off-ramp quote shape |
-|---|---|---|
-| Lightspark | `manual_instructions` | `REALTIME_FUNDING` quote: customer sends crypto to the instructions, the provider auto-executes into the payout account |
-| BVNK | `manual_instructions` | estimate → accept; carries `bvnkCompliance` (requester IP, etc.) |
-| MoonPay | `hosted` | signed `sell.moonpay.com` widget `hostedUrl` |
-| MoneyGram | `session_widget` | short-lived session JWT + `widgetUrl` |
+| deliveryMode | Off-ramp quote shape |
+|---|---|
+| `manual_instructions` | on-chain funding instructions: the customer sends crypto to the instructions and the provider executes into the advance-provisioned payout destination (missing provisioning throws `counterpartyNotProvisioned`; some upstreams also require compliance party details on the quote) |
+| `hosted` | signed provider widget `hostedUrl` |
+| `session_widget` | short-lived session credentials + widget URL |
 
 ## Rules + verify
 

@@ -2,7 +2,7 @@ import type { ListCounterpartiesResponse, PaymentsDashboardWalletsEnvelope } fro
 import { resolveTransferTokenLabel } from "@/app/dashboard/payments/payments-overview.utils";
 
 export interface TransactionFilterOptions {
-  wallets: Array<{ id: string; label: string }>;
+  wallets: Array<{ id: string; publicKey?: string; label: string }>;
   counterparties: Array<{ id: string; label: string }>;
   /**
    * Held tokens, keyed by mint.
@@ -26,7 +26,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-function uniqueOptions(options: Array<{ id: string; label: string }>) {
+function uniqueOptions<T extends { id: string; label: string }>(options: T[]): T[] {
   return [...new Map(options.map((option) => [option.id, option])).values()];
 }
 
@@ -149,7 +149,8 @@ export async function fetchTransactionFilterOptions(
   return {
     wallets: uniqueOptions(
       (walletsBody.data?.wallets ?? []).map((wallet) => ({
-        id: wallet.walletId,
+        id: wallet.id,
+        publicKey: wallet.publicKey,
         label: wallet.label?.trim() || wallet.publicKey,
       }))
     ),

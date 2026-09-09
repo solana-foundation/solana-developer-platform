@@ -1,14 +1,20 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import type { OnboardingCopy, SimulateActionLabels, StandardOnboardingPanelStatus } from "./index";
+import type { BvnkOnboardingPanelStatus, OnboardingCopy, SimulateActionLabels } from "./index";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function getBvnkOnboardingCopy(
   t: Translate
-): Record<StandardOnboardingPanelStatus, OnboardingCopy> {
+): Record<BvnkOnboardingPanelStatus, OnboardingCopy> {
   return {
+    customer_pending_agreement_acceptance: {
+      title: t("DashboardPayments.bvnk.agreementPendingTitle"),
+      description: t("DashboardPayments.bvnk.agreementPendingDescription"),
+      icon: Loader2Icon,
+      iconClassName: "animate-spin text-secondary",
+    },
     customer_verification_required: {
       title: t("DashboardPayments.bvnk.verificationRequiredTitle"),
       description: t("DashboardPayments.bvnk.verificationRequiredDescription"),
@@ -27,13 +33,13 @@ export function getBvnkOnboardingCopy(
       icon: XCircleIcon,
       iconClassName: "text-error",
     },
-    funding_account_provisioning: {
+    customer_funding_account_provisioning: {
       title: t("DashboardPayments.bvnk.fundingAccountProvisioningTitle"),
       description: t("DashboardPayments.bvnk.fundingAccountProvisioningDescription"),
       icon: Loader2Icon,
       iconClassName: "animate-spin text-secondary",
     },
-    provisioning_failed: {
+    customer_funding_account_provisioning_failed: {
       title: t("DashboardPayments.bvnk.provisioningFailedTitle"),
       description: t("DashboardPayments.bvnk.provisioningFailedDescription"),
       icon: XCircleIcon,

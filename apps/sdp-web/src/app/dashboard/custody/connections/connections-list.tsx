@@ -230,7 +230,7 @@ export function ConnectionsList({
           {connections.map((connection) => (
             <TableRow key={connection.id} data-connection-id={connection.id}>
               <TableCell className="font-medium">
-                <span className="block truncate">{connection.providerCredential.label}</span>
+                <span className="block truncate">{connection.label}</span>
                 <span className="mt-1 block truncate font-mono text-[11px] font-normal text-tertiary">
                   {formatWalletMeta(connection.id, 10, 6)}
                 </span>

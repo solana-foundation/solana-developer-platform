@@ -143,7 +143,9 @@
     "done": "Terminé",
     "time": "Heure",
     "unknownToken": "Inconnu",
-    "sdpMintedToken": "Minté par SDP"
+    "sdpMintedToken": "Minté par SDP",
+    "selectExistingOrganizationDescription": "Choisissez une organisation existante pour continuer.",
+    "loadMore": "Charger plus"
   },
   "dashboardShell": {
     "workspace": "Espace de travail",
@@ -227,7 +229,10 @@
     "backToPrivateChannels": "Retour aux canaux privés",
     "integrations": "Intégrations",
     "holdings": "Détentions",
-    "backToHome": "Retour à l'accueil"
+    "backToHome": "Retour à l'accueil",
+    "manageAccount": "Gérer le compte",
+    "signOut": "Se déconnecter",
+    "accountMenu": "Menu du compte"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",
@@ -444,7 +449,11 @@
     "rpcByokRotated": "Clé remplacée.",
     "rpcByokTest": "Tester la clé",
     "rpcByokTestPassed": "Fournisseur joint à l'instant.",
-    "rpcByokTestFailed": "Impossible de joindre le fournisseur."
+    "rpcByokTestFailed": "Impossible de joindre le fournisseur.",
+    "statusNotConnected": "Non connecté",
+    "statusOnRequest": "Disponible sur demande",
+    "rpcByokDeleteConfirm": "Supprimer cette connexion ? Sa clé a été détruite lors de sa désactivation, cela ne fait donc qu'effacer l'enregistrement.",
+    "rpcByokDeleteNamed": "Supprimer {name}"
   },
   "notifications": {
     "ariaLabel": "Notifications",

@@ -54,6 +54,11 @@ export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createF
 
 export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
+export const createOrgSignerForCustodyWalletMock = vi.spyOn(
+  solanaServices,
+  "createOrgSignerForCustodyWallet"
+);
+
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
 const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
@@ -182,8 +187,6 @@ export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
 
 export const TEST_MONEYGRAM_SECRET_KEY = "moneygram_sandbox_secret_key";
 
-export const TEST_RAMP_REDIRECT_ALLOWED_HOSTS = "example.com";
-
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
@@ -226,8 +229,6 @@ let originalMoneygramSandboxPublicKey: string | undefined;
 
 let originalMoneygramSandboxSecretKey: string | undefined;
 
-let originalRampRedirectAllowedHosts: string | undefined;
-
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
@@ -235,8 +236,17 @@ async function seedAuthAndWallet(): Promise<void> {
 
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        "enterprise",
+        "active",
+        JSON.stringify({ providerOverrides: { custody: { local: true } } })
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -612,6 +622,9 @@ export function installPaymentsRouteTestHooks(): void {
     createOrgSignerMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
+    );
 
     originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
@@ -634,7 +647,6 @@ export function installPaymentsRouteTestHooks(): void {
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
     originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
     originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
-    originalRampRedirectAllowedHosts = env.RAMP_REDIRECT_ALLOWED_HOSTS;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -657,7 +669,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
-    env.RAMP_REDIRECT_ALLOWED_HOSTS = TEST_RAMP_REDIRECT_ALLOWED_HOSTS;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -685,7 +696,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
-    env.RAMP_REDIRECT_ALLOWED_HOSTS = originalRampRedirectAllowedHosts;
 
     await clearKVStores(env);
   });

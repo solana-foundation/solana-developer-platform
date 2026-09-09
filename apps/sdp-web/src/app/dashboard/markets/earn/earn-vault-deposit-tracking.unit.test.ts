@@ -3,9 +3,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   claimVaultDepositIdempotencyKey,
+  forgetVaultDepositFloor,
   holdVaultDepositIdempotencyKey,
   isVaultDepositIdempotencyKeyHeld,
+  recallVaultDepositFloor,
   releaseVaultDepositIdempotencyKey,
+  rememberVaultDepositFloor,
   resetVaultDepositTrackingStateForTests,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
@@ -17,6 +20,7 @@ const request = {
   strategyId: "strategy_1",
   custodyWalletId: "wallet_1",
   amount: "1",
+  toleranceBps: null,
 };
 
 let nextUuid = 0;
@@ -48,6 +52,11 @@ describe("vaultDepositRequestFingerprint", () => {
       { ...request, strategyId: "strategy_2" },
       { ...request, custodyWalletId: "wallet_2" },
       { ...request, amount: "2" },
+      // "Raise the tolerance and retry" is a NEW request and mints a fresh
+      // key; the tolerance — unlike the quote-derived floor it produces — is
+      // still reproducible from user input after a reload, which is what the
+      // store's cross-reload replay rests on.
+      { ...request, toleranceBps: 50 },
     ]) {
       expect(vaultDepositRequestFingerprint(different)).not.toBe(base);
     }
@@ -325,5 +334,51 @@ describe("storage bound", () => {
     expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(
       "00000000-0000-4000-8000-000000000001"
     );
+  });
+});
+
+describe("the floor memo", () => {
+  const fingerprint = vaultDepositRequestFingerprint({ ...request, toleranceBps: 10 });
+
+  it("replays the floor a key was minted with, across a reload", () => {
+    rememberVaultDepositFloor(fingerprint, "0.99899");
+    // A reload is exactly this: every in-memory reference is gone and the
+    // fresh quote would derive a DIFFERENT floor the API's fingerprint
+    // refuses under the held key.
+    expect(recallVaultDepositFloor(fingerprint)).toBe("0.99899");
+  });
+
+  it("distinguishes a remembered null floor from nothing remembered", () => {
+    rememberVaultDepositFloor(fingerprint, null);
+    expect(recallVaultDepositFloor(fingerprint)).toBeNull();
+    forgetVaultDepositFloor(fingerprint);
+    expect(recallVaultDepositFloor(fingerprint)).toBeUndefined();
+  });
+
+  it("keeps serving in memory when the browser refuses to store anything", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    rememberVaultDepositFloor(fingerprint, "1.5");
+    expect(recallVaultDepositFloor(fingerprint)).toBe("1.5");
+  });
+
+  it("bounds abandoned entries instead of growing without limit", () => {
+    for (let index = 0; index < 40; index += 1) {
+      rememberVaultDepositFloor(
+        vaultDepositRequestFingerprint({ ...request, amount: `40${index}` }),
+        "1"
+      );
+    }
+    // The oldest fell off; the newest is intact.
+    expect(
+      recallVaultDepositFloor(vaultDepositRequestFingerprint({ ...request, amount: "400" }))
+    ).toBeUndefined();
+    expect(
+      recallVaultDepositFloor(vaultDepositRequestFingerprint({ ...request, amount: "4039" }))
+    ).toBe("1");
   });
 });

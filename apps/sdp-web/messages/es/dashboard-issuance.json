@@ -139,7 +139,9 @@
       "copyTokenId": "Copiar ID de Token",
       "explorer": "Explorador",
       "deploy": "Desplegar",
-      "unpause": "Reanudar"
+      "unpause": "Reanudar",
+      "mint": "Mint",
+      "deployedOn": "Desplegado el {date}"
     },
     "create": {
       "title": "Crear nuevo borrador de Token",

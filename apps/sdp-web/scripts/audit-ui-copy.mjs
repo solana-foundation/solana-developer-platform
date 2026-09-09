@@ -124,7 +124,8 @@ async function collectSourceFiles(directory) {
 
 function candidateId(filePath, sourceFile, node, value) {
   const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-  return `${path.relative(webDirectory, filePath)}:${line + 1}:${character + 1}:${value}`;
+  const relativePath = path.relative(webDirectory, filePath).split(path.sep).join(path.posix.sep);
+  return `${relativePath}:${line + 1}:${character + 1}:${value}`;
 }
 
 function stableCandidateId(candidate) {

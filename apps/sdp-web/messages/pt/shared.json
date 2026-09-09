@@ -133,7 +133,19 @@
     "invalidApiKeyFormat": "Formato de chave de API inválido. Use um valor de chave bruto como sk_test_... ou sk_live_... com um sufixo válido.",
     "playgroundExecutionFailed": "Falha na execução do Playground.",
     "requestExecutionFailed": "Falha na execução da requisição.",
-    "sdpMintedToken": "Mint pela SDP"
+    "sdpMintedToken": "Mint pela SDP",
+    "copyOrganizationId": "Copiar ID da organização",
+    "organizationId": "ID da organização",
+    "chooseDate": "Escolher data",
+    "chooseDateAndTime": "Escolher data e hora",
+    "chooseDateRange": "Escolher intervalo de datas",
+    "chooseEndDate": "Escolher data final",
+    "dateRange": "Intervalo de datas",
+    "done": "Concluir",
+    "time": "Hora",
+    "unknownToken": "Desconhecido",
+    "selectExistingOrganizationDescription": "Escolha uma organização existente para continuar.",
+    "loadMore": "Carregar mais"
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",
@@ -214,7 +226,10 @@
     "backToPrivateChannels": "Voltar para canais privados",
     "integrations": "Integrações",
     "holdings": "Ativos",
-    "backToHome": "Voltar para o início"
+    "backToHome": "Voltar para o início",
+    "manageAccount": "Gerenciar conta",
+    "signOut": "Sair",
+    "accountMenu": "Menu da conta"
   },
   "validation": {
     "allowlistValueRequired": "O valor da allowlist é obrigatório",
@@ -428,7 +443,11 @@
     "rpcByokRotated": "Chave rotacionada.",
     "rpcByokTest": "Testar chave",
     "rpcByokTestPassed": "Alcançou o provedor agora mesmo.",
-    "rpcByokTestFailed": "Não foi possível alcançar o provedor."
+    "rpcByokTestFailed": "Não foi possível alcançar o provedor.",
+    "statusNotConnected": "Não conectado",
+    "statusOnRequest": "Disponível mediante solicitação",
+    "rpcByokDeleteConfirm": "Excluir esta conexão? A chave foi destruída quando ela foi desativada, então isso apenas limpa o registro.",
+    "rpcByokDeleteNamed": "Excluir {name}"
   },
   "notifications": {
     "ariaLabel": "Notificações",

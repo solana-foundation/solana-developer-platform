@@ -9,6 +9,10 @@ import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-pay
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_recurring_payments_repo_test";
+const TEST_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_test";
+const TEST_SIBLING_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_sibling";
+const TEST_PROVIDER_WALLET_ID = "wallet_recurring_payments_repo_test";
+const TEST_SOURCE_ADDRESS = "Sender111111111111111111111111111111111";
 
 describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   let repo: PaymentRecurringPaymentsRepository;
@@ -49,6 +53,34 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
       .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES
+           ('cfg_recurring_payments_exact', ?, NULL, 'test_recurring_exact', 'encrypted'),
+           ('cfg_recurring_payments_sibling', ?, ?, 'test_recurring_sibling', 'encrypted')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_ORG.id, TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+         VALUES
+           (?, 'cfg_recurring_payments_exact', ?, ?),
+           (?, 'cfg_recurring_payments_sibling', ?, ?)
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(
+        TEST_CUSTODY_WALLET_ID,
+        TEST_PROVIDER_WALLET_ID,
+        TEST_SOURCE_ADDRESS,
+        TEST_SIBLING_CUSTODY_WALLET_ID,
+        TEST_PROVIDER_WALLET_ID,
+        TEST_SOURCE_ADDRESS
+      )
+      .run();
 
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
   });
@@ -84,6 +116,109 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     return { account, counterparty };
   }
 
+  it("persists exact source identities and authorizes Provider IDs only for legacy rows", async () => {
+    const { account, counterparty } = await seedCounterpartyAccount();
+    const createdAt = "2026-06-29T12:00:00.000Z";
+    const create = (id: string, sourceCustodyWalletId: string) =>
+      repo.createRecurringPayment({
+        id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId,
+        sourceWalletId: TEST_PROVIDER_WALLET_ID,
+        sourceAddress: TEST_SOURCE_ADDRESS,
+        counterpartyId: counterparty.id,
+        counterpartyAccountId: account.id,
+        destinationAddress: "Destination111111111111111111111111111111",
+        token: "USDC",
+        amount: "10.00",
+        periodHours: 24,
+        firstCollectionAt: null,
+        metadataUri: null,
+        createdBy: TEST_USER.id,
+        createdAt,
+        updatedAt: createdAt,
+      });
+
+    const exact = await create("recpay_repo_exact_filter", TEST_CUSTODY_WALLET_ID);
+    await create("recpay_repo_legacy_filter", TEST_CUSTODY_WALLET_ID);
+    await create("recpay_repo_sibling_filter", TEST_SIBLING_CUSTODY_WALLET_ID);
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payments
+            SET source_custody_wallet_id = NULL
+          WHERE id = 'recpay_repo_legacy_filter'`
+      )
+      .run();
+
+    const attempt = await repo.createUpdateAttempt({
+      id: "recpay_update_exact_source",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      recurringPaymentId: exact?.id ?? "",
+      mode: "replacement",
+      status: "processing",
+      stage: "claim",
+      oldPlanId: null,
+      oldSubscriptionId: null,
+      newPlanId: null,
+      newSubscriptionId: null,
+      newSourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID,
+      planUpdateSignature: null,
+      planCreationSignature: null,
+      authorizationSetupSignature: null,
+      authorizationSignature: null,
+      oldCancelSignature: null,
+      changedFields: ["sourceCustodyWalletId"],
+      beforeValues: {},
+      afterValues: { sourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID },
+      error: null,
+      createdBy: TEST_USER.id,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    const authorized = await repo.listRecurringPayments({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: {
+        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
+        providerWalletIds: [TEST_PROVIDER_WALLET_ID],
+      },
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(exact?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(attempt?.new_source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
+    expect(authorized.rows.map((row) => row.id).sort()).toEqual([
+      "recpay_repo_exact_filter",
+      "recpay_repo_legacy_filter",
+    ]);
+    await expect(
+      repo.getRecurringPaymentById({
+        recurringPaymentId: "recpay_repo_sibling_filter",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        walletAuthorization: {
+          custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
+          providerWalletIds: [TEST_PROVIDER_WALLET_ID],
+        },
+      })
+    ).resolves.toBeNull();
+
+    const promoted = await repo.updateRecurringPayment({
+      recurringPaymentId: exact?.id ?? "",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      sourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID,
+      sourceWalletId: TEST_PROVIDER_WALLET_ID,
+      sourceAddress: TEST_SOURCE_ADDRESS,
+      expectedStatus: "pending_activation",
+      updatedAt: "2026-06-29T12:01:00.000Z",
+    });
+    expect(promoted?.source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
+  });
+
   it("guards pending updates with the expected updated_at value", async () => {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";
@@ -91,6 +226,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       id: "recpay_repo_guard",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       sourceWalletId: "wallet_sender",
       sourceAddress: "Sender111111111111111111111111111111111",
       counterpartyId: counterparty.id,

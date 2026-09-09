@@ -1027,7 +1027,7 @@ export class GroundEarnClient
    * Page through the raw yield-source catalogue, unfiltered. Data source for
    * `listStrategies`, and the tooling surface the catalogue-inventory script
    * reads so it can report what distillation drops (underscore-prefixed like
-   * RampClient._discoverProviderRails: a real consumer exists, but this is
+   * RampProvider.discoverCurrencyAndRails: a real consumer exists, but this is
    * not part of the provider contract).
    */
   async *_iterateYieldSources(ctx: EarnRuntimeContext): AsyncGenerator<GroundYieldSource, void> {

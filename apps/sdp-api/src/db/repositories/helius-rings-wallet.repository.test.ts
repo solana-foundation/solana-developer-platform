@@ -4,13 +4,17 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
-import { mapHeliusRingsWalletRow } from "./helius-rings-wallet.repository";
+import {
+  DEFAULT_RINGS_WALLET_LIST_LIMIT,
+  mapHeliusRingsWalletRow,
+} from "./helius-rings-wallet.repository";
 import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_hrw_repo_test";
 const OTHER_PROJECT_ID = "prj_hrw_repo_other";
 
 const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+const OWNER_ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
 let repo: HeliusRingsWalletRepository;
 
@@ -18,6 +22,14 @@ async function createWallet(sdpWalletId: string, name = "Treasury") {
   const wallet = await repo.createWallet({ ...scope, sdpWalletId, name, materialTag: "simulated" });
   if (!wallet) throw new Error("wallet fixture was not created");
   return wallet;
+}
+
+/** Pins created_at so ordering assertions do not depend on clock resolution. */
+async function setCreatedAt(id: string, createdAt: string): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE helius_rings_wallets SET created_at = ? WHERE id = ?")
+    .bind(createdAt, id)
+    .run();
 }
 
 describe("HeliusRingsWalletRepository (postgres)", () => {
@@ -96,6 +108,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
         ...scope,
         id: wallet.id,
         shieldedAddress: "shielded-1",
+        ownerAddress: OWNER_ADDRESS,
         materialTag: "live",
         expectedStatus: "pending",
       });
@@ -117,6 +130,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
         ...scope,
         id: wallet.id,
         shieldedAddress: "shielded-1",
+        ownerAddress: OWNER_ADDRESS,
         materialTag: "live",
         expectedStatus: "pending",
       });
@@ -157,6 +171,42 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
     expect(await repo.listWallets({ ...scope, limit: 1 })).toHaveLength(1);
   });
 
+  it("applies the provider wallet allowlist before the list limit", async () => {
+    const allowed = await createWallet("wal_allowed");
+    const unauthorized = await createWallet("wal_unauthorized");
+    await setCreatedAt(allowed.id, "2026-01-01T00:00:00.000Z");
+    await setCreatedAt(unauthorized.id, "2026-02-01T00:00:00.000Z");
+
+    const listed = await repo.listWallets({
+      ...scope,
+      sdpWalletIds: [allowed.sdp_wallet_id],
+      limit: 1,
+    });
+
+    expect(listed.map((wallet) => wallet.id)).toEqual([allowed.id]);
+  });
+
+  it("returns no wallets for an explicit empty provider wallet allowlist", async () => {
+    await createWallet("wal_1");
+
+    expect(await repo.listWallets({ ...scope, sdpWalletIds: [] })).toEqual([]);
+  });
+
+  it("resolves every allowed rings wallet id without list pagination", async () => {
+    const providerWalletIds = Array.from(
+      { length: DEFAULT_RINGS_WALLET_LIST_LIMIT + 1 },
+      (_, index) => `wal_allowed_${index}`
+    );
+    const wallets = await Promise.all(providerWalletIds.map((id) => createWallet(id)));
+
+    const resolved = await repo.listWalletIdsBySdpWalletIds({
+      ...scope,
+      sdpWalletIds: providerWalletIds,
+    });
+
+    expect(new Set(resolved)).toEqual(new Set(wallets.map((wallet) => wallet.id)));
+  });
+
   describe("mapHeliusRingsWalletRow", () => {
     it("projects the row onto the domain wallet without tenant columns", async () => {
       const wallet = await createWallet("wal_1");
@@ -164,6 +214,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
         ...scope,
         id: wallet.id,
         shieldedAddress: "shielded-1",
+        ownerAddress: OWNER_ADDRESS,
         materialTag: "live",
         expectedStatus: "pending",
       });

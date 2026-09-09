@@ -1,10 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { assetProfiles } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { isDeveloperControlsEnabled } from "@/lib/developer-controls";
-import { AppearanceSection } from "./appearance-section";
 import { MembersSection } from "./members-section";
 
 /** Anything that is not a positive integer falls back to the first page. */
@@ -27,10 +24,7 @@ export default async function SettingsPage({
 }) {
   const membersPage = resolveMembersPage((await searchParams).membersPage);
 
-  const [{ userId, orgId, orgRole }, assetProfilesEnabled] = await Promise.all([
-    auth(),
-    assetProfiles(),
-  ]);
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -47,22 +41,6 @@ export default async function SettingsPage({
       {dashboardAccess.capabilities.canManageOrgSettings ? (
         <MembersSection page={membersPage} />
       ) : null}
-
-      {/* Not permission-gated: the colour theme is a per-device personal preference,
-          not organization state, so every role gets to set it. */}
-      {/* The asset-header controls tune a surface that is itself still behind the
-          asset-profiles flag, and they are ours to tune rather than a customer
-          setting — so they only appear where both hold. */}
-      <AppearanceSection
-        showAssetHeaderControls={
-          assetProfilesEnabled &&
-          isDeveloperControlsEnabled({
-            nodeEnvironment: process.env.NODE_ENV,
-            sdpEnvironment: process.env.NEXT_PUBLIC_SDP_ENVIRONMENT,
-            vercelEnvironment: process.env.VERCEL_ENV,
-          })
-        }
-      />
     </div>
   );
 }

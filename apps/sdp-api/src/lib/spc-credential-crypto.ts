@@ -1,4 +1,4 @@
-// Cipher for the SPC passwords SDP issues on behalf of invited members.
+// Cipher for the SPC passwords SDP owns for project principals.
 //
 // Shares the custody cipher router — legacy AES-GCM, or Cloud KMS envelope
 // encryption (`v2.` prefix) once SPC_CREDENTIAL_KMS_KEY_NAME is set — but under
@@ -7,9 +7,9 @@
 //   * blast radius: compromising the custody key must not expose SPC
 //     credentials, and vice versa;
 //   * recoverability differs. Custody keys are irreplaceable — lose them and
-//     wallet control is gone. An SPC password is re-issuable: `inviteMember`
-//     generates it and registers it with SPC, and the member never sees it, so
-//     an unreadable credential is repaired by re-inviting.
+//     wallet control is gone. An SPC password is re-issuable: identity
+//     provisioning generates it and registers it with SPC, and the SDP actor
+//     never sees it.
 //
 // Despite the router calling it `legacy`, SPC_CREDENTIAL_ENCRYPTION_KEY is required
 // rather than optional: KMS auth goes through the GCE metadata server
@@ -40,7 +40,7 @@ export function createSpcCredentialCipher(env: SpcCredentialCipherEnv): CustodyC
   const legacyKey = env.SPC_CREDENTIAL_ENCRYPTION_KEY;
   const kmsKeyName = env.SPC_CREDENTIAL_KMS_KEY_NAME;
   // Fail fast rather than at the first encrypt/decrypt: neither key configured
-  // means Private Channels invites cannot work at all.
+  // means Private Channels identity provisioning cannot work at all.
   if (!legacyKey && !kmsKeyName) {
     throw new EncryptionError(
       "SPC_CREDENTIAL_ENCRYPTION_KEY environment variable is not configured"

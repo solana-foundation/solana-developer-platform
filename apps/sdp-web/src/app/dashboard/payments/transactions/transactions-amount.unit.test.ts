@@ -55,6 +55,8 @@ describe("transaction amount presentation", () => {
       createElement(TransactionAmount, {
         transfer: {
           id: "transfer_1",
+          custodyWalletId: "cwlt_1",
+          providerWalletId: "privy_1",
           status: "confirmed",
           signature: null,
           rampsMemo: {},

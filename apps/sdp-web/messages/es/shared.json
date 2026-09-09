@@ -143,7 +143,9 @@
     "done": "Listo",
     "time": "Hora",
     "unknownToken": "Desconocido",
-    "sdpMintedToken": "SDP-Minted"
+    "sdpMintedToken": "SDP-Minted",
+    "selectExistingOrganizationDescription": "Elige una organización existente para continuar.",
+    "loadMore": "Cargar más"
   },
   "dashboardShell": {
     "workspace": "Espacio de trabajo",
@@ -225,7 +227,10 @@
     "backToPrivateChannels": "Volver a canales privados",
     "integrations": "Integraciones",
     "holdings": "Tenencia",
-    "backToHome": "Volver al inicio"
+    "backToHome": "Volver al inicio",
+    "manageAccount": "Administrar cuenta",
+    "signOut": "Cerrar sesión",
+    "accountMenu": "Menú de cuenta"
   },
   "validation": {
     "allowlistValueRequired": "El valor de la Allowlist es obligatorio",
@@ -439,7 +444,11 @@
     "rpcByokRotated": "Clave rotada.",
     "rpcByokTest": "Probar clave",
     "rpcByokTestPassed": "Se alcanzó el proveedor justo ahora.",
-    "rpcByokTestFailed": "No se pudo alcanzar el proveedor."
+    "rpcByokTestFailed": "No se pudo alcanzar el proveedor.",
+    "statusNotConnected": "No conectado",
+    "statusOnRequest": "Disponible bajo solicitud",
+    "rpcByokDeleteConfirm": "¿Eliminar esta conexión? Su clave se destruyó al desactivarse, así que esto solo borra el registro.",
+    "rpcByokDeleteNamed": "Eliminar {name}"
   },
   "notifications": {
     "ariaLabel": "Notificaciones",

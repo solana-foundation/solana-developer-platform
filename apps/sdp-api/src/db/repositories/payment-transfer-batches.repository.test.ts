@@ -10,6 +10,7 @@ import { createPostgresPaymentTransferBatchesRepository } from "./payment-transf
 const TEST_PROJECT_ID = "prj_transfer_batches_repo_test";
 const OTHER_PROJECT_ID = "prj_transfer_batches_repo_test_other";
 const TEST_WALLET_ID = "wallet_transfer_batches_repo_test";
+const TEST_CUSTODY_WALLET_ID = "cwlt_transfer_batches_repo_test";
 
 describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   let repo: PaymentTransferBatchesRepository;
@@ -48,12 +49,30 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
         .run();
     }
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_transfer_batches_exact', ?, NULL, 'test_batch_exact', 'encrypted')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+         VALUES (?, 'cfg_transfer_batches_exact', ?, 'Source111')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID)
+      .run();
 
     repo = createPostgresPaymentTransferBatchesRepository(db);
   });
 
   const baseInput = {
     organizationId: TEST_ORG.id,
+    sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
     sourceWalletId: TEST_WALLET_ID,
     sourceAddress: "Source111",
     token: "SOL",
@@ -73,6 +92,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     });
 
     expect(created.idempotency_key).toBe("batch-key-abc");
+    expect(created.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
 
     const found = await repo.findTransferBatchByIdempotency({
       organizationId: TEST_ORG.id,
@@ -146,5 +166,64 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         idempotencyKey: "rollback-batch-key",
       })
     ).toBeNull();
+  });
+
+  it("filters batches by exact wallet and exact-wallet allowlist", async () => {
+    const db = getDb(env);
+    await repo.createTransferBatchWithRecipients({
+      batch: {
+        ...baseInput,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      },
+      recipients: [],
+    });
+    const { batch: legacy } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID },
+      recipients: [],
+    });
+    await db
+      .prepare("UPDATE payment_transfer_batches SET source_custody_wallet_id = NULL WHERE id = ?")
+      .bind(legacy.id)
+      .run();
+
+    const selected = await repo.listTransferBatches({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      limit: 20,
+      offset: 0,
+    });
+    const authorized = await repo.listTransferBatches({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: {
+        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
+        providerWalletIds: [TEST_WALLET_ID],
+      },
+      limit: 20,
+      offset: 0,
+    });
+    const authorizationDenied = await repo.listTransferBatches({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(selected.rows).toHaveLength(1);
+    expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(authorized.rows).toHaveLength(2);
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID })
+    );
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({
+        source_custody_wallet_id: null,
+        source_wallet_id: TEST_WALLET_ID,
+      })
+    );
+    expect(authorizationDenied).toEqual({ rows: [], total: 0 });
   });
 });

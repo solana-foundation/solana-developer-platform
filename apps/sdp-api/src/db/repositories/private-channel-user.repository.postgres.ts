@@ -1,6 +1,7 @@
 import type { AppDb } from "@/db";
 import {
   type AddMembershipInput,
+  type CompletePrivateChannelPrincipalInput,
   type CreatePrivateChannelUserInput,
   generatePrivateChannelMembershipId,
   type PrivateChannelMembershipRow,
@@ -9,6 +10,7 @@ import {
   type PrivateChannelUserRow,
   type PrivateChannelUserWithIdentityRow,
   type ProjectScope,
+  type ReservePrivateChannelPrincipalInput,
 } from "./private-channel-user.repository";
 
 function mapUserRow(row: Record<string, unknown>): PrivateChannelUserRow {
@@ -16,10 +18,17 @@ function mapUserRow(row: Record<string, unknown>): PrivateChannelUserRow {
     id: row.id as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
-    user_id: row.user_id as string,
+    user_id: (row.user_id ?? null) as string | null,
+    instance_id: (row.instance_id ?? null) as string | null,
+    name: (row.name ?? row.user_name ?? row.user_email ?? "Principal") as string,
+    is_default: Boolean(row.is_default),
+    disabled_at: (row.disabled_at ?? null) as string | null,
+    created_by: (row.created_by ?? null) as string | null,
+    verified_wallet_count: Number(row.verified_wallet_count ?? 0),
     spc_user_id: (row.spc_user_id ?? null) as string | null,
     spc_username: (row.spc_username ?? null) as string | null,
     spc_credential_ciphertext: (row.spc_credential_ciphertext ?? null) as string | null,
+    provisioned_at: (row.provisioned_at ?? null) as string | null,
     invited_by: (row.invited_by ?? null) as string | null,
     invite_token: (row.invite_token ?? null) as string | null,
     invited_at: row.invited_at as string,
@@ -32,7 +41,7 @@ function mapUserRow(row: Record<string, unknown>): PrivateChannelUserRow {
 function mapUserWithIdentityRow(row: Record<string, unknown>): PrivateChannelUserWithIdentityRow {
   return {
     ...mapUserRow(row),
-    user_email: row.user_email as string,
+    user_email: (row.user_email ?? null) as string | null,
     user_name: (row.user_name ?? null) as string | null,
     verified_wallet_count: Number(row.verified_wallet_count ?? 0),
     project_role: (row.project_role ?? null) as string | null,
@@ -71,7 +80,7 @@ const USER_SELECT = `
 
 // LEFT JOIN so PCU rows survive later removal from project_members (orphans stay visible for cleanup).
 const USER_JOINS = `
-  INNER JOIN users u ON u.id = pcu.user_id
+  LEFT  JOIN users u ON u.id = pcu.user_id
   LEFT  JOIN project_members pm ON pm.project_id = pcu.project_id AND pm.user_id = pcu.user_id
 `;
 
@@ -79,6 +88,175 @@ export function createPostgresPrivateChannelUserRepository(
   db: AppDb
 ): PrivateChannelUserRepository {
   return {
+    async listPrincipals(scope, instanceId) {
+      const { results = [] } = await db
+        .prepare(
+          `SELECT pcu.*,
+                  (
+                    SELECT COUNT(*)
+                      FROM private_channel_verified_wallets vw
+                     WHERE vw.user_id = pcu.id
+                       AND vw.instance_id = pcu.instance_id
+                  ) AS verified_wallet_count
+             FROM private_channel_users pcu
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND instance_id = ?
+              AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+            ORDER BY is_default DESC, created_at ASC, id ASC`
+        )
+        .bind(scope.organizationId, scope.projectId, instanceId)
+        .all<Record<string, unknown>>();
+      return results.map(mapUserRow);
+    },
+
+    async findDefaultPrincipal(scope, instanceId) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM private_channel_users
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND instance_id = ?
+              AND is_default = TRUE
+              AND disabled_at IS NULL
+              AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+            LIMIT 1`
+        )
+        .bind(scope.organizationId, scope.projectId, instanceId)
+        .first<Record<string, unknown>>();
+      return row ? mapUserRow(row) : null;
+    },
+
+    async findDefaultPrincipalByProject(scope) {
+      const row = await db
+        .prepare(
+          `SELECT pcu.*
+             FROM private_channel_users pcu
+             INNER JOIN private_channel_instances pci ON pci.id = pcu.instance_id
+            WHERE pcu.organization_id = ?
+              AND pcu.project_id = ?
+              AND pcu.is_default = TRUE
+              AND pcu.disabled_at IS NULL
+              AND (pcu.spc_user_id IS NOT NULL OR pcu.provisioned_at IS NOT NULL)
+              AND pci.is_active = TRUE
+            ORDER BY pci.created_at DESC, pci.id DESC
+            LIMIT 1`
+        )
+        .bind(scope.organizationId, scope.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapUserRow(row) : null;
+    },
+
+    async reservePrincipal(input: ReservePrivateChannelPrincipalInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO private_channel_users (
+               id, organization_id, project_id, instance_id, user_id,
+               name, is_default, created_by,
+               spc_username, spc_credential_ciphertext,
+               invited_by, invite_token
+             )
+           VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL)
+          RETURNING *`
+        )
+        .bind(
+          `pcu_${crypto.randomUUID()}`,
+          input.organizationId,
+          input.projectId,
+          input.instanceId,
+          input.name,
+          input.isDefault,
+          input.createdBy,
+          input.spcUsername,
+          input.spcCredentialCiphertext
+        )
+        .first<Record<string, unknown>>();
+      if (!row) throw new Error("private channel principal insert returned no row");
+      return mapUserRow(row);
+    },
+
+    async findPrincipalReservation(input) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM private_channel_users
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND instance_id = ?
+              AND LOWER(name) = LOWER(?)
+              AND disabled_at IS NULL
+              AND spc_user_id IS NULL
+              AND provisioned_at IS NULL
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.instanceId, input.name)
+        .first<Record<string, unknown>>();
+      return row ? mapUserRow(row) : null;
+    },
+
+    async completePrincipal(input: CompletePrivateChannelPrincipalInput) {
+      const row = await db
+        .prepare(
+          `UPDATE private_channel_users
+              SET spc_user_id = ?,
+                  spc_username = ?,
+                  spc_credential_ciphertext = ?,
+                  provisioned_at = sdp_iso_now(),
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND provisioned_at IS NULL
+          RETURNING *`
+        )
+        .bind(
+          input.spcUserId,
+          input.spcUsername,
+          input.spcCredentialCiphertext,
+          input.id,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+      if (!row) throw new Error("private channel principal reservation could not be completed");
+      return mapUserRow(row);
+    },
+
+    async deletePrincipalReservation(scope, id) {
+      const row = await db
+        .prepare(
+          `DELETE FROM private_channel_users
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND spc_user_id IS NULL
+              AND provisioned_at IS NULL
+          RETURNING id`
+        )
+        .bind(id, scope.organizationId, scope.projectId)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
+    async disablePrincipal(scope, id) {
+      const row = await db
+        .prepare(
+          `UPDATE private_channel_users
+              SET disabled_at = sdp_iso_now(),
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND is_default = FALSE
+              AND disabled_at IS NULL
+          RETURNING id`
+        )
+        .bind(id, scope.organizationId, scope.projectId)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
     async listByProject(scope: ProjectScope) {
       const { results = [] } = await db
         .prepare(
@@ -227,27 +405,39 @@ export function createPostgresPrivateChannelUserRepository(
       return results.map(mapMembershipWithChannelRow);
     },
 
-    async addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow> {
+    async addMembership(input: AddMembershipInput): Promise<PrivateChannelMembershipRow | null> {
       // Idempotent: ON CONFLICT DO UPDATE (no-op) so we always return a row.
       // `RETURNING` on both insert + no-op update gives us the winning row's id
-      // even when the row already existed.
+      // even when the row already existed. Locking the active principal makes
+      // this insert serialize with disablePrincipal: either membership commits
+      // first and disable cleanup sees it, or disable wins and this returns null.
       const row = await db
         .prepare(
-          `INSERT INTO private_channel_memberships (
+          `WITH active_principal AS (
+             SELECT id
+               FROM private_channel_users
+              WHERE id = ?
+                AND disabled_at IS NULL
+                AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+              FOR UPDATE
+           )
+           INSERT INTO private_channel_memberships (
                id, channel_id, private_channel_user_id, added_by
-             ) VALUES (?, ?, ?, ?)
+             )
+           SELECT ?, ?, id, ?
+             FROM active_principal
           ON CONFLICT (channel_id, private_channel_user_id) DO UPDATE
              SET added_at = private_channel_memberships.added_at
           RETURNING *`
         )
         .bind(
+          input.privateChannelUserId,
           generatePrivateChannelMembershipId(),
           input.channelId,
-          input.privateChannelUserId,
           input.addedBy
         )
         .first<Record<string, unknown>>();
-      if (!row) throw new Error("private_channel_memberships insert returned no row");
+      if (!row) return null;
       return {
         id: row.id as string,
         channel_id: row.channel_id as string,

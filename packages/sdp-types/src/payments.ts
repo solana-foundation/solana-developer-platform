@@ -1,6 +1,7 @@
 import type { Address } from "@solana/addresses";
+import type { CountryCode } from "./countries";
 import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
-import type { RampFiatCurrency } from "./generated/ramp-support.generated";
+import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
   PolicyDecision,
@@ -151,6 +152,7 @@ export interface LightsparkRampSettlement {
   receivedAmount: LightsparkGridAmount;
   exchangeRate: number;
   fees: number;
+  settledAt?: string;
   failureReason?: string;
 }
 
@@ -200,7 +202,8 @@ export interface MoneygramTransferDetails {
 
 export interface PaymentTransferSummary {
   id: string;
-  walletId?: string;
+  custodyWalletId: string | null;
+  providerWalletId: string;
   status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
@@ -251,7 +254,7 @@ export type PreparedPrivateTransfer = MagicBlockPreparedPrivateTransfer;
 
 export interface PaymentTransferRequest {
   projectId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   destination: string;
   token: string;
   amount: string;
@@ -305,7 +308,7 @@ export interface PaymentTransferBatchOptions {
 export interface PaymentTransferBatchRequest {
   projectId?: string;
   externalId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   token: string;
   recipients: PaymentTransferBatchRecipientRequest[];
   options?: PaymentTransferBatchOptions;
@@ -318,7 +321,8 @@ export interface PaymentTransferBatch {
   organizationId: string;
   projectId: string;
   externalId: string | null;
-  sourceWalletId: string;
+  sourceCustodyWalletId: string | null;
+  sourceProviderWalletId: string;
   sourceAddress: string;
   token: string;
   status: PaymentTransferBatchStatus;
@@ -491,7 +495,8 @@ export interface PaymentRecurringPayment {
   id: string;
   organizationId: string;
   projectId: string;
-  sourceWalletId: string;
+  sourceCustodyWalletId: string | null;
+  sourceProviderWalletId: string;
   sourceAddress: string;
   counterpartyId: string;
   counterpartyAccountId: string;
@@ -611,7 +616,7 @@ export interface CreatePaymentSubscriptionCollectionAttemptRequest {
 }
 
 export interface CreatePaymentRecurringPaymentRequest {
-  sourceWalletId: string;
+  sourceCustodyWalletId: string;
   counterpartyId: string;
   counterpartyAccountId: string;
   token: string;
@@ -622,7 +627,7 @@ export interface CreatePaymentRecurringPaymentRequest {
 }
 
 export interface UpdatePaymentRecurringPaymentRequest {
-  sourceWalletId?: string;
+  sourceCustodyWalletId?: string;
   counterpartyId?: string;
   counterpartyAccountId?: string;
   token?: string;
@@ -881,25 +886,38 @@ export const RAMPS_MEMO_LIMITS = {
 export interface PaymentOnrampQuoteRequest {
   provider: RampProviderId;
   counterpartyId: string;
-  destinationWallet: string;
-  cryptoToken: string;
+  destinationCustodyWalletId: string;
+  assetRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  redirectUrl?: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
 }
 
-export interface PaymentOfframpQuoteRequest {
-  provider: RampProviderId;
+interface PaymentOfframpQuoteRequestBase {
   counterpartyId: string;
-  sourceWallet: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
+  sourceCustodyWalletId: string;
+  assetRail: CryptoRailId;
   cryptoAmount: string;
-  redirectUrl?: string;
   rampsMemo?: Record<string, string>;
 }
+
+/**
+ * Off-ramp quote request. Lightspark payouts are corridor-addressed: the
+ * fiat currency and destination country select the payout external account,
+ * so both are required on that arm.
+ */
+export type PaymentOfframpQuoteRequest =
+  | (PaymentOfframpQuoteRequestBase & {
+      provider: "lightspark";
+      fiatCurrency: RampFiatCurrency;
+      destinationCountry: CountryCode;
+      providerAccountId?: string;
+    })
+  | (PaymentOfframpQuoteRequestBase & {
+      provider: Exclude<RampProviderId, "lightspark">;
+      fiatCurrency?: RampFiatCurrency;
+    });
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
 

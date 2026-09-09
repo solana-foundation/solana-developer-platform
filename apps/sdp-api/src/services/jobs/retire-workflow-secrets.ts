@@ -35,7 +35,10 @@ function nextAttemptIso(now: Date, attemptCount: number): string {
 }
 
 function isAlreadyDestroyed(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("FAILED_PRECONDITION");
+  return (
+    error instanceof Error &&
+    (error.message.includes("FAILED_PRECONDITION") || error.message.includes("NOT_FOUND"))
+  );
 }
 
 function isKnownBackend(value: string): value is CredentialSecretStorageBackend {
@@ -100,6 +103,21 @@ export async function retireOrphanedActionSecrets(
   const stores = new Map<string, CredentialSecretStore | Error>();
 
   for (const row of due) {
+    // Claim before destroying, never after listing. A version's obligation can
+    // be cancelled by the transaction that references it at any moment, and
+    // destroying is an external side effect that cannot be rolled back — so the
+    // row is taken first, and a row that cannot be taken is one somebody else
+    // is entitled to. Without this the destroy could land on a version that a
+    // just-committed credential row points at.
+    const claimed = await repo.claimRetirement({
+      id: row.id,
+      expectedAttemptCount: row.attempt_count,
+      nextAttemptAt: nextAttemptIso(now, row.attempt_count + 1),
+    });
+    if (!claimed) {
+      continue;
+    }
+
     try {
       const secretStore = storeForBackend(env, row.storage_backend, stores);
       await secretStore.destroyVersion({ secretVersionRef: row.secret_version_ref });
@@ -115,12 +133,10 @@ export async function retireOrphanedActionSecrets(
         result.retired += 1;
         continue;
       }
+      // The claim already counted this attempt and set the next one, so only
+      // the reason is left to record.
       const reason = error instanceof Error ? error.message : String(error);
-      await repo.rescheduleRetirement({
-        id: row.id,
-        error: reason,
-        nextAttemptAt: nextAttemptIso(now, row.attempt_count + 1),
-      });
+      await repo.recordRetirementFailure({ id: row.id, error: reason });
       result.failed += 1;
       getLogger().error(
         {

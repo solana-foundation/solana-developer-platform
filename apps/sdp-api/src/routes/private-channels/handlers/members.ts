@@ -1,112 +1,54 @@
 import {
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelMembershipChannelDto,
-  type PrivateChannelUserDto,
+  type PrivateChannelPrincipalDto,
 } from "@sdp/types";
 import type {
   PrivateChannelMembershipWithChannelRow,
-  PrivateChannelUserWithIdentityRow,
+  PrivateChannelUserRow,
 } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { sendInviteEmail } from "@/lib/spc-invite-email";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
-import { inviteMember, mapPrivateChannelError } from "@/services/private-channels";
+import {
+  mapPrivateChannelError,
+  provisionPrincipal,
+  revokePrivateChannelPrincipalWallets,
+} from "@/services/private-channels";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
-  getProjectUserRepository,
 } from "../context";
 import { emitMember } from "../helpers";
-import type { addMembershipBodySchema, inviteMemberBodySchema } from "../schemas";
+import type { addPrincipalMembershipBodySchema, createPrincipalBodySchema } from "../schemas";
 
 function toDto(
-  row: PrivateChannelUserWithIdentityRow,
+  row: PrivateChannelUserRow,
   memberships: PrivateChannelMembershipWithChannelRow[]
-): PrivateChannelUserDto {
-  const channels: PrivateChannelMembershipChannelDto[] = memberships.map((m) => ({
-    id: m.channel_id,
-    name: m.channel_name,
-    isDefault: m.channel_is_default,
+): PrivateChannelPrincipalDto {
+  const channels: PrivateChannelMembershipChannelDto[] = memberships.map((membership) => ({
+    id: membership.channel_id,
+    name: membership.channel_name,
+    isDefault: membership.channel_is_default,
   }));
   return {
     id: row.id,
-    userId: row.user_id,
-    email: row.user_email,
-    name: row.user_name,
-    projectRole: row.project_role,
-    verifiedWalletCount: row.verified_wallet_count,
-    invitedAt: row.invited_at,
+    name: row.name,
+    isDefault: row.is_default,
+    status: row.disabled_at ? "disabled" : "active",
+    verifiedWalletCount: row.verified_wallet_count ?? 0,
+    createdAt: row.created_at,
     channels,
   };
 }
 
-export const listPrivateChannelUsers = async (c: AppContext) => {
+async function activeInstance(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const scope = { organizationId: auth.organizationId, projectId };
-
-  const repo = getPrivateChannelUserRepository(c);
-  const [rows, membershipsByUser] = await Promise.all([
-    repo.listByProject(scope),
-    repo.listMembershipsByProject(scope),
-  ]);
-
-  const users: PrivateChannelUserDto[] = rows.map((row) =>
-    toDto(row, membershipsByUser.get(row.id) ?? [])
-  );
-  return success(c, { users });
-};
-
-// Caller's own workspace membership for the active project. Returns { user: null }
-// when the caller isn't a member — the UI uses that to decide whether to show
-// invitee-specific affordances (e.g. the wallet-verify button).
-export const getAuthenticatedPrivateChannelUser = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  if (!auth.userId) {
-    return success(c, { user: null });
-  }
-
-  const repo = getPrivateChannelUserRepository(c);
-  const scope = { organizationId: auth.organizationId, projectId };
-  const row = await repo.getByProjectAndUser(scope, auth.userId);
-  if (!row) return success(c, { user: null });
-
-  const memberships = await repo.listMembershipsForUser(row.id);
-  return success(c, { user: toDto(row, memberships) });
-};
-
-export const getPrivateChannelUser = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const id = c.req.param("privateChannelUserId");
-  if (!id) throw badRequest("privateChannelUserId is required");
-
-  const repo = getPrivateChannelUserRepository(c);
-  const row = await repo.getById({ organizationId: auth.organizationId, projectId }, id);
-  if (!row) throw notFound("Private channel user");
-
-  const memberships = await repo.listMembershipsForUser(row.id);
-  return success(c, { user: toDto(row, memberships) });
-};
-
-export const invitePrivateChannelUser = async (
-  c: ValidatedBodyContext<typeof inviteMemberBodySchema>
-) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-
-  const body = c.req.valid("json");
-
-  const scope = { organizationId: auth.organizationId, projectId };
-
-  // Instance must exist and be active — SPC user registration requires the
-  // configured auth service (guaranteed present on every active instance).
   const instance = await getPrivateChannelInstanceRepository(c).getActiveByProject(scope);
   if (!instance) {
     throw new AppError(
@@ -114,185 +56,185 @@ export const invitePrivateChannelUser = async (
       "No active Private Channel instance for this project. Connect one first."
     );
   }
+  return { auth, scope, instance };
+}
 
-  const target = await getProjectUserRepository(c).getByProjectAndUserId(projectId, body.userId);
-  if (!target) throw notFound("Project user");
+export const listPrivateChannelPrincipals = async (c: AppContext) => {
+  const { auth, scope, instance } = await activeInstance(c);
+  const repo = getPrivateChannelUserRepository(c);
+  let defaultPrincipal = await repo.findDefaultPrincipal(scope, instance.id);
+  if (!defaultPrincipal) {
+    try {
+      defaultPrincipal = (
+        await provisionPrincipal(c.env, repo, {
+          ...scope,
+          instanceId: instance.id,
+          authUrl: instance.auth_url,
+          name: "Default",
+          isDefault: true,
+          createdBy: auth.userId ?? null,
+        })
+      ).principal;
+      const { channel } = await getPrivateChannelRepository(c).getOrCreateDefault({
+        instanceId: instance.id,
+        organizationId: scope.organizationId,
+        projectId: scope.projectId,
+      });
+      await repo.addMembership({
+        channelId: channel.id,
+        privateChannelUserId: defaultPrincipal.id,
+        addedBy: auth.userId ?? null,
+      });
+    } catch (error) {
+      throw mapPrivateChannelError(error);
+    }
+  }
+  const [rows, memberships] = await Promise.all([
+    repo.listPrincipals(scope, instance.id),
+    repo.listMembershipsByProject(scope),
+  ]);
+  return success(c, {
+    principals: rows.map((row) => toDto(row, memberships.get(row.id) ?? [])),
+  });
+};
 
+export const createPrivateChannelPrincipal = async (
+  c: ValidatedBodyContext<typeof createPrincipalBodySchema>
+) => {
+  const { auth, scope, instance } = await activeInstance(c);
+  const body = c.req.valid("json");
   try {
-    const repo = getPrivateChannelUserRepository(c);
-    const { member, inviteToken } = await inviteMember(c.env, repo, {
+    const { principal } = await provisionPrincipal(c.env, getPrivateChannelUserRepository(c), {
       ...scope,
+      instanceId: instance.id,
       authUrl: instance.auth_url,
-      targetUserId: body.userId,
-      targetUserEmail: target.email,
-      invitedBy: auth.userId ?? null,
+      name: body.name.trim(),
+      isDefault: false,
+      createdBy: auth.userId ?? null,
     });
-
-    // Email is scaffolded — log the URL so admins can copy it from stdout.
-    const frontendUrl = c.env.FRONTEND_URL ?? "";
-    const inviteUrl = frontendUrl
-      ? `${frontendUrl.replace(/\/$/, "")}/invite/${encodeURIComponent(inviteToken)}`
-      : `<invite token: ${inviteToken}>`;
-    await sendInviteEmail({
-      to: target.email,
-      inviteUrl,
-      invitedByName: null,
-    });
-
-    return success(c, { user: toDto(member, []), inviteUrl });
+    return success(c, { principal: toDto(principal, []) });
   } catch (error) {
     throw mapPrivateChannelError(error);
   }
 };
 
-export const deletePrivateChannelUser = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const id = c.req.param("privateChannelUserId");
-  if (!id) throw badRequest("privateChannelUserId is required");
+export const disablePrivateChannelPrincipal = async (c: AppContext) => {
+  const { auth, scope, instance } = await activeInstance(c);
+  const id = c.req.param("principalId");
+  if (!id) throw badRequest("principalId is required");
 
   const repo = getPrivateChannelUserRepository(c);
-  const scope = { organizationId: auth.organizationId, projectId };
-  const user = await repo.getById(scope, id);
-  if (!user) throw notFound("Private channel user");
-
-  const memberships = await repo.listMembershipsForUser(user.id);
-  const instance = await getPrivateChannelInstanceRepository(c).getActiveByProject(scope);
-
-  const deleted = await repo.deleteById(scope, id);
-  if (!deleted) throw notFound("Private channel user");
-
-  // Emit per-channel revokes using memberships captured before delete.
-  // Best-effort when no active instance remains (we can't attribute an instance).
-  if (instance) {
-    const eventScope = {
-      organizationId: instance.organization_id,
-      projectId: instance.project_id,
-      instanceId: instance.id,
-    };
-    for (const membership of memberships) {
-      await emitMember(c, eventScope, PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_REVOKED, {
-        channelId: membership.channel_id,
-        payload: {
-          privateChannelUserId: user.id,
-          targetUserId: user.user_id,
-          reason: "user_deleted",
-        },
-      });
+  const principal = await repo.getById(scope, id);
+  if (!principal || principal.instance_id !== instance.id) {
+    throw notFound("Private Channels principal");
+  }
+  if (principal.is_default) {
+    throw conflict("The default Private Channels principal cannot be disabled.");
+  }
+  try {
+    // Disable first. addMembership locks this same principal row, so an
+    // in-flight membership either commits before this transition (and is found
+    // below) or observes the disabled state and cannot insert.
+    if (!principal.disabled_at) {
+      const disabled = await repo.disablePrincipal(scope, principal.id);
+      if (!disabled) throw notFound("Private Channels principal");
     }
+  } catch (error) {
+    throw mapPrivateChannelError(error);
   }
 
-  // SPC has no delete-user endpoint; the SPC credential is intentionally
-  // orphaned. Log so operators can spot excess accumulation if needed.
-  getLogger().info(
-    {
-      id,
-      organizationId: auth.organizationId,
-      projectId,
-    },
-    "[members] deleted private_channel_users row; SPC credential remains orphaned"
+  // These repairs are independent. Await both so a failed upstream wallet
+  // revocation cannot leave a disabled principal visibly attached to channels,
+  // and a membership failure cannot skip durable wallet cleanup.
+  const cleanupResults = await Promise.allSettled([
+    revokePrivateChannelPrincipalWallets(c.env, auth, scope.projectId, principal.id),
+    (async () => {
+      const memberships = await repo.listMembershipsForUser(principal.id);
+      for (const membership of memberships) {
+        await repo.removeMembership(membership.channel_id, principal.id);
+        await emitMember(
+          c,
+          { ...scope, instanceId: instance.id },
+          PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_REVOKED,
+          {
+            channelId: membership.channel_id,
+            payload: { principalId: principal.id, reason: "principal_disabled" },
+          }
+        );
+      }
+    })(),
+  ]);
+  const failedCleanup = cleanupResults.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
   );
-
-  return success(c, { deleted: true });
+  if (failedCleanup) {
+    throw mapPrivateChannelError(failedCleanup.reason);
+  }
+  return success(c, { disabled: true });
 };
 
-export const addChannelMembership = async (
-  c: ValidatedBodyContext<typeof addMembershipBodySchema>
+export const addPrincipalChannelMembership = async (
+  c: ValidatedBodyContext<typeof addPrincipalMembershipBodySchema>
 ) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
+  const { auth, scope, instance } = await activeInstance(c);
   const channelId = c.req.param("channelId");
   if (!channelId) throw badRequest("channelId is required");
+  const { principalId } = c.req.valid("json");
 
-  const body = c.req.valid("json");
-
-  const scope = { organizationId: auth.organizationId, projectId };
   const repo = getPrivateChannelUserRepository(c);
+  const principal = await repo.getById(scope, principalId);
+  if (!principal || principal.instance_id !== instance.id || principal.disabled_at) {
+    throw notFound("Active Private Channels principal");
+  }
+  const channel = await getPrivateChannelRepository(c).findInProject({ ...scope, channelId });
+  if (!channel || channel.instance_id !== instance.id) throw notFound("Channel");
 
-  const user = await repo.getById(scope, body.privateChannelUserId);
-  if (!user) throw notFound("Private channel user");
-
-  const channel = await getPrivateChannelRepository(c).findInProject({
-    ...scope,
-    channelId,
-  });
-  if (!channel) throw notFound("Channel");
-
-  const alreadyMember = (await repo.listMembershipsForUser(user.id)).some(
-    (m) => m.channel_id === channelId
+  const alreadyMember = (await repo.listMembershipsForUser(principal.id)).some(
+    (membership) => membership.channel_id === channelId
   );
-
   const membership = await repo.addMembership({
     channelId,
-    privateChannelUserId: user.id,
+    privateChannelUserId: principal.id,
     addedBy: auth.userId ?? null,
   });
-
-  // Only emit on a genuine add (membership insert is idempotent).
+  if (!membership) throw notFound("Active Private Channels principal");
   if (!alreadyMember) {
     await emitMember(
       c,
-      {
-        organizationId: channel.organization_id,
-        projectId: channel.project_id,
-        instanceId: channel.instance_id,
-      },
+      { ...scope, instanceId: instance.id },
       PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_ADDED,
       {
         channelId,
-        payload: {
-          privateChannelUserId: user.id,
-          targetUserId: user.user_id,
-          membershipId: membership.id,
-        },
+        payload: { principalId: principal.id, membershipId: membership.id },
       }
     );
   }
-
   return success(c, { membership });
 };
 
-export const removeChannelMembership = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
+export const removePrincipalChannelMembership = async (c: AppContext) => {
+  const { scope, instance } = await activeInstance(c);
   const channelId = c.req.param("channelId");
-  const userId = c.req.param("privateChannelUserId");
-  if (!channelId || !userId) {
-    throw badRequest("channelId and privateChannelUserId are required");
+  const principalId = c.req.param("principalId");
+  if (!channelId || !principalId) {
+    throw badRequest("channelId and principalId are required");
   }
 
-  const scope = { organizationId: auth.organizationId, projectId };
   const repo = getPrivateChannelUserRepository(c);
+  const principal = await repo.getById(scope, principalId);
+  if (!principal || principal.instance_id !== instance.id) {
+    throw notFound("Private Channels principal");
+  }
+  const channel = await getPrivateChannelRepository(c).findInProject({ ...scope, channelId });
+  if (!channel || channel.instance_id !== instance.id) throw notFound("Channel");
 
-  // Scope checks: both the user and the channel must belong to this project.
-  const user = await repo.getById(scope, userId);
-  if (!user) throw notFound("Private channel user");
-
-  const channel = await getPrivateChannelRepository(c).findInProject({
-    ...scope,
-    channelId,
-  });
-  if (!channel) throw notFound("Channel");
-
-  const removed = await repo.removeMembership(channelId, userId);
+  const removed = await repo.removeMembership(channelId, principalId);
   if (!removed) throw notFound("Membership");
-
   await emitMember(
     c,
-    {
-      organizationId: channel.organization_id,
-      projectId: channel.project_id,
-      instanceId: channel.instance_id,
-    },
+    { ...scope, instanceId: instance.id },
     PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_REVOKED,
-    {
-      channelId,
-      payload: {
-        privateChannelUserId: user.id,
-        targetUserId: user.user_id,
-      },
-    }
+    { channelId, payload: { principalId: principal.id } }
   );
-
   return success(c, { removed: true });
 };

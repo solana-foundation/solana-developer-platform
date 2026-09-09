@@ -7,7 +7,33 @@ import {
   type PrivateChannelInstanceRow,
   type ProjectScope,
   type ReactivateInstanceInput,
+  type UpdateActiveInstanceInput,
 } from "./private-channel-instance.repository";
+
+function readDrainingAt(row: Record<string, unknown>): string | null {
+  // The drain flag gates value-movement admission, so a query or migration that
+  // stops returning the column must fail loudly instead of reading as "not
+  // draining" and reopening admission on an instance being deleted (HOO-1011).
+  if (!("draining_at" in row)) {
+    throw new Error("private_channel_instances row is missing draining_at");
+  }
+  const value = row.draining_at;
+  if (value === null || typeof value === "string") {
+    return value;
+  }
+  throw new Error("private_channel_instances.draining_at is not a nullable text value");
+}
+
+function readDrainingToken(row: Record<string, unknown>): string | null {
+  if (!("draining_token" in row)) {
+    throw new Error("private_channel_instances row is missing draining_token");
+  }
+  const value = row.draining_token;
+  if (value === null || typeof value === "string") {
+    return value;
+  }
+  throw new Error("private_channel_instances.draining_token is not a nullable text value");
+}
 
 function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
   return {
@@ -21,6 +47,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelInstanceRow {
     escrow_instance_addr: row.escrow_instance_addr as string,
     auth_url: row.auth_url as string,
     is_active: row.is_active as boolean,
+    draining_at: readDrainingAt(row),
+    draining_token: readDrainingToken(row),
     created_by: (row.created_by ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -77,11 +105,11 @@ export function createPostgresPrivateChannelInstanceRepository(
         .prepare(
           `INSERT INTO private_channel_instances (
                id, organization_id, project_id,
-               gateway_url, chain_rpc_url,
+               gateway_url,
                escrow_program_id, withdraw_program_id, escrow_instance_addr,
                auth_url,
                is_active, created_by
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
           RETURNING *`
         )
         .bind(
@@ -89,7 +117,6 @@ export function createPostgresPrivateChannelInstanceRepository(
           input.organizationId,
           input.projectId,
           input.gatewayUrl,
-          input.chainRpcUrl,
           input.escrowProgramId,
           input.withdrawProgramId,
           input.escrowInstanceAddr,
@@ -104,23 +131,63 @@ export function createPostgresPrivateChannelInstanceRepository(
       const row = await db
         .prepare(
           `UPDATE private_channel_instances
-              SET chain_rpc_url = ?,
+              SET chain_rpc_url = '',
                   escrow_program_id = ?,
                   withdraw_program_id = ?,
                   escrow_instance_addr = ?,
                   auth_url = ?,
                   is_active = TRUE,
+                  draining_at = NULL,
+                  draining_token = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ?
           RETURNING *`
         )
         .bind(
-          input.chainRpcUrl,
           input.escrowProgramId,
           input.withdrawProgramId,
           input.escrowInstanceAddr,
           input.authUrl,
           input.id
+        )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async updateActive(input: UpdateActiveInstanceInput) {
+      const row = await db
+        .prepare(
+          // draining_at is cleared here on purpose: a deletion refused for
+          // in-flight movements leaves the drain standing, and a transfer that
+          // never produced a verdict has no reconciler to settle it. Updating
+          // the connection is the operator saying "keep this instance", which
+          // is the explicit way back from a drain that would otherwise be
+          // permanent (HOO-1011).
+          `UPDATE private_channel_instances
+              SET gateway_url = ?,
+                  chain_rpc_url = '',
+                  escrow_program_id = ?,
+                  withdraw_program_id = ?,
+                  escrow_instance_addr = ?,
+                  auth_url = ?,
+                  draining_at = NULL,
+                  draining_token = NULL,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND is_active = TRUE
+          RETURNING *`
+        )
+        .bind(
+          input.gatewayUrl,
+          input.escrowProgramId,
+          input.withdrawProgramId,
+          input.escrowInstanceAddr,
+          input.authUrl,
+          input.id,
+          input.organizationId,
+          input.projectId
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
@@ -142,16 +209,65 @@ export function createPostgresPrivateChannelInstanceRepository(
       return row ? mapRow(row) : null;
     },
 
-    async deleteActive(scope) {
+    async beginDraining(scope) {
+      // One statement, two outcomes: an admitting row flips to draining, an
+      // already-draining row keeps its original timestamp (COALESCE), so a
+      // deletion retry never resets the drain clock.
+      const row = await db
+        .prepare(
+          `UPDATE private_channel_instances
+              SET draining_at = COALESCE(draining_at, sdp_iso_now()),
+                  draining_token = COALESCE(draining_token, gen_random_uuid()::text),
+                  updated_at = sdp_iso_now()
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND is_active = TRUE
+          RETURNING *`
+        )
+        .bind(scope.organizationId, scope.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async lockActiveForDeletion(scope, drainingToken) {
+      // Taken inside the deletion transaction. It waits behind any admission
+      // insert already holding the row and blocks later ones, so the in-flight
+      // counts read after it are stable until this transaction commits.
+      //
+      // Matching draining_token is what ties the deletion to ITS OWN drain: an
+      // operator who resumed the instance in between (updateActive clears the
+      // flag) must not have it deleted out from under a request that answered
+      // "resumed". No row here means the drain this deletion established is
+      // gone, and the deletion is abandoned rather than applied to whatever is
+      // active now.
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_instances
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND is_active = TRUE
+               AND draining_token IS NOT DISTINCT FROM ?
+             FOR NO KEY UPDATE`
+        )
+        .bind(scope.organizationId, scope.projectId, drainingToken)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async deleteActive(scope, drainingToken) {
+      // Same drain guard as the lock above, restated in the statement that
+      // actually removes the row: the delete may only ever apply to the
+      // instance this request drained.
       const row = await db
         .prepare(
           `DELETE FROM private_channel_instances
             WHERE organization_id = ?
               AND project_id = ?
               AND is_active = TRUE
+              AND draining_token IS NOT DISTINCT FROM ?
           RETURNING id`
         )
-        .bind(scope.organizationId, scope.projectId)
+        .bind(scope.organizationId, scope.projectId, drainingToken)
         .first<{ id: string }>();
       return row !== null;
     },

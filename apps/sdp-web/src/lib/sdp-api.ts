@@ -318,6 +318,7 @@ export function proxyFailure(
     {
       status,
       headers: {
+        "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },
@@ -336,7 +337,6 @@ export async function proxyToSdpApi({
   traceSource,
   path,
   upstreamHeaders,
-  expectedProjectId,
 }: {
   request: Request;
   traceSource: string;
@@ -347,12 +347,6 @@ export async function proxyToSdpApi({
    * remain server-owned, while endpoint-specific metadata is opt-in.
    */
   upstreamHeaders?: HeadersInit;
-  /**
-   * Project identity captured by a client before a workspace transition. When
-   * supplied, the proxy rejects a missing or changed selection instead of
-   * re-scoping the request through the latest project cookie.
-   */
-  expectedProjectId?: string;
 }): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
@@ -366,14 +360,6 @@ export async function proxyToSdpApi({
   const projectId = await getSelectedProjectId();
   if (!projectId) {
     return proxyFailure(trace, 400, "Selected project required");
-  }
-  if (expectedProjectId !== undefined) {
-    if (!expectedProjectId) {
-      return proxyFailure(trace, 400, "Expected project required");
-    }
-    if (expectedProjectId !== projectId) {
-      return proxyFailure(trace, 409, "Project selection changed. Reload and try again.");
-    }
   }
 
   try {
@@ -392,6 +378,8 @@ export async function proxyToSdpApi({
       status: response.status,
       headers: {
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+        // Per-org financial state: never storable by browsers or intermediaries.
+        "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },

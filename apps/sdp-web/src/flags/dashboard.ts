@@ -1,26 +1,32 @@
 import {
   assetProfiles,
+  custody,
+  dvp,
   earn,
   heliusRings,
+  issuance,
   markets,
-  organizationOnboarding,
   payments,
+  policies,
   privateChannels,
 } from "@/flags";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
+  custody: boolean;
+  dvp: boolean;
   earn: boolean;
   heliusRings: boolean;
+  issuance: boolean;
   markets: boolean;
-  organizationOnboarding: boolean;
   payments: boolean;
+  policies: boolean;
   privateChannels: boolean;
 };
 
 /**
  * Evaluates every flag the dashboard layout consumes in one request-scoped
- * pass, so the layout awaits a single snapshot instead of six flag promises.
+ * pass, so the layout awaits a single snapshot instead of separate flag reads.
  *
  * Lives beside the definitions instead of in index.ts because the flags
  * discovery endpoint serves that module wholesale and accepts only flag
@@ -31,29 +37,38 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
+    custodyEnabled,
+    dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
+    issuanceEnabled,
     marketsEnabled,
-    organizationOnboardingEnabled,
     paymentsEnabled,
+    policiesEnabled,
     privateChannelsEnabled,
   ] = await Promise.all([
     assetProfiles(),
+    custody(),
+    dvp(),
     earn(),
     heliusRings(),
+    issuance(),
     markets(),
-    organizationOnboarding(),
     payments(),
+    policies(),
     privateChannels(),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
+    custody: custodyEnabled,
+    dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
+    issuance: issuanceEnabled,
     markets: marketsEnabled,
-    organizationOnboarding: organizationOnboardingEnabled,
     payments: paymentsEnabled,
+    policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
   };
 }

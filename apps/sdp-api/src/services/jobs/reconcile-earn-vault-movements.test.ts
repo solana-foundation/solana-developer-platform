@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -20,6 +21,9 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
+const { reconcileEarnVaultMovementReadThrough } = await import(
+  "../earn/vault-movement-reconciliation.service"
+);
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";
@@ -118,6 +122,189 @@ async function ledgerRow(movementId: string) {
     organizationId: ORG,
   });
 }
+
+/**
+ * An external-wallet (caller-signed) deposit movement: the other signer shape
+ * that rides this service, via the detail read's read-through. Same ledger
+ * table, `owner_address` instead of a custody wallet, and a consumed build row.
+ */
+async function seedExternalWalletMovement() {
+  const repository = createPostgresEarnMovementsRepository(getDb(env));
+  const transactionId = `earn_ewt_${crypto.randomUUID()}`;
+  await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+    id: transactionId,
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    direction: "deposit",
+    ownerAddress: "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
+    vaultAddress: `vault_${crypto.randomUUID()}`,
+    tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    shareMint: "So11111111111111111111111111111111111111112",
+    label: "USDC Vault",
+    denomination: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    amountRequested: "1",
+    createsShareAccount: false,
+    unsignedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
+    lastValidBlockHeight: "100",
+  });
+  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
+    organizationId: ORG,
+    transactionId,
+  });
+  if (!built) throw new Error("external-wallet build row did not persist");
+  return repository.createSignedExternalWalletDepositIntent({
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    vaultAddress: built.vault_address,
+    ownerAddress: built.owner_address,
+    shareMint: built.share_mint,
+    tokenMint: built.token_mint,
+    label: built.label,
+    requestedAmount: built.amount_requested,
+    signature: `sig_${crypto.randomUUID()}`,
+    signedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
+    lastValidBlockHeight: "100",
+    requestId: crypto.randomUUID(),
+    idempotencyFingerprint: crypto.randomUUID(),
+    externalWalletTransactionId: built.id,
+  });
+}
+
+describe("reconcileEarnVaultMovementReadThrough", () => {
+  it("records confirmed chain status during an interactive detail read", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({ status: "confirmed", settled_at: null });
+    expect(movement.confirmed_at).not.toBeNull();
+    expect(getSignatureStatuses).toHaveBeenCalledWith(
+      expect.anything(),
+      [seeded.movement.signature],
+      { retryDelaysMs: [], searchTransactionHistory: true }
+    );
+    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("records irreversible finality without waiting for the scheduled sweep", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({ status: "finalized", amount_settled: "1" });
+    expect(movement.confirmed_at).not.toBeNull();
+    expect(movement.settled_at).not.toBeNull();
+  });
+
+  it("leaves an unknown signature for the durable reconciler without rebroadcasting from GET", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([null]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement.status).toBe("requested");
+    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails soft to the durable row when the interactive RPC read is unavailable", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(
+      reconcileEarnVaultMovementReadThrough(env, seeded.movement)
+    ).resolves.toMatchObject({ id: seeded.movement.id, status: "requested" });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "requested" });
+  });
+
+  it("coalesces concurrent interactive reads for one movement", async () => {
+    const seeded = await seedWithdrawal();
+    let resolveStatuses: ((statuses: Array<Record<string, unknown>>) => void) | undefined;
+    getSignatureStatuses.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStatuses = resolve;
+        })
+    );
+
+    const first = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const second = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await vi.waitFor(() => expect(getSignatureStatuses).toHaveBeenCalledTimes(1));
+    resolveStatuses?.([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+
+    const movements = await Promise.all([first, second]);
+    expect(movements.map((movement) => movement.status)).toEqual(["confirmed", "confirmed"]);
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds an interactive response while a shared RPC observation remains in flight", async () => {
+    const seeded = await seedWithdrawal();
+    vi.useFakeTimers();
+    try {
+      getSignatureStatuses.mockImplementation(() => new Promise(() => {}));
+      const response = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(response).resolves.toMatchObject({
+        id: seeded.movement.id,
+        status: "requested",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("advances an external-wallet (caller-signed) movement the same way", async () => {
+    // The embedded-yield detail read adopted this read-through; an
+    // owner-signed row is the same vault_direct ledger shape with a signature
+    // recorded at submit, so nothing here may depend on a custody wallet.
+    const seeded = await seedExternalWalletMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "finalized",
+      owner_address: seeded.movement.owner_address,
+    });
+    expect(movement.settled_at).not.toBeNull();
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "finalized" });
+  });
+
+  it("short-circuits a terminal movement without touching the RPC", async () => {
+    const seeded = await seedExternalWalletMovement();
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    await repository.advanceVaultMovement({
+      movementId: seeded.movement.id,
+      organizationId: ORG,
+      toStatus: "failed",
+      failureReason: "test setup",
+    });
+    const terminal = await ledgerRow(seeded.movement.id);
+    if (!terminal) throw new Error("terminal movement did not persist");
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, terminal);
+
+    expect(movement.status).toBe("failed");
+    expect(getSignatureStatuses).not.toHaveBeenCalled();
+  });
+});
 
 describe("reconcileEarnVaultMovements", () => {
   it("reconciles withdrawals through the same movement queue", async () => {

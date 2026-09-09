@@ -99,6 +99,8 @@ describe("transaction counterparty presentation", () => {
       retainTransactionCounterpartyDisplayName(
         {
           id: "transfer_1",
+          custodyWalletId: "cwlt_1",
+          providerWalletId: "privy_1",
           status: "confirmed",
           signature: null,
           rampsMemo: {},
@@ -120,6 +122,8 @@ describe("transaction counterparty presentation", () => {
       retainTransactionCounterpartyDisplayName(
         {
           id: "transfer_1",
+          custodyWalletId: "cwlt_1",
+          providerWalletId: "privy_1",
           status: "confirmed",
           signature: null,
           rampsMemo: {},

@@ -203,12 +203,14 @@ describe("external-wallet position reads", () => {
       totalsByStrategy: [
         {
           label: "USDC vault",
+          ownerAddresses: [OWNER_A, OWNER_B].sort(),
           walletCount: 2,
           positionCount: 2,
           totalsByToken: [{ tokenMint: USDC, tokenValue: "30.3" }],
         },
         {
           label: "USDT vault",
+          ownerAddresses: [OWNER_B],
           walletCount: 1,
           positionCount: 1,
           totalsByToken: [{ tokenMint: USDT, tokenValue: "5.5" }],
@@ -250,7 +252,7 @@ describe("external-wallet position reads", () => {
       }
     );
 
-    const response = await get(`/v1/earn/external-wallet/positions/${OWNER_B}`);
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { positions: Array<Record<string, unknown>> } };
     expect(body.data.positions).toHaveLength(1);
@@ -268,6 +270,53 @@ describe("external-wallet position reads", () => {
     };
     expect(summary.data.summary.unavailablePositionCount).toBe(1);
     expect(summary.data.summary.totalsByToken[0]).not.toHaveProperty("tokenValue");
+  });
+
+  it("summary excludes a sibling project's positions and never leaks their owner addresses (EARN-028)", async () => {
+    // The summary is project-wide, and totalsByStrategy.ownerAddresses returns
+    // raw end-user addresses to any earn:read key in the project. Its only
+    // tenant boundary is the project_id predicate, so a same-org SIBLING
+    // project's owners must never appear in this key's summary.
+    const siblingProject = "prj_external_position_sibling";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Sibling', 'external-positions-sibling', 'sandbox', 'active', ?)`
+      )
+      .bind(siblingProject, ORG, USER)
+      .run();
+
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    // OWNER_B holds a position only in the sibling project.
+    await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+      projectId: siblingProject,
+    });
+
+    const body = (await (await get("/v1/earn/external-wallet/positions/summary")).json()) as {
+      data: {
+        summary: {
+          walletCount: number;
+          positionCount: number;
+          totalsByStrategy: Array<{ ownerAddresses: string[] }>;
+        };
+      };
+    };
+
+    expect(body.data.summary.walletCount).toBe(1);
+    expect(body.data.summary.positionCount).toBe(1);
+    const allOwners = body.data.summary.totalsByStrategy.flatMap((s) => s.ownerAddresses);
+    expect(allOwners).toContain(OWNER_A);
+    expect(allOwners).not.toContain(OWNER_B);
   });
 
   it("404s an owner whose claim belongs to another organization", async () => {
@@ -294,10 +343,12 @@ describe("external-wallet position reads", () => {
       projectId: foreignProject,
     });
 
-    expect((await get(`/v1/earn/external-wallet/positions/${OWNER_B}`)).status).toBe(404);
+    expect((await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`)).status).toBe(
+      404
+    );
   });
 
-  it.each(["?limit=0", "?limit=101", "?before=not-a-cursor", "?page=2"])(
+  it.each(["&limit=0", "&limit=101", "&before=not-a-cursor", "&page=2"])(
     "strictly rejects malformed or unknown per-wallet query %s",
     async (query) => {
       await seedPosition({
@@ -306,9 +357,30 @@ describe("external-wallet position reads", () => {
         tokenMint: USDC,
         label: "Query",
       });
-      expect((await get(`/v1/earn/external-wallet/positions/${OWNER_A}${query}`)).status).toBe(400);
+      expect(
+        (await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}${query}`)).status
+      ).toBe(400);
     }
   );
+
+  it("keeps the retired path-addressed shape dead", async () => {
+    // PRO-1722 originally addressed the owner as a path segment; the surface
+    // unified on the movements list's query addressing before GA. A base58
+    // segment must read as an unknown route, never as an owner.
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-retired",
+      tokenMint: USDC,
+      label: "Retired",
+    });
+    expect((await get(`/v1/earn/external-wallet/positions/${OWNER_A}`)).status).toBe(404);
+    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).status).toBe(404);
+    // The query-addressed replacements answer for the same owner, so the 404s
+    // above assert the SHAPE is gone rather than the data.
+    expect((await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`)).status).toBe(
+      200
+    );
+  });
 
   it("fails loudly when a keyset reader repeats its bound", async () => {
     const row = {

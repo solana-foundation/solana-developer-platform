@@ -16,8 +16,6 @@ export const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   WORKSPACE_LOADING_PATH,
   "/pay/:token",
-  "/embedded-yield/integrate/:token",
-  "/earn/integrate/:token",
   "/",
   "/docs(.*)",
   // Social-card images are fetched by unauthenticated link unfurlers, and the
@@ -31,6 +29,36 @@ const needsSelectedProject = createRouteMatcher([
   "/api/dashboard(.*)",
   "/api/playground(.*)",
 ]);
+
+const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/playground(.*)"]);
+
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * CSRF backstop for the BFF write routes (threat model EARN-021, PRO-1865).
+ * The only ambient credential on these routes is the Clerk session cookie, so
+ * a write arriving with a cross-origin `Origin` (including the sandboxed
+ * literal "null") is never legitimate. A write without an `Origin` header
+ * passes unless `Sec-Fetch-Site` positively marks it cross-site: origin-less
+ * callers are non-browser clients, which carry no ambient credentials for
+ * CSRF to ride on.
+ */
+export function rejectCrossSiteWrite(req: NextRequest): NextResponse | null {
+  if (!WRITE_METHODS.has(req.method) || !isBrowserWriteGated(req)) {
+    return null;
+  }
+
+  const origin = req.headers.get("origin");
+  const crossSite =
+    origin !== null
+      ? origin !== req.nextUrl.origin
+      : ["cross-site", "same-site"].includes(req.headers.get("sec-fetch-site") ?? "");
+
+  if (!crossSite) {
+    return null;
+  }
+  return NextResponse.json({ error: { message: "Cross-origin request refused" } }, { status: 403 });
+}
 
 function getUnauthenticatedUrl(req: NextRequest): string {
   const authEntryUrl = new URL(AUTH_ENTRY_PATH, req.url);
@@ -72,6 +100,11 @@ async function resolveDefaultProjectId(
 }
 
 export const proxy = clerkMiddleware(async (auth, req) => {
+  const crossSiteWrite = rejectCrossSiteWrite(req);
+  if (crossSiteWrite) {
+    return crossSiteWrite;
+  }
+
   if (!isPublicRoute(req)) {
     await auth.protect({
       unauthenticatedUrl: getUnauthenticatedUrl(req),

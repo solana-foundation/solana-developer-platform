@@ -17,6 +17,20 @@ export interface PrivateChannelInstanceRow {
   escrow_instance_addr: string;
   auth_url: string;
   is_active: boolean;
+  /**
+   * When set, the instance is a drain-in-progress: value-movement admission
+   * refuses atomically (the admitting INSERTs are guarded on this column), so
+   * the in-flight set can only shrink and deletion cannot strand a movement
+   * admitted concurrently (HOO-1011).
+   */
+  draining_at: string | null;
+  /**
+   * Identity of the current drain episode, minted by `beginDraining` and
+   * cleared with `draining_at`. A deletion carries it so it can only ever
+   * apply to the drain it started — a timestamp cannot tell one drain from a
+   * resume-and-re-drain that lands in the same millisecond.
+   */
+  draining_token: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -39,6 +53,10 @@ export interface ReactivateInstanceInput extends PrivateChannelInstanceInput {
   id: string;
 }
 
+export interface UpdateActiveInstanceInput extends PrivateChannelInstanceInput, ProjectScope {
+  id: string;
+}
+
 export interface PrivateChannelInstanceRepositoryContext {
   db: RepositoryDbClient;
 }
@@ -56,9 +74,35 @@ export interface PrivateChannelInstanceRepository {
   /** Caller must ensure no other active row for this project (409 upstream). */
   createActive(input: CreateActiveInstanceInput): Promise<PrivateChannelInstanceRow | null>;
   reactivateAndUpdate(input: ReactivateInstanceInput): Promise<PrivateChannelInstanceRow | null>;
+  /** Updates the currently active row after the caller has verified the proposed connection. */
+  updateActive(input: UpdateActiveInstanceInput): Promise<PrivateChannelInstanceRow | null>;
   deactivateActive(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
-  /** FK ON DELETE CASCADE handles downstream tables. */
-  deleteActive(scope: ProjectScope): Promise<boolean>;
+  /**
+   * Flip the active instance into the durable draining state. Idempotent: an
+   * already-draining instance is returned as-is, so a deletion retry keeps the
+   * original drain timestamp instead of resetting the clock.
+   */
+  beginDraining(scope: ProjectScope): Promise<PrivateChannelInstanceRow | null>;
+  /**
+   * Row-lock the active instance for the duration of the caller's transaction.
+   * Admission inserts take the same lock, so in-flight counts read after this
+   * call cannot grow before the transaction commits.
+   *
+   * `drainingToken` is the drain this deletion established: the row must still
+   * carry it, so a deletion can never apply to an instance an operator resumed
+   * (or to a drain some other request started) while it was running.
+   */
+  lockActiveForDeletion(
+    scope: ProjectScope,
+    drainingToken: string | null
+  ): Promise<PrivateChannelInstanceRow | null>;
+  /**
+   * FK ON DELETE CASCADE handles downstream tables. Guarded by the same
+   * `drainingToken` as the lock, so the delete cannot outlive its own drain —
+   * `null` addresses an instance that is not draining at all, which is what
+   * the connect-rollback path deletes.
+   */
+  deleteActive(scope: ProjectScope, drainingToken: string | null): Promise<boolean>;
 }
 
 export function mapPrivateChannelInstanceRow(

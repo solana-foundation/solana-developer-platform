@@ -1,4 +1,5 @@
 export {
+  admitTransferBatchRuntimeExecution,
   createTransferBatch,
   extractTransferBatchPolicyCandidate,
   findTransferBatchIdempotentKeyReplay,

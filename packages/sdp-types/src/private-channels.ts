@@ -41,6 +41,20 @@ export interface PrivateChannelToken {
   tokenProgram: string;
 }
 
+export type PrivateChannelTokenExclusionCode = "NOT_ALLOWED_BY_INSTANCE" | "ALLOWLIST_UNAVAILABLE";
+
+/** Why a registered token cannot currently be used with the connected instance. */
+export interface PrivateChannelTokenExclusion {
+  code: PrivateChannelTokenExclusionCode;
+  message: string;
+}
+
+/** SDP token metadata combined with the instance's on-chain `allowedMint` state. */
+export interface PrivateChannelTokenEligibility extends PrivateChannelToken {
+  enabled: boolean;
+  exclusionReasons: PrivateChannelTokenExclusion[];
+}
+
 /**
  * Legacy cluster inference used by the currently deployed Private Channels UI.
  *
@@ -127,6 +141,25 @@ export type PrivateChannelHealth =
   | { status: "ready"; latencyMs: number }
   | { status: "degraded"; latencyMs: number; reason: string }
   | { status: "unreachable"; latencyMs: number; error: string };
+
+/**
+ * Result of the connect-time probe (`POST /probe`, and the same check Connect
+ * re-runs) as it goes over the wire: one status per endpoint plus latency, and
+ * a short reason when something failed.
+ *
+ * The caller chose these endpoints, so nothing an endpoint returns is relayed
+ * back — no upstream body, no headers, and reason strings truncated. What the
+ * connect form needs is a badge per endpoint, and that is all this carries.
+ */
+export interface PrivateChannelProbeResult {
+  /** True only when all three endpoints answered as expected. */
+  ok: boolean;
+  gateway: PrivateChannelHealth;
+  rpc:
+    | { ok: true; latencyMs: number; version: string }
+    | { ok: false; latencyMs: number; error: string };
+  auth: { ok: true; latencyMs: number } | { ok: false; latencyMs: number; error: string };
+}
 
 /**
  * Post-connect overview. Two data sources:
@@ -379,19 +412,9 @@ export interface PrivateChannelVerifiedWalletDto {
   verifiedAt: string;
 }
 
-/** An SDP user invited to the SPC workspace, joined with `users` for display. */
-export interface PrivateChannelUserDto {
-  id: string;
-  userId: string;
-  email: string;
-  name: string | null;
-  /** Per-project role; null once the user's project_members row is removed. */
-  projectRole: string | null;
-  /** How many wallets this member has verified with the connected instance. */
-  verifiedWalletCount: number;
-  invitedAt: string;
-  /** Channels this user is a member of. */
-  channels: PrivateChannelMembershipChannelDto[];
+/** Optional target principal for a custody-wallet verification. Defaults to the project principal. */
+export interface VerifyPrivateChannelWalletRequest {
+  principalId?: string;
 }
 
 export interface PrivateChannelMembershipChannelDto {
@@ -400,14 +423,23 @@ export interface PrivateChannelMembershipChannelDto {
   isDefault: boolean;
 }
 
-/** Invite an existing SDP project user to the SPC workspace. */
-export interface InvitePrivateChannelUserRequest {
-  userId: string;
+/** A project-scoped SPC identity. It represents a business participant, not an SDP user. */
+export interface PrivateChannelPrincipalDto {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  status: "active" | "disabled";
+  verifiedWalletCount: number;
+  createdAt: string;
+  channels: PrivateChannelMembershipChannelDto[];
 }
 
-/** Request body for adding a user to a channel. */
-export interface AddPrivateChannelMembershipRequest {
-  privateChannelUserId: string;
+export interface CreatePrivateChannelPrincipalRequest {
+  name: string;
+}
+
+export interface AddPrivateChannelPrincipalMembershipRequest {
+  principalId: string;
 }
 
 // --- Private Channel Events ---------------------------------------------

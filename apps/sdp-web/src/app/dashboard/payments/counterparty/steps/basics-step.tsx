@@ -14,25 +14,28 @@ export function BasicsStep() {
 
   return (
     <div className="space-y-6">
-      <EntityTypeToggle
-        value={values.entityType}
-        onChange={(next) => setField("entityType", next)}
-      />
-
       <div className="space-y-2">
         <Label htmlFor="displayName">{t("DashboardPayments.counterparty.displayName")}</Label>
-        <Input
-          size="xl"
-          id="displayName"
-          iconLeft={<IdCardIcon />}
-          placeholder={t(
-            values.entityType === "individual"
-              ? "DashboardPayments.counterparty.individualNamePlaceholder"
-              : "DashboardPayments.counterparty.businessNamePlaceholder"
-          )}
-          value={values.displayName}
-          onChange={(e) => setField("displayName", e.target.value)}
-        />
+        <div className="flex items-stretch gap-2">
+          <div className="min-w-0 flex-1">
+            <Input
+              size="xl"
+              id="displayName"
+              iconLeft={<IdCardIcon />}
+              placeholder={t(
+                values.entityType === "individual"
+                  ? "DashboardPayments.counterparty.individualNamePlaceholder"
+                  : "DashboardPayments.counterparty.businessNamePlaceholder"
+              )}
+              value={values.displayName}
+              onChange={(e) => setField("displayName", e.target.value)}
+            />
+          </div>
+          <EntityTypeToggle
+            value={values.entityType}
+            onChange={(next) => setField("entityType", next)}
+          />
+        </div>
         {errors.displayName && <p className="mt-1 text-xs text-error">{errors.displayName}</p>}
       </div>
 

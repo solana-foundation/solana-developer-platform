@@ -44,6 +44,7 @@ export {
   updateSubscriptionPlan,
 } from "./handlers/subscriptions";
 export {
+  admitTransferBatchRuntimeExecution,
   createTransferBatch,
   estimateTransferBatch,
   extractTransferBatchPolicyCandidate,
@@ -52,6 +53,7 @@ export {
   listTransferBatches,
 } from "./handlers/transfer-batches";
 export {
+  admitTransferRuntimeExecution,
   createTransfer,
   extractTransferPolicyCandidate,
   findTransferIdempotentKeyReplay,

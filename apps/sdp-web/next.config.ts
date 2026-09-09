@@ -18,11 +18,6 @@ const nextConfig: NextConfig = {
         destination: "/dashboard/markets/embedded-yield/:path*",
         permanent: false,
       },
-      {
-        source: "/earn/integrate/:token",
-        destination: "/embedded-yield/integrate/:token",
-        permanent: true,
-      },
     ];
   },
   async rewrites() {

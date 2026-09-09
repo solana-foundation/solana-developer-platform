@@ -1,14 +1,12 @@
 import { z } from "zod";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequestParams, badRequestQuery, forbidden, notFound } from "@/lib/errors";
+import { AppError, badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIds,
-} from "@/services/api-key-scope.service";
+import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentTransferBatchesRepository } from "../../context";
 import { listTransferBatchesQuerySchema, transferBatchIdParamsSchema } from "../../schemas";
+import { assertPaymentWalletReadAccess } from "../../wallets";
 import { buildTransferBatchResponse, mapBatchRow } from "./respond";
 
 /**
@@ -28,20 +26,36 @@ export async function listTransferBatches(c: AppContext) {
 
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  if (query.data.wallet) {
-    assertApiKeyWalletAccess(auth, query.data.wallet, ["payments:read"]);
+  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
+    "payments:read",
+  ]);
+  if (query.data.sourceCustodyWalletId) {
+    if (
+      walletAuthorization &&
+      !walletAuthorization.custodyWalletIds.includes(query.data.sourceCustodyWalletId)
+    ) {
+      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    }
   }
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
   const result = await getPaymentTransferBatchesRepository(c).listTransferBatches({
     organizationId: auth.organizationId,
     projectId,
-    walletId: query.data.wallet,
-    walletIds: query.data.wallet ? undefined : (allowedWalletIds ?? undefined),
+    sourceCustodyWalletId: query.data.sourceCustodyWalletId,
+    walletAuthorization:
+      query.data.sourceCustodyWalletId || walletAuthorization === null
+        ? undefined
+        : walletAuthorization,
     token: query.data.token ? normalizePaymentToken(query.data.token, c.env) : undefined,
     status: query.data.status,
     externalId: query.data.externalId,
     limit: query.data.pageSize,
     offset: (query.data.page - 1) * query.data.pageSize,
+  });
+  result.rows.forEach((row) => {
+    assertPaymentWalletReadAccess(c, {
+      custodyWalletId: row.source_custody_wallet_id,
+      providerWalletId: row.source_wallet_id,
+    });
   });
 
   return paginated(
@@ -83,10 +97,10 @@ export async function getTransferBatch(c: AppContext) {
     throw notFound("Transfer batch");
   }
 
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
-  if (allowedWalletIds && !allowedWalletIds.includes(batch.source_wallet_id)) {
-    throw forbidden("API key is not authorized for the requested wallet");
-  }
+  assertPaymentWalletReadAccess(c, {
+    custodyWalletId: batch.source_custody_wallet_id,
+    providerWalletId: batch.source_wallet_id,
+  });
 
   return success(c, await buildTransferBatchResponse(c, batch, auth.organizationId, projectId));
 }

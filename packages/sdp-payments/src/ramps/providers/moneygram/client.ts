@@ -4,7 +4,7 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { getCryptoRailAssetLabel, type RampCurrencyLimit } from "@sdp/types/payment-rails";
 import {
   checkRampDestination,
@@ -25,12 +25,12 @@ import {
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
-  RampRawDumpReader,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
@@ -160,29 +160,29 @@ export class MoneygramRampClient implements RampProvider {
     return readyCounterparty(this.id, options.direction);
   }
 
-  async _discoverRails({
-    env,
-    fetchJson,
-    writeDump,
-  }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    await writeDump(
-      RAMP_RAIL_DUMPS.moneygram.currencies.name,
-      await fetchJson(
-        this.id,
-        "GET /api/v1/currencies",
-        `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/currencies`,
-        {
-          headers: {
-            "x-api-key": requireEnv(env, "MONEYGRAM_SANDBOX_PUBLIC_KEY"),
-            "User-Agent": "sdp-api/ramps",
-          },
-        }
-      )
+  async discoverCurrencyAndRails(
+    context: RampDiscoveryContext
+  ): Promise<ProviderRailSupportDistillation> {
+    if (!context.offline) {
+      const { env, fetchJson, writeDump } = context;
+      await writeDump(
+        RAMP_RAIL_DUMPS.moneygram.currencies.name,
+        await fetchJson(
+          this.id,
+          "GET /api/v1/currencies",
+          `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/currencies`,
+          {
+            headers: {
+              "x-api-key": requireEnv(env, "MONEYGRAM_SANDBOX_PUBLIC_KEY"),
+              "User-Agent": "sdp-api/ramps",
+            },
+          }
+        )
+      );
+    }
+    return distillMoneygramRailSupport(
+      await context.readDump(RAMP_RAIL_DUMPS.moneygram.currencies.file)
     );
-  }
-
-  async distillRailSupport(readDump: RampRawDumpReader): Promise<ProviderRailSupportDistillation> {
-    return distillMoneygramRailSupport(await readDump(RAMP_RAIL_DUMPS.moneygram.currencies.file));
   }
 
   async estimateOnramp(

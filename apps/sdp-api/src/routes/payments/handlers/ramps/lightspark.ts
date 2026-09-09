@@ -1,48 +1,48 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   buildLightsparkAccountInfo,
-  lightsparkPayoutCollectedData,
+  buildLightsparkBusinessInfo,
+  buildLightsparkIndividualInfo,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
-  type LightsparkPayoutAccount,
-  type LightsparkPayoutAccountEntry,
-  latestLightsparkPayoutAccount,
-  lightsparkPayoutAccountKey,
-  readLightsparkCustomerId,
+  isLightsparkPurposeOfPayment,
+  LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
+  type LightsparkPurposeOfPayment,
   readLightsparkData,
-  readLightsparkPayoutAccountByKey,
-  readLightsparkPayoutAccounts,
+  readLightsparkPurposeOfPayment,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { LightsparkCustomerResolution } from "@sdp/payments/ramps/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import { type CountryCode, isCountryCode } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
+import { getDb } from "@/db";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import {
+  type CounterpartyProviderAccountRow,
+  createPostgresCounterpartyProviderAccountsRepository,
+} from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { badRequest, notFound } from "@/lib/errors";
+import {
+  badRequest,
+  conflict,
+  counterpartyExternalAccountAmbiguous,
+  internalError,
+} from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { logEvent } from "@/runtime/money-path-events";
 import { type AppContext, rampRuntime } from "../../context";
 
 /**
- * Re-reads the counterparty row so provider_data merges happen against the
- * latest state instead of the request's snapshot — concurrent requests for the
- * same counterparty would otherwise clobber each other's writes.
+ * Merges a Lightspark provider-data patch under the counterparty row lock.
+ *
+ * @param c - Request context for database access.
+ * @param row - Counterparty whose provider data is updated.
+ * @param projectId - Project that owns the counterparty.
+ * @param patch - Lightspark data to merge.
+ * @returns Nothing.
  */
-async function freshCounterpartyRow(
-  c: AppContext,
-  counterparty: CounterpartyRow,
-  projectId: string
-): Promise<CounterpartyRow> {
-  const row = await getCounterpartiesRepository(c).getCounterpartyById({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
-  });
-  if (!row) {
-    throw notFound("Counterparty");
-  }
-  return row;
-}
-
 async function persistLightsparkData(
   c: AppContext,
   row: CounterpartyRow,
@@ -64,151 +64,318 @@ async function persistLightsparkData(
 }
 
 /**
- * Returns the persisted Grid customer id and rejects first-time creation until
- * transient identity collection is wired.
+ * Reads the linked Grid customer id from counterparty_provider_accounts.
  *
- * @param counterparty - Counterparty whose Lightspark customer is resolved.
- * @returns The existing Lightspark customer resolution.
+ * @param c - Request context for database access.
+ * @param counterparty - Counterparty whose Lightspark customer link is read.
+ * @param projectId - Project that owns the counterparty.
+ * @returns The linked Grid customer id, or null when none is linked.
  */
-export function ensureLightsparkCustomer(
-  counterparty: CounterpartyRow
-): LightsparkCustomerResolution {
-  const existing = readLightsparkCustomerId(counterparty.provider_data);
-  if (existing) {
-    return { customerId: existing };
-  }
-
-  throw badRequest(
-    "Lightspark customer creation requires identity fields that are no longer stored; JIT collection is not wired yet"
-  );
+export async function lightsparkProviderCustomerId(
+  c: AppContext,
+  counterparty: CounterpartyRow,
+  projectId: string
+): Promise<string | null> {
+  const link = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "lightspark",
+  });
+  return link === null ? null : link.provider_customer_reference;
 }
 
-async function persistLightsparkPayoutAccount(
+/**
+ * Returns the linked Grid customer, creating it just-in-time from transient
+ * collected identity fields when no link exists. Creation is idempotent on the
+ * counterparty id (Grid platformCustomerId), and the resulting reference is
+ * linked in counterparty_provider_accounts.
+ *
+ * @param c - Request context for provider and database access.
+ * @param input - Parent counterparty, project scope, and transient identity fields.
+ * @returns The Lightspark customer resolution.
+ */
+export async function ensureLightsparkCustomer(
   c: AppContext,
-  row: CounterpartyRow,
-  projectId: string,
-  customerId: string,
-  entry: LightsparkPayoutAccountEntry
-): Promise<void> {
-  await persistLightsparkData(c, row, projectId, {
-    customerId,
-    payoutAccounts: {
-      ...readLightsparkPayoutAccounts(row.provider_data),
-      [entry.key]: { accountId: entry.accountId, status: entry.status, createdAt: entry.createdAt },
-    },
+  input: { counterparty: CounterpartyRow; projectId: string; collectedData?: CollectedFieldData }
+): Promise<LightsparkCustomerResolution> {
+  const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const existing = await repository.getProviderAccount({
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "lightspark",
   });
+  if (existing) {
+    return { customerId: existing.provider_customer_reference };
+  }
+
+  const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(
+    rampRuntime(c),
+    input.counterparty.entity_type === "individual"
+      ? {
+          platformCustomerId: input.counterparty.id,
+          customerType: "INDIVIDUAL",
+          individualInfo: buildLightsparkIndividualInfo(input.collectedData),
+        }
+      : {
+          platformCustomerId: input.counterparty.id,
+          customerType: "BUSINESS",
+          businessInfo: buildLightsparkBusinessInfo(input.collectedData),
+        }
+  );
+  await repository.upsertProviderAccount({
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "lightspark",
+    providerCustomerReference: customer.id,
+  });
+  logEvent("info", {
+    event: "sdp_api_lightspark_customer_created",
+    organization_id: input.counterparty.organization_id,
+    project_id: input.projectId,
+    counterparty_id: input.counterparty.id,
+    provider_customer_reference: customer.id,
+  });
+  return { customerId: customer.id };
+}
+
+/**
+ * Returns the counterparty's purpose-of-payment, persisting a newly collected
+ * value into provider_data first. The stored code is required on every Grid
+ * quote because some payout corridors mandate it.
+ *
+ * @param c - Request context for database access.
+ * @param input - Parent counterparty, project scope, and transient collected fields.
+ * @returns The stored purpose-of-payment, or null when none has been collected.
+ */
+export async function ensureLightsparkPurposeOfPayment(
+  c: AppContext,
+  input: { counterparty: CounterpartyRow; projectId: string; collectedData?: CollectedFieldData }
+): Promise<LightsparkPurposeOfPayment | null> {
+  const supplied =
+    input.collectedData === undefined ? undefined : input.collectedData.purposeOfPayment;
+  if (supplied === undefined) {
+    return readLightsparkPurposeOfPayment(input.counterparty.provider_data);
+  }
+  if (!isLightsparkPurposeOfPayment(supplied)) {
+    throw badRequest(
+      `purposeOfPayment must be one of: ${Object.keys(LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS).join(", ")}`
+    );
+  }
+  await persistLightsparkData(c, input.counterparty, input.projectId, {
+    purposeOfPayment: supplied,
+  });
+  return supplied;
 }
 
 interface PayoutAccountContext {
   counterparty: CounterpartyRow;
   projectId: string;
   customer: LightsparkCustomerResolution;
+  cryptoRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
 }
 
-async function refreshPayoutAccount(
-  c: AppContext,
-  input: PayoutAccountContext,
-  entry: LightsparkPayoutAccountEntry
-): Promise<LightsparkPayoutAccount> {
-  if (isLightsparkExternalAccountActive(entry.status)) {
-    return entry;
+/**
+ * Selects the reusable Lightspark payout account for a corridor when no
+ * explicit account was chosen.
+ *
+ * @param accounts - Active external accounts for one payout corridor.
+ * @param fiatCurrency - Fiat currency of the payout corridor.
+ * @param destinationCountry - Destination country of the payout corridor.
+ * @returns The single reusable account, or null when the corridor has none.
+ */
+export function selectLightsparkPayoutAccount(
+  accounts: readonly CounterpartyProviderAccountRow[],
+  fiatCurrency: string,
+  destinationCountry: CountryCode
+): CounterpartyProviderAccountRow | null {
+  if (accounts.length === 0) {
+    return null;
   }
-
-  const latest = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
-    accountId: entry.accountId,
-  });
-  const refreshed: LightsparkPayoutAccountEntry = { ...entry, status: latest.status };
-  if (latest.status !== entry.status) {
-    const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-    await persistLightsparkPayoutAccount(
-      c,
-      row,
-      input.projectId,
-      input.customer.customerId,
-      refreshed
-    );
+  if (accounts.length === 1) {
+    return accounts[0];
   }
-  if (!isLightsparkExternalAccountActive(latest.status)) {
-    throw badRequest(
-      `Lightspark payout account is not active yet (status: ${latest.status}). Retry once it is verified.`
-    );
-  }
-  return refreshed;
+  throw counterpartyExternalAccountAmbiguous("lightspark", fiatCurrency, destinationCountry);
 }
 
 /**
- * Resolves the Grid external payout account for the quote. Entries are cached
- * in provider_data keyed by `${fiat}:${hash(collectedData)}`, so re-submitting
- * the same bank details reuses the same Grid account while different details
- * create (and keep) a distinct one — Grid customers can hold several external
- * accounts. Raw bank details pass through to Grid and are never stored. A
- * quote without collected details uses the most recently created account for
- * the currency.
+ * Loads an explicitly selected Lightspark payout account and verifies it is
+ * an active, provider-verified account for the requested corridor.
+ *
+ * @param c - Request context for database access.
+ * @param input - Tenant scope, corridor, and the selected provider account id.
+ * @returns The validated payout account row.
+ */
+export async function requireLightsparkPayoutAccountById(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string;
+    counterpartyId: string;
+    providerAccountId: string;
+    fiatCurrency: RampFiatCurrency;
+    destinationCountry: CountryCode;
+  }
+): Promise<CounterpartyProviderAccountRow> {
+  const selected = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getExternalAccountById({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    counterpartyId: input.counterpartyId,
+    provider: "lightspark",
+    id: input.providerAccountId,
+  });
+  if (
+    selected === null ||
+    selected.status !== "active" ||
+    selected.fiat_currency !== input.fiatCurrency ||
+    selected.destination_country !== input.destinationCountry ||
+    selected.external_account_reference === null ||
+    selected.provider_status === null ||
+    !isLightsparkExternalAccountActive(selected.provider_status)
+  ) {
+    throw badRequest(
+      "providerAccountId does not reference an active lightspark payout account for this corridor."
+    );
+  }
+  return selected;
+}
+
+/**
+ * Resolves the collected destination country into the canonical country type.
+ *
+ * @param collectedData - Collected Lightspark payout fields.
+ * @returns The validated destination country.
+ */
+function requireDestinationCountry(collectedData: CollectedFieldData): CountryCode {
+  const destinationCountry = collectedData.destinationCountry;
+  if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
+    throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
+  }
+  return destinationCountry;
+}
+
+/**
+ * Creates the Grid external payout account a new-account submission defines,
+ * always under a freshly minted platform identity. Completed accounts are never
+ * adopted — reusing one is an explicit `providerAccountId` selection, not a
+ * side effect of submitting fields.
+ *
+ * @param c - Request context for database and provider access.
+ * @param input - Counterparty, project, customer, crypto rail, fiat currency, and collected payout data.
+ * @returns The newly completed Lightspark external account row.
  */
 export async function ensureLightsparkPayoutAccount(
   c: AppContext,
   input: PayoutAccountContext & { collectedData?: CollectedFieldData }
-): Promise<LightsparkPayoutAccount> {
-  const collected =
-    input.collectedData === undefined
-      ? undefined
-      : lightsparkPayoutCollectedData(input.fiatCurrency, input.collectedData);
-
-  if (!collected) {
-    let entry = latestLightsparkPayoutAccount(input.counterparty.provider_data, input.fiatCurrency);
-    if (!entry) {
-      const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-      entry = latestLightsparkPayoutAccount(row.provider_data, input.fiatCurrency);
-    }
-    if (!entry) {
-      throw badRequest(
-        "collectedData with payout bank details is required for Lightspark off-ramp."
-      );
-    }
-    return refreshPayoutAccount(c, input, entry);
+): Promise<CounterpartyProviderAccountRow> {
+  if (input.collectedData === undefined) {
+    throw badRequest("collectedData with destinationCountry is required for Lightspark off-ramp.");
   }
-
-  const key = await lightsparkPayoutAccountKey(input.fiatCurrency, collected);
-  let entry = readLightsparkPayoutAccountByKey(input.counterparty.provider_data, key);
-  if (!entry) {
-    const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-    entry = readLightsparkPayoutAccountByKey(row.provider_data, key);
-
-    if (!entry) {
-      const accountInfo = buildLightsparkAccountInfo(row, input.fiatCurrency, collected);
-      const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
-        rampRuntime(c),
-        {
-          customerId: input.customer.customerId,
-          currency: input.fiatCurrency,
-          platformAccountId: `${input.counterparty.id}:${key}`,
-          accountInfo,
-        }
+  const destinationCountry = requireDestinationCountry(input.collectedData);
+  const paymentRail: string | undefined = input.collectedData.paymentRails;
+  if (paymentRail === undefined) {
+    throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+  }
+  // Validate the submitted bank fields before touching the database: a rejected
+  // submission must not leave a durable pending account row behind.
+  const accountInfo = buildLightsparkAccountInfo(
+    input.counterparty,
+    input.cryptoRail,
+    input.fiatCurrency,
+    input.collectedData
+  );
+  const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  // Every submission mints a fresh pending identity — a stale same-rail pending
+  // row is never resumed. The provider converges on platformAccountId, so
+  // reusing a prior row's id could silently bind this submission to an account
+  // created from DIFFERENT bank details, and bank details are never persisted
+  // (store-nothing PII), so sameness cannot be proven. The partial unique index
+  // allows one live reservation per corridor and rail: a concurrent submission
+  // gets a 409 while another is genuinely in flight — never an archive of the
+  // other request's parent row, which would strand its provider account. On
+  // failure the request archives its OWN reservation so an immediate retry is
+  // clean; only a process crash leaves a reservation behind (409 until swept).
+  let pending: CounterpartyProviderAccountRow;
+  try {
+    pending = await repository.insertPendingExternalAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: input.customer.customerId,
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry,
+      paymentRail,
+    });
+  } catch (error) {
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict(
+        "A payout account submission for this corridor is already in progress. Retry once it settles."
       );
-
-      const account: LightsparkPayoutAccountEntry = {
-        key,
-        accountId: created.id,
-        status: created.status,
-        createdAt: new Date().toISOString(),
-      };
-      const latestRow = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-      await persistLightsparkPayoutAccount(
-        c,
-        latestRow,
-        input.projectId,
-        input.customer.customerId,
-        account
-      );
-      if (!isLightsparkExternalAccountActive(created.status)) {
-        throw badRequest(
-          `Lightspark payout account was created but is not active yet (status: ${created.status}). Retry once it is verified.`
-        );
+    }
+    throw error;
+  }
+  let completed: CounterpartyProviderAccountRow | null;
+  try {
+    const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
+      rampRuntime(c),
+      {
+        customerId: input.customer.customerId,
+        currency: input.fiatCurrency,
+        platformAccountId: pending.id,
+        accountInfo,
       }
-      return account;
+    );
+    completed = await repository.completeExternalAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      id: pending.id,
+      externalAccountReference: created.id,
+      providerStatus: created.status,
+    });
+  } catch (error) {
+    try {
+      await repository.archiveExternalAccount({
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        provider: "lightspark",
+        id: pending.id,
+      });
+    } catch (compensationError) {
+      logEvent("warn", {
+        event: "sdp_api_lightspark_reservation_compensation_failed",
+        organization_id: input.counterparty.organization_id,
+        project_id: input.projectId,
+        counterparty_id: input.counterparty.id,
+        provider_account_id: pending.id,
+        error: compensationError instanceof Error ? compensationError.message : "unknown",
+      });
     }
+    throw error;
   }
-
-  return refreshPayoutAccount(c, input, entry);
+  if (completed === null) {
+    throw internalError("Lightspark external-account completion lost its parent scope.");
+  }
+  logEvent("info", {
+    event: "sdp_api_lightspark_external_account_completed",
+    organization_id: input.counterparty.organization_id,
+    project_id: input.projectId,
+    counterparty_id: input.counterparty.id,
+    provider_account_id: completed.id,
+    external_account_reference: completed.external_account_reference,
+    provider_status: completed.provider_status,
+    fiat_currency: completed.fiat_currency,
+    destination_country: completed.destination_country,
+  });
+  return completed;
 }

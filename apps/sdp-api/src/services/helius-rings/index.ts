@@ -1,8 +1,7 @@
 export { RingsAdapterError } from "./adapter-error";
 export {
-  type RingsUpstreamEnv,
-  resolveRingsGateway,
-  ringsUpstreamsConfigured,
+  createConfiguredRingsGateway,
+  resolvePersistedRingsGateway,
   UnconfiguredRingsGateway,
 } from "./gateway";
 export {
@@ -21,7 +20,6 @@ export {
   type HeliusRingsTenant,
   type PrepareOperationContext,
   type ProvisionPrivateWalletInput,
-  type SyncWalletResult,
   type WalletIdentityResult,
 } from "./service";
 export { signRingsOuterTransaction } from "./signer-adapter";

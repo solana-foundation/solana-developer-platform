@@ -1,6 +1,7 @@
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { PolicyCandidate } from "@sdp/types";
 import type { Context, MiddlewareHandler, Next } from "hono";
+import { WalletOperationIdempotencyConflictError } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -27,6 +28,8 @@ export interface PolicyGateExtraction {
   body: Record<string, unknown>;
   resolved: unknown;
   rawPayload: Record<string, unknown>;
+  /** HOO-1023: remove with K2 rollback support. */
+  executionRequestBody?: Record<string, unknown>;
   /** Route-owned canonical key to persist on the policy operation. */
   idempotencyKey: string | null;
 }
@@ -38,6 +41,14 @@ export interface PolicyGateConfig {
     extraction: PolicyGateExtraction,
     idempotencyKey: string
   ) => Promise<Response | null>;
+  beforeEnforce?: (c: GateContext, extraction: PolicyGateExtraction) => Promise<void>;
+  /**
+   * Answer a request whose idempotency key lost the race to a concurrent first
+   * attempt. The route's own replay answer is the right one — the winning
+   * operation is committed by the time this runs — so the hook is expected to
+   * throw the same gated response a sequential retry would get.
+   */
+  onIdempotencyConflict?: (c: GateContext, extraction: PolicyGateExtraction) => Promise<void>;
 }
 
 export interface PolicyGateContext<
@@ -52,10 +63,8 @@ export interface PolicyGateContext<
 }
 
 /**
- * Gate a route on wallet-operation policy. The route owns only `extract` —
- * parse and validate the request however the route already does, resolve its
- * resources, and return the policy candidate. The gate owns the three
- * generic exits:
+ * Gate a route on wallet-operation policy. The route owns extraction and any
+ * new-work admission hook; the gate owns the three generic exits:
  *
  * 1. `Dry-Run: true` → evaluate without writes and respond 200; the handler
  *    never runs, so a dry-run provably cannot persist or execute anything.
@@ -65,7 +74,7 @@ export interface PolicyGateContext<
  * 3. Allow, or an approved-operation replay → the validated body, resolved
  *    resources, and enforcement land on the context for the handler.
  *
- * The gate runs four explicit steps, first exit wins:
+ * The gate runs five explicit steps, first exit wins:
  *
  * 1. `extract` — always; one job: request → candidate + cargo.
  * 2. `Dry-Run: true` → respond 200 with the verdict; advisory, so the
@@ -74,7 +83,9 @@ export interface PolicyGateContext<
  * 3. Idempotency-Key present and the route supplied `findIdempotentKeyReplay`
  *    → a matched recorded outcome returns verbatim; policy never runs and the
  *    handler is never invoked, because a replayed request is not a new intent.
- * 4. Enforce → non-allow throws (403 deny / 202 approval-pending); allow and
+ * 4. `beforeEnforce` → admit genuinely new work after advisory and completed
+ *    replay exits, when the route supplied an admission hook.
+ * 5. Enforce → non-allow throws (403 deny / 202 approval-pending); allow and
  *    approved replays fall through to the handler with the gate context set.
  *
  * The gate stores the replay envelope on the operation uniformly, so routes
@@ -118,26 +129,42 @@ export function policyGate(config: PolicyGateConfig): MiddlewareHandler<{ Bindin
       }
     }
 
+    await config.beforeEnforce?.(c, extraction);
+
     if (candidate === null) {
       c.set("policyGate", { body, candidate: null, resolved, enforcement: null });
       return next();
     }
 
-    const enforcement = await enforceWalletOperationPolicy(
-      c.env,
-      scope,
-      {
-        ...candidate,
-        legs,
-        rawPayload: {
-          ...rawPayload,
-          executionRequest: walletOperationExecutionRequest(c, body),
+    let enforcement: WalletOperationPolicyEnforcement;
+    try {
+      enforcement = await enforceWalletOperationPolicy(
+        c.env,
+        scope,
+        {
+          ...candidate,
+          legs,
+          rawPayload: {
+            ...rawPayload,
+            executionRequest: walletOperationExecutionRequest(
+              c,
+              extraction.executionRequestBody ?? body
+            ),
+          },
+          idempotencyKey: operationIdempotencyKey,
         },
-        idempotencyKey: operationIdempotencyKey,
-      },
-      approvedWalletOperationId(c),
-      approvedWalletOperationAttemptId(c)
-    );
+        approvedWalletOperationId(c),
+        approvedWalletOperationAttemptId(c)
+      );
+    } catch (error) {
+      // A conflict means a concurrent first attempt already governs this key.
+      // The route answers with THAT operation; if it has no answer to give, the
+      // conflict travels on rather than being swallowed.
+      if (error instanceof WalletOperationIdempotencyConflictError) {
+        await config.onIdempotencyConflict?.(c, extraction);
+      }
+      throw error;
+    }
 
     c.set("policyGate", { body, candidate, resolved, enforcement });
     return next();

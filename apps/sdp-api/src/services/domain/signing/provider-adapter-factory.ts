@@ -18,6 +18,7 @@ import {
 } from "@sdp/custody/signing";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
+import { instrumentVendorPort, signFailedResult } from "@/runtime/vendor-calls";
 import {
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
@@ -303,7 +304,11 @@ export async function createAdapterFromEncryptedConfig(
   // their first await. Some runtimes report the adopted, briefly
   // handler-less promise as an unhandled rejection — dropping the await fails
   // shared-module test runs and would log rejection noise in production.
-  return await factory({ env, orgId, record, parsed, cipher });
+  return instrumentVendorPort(
+    parsed.provider,
+    await factory({ env, orgId, record, parsed, cipher }),
+    signFailedResult
+  );
 }
 
 export function createPrivyAdapterFromCredential(

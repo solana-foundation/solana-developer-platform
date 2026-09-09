@@ -7,16 +7,21 @@ import {
   requirePrivateChannelsAccess,
 } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadInstance, loadSignableWallets } from "../private-channels-page.data";
+import {
+  loadInstance,
+  loadSignableWallets,
+  loadTokenEligibility,
+} from "../private-channels-page.data";
 import { WithdrawForm } from "./withdraw-form";
 
 export default async function PrivateChannelsWithdrawPage() {
   await requirePrivateChannelsAccess();
 
   const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
-  const [instance, wallets] = await Promise.all([
+  const [instance, wallets, tokenEligibility] = await Promise.all([
     loadInstance(client),
     loadSignableWallets(client),
+    loadTokenEligibility(client),
   ]);
   if (!instance.ok) {
     return <PrivateChannelsLoadError message={instance.error} />;
@@ -33,10 +38,13 @@ export default async function PrivateChannelsWithdrawPage() {
           <CardDescription>{t("DashboardPrivateChannels.withdraw.description")}</CardDescription>
         </CardHeader>
         <CardContent>
-          {wallets.ok ? (
-            <WithdrawForm wallets={wallets.data} />
+          {wallets.ok && tokenEligibility.ok ? (
+            <WithdrawForm
+              tokens={tokenEligibility.data.filter((token) => token.enabled)}
+              wallets={wallets.data}
+            />
           ) : (
-            <PrivateChannelsLoadError message={wallets.error} />
+            <PrivateChannelsLoadError message={wallets.error ?? tokenEligibility.error} />
           )}
         </CardContent>
       </Card>

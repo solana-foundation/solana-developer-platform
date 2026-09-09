@@ -6,6 +6,7 @@ import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { earnProviderLabel } from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
@@ -98,17 +99,25 @@ export function EarnDepositAvailabilityBadge({
 }
 
 /** One strategy identity component shared by Treasury and Earn Program. */
-export function EarnStrategyIdentity({ strategy }: { strategy: EarnStrategy }) {
+export function EarnStrategyIdentity({
+  showAssetMark = true,
+  strategy,
+}: {
+  showAssetMark?: boolean;
+  strategy: EarnStrategy;
+}) {
   const asset = earnStrategyAsset(strategy);
   return (
     <div className="flex min-w-0 items-center gap-3">
-      {asset ? <TokenMark mint={asset.mint} size="md" symbol={asset.symbol} /> : null}
+      {showAssetMark && asset ? (
+        <TokenMark mint={asset.mint} size="md" symbol={asset.symbol} />
+      ) : null}
       <div className="min-w-0">
         <p className="line-clamp-2 break-words text-sm text-primary" title={strategy.name}>
           {strategy.name}
         </p>
         <p className="mt-0.5 truncate text-xs text-tertiary">
-          {[asset?.symbol, strategy.provider].filter(Boolean).join(" · ")}
+          {[asset?.symbol, earnProviderLabel(strategy.provider)].filter(Boolean).join(" · ")}
         </p>
       </div>
     </div>

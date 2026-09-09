@@ -1,17 +1,13 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
-const tsxBin = path.join(
-  appDir,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "tsx.cmd" : "tsx"
-);
+const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
 
 function loadLocalEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -217,7 +213,7 @@ try {
   await run("node", ["scripts/migrate-postgres.mjs"], {
     env: { DATABASE_URL: databaseUrl },
   });
-  await run(tsxBin, ["watch", "--clear-screen=false", "src/server.ts"], {
+  await run(process.execPath, [tsxCli, "watch", "--clear-screen=false", "src/server.ts"], {
     env: {
       ENVIRONMENT: localEnv.ENVIRONMENT ?? process.env.ENVIRONMENT ?? "development",
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",

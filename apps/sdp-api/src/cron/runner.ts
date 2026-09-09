@@ -10,37 +10,60 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
+import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
+import { runWithSystemDatabaseIdentity } from "@/db";
 import {
   isAssetProfilesEnabled,
   isEarnEnabled,
   isPrivateChannelsEnabled,
 } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
+import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
-import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSync } from "./earn-catalogue-sync";
-import { EARN_METRICS_REFRESH_CRON, runEarnMetricsRefresh } from "./earn-metrics-refresh";
+import {
+  EARN_CATALOGUE_SYNC_CRON,
+  EARN_CATALOGUE_SYNC_MONITOR,
+  runEarnCatalogueSync,
+} from "./earn-catalogue-sync";
+import {
+  EARN_METRICS_REFRESH_CRON,
+  EARN_METRICS_REFRESH_MONITOR,
+  runEarnMetricsRefresh,
+} from "./earn-metrics-refresh";
 import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
-import { PENDING_DEPOSITS_CRON, runPendingDepositsReconciliation } from "./pending-deposits";
+import {
+  PENDING_DEPOSITS_CRON,
+  PENDING_DEPOSITS_MONITOR,
+  runPendingDepositsReconciliation,
+} from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
   PENDING_WITHDRAWALS_CRON,
+  PENDING_WITHDRAWALS_MONITOR,
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
+import {
+  REVOKED_API_KEY_CACHE_CRON,
+  runRevokedApiKeyCacheReconciliation,
+} from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { runWithCronRunEvent } from "./run-event";
-import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
+import {
+  runWorkflowExecutions,
+  WORKFLOW_EXECUTIONS_CRON,
+  WORKFLOW_EXECUTIONS_MONITOR,
+} from "./workflow-executions";
 import {
   runWorkflowSecretRetirements,
   WORKFLOW_SECRET_RETIREMENTS_CRON,
@@ -98,7 +121,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
   }
   deps = {
     ...deps,
-    observability: deps.observability ? withCheckinMargin(deps.observability) : undefined,
+    observability: withCheckinMargin(deps.observability ?? noopObservability),
   };
 
   // node-cron's `task.stop()` halts future scheduling but doesn't promise
@@ -109,131 +132,133 @@ export function startCron(deps: CronDeps): CronHandle | null {
 
   const tasks: ScheduledTask[] = [];
 
-  tasks.push(
-    schedule(APPROVED_WALLET_OPERATIONS_CRON, () => {
+  // Every tick runs under a named system database identity: reconciliation is
+  // inherently cross-tenant, and row-level security (migration 0079) denies
+  // database access to any workload that never declared one.
+  const scheduleSystemTask = (
+    cronExpression: string,
+    component: string,
+    run: (deps: CronDeps) => void
+  ): ScheduledTask =>
+    schedule(cronExpression, () => {
       if (stopping) {
         return;
       }
-      runApprovedWalletOperationRecovery({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+      runWithSystemDatabaseIdentity(component, () =>
+        run({
+          env: deps.env,
+          bg: deps.bg,
+          observability: deps.observability,
+        })
+      );
+    });
+
+  // Feature-gated ticks keep emitting their sdp_cron_run proof-of-life while
+  // the flag is off, mirroring the managed job (job.ts): the staleness alert
+  // counts distinct monitors per window, so a disabled feature must read as a
+  // healthy no-op, not as the silence that means the scheduler died. It takes
+  // no database identity on purpose — the tick does nothing but log, and a
+  // heartbeat is not a reason to hand a disabled feature cross-tenant access.
+  const scheduleDisabledTickProofOfLife = (cron: string, monitor: string) => {
+    tasks.push(
+      schedule(cron, () => {
+        if (stopping) {
+          return;
+        }
+        deps.bg.run(runWithCronRunEvent(monitor, async () => undefined));
+      })
+    );
+  };
+
+  tasks.push(
+    scheduleSystemTask(
+      APPROVED_WALLET_OPERATIONS_CRON,
+      "cron:approved-wallet-operations",
+      runApprovedWalletOperationRecovery
+    )
   );
 
   tasks.push(
-    schedule(PENDING_TRANSFERS_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runPendingTransfersReconciliation({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      PENDING_TRANSFERS_CRON,
+      "cron:pending-transfers",
+      runPendingTransfersReconciliation
+    )
+  );
+
+  // Unconditional: repairs cached credentials for keys Postgres already
+  // revoked. Feature-gating this would leave deployments without the only
+  // recovery path for a revocation whose cache write failed post-commit.
+  tasks.push(
+    scheduleSystemTask(
+      REVOKED_API_KEY_CACHE_CRON,
+      "cron:revoked-api-key-cache",
+      runRevokedApiKeyCacheReconciliation
+    )
   );
 
   tasks.push(
-    schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runRecurringPaymentsCollection({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      RECURRING_PAYMENTS_COLLECTION_CRON,
+      "cron:recurring-payments",
+      runRecurringPaymentsCollection
+    )
   );
 
   if (isAssetProfilesEnabled(deps.env)) {
     tasks.push(
-      schedule(WORKFLOW_EXECUTIONS_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runWorkflowExecutions({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        WORKFLOW_EXECUTIONS_CRON,
+        "cron:workflow-executions",
+        runWorkflowExecutions
+      )
     );
+  } else {
+    scheduleDisabledTickProofOfLife(WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR);
   }
 
   if (isPrivateChannelsEnabled(deps.env)) {
     tasks.push(
-      schedule(PENDING_DEPOSITS_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runPendingDepositsReconciliation({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        PENDING_DEPOSITS_CRON,
+        "cron:pending-deposits",
+        runPendingDepositsReconciliation
+      )
     );
     tasks.push(
-      schedule(PENDING_WITHDRAWALS_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runPendingWithdrawalsReconciliation({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        PENDING_WITHDRAWALS_CRON,
+        "cron:pending-withdrawals",
+        runPendingWithdrawalsReconciliation
+      )
     );
+  } else {
+    scheduleDisabledTickProofOfLife(PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR);
+    scheduleDisabledTickProofOfLife(PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR);
   }
 
   // Cheap to schedule unconditionally: the job early-returns unless the rings
   // flag is on and the live gateway adapter is selected.
-  tasks.push(
-    schedule(RINGS_INDEXING_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runRingsIndexingPoll({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
-  );
+  tasks.push(scheduleSystemTask(RINGS_INDEXING_CRON, "cron:rings-indexing", runRingsIndexingPoll));
 
   if (isEarnEnabled(deps.env)) {
     tasks.push(
-      schedule(EARN_CATALOGUE_SYNC_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runEarnCatalogueSync({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(EARN_CATALOGUE_SYNC_CRON, "cron:earn-catalogue-sync", runEarnCatalogueSync)
     );
     // Separate task, not folded into the sync above: the two have different
     // cadences on purpose (catalogue drift is hourly, rates are not) and
     // different blast radii — this one can only rewrite figures on rows that
     // already exist. See cron/earn-metrics-refresh.ts.
     tasks.push(
-      schedule(EARN_METRICS_REFRESH_CRON, () => {
-        if (stopping) {
-          return;
-        }
-        runEarnMetricsRefresh({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        });
-      })
+      scheduleSystemTask(
+        EARN_METRICS_REFRESH_CRON,
+        "cron:earn-metrics-refresh",
+        runEarnMetricsRefresh
+      )
     );
+  } else {
+    scheduleDisabledTickProofOfLife(EARN_CATALOGUE_SYNC_CRON, EARN_CATALOGUE_SYNC_MONITOR);
+    scheduleDisabledTickProofOfLife(EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR);
   }
 
   // Deliberately outside every feature gate, and in particular outside the asset-profiles
@@ -246,30 +271,32 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // exactly when the cleanup matters most). The sweep is a no-op on the empty queue every
   // other deployment has.
   tasks.push(
-    schedule(WORKFLOW_SECRET_RETIREMENTS_CRON, () => {
-      if (stopping) {
-        return;
-      }
-      runWorkflowSecretRetirements({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      WORKFLOW_SECRET_RETIREMENTS_CRON,
+      "cron:workflow-secret-retirements",
+      runWorkflowSecretRetirements
+    )
   );
 
   // Durable signed intents outlive the feature flag that admitted them. Keep
   // draining their outbox even when Earn is disabled during an incident.
   tasks.push(
-    schedule(EARN_VAULT_MOVEMENTS_CRON, () => {
-      if (stopping) return;
-      runEarnVaultMovementsReconciliation({
-        env: deps.env,
-        bg: deps.bg,
-        observability: deps.observability,
-      });
-    })
+    scheduleSystemTask(
+      EARN_VAULT_MOVEMENTS_CRON,
+      "cron:earn-vault-movements",
+      runEarnVaultMovementsReconciliation
+    )
   );
+
+  // The DvP job checks the flag itself and returns early, so it is registered
+  // unconditionally: an open trade holds a counterparty's money in escrow, and
+  // must keep being observed even if the flag is turned off during an incident.
+  // Through scheduleSystemTask like every other sweep, NOT a bare schedule().
+  // Reconciliation is cross-tenant by nature and 0086 puts forced row-level
+  // security on dvp_trades, which fails closed when no identity is declared -
+  // so a bare tick would read zero open trades, find no funding, and go on
+  // reporting success while a counterparty's escrowed deposit sat unnoticed.
+  tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
 
   return {
     stop() {

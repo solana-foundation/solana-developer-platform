@@ -1,11 +1,11 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
+import { errorResponseSchema, walletIdParamSchema } from "../schemas/base";
 import {
   createCustodyWalletRequestSchema,
   custodyPublicKeyResponseSchema,
   deleteWalletRequestSchema,
-  errorResponseSchema,
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
   orgCustodyProviderSchema,
@@ -15,8 +15,7 @@ import {
   switchSigningRequestSchema,
   switchSigningResponseSchema,
   updateCustodyWalletRequestSchema,
-  walletIdParamSchema,
-} from "../schemas";
+} from "../schemas/custody";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   custodyConfigResponse,
@@ -296,10 +295,10 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/wallets/signer-check",
     tags: ["Wallets"],
-    summary: "Check signer via memo transaction",
+    summary: "Check signer via simulated memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Submits a server-authored memo transaction using the wallet selected by an authenticated API key or dashboard session. The wallet is the only readonly signer, Kora pays the fee, and the request cannot supply memo text.",
+      "Signs a server-authored memo message with the wallet selected by an authenticated API key or dashboard session, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -310,7 +309,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Signer check transaction submitted",
+        description: "Signer check verified in simulation",
         content: jsonContent(custodySignerCheckResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 502]),

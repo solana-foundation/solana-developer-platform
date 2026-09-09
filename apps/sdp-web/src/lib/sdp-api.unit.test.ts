@@ -185,6 +185,7 @@ describe("createRequestScopedSdpApiClients", () => {
     });
 
     expect(response.status).toBe(204);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, options] = fetchMock.mock.calls[0] ?? [];
     const headers = new Headers(options?.headers);
@@ -195,61 +196,20 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(options?.body).toBe(JSON.stringify({ amount: "1" }));
   });
 
-  it("rejects a write captured for a different project before reaching the API", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: (name: string) =>
-        name === "sdp_selected_project_id" ? { value: "project_next" } : undefined,
-    });
-    mocks.auth.mockResolvedValue({
-      userId: "user_test",
-      orgId: "org_test",
-      getToken: vi.fn().mockResolvedValue("token_test"),
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("marks proxy failure responses uncacheable too", async () => {
+    mocks.cookies.mockResolvedValue({ get: () => undefined });
+    mocks.auth.mockResolvedValue({ userId: null, orgId: null, getToken: vi.fn() });
 
     const response = await proxyToSdpApi({
-      request: new Request("https://dashboard.example.test/api/button-configuration", {
-        method: "PUT",
+      request: new Request("https://dashboard.example.test/api/anything", {
+        method: "POST",
+        body: "{}",
       }),
-      traceSource: "test.proxy.project_guard",
-      path: "/v1/earn/button-configurations/current",
-      expectedProjectId: "project_original",
+      traceSource: "test.proxy.cache",
+      path: "/v1/earn/vault-deposits",
     });
 
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      error: { message: "Project selection changed. Reload and try again." },
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("requires an explicit project identity when a route enables the project guard", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: (name: string) =>
-        name === "sdp_selected_project_id" ? { value: "project_current" } : undefined,
-    });
-    mocks.auth.mockResolvedValue({
-      userId: "user_test",
-      orgId: "org_test",
-      getToken: vi.fn().mockResolvedValue("token_test"),
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await proxyToSdpApi({
-      request: new Request("https://dashboard.example.test/api/button-configuration", {
-        method: "PUT",
-      }),
-      traceSource: "test.proxy.project_guard",
-      path: "/v1/earn/button-configurations/current",
-      expectedProjectId: "",
-    });
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: { message: "Expected project required" },
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
 });

@@ -103,7 +103,11 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     if (!env.useExternalApi) {
       throw new Error("GCP smoke must run in explicit external mode");
     }
-    expect(env.sdpApiBaseUrl).toBe("https://api-dev.solana.com");
+    expect([
+      "https://api-dev.solana.com",
+      "https://api-stage.solana.com",
+      "https://api-preview.solana.com",
+    ]).toContain(env.sdpApiBaseUrl);
 
     fixture = await provisionWithAdminSession(browser, async (session) => {
       expect(session.identity.email).toBe(env.clerkTestEmail);

@@ -18,12 +18,9 @@ export async function verifyRingsIndexed(
   }
 
   return {
-    // Photon's own clock, not this process's: SDP polls on a one-minute tick, so
-    // a local stamp would report the poll that noticed rather than the chain
-    // state that settled it. `blockTime` is the highest slot Photon has persisted.
     indexedAt: indexerTime(response.context.blockTime),
-    // The event, not the input echoed back: one signature can carry several.
     photonRef: `${txSignature}#${first.eventIndex}`,
+    slot: first.transaction.slot.toString(),
   };
 }
 

@@ -6,6 +6,7 @@ import type {
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
+import { getCryptoRailAssetLabel, isCountryCode } from "@sdp/types";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -18,9 +19,10 @@ import {
   createTransfer,
   fetchTransferById,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
+import { offrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
@@ -77,6 +79,7 @@ function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId>
 }
 
 export function useOfframpWizard(props: UseRampWizardProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteExpired, setQuoteExpired] = useState(false);
@@ -91,28 +94,62 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
-    pairs: OFFRAMP_PAIRS,
+    pairs: offrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOfframpSteps(t),
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
       step: getOfframpRequirementsStep(t),
-      insertAfter: "MEMO",
+      insertAfter: "WITHDRAW",
       direction: "offramp",
     },
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, rampsMemo }) =>
-      ({
-        provider,
+    buildQuotePayload: ({
+      fields,
+      selectedWallet,
+      provider,
+      selectedRampPair,
+      assetRail,
+      collectedData,
+      selectedProviderAccountId,
+      selectedPayoutAccount,
+      rampsMemo,
+    }) => {
+      const base = {
         counterpartyId: fields.counterpartyId,
-        sourceWallet: fields.walletId,
-        cryptoToken,
-        fiatCurrency: selectedRampPair.fiatCurrency,
+        sourceCustodyWalletId: selectedWallet.id,
+        assetRail,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,
-      }) satisfies PaymentOfframpQuoteRequest,
+      };
+      if (provider !== "lightspark") {
+        return {
+          ...base,
+          provider,
+          fiatCurrency: selectedRampPair.fiatCurrency,
+        } satisfies PaymentOfframpQuoteRequest;
+      }
+      const destinationCountry =
+        selectedPayoutAccount !== null
+          ? selectedPayoutAccount.destinationCountry
+          : collectedData.destinationCountry;
+      if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
+        throw new Error(
+          "Select a payout destination country in the requirements step before requesting a Lightspark quote."
+        );
+      }
+      return {
+        ...base,
+        provider,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+        destinationCountry,
+        ...(selectedProviderAccountId === null
+          ? {}
+          : { providerAccountId: selectedProviderAccountId }),
+      } satisfies PaymentOfframpQuoteRequest;
+    },
     onQuoteCreated: () => {
       resetCreateTransfer();
       setQuoteExpired(false);
@@ -178,7 +215,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     return null;
   }, [wizard.quote, wizard.fields.amount, transferStatus]);
 
-  const offrampCryptoToken = toRampCryptoToken(wizard.selectedRampPair.assetRail);
+  const offrampCryptoToken = getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail);
   // The transfers API requires the mint address, not the token symbol.
   const sourceTokenMint = useMemo(() => {
     const balance = wizard.selectedWallet?.balances?.find(
@@ -217,7 +254,13 @@ export function useOfframpWizard(props: UseRampWizardProps) {
 
   const sendCryptoToDeposit = async () => {
     const transferId = wizard.quoteTransferId;
-    if (!depositTarget || !sourceTokenMint || !wizard.fields.walletId || !transferId) {
+    if (
+      !depositTarget ||
+      !sourceTokenMint ||
+      !wizard.fields.walletId ||
+      !wizard.selectedWallet ||
+      !transferId
+    ) {
       return;
     }
     if (onchainSendLoading || onchainSendResult) {
@@ -240,7 +283,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     try {
       const transfer = await triggerCreateTransfer({
         transferId,
-        source: wizard.fields.walletId,
+        sourceCustodyWalletId: wizard.selectedWallet.id,
         destination: depositTarget.destinationAddress,
         token: address(sourceTokenMint),
         amount: depositTarget.amount,

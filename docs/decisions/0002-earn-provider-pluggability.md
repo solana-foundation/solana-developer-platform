@@ -1062,3 +1062,110 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
 - **An unconsumed build is inert garbage** that expires with its blockhash; rows
   accumulate until a cleanup sweep exists. Nothing reads them but their own
   submit.
+
+## Addendum — 2026-08-31 External wallets: per-owner reads and the earned figure (PRO-1772)
+
+PRO-1722 shipped the B2B2C surface write-only; this addendum adds the reads
+that close the loop: a per-owner activity list and movement detail, and a
+balance-plus-earned read. All three take `earn:read` only (no `wallets:read` —
+an end-user wallet carries no custody binding) and no provider gate (they
+report on money that already moved). Scope is the 0070 claim key — org, EXACT
+project, environment, owner — collapsed to one 404 for anything outside it.
+`GET /v1/earn/movements` deliberately stays custody-scoped: its vault arm
+requires a custody-wallet match an owner-signed row can never satisfy, so the
+per-owner reads are a separate surface rather than a widened union. Index:
+`idx_earn_movements_external_wallet_owner` (migration 0073).
+
+### The earned figure is stated only when it is exact
+
+`earned` = live current value − Σ finalized SDP deposits, per deposit token.
+Three conditions make it unstatable, each answered by an absent field plus a
+named `earnedUnavailableReason`, never a zero:
+
+- `live_value_unavailable` — hydration failed; a failed RPC read cannot
+  support a claim about someone's money (the 0-vs-unavailable rule again).
+- `movements_pending` — a movement is still settling, so the chain and the
+  ledger describe different moments; stating a figure in that window would
+  swing it by the full amount of the in-flight movement in either direction.
+  The reconciler bounds the window (~90 s), so this is a moment, not a state.
+- `withdrawals_not_valued` — the ledger records vault exits in SHARES
+  (`denomination` = share mint; 0070 pins `payout_token` NULL for vault rows),
+  and no share-price history exists to value them in the deposit token.
+  Valuing withdrawn shares at the CURRENT price was considered and rejected:
+  it counts growth that happened after the user exited, so the error is
+  always flattering — the one direction a financial figure must never lean.
+  Closing this properly means observing the actual token payout from the
+  LANDED transaction at settlement (the same settle-time-observation shape as
+  the rent-funder residual above) and is deliberately follow-up work, not
+  part of this change.
+
+Scope: every figure covers the wallet's **currently held positions**. A fully
+exited position drops out entirely — its deposits leave `totalDeposited`
+along with its unvalued withdrawal, so the token stays internally consistent —
+because consuming closed positions' history would answer
+`withdrawals_not_valued` forever after any full exit, permanently withholding
+an earned figure that is exact for what the wallet still holds. The exited
+history remains fully visible on the movements list, and the
+`withdrawals_not_valued` reason therefore describes a withdrawal on a HELD
+position (a partial exit, or a closed-and-re-entered vault, whose claim row is
+reused).
+
+The token-level figure is Σlive − Σdeposited (identical to the per-position
+sum) and is withheld when ANY contributing position cannot state it — the
+never-partial rule the position summary already follows. The live-hydration
+caveat stands unchanged: live value reads the owner's whole vault balance, so
+shares acquired outside SDP inflate `earned`; that stays a documented property
+of non-custodial reads.
+
+## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
+
+Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
+addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
+wallet the API caller (the partner) controls, which becomes the transaction's
+fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
+account creation needs. The compiled transaction then requires the partner's
+signature alongside the owner's; the partner co-signs OUTSIDE SDP before the
+submit. This is deliberately not PRO-1744 (Kora, SDP paying): no paymaster, no
+budget, no SDP co-signature. The partner funds and signs with its own wallet,
+which is why no new policy gate exists — the same authorization-by-signature
+rule the surface was built on, now with two signatures.
+
+Decisions that hold it together:
+
+- **Committed at build, unforgeable at submit.** The fee payer lives inside
+  the message bytes, so the existing message-equality check makes a swapped
+  fee payer a refused submit. It is persisted on the build row
+  (migration 0079) so the submit can name the right slot in its errors.
+- **One identity, three places** (the PRO-1736 rule restated for a caller's
+  wallet): the same resolved value drives the compiled fee-payer seat, the
+  simulation fee payer (the funds check moves to the partner wallet, which is
+  the point — the zero-SOL owner this feature serves must not fail it), and
+  the provider's `rentPayer`. `VaultFeeMode` gained a `caller-provided` kind;
+  its consumers are exhaustive, and the custody signing path asserts the new
+  kind unreachable.
+- **The signer set is asserted ordered and exact** at compile:
+  `[feePayer, owner]`, or `[owner]` without one. This keeps refusing a
+  provider plan that smuggles an extra signer AND refuses a fee-payer build
+  whose plan never names the owner as a signer — with the owner out of the
+  fee-payer seat, instruction-level signer roles are the only thing making
+  the owner's authorization mandatory.
+- **Rent attribution follows the money.** `share_ata_rent_funder` records the
+  partner when its wallet funded the account (build row → movement → position
+  projection), so the exit refunds the PARTNER; owner-paid rent stays the
+  NULL convention. Veda honors `rentPayer` via its ATA payer swap
+  (2026-09-02, #1611), so this is provider-neutral.
+- **Submit verifies EVERY signature** (ed25519, per-slot error naming), not
+  just the owner's: a garbage partner signature is a debuggable 400, never a
+  durable movement that can only die at broadcast. The recorded ledger
+  `signature` is slot zero — the partner's when present — which is the
+  on-chain txid, so reconciliation is unchanged.
+- **The split-swap contract carries `feePayer`** through `followUp`, and the
+  standalone swap compiles with the same payer, so every transaction the flow
+  hands out is partner-payable.
+
+Accepted costs: the partner wallet needs a SOL float and its balance is now
+partner-operational surface (a broke sponsor 400s at build, naming the fee
+payer); the fee payer adds 96 bytes to the compiled transaction, so near-limit
+swap-funded builds fall to the split flow slightly more often; and the
+blockhash window now has to fit the partner's co-signature too, which is why
+the docs tell partners to co-sign programmatically.

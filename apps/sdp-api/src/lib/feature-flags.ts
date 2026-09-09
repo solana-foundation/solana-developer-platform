@@ -30,16 +30,6 @@ export function isHeliusRingsEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): bo
   return isTruthyFlag(env.HELIUS_RINGS_ENABLED);
 }
 
-/**
- * Permits plain-http Rings upstreams. Explicit rather than read off the URL
- * scheme: in plaintext an indexer response reveals which notes an identity owns.
- */
-export function isRingsInsecureHttpAllowed(
-  env: Pick<Env, "HELIUS_RINGS_ALLOW_INSECURE_HTTP">
-): boolean {
-  return isTruthyFlag(env.HELIUS_RINGS_ALLOW_INSECURE_HTTP);
-}
-
 export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
   return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
 }
@@ -82,12 +72,20 @@ export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">
   return isMarketsEnabled(env) && isTruthyFlag(env.EARN_ENABLED);
 }
 
+// DvP is a sub-module of Markets, gated the same way as Earn: the parent flag
+// wins, so clearing MARKETS_ENABLED dark-launches this too. Worth knowing that
+// the DvP swap program is deployed on devnet ONLY, so enabling this against a
+// mainnet cluster produces trades that cannot be created at all (PRO-1798).
+export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "DVP_ENABLED">): boolean {
+  return isMarketsEnabled(env) && isTruthyFlag(env.DVP_ENABLED);
+}
+
 /**
  * Clusters on which Kora may pay for Earn vault movements.
  *
- * TO OPEN MAINNET, all three must land together, and none is a flag flip:
+ * TO OPEN MAINNET, all three must be in place, and none is a flag flip:
  * the Kamino program ids must reach `kora.mainnet.toml`'s `allowed_programs`
- * (sdp-infra#64, open at time of writing);
+ * (landed with sdp-infra#64);
  * `fee_payer_policy.system.allow_create_account` must be opened there (today
  * `validate-policy.py` runs with no `--allow-spend` for mainnet and hard-fails
  * CI on any `true`), which is deliberately deferred until compensated pricing

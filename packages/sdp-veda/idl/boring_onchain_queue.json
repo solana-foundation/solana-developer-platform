@@ -1,0 +1,3011 @@
+{
+  "address": "Cchro8d7bN5Xfk77z9hJKxREJwSAjpz5K2seK4iNN396",
+  "metadata": {
+    "name": "boring_onchain_queue",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "accept_authority",
+      "docs": [
+        "Completes a queue authority handshake. Only the staged pending authority may call",
+        "this, promoting itself to the queue authority.",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `vault_id` - The vault ID"
+      ],
+      "discriminator": [
+        107,
+        86,
+        198,
+        91,
+        33,
+        12,
+        107,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "queue_state",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "accept_program_authority",
+      "docs": [
+        "Completes the ProgramAuthority handshake. Only the pending authority may call this,",
+        "promoting itself to the program authority.",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts"
+      ],
+      "discriminator": [
+        224,
+        193,
+        101,
+        195,
+        243,
+        34,
+        10,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_withdraw",
+      "docs": [
+        "Cancels a withdraw request and returns shares to user",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `request_id` - The request ID to cancel",
+        "",
+        "# Errors",
+        "* `RequestDeadlineNotPassed` - If request deadline hasn't passed yet",
+        "* `InvalidShareMint` - If share mint doesn't match queue state"
+      ],
+      "discriminator": [
+        112,
+        53,
+        226,
+        58,
+        158,
+        30,
+        37,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "share_mint",
+          "docs": [
+            "The vault's share mint"
+          ]
+        },
+        {
+          "name": "withdraw_request",
+          "writable": true
+        },
+        {
+          "name": "queue_state"
+        },
+        {
+          "name": "queue"
+        },
+        {
+          "name": "user_shares",
+          "docs": [
+            "The user's share token 2022 account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "account",
+                "path": "token_program_2022"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "queue_shares",
+          "docs": [
+            "The queue's share token 2022 account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "queue"
+              },
+              {
+                "kind": "account",
+                "path": "token_program_2022"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        }
+      ],
+      "args": [
+        {
+          "name": "_request_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deploy",
+      "docs": [
+        "Deploys a new queue for a vault",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `args` - The deployment arguments containing vault configuration"
+      ],
+      "discriminator": [
+        67,
+        36,
+        143,
+        118,
+        36,
+        164,
+        92,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "queue_state",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "DeployArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "fulfill_withdraw",
+      "docs": [
+        "Fulfills a withdraw request by transferring assets to user",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `request_id` - The request ID to fulfill",
+        "* `cpi_digest_ix_data` - instruction data passed into the withdraw CPI",
+        "",
+        "# Errors",
+        "* `RequestNotMature` - If maturity period hasn't passed",
+        "* `RequestDeadlinePassed` - If request has expired",
+        "* `InvalidWithdrawMint` - If withdraw mint doesn't match request",
+        "* `QueuePaused` - If queue is paused",
+        "* `InvalidTokenProgram` - If token program doesn't match mint"
+      ],
+      "discriminator": [
+        158,
+        10,
+        86,
+        153,
+        67,
+        210,
+        223,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "solver",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user"
+        },
+        {
+          "name": "withdraw_request",
+          "writable": true
+        },
+        {
+          "name": "share_mint",
+          "docs": [
+            "The vault's share mint"
+          ],
+          "writable": true
+        },
+        {
+          "name": "queue_state"
+        },
+        {
+          "name": "withdraw_mint"
+        },
+        {
+          "name": "user_ata",
+          "docs": [
+            "Users's Token associated token account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "queue_ata",
+          "docs": [
+            "Queues's Token associated token account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault_ata",
+          "docs": [
+            "Vault's Token associated token account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "queue",
+          "writable": true
+        },
+        {
+          "name": "queue_shares",
+          "docs": [
+            "The queue's share token 2022 account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "queue"
+              },
+              {
+                "kind": "account",
+                "path": "token_program_2022"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "boring_vault_program",
+          "docs": [
+            "The Boring Vault program"
+          ],
+          "address": "5J76xGGXn5op9S48pMqWV6Ex48ZxsKsRs4bGeDzSHEVc"
+        },
+        {
+          "name": "boring_vault_state",
+          "docs": [
+            "The vault state account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "boring_vault"
+        },
+        {
+          "name": "vault_asset_data",
+          "docs": [
+            "The vault's asset data for the withdraw mint"
+          ]
+        },
+        {
+          "name": "price_feed",
+          "docs": [
+            "Price feed for the withdraw asset"
+          ]
+        },
+        {
+          "name": "allowed_user",
+          "docs": [
+            "The queue's `AllowedUser` in the vault program, forwarded to the vault withdraw CPI. The",
+            "queue is the withdraw signer; in compliance mode it must be an enabled allowed user."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  45,
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "boring_vault_state"
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "boring_vault_program"
+            }
+          }
+        },
+        {
+          "name": "user_allowed_user",
+          "docs": [
+            "The recipient's (`withdraw_request.user`) `AllowedUser` in the vault program.",
+            "Required only when the vault is in compliance mode, `None` otherwise."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  45,
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "boring_vault_state"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "boring_vault_program"
+            }
+          }
+        },
+        {
+          "name": "cpi_digest",
+          "docs": [
+            "The vault's `CpiDigest` for the withdraw sidecar. Required when the withdraw asset",
+            "has a non-default `withdraw_cpi_digest`, `None` otherwise."
+          ],
+          "optional": true
+        },
+        {
+          "name": "ix_program_id",
+          "docs": [
+            "Target program of the withdraw sidecar CPI. Required when the withdraw asset",
+            "has a non-default `withdraw_cpi_digest`, `None` otherwise."
+          ],
+          "optional": true
+        },
+        {
+          "name": "target_program_data",
+          "docs": [
+            "ProgramData of the sidecar target program. Required when the vault's withdraw `CpiDigest`",
+            "is bound to the target program's deployed code, `None` otherwise."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "_request_id",
+          "type": "u64"
+        },
+        {
+          "name": "cpi_digest_ix_data",
+          "type": {
+            "option": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "Initializes the program configuration",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `authority` - The authority address to set"
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  172,
+                  150,
+                  21,
+                  90,
+                  40,
+                  12,
+                  53,
+                  232,
+                  96,
+                  195,
+                  223,
+                  103,
+                  241,
+                  81,
+                  30,
+                  161,
+                  100,
+                  139,
+                  252,
+                  240,
+                  8,
+                  215,
+                  126,
+                  229,
+                  216,
+                  218,
+                  58,
+                  17,
+                  228,
+                  135,
+                  7,
+                  21
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "pause",
+      "docs": [
+        "Pauses the queue, preventing new withdraw requests",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `vault_id` - The vault ID"
+      ],
+      "discriminator": [
+        211,
+        22,
+        221,
+        251,
+        74,
+        121,
+        193,
+        47
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "queue_state",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "request_withdraw",
+      "docs": [
+        "Requests a withdrawal from the queue",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `args` - The withdraw request arguments containing:",
+        "- vault_id: The vault to withdraw from",
+        "- share_amount: Amount of shares to withdraw",
+        "- discount: Discount rate in BPS",
+        "- seconds_to_deadline: Time until request expires",
+        "",
+        "# Errors",
+        "* `InvalidShareMint` - If share mint doesn't match queue state",
+        "* `InvalidDiscount` - If discount is outside allowed range",
+        "* `InvalidShareAmount` - If share amount is below minimum",
+        "* `InvalidSecondsToDeadline` - If deadline is too short"
+      ],
+      "discriminator": [
+        137,
+        95,
+        187,
+        96,
+        250,
+        138,
+        31,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "queue_state"
+        },
+        {
+          "name": "withdraw_mint"
+        },
+        {
+          "name": "withdraw_asset_data"
+        },
+        {
+          "name": "user_withdraw_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  114,
+                  105,
+                  110,
+                  103,
+                  45,
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  45,
+                  117,
+                  115,
+                  101,
+                  114,
+                  45,
+                  119,
+                  105,
+                  116,
+                  104,
+                  100,
+                  114,
+                  97,
+                  119,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "withdraw_request",
+          "writable": true
+        },
+        {
+          "name": "queue"
+        },
+        {
+          "name": "share_mint",
+          "docs": [
+            "The vault's share mint"
+          ]
+        },
+        {
+          "name": "user_shares",
+          "docs": [
+            "The user's share token 2022 account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "account",
+                "path": "token_program_2022"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "queue_shares",
+          "docs": [
+            "The queue's share token 2022 account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "queue"
+              },
+              {
+                "kind": "account",
+                "path": "token_program_2022"
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "boring_vault_program",
+          "docs": [
+            "The Boring Vault program"
+          ],
+          "address": "5J76xGGXn5op9S48pMqWV6Ex48ZxsKsRs4bGeDzSHEVc"
+        },
+        {
+          "name": "boring_vault_state",
+          "docs": [
+            "The vault state account.",
+            "Mutable: for VestingYield vaults the `vest_to_exchange_rate` CPI persists pending gains",
+            "into this account before the rate is read.",
+            "Constrained to the vault PDA for `args.vault_id` and to this queue's share mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "queue_permission",
+          "docs": [
+            "The queue PDA's permission in the vault. Required for VestingYield vaults so the queue can",
+            "sign the `vest_to_exchange_rate` CPI."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  105,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "boring_vault_state"
+              },
+              {
+                "kind": "account",
+                "path": "queue"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "boring_vault_program"
+            }
+          }
+        },
+        {
+          "name": "vault_asset_data",
+          "docs": [
+            "The vault's asset data for the withdraw mint, used to price the quote."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "boring_vault_state"
+              },
+              {
+                "kind": "account",
+                "path": "withdraw_mint"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "boring_vault_program"
+            }
+          }
+        },
+        {
+          "name": "price_feed",
+          "docs": [
+            "Price feed for the withdraw asset."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RequestWithdrawArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_solve_authority",
+      "docs": [
+        "Sets the solve authority for the queue",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `vault_id` - The vault ID",
+        "* `new_solve_authority` - The new solve authority address"
+      ],
+      "discriminator": [
+        46,
+        173,
+        39,
+        53,
+        34,
+        224,
+        54,
+        195
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "queue_state",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        },
+        {
+          "name": "new_solve_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "setup_user_withdraw_state",
+      "docs": [
+        "Initializes a user's withdraw state",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts"
+      ],
+      "discriminator": [
+        105,
+        154,
+        55,
+        232,
+        156,
+        127,
+        164,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user_withdraw_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  114,
+                  105,
+                  110,
+                  103,
+                  45,
+                  113,
+                  117,
+                  101,
+                  117,
+                  101,
+                  45,
+                  117,
+                  115,
+                  101,
+                  114,
+                  45,
+                  119,
+                  105,
+                  116,
+                  104,
+                  100,
+                  114,
+                  97,
+                  119,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "transfer_authority",
+      "docs": [
+        "Stages a new authority for a queue. Only the current queue authority may call this.",
+        "The transfer only takes effect once `pending_authority` calls `accept_authority`,",
+        "so a typo'd or unusable key cannot lock the queue out.",
+        "",
+        "Passing `Pubkey::default()` revokes a staged transfer.",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `vault_id` - The vault ID",
+        "* `pending_authority` - The proposed next queue authority or the default pubkey",
+        "",
+        "# Errors",
+        "* `SelfTransferNotAllowed` - If `pending_authority` is the current authority"
+      ],
+      "discriminator": [
+        48,
+        169,
+        76,
+        72,
+        229,
+        180,
+        55,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "queue_state",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        },
+        {
+          "name": "pending_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "transfer_program_authority",
+      "docs": [
+        "Stages a new ProgramConfig authority. Only the current program authority may call this.",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `pending_authority` - The proposed next program authority"
+      ],
+      "discriminator": [
+        133,
+        0,
+        66,
+        166,
+        130,
+        239,
+        5,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "pending_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "unpause",
+      "docs": [
+        "Unpauses the queue, allowing new withdraw requests",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `vault_id` - The vault ID"
+      ],
+      "discriminator": [
+        169,
+        144,
+        4,
+        38,
+        10,
+        141,
+        188,
+        255
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "queue_state",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_withdraw_asset_data",
+      "docs": [
+        "Updates withdraw asset configuration",
+        "",
+        "# Arguments",
+        "* `ctx` - The context of accounts",
+        "* `args` - The configuration parameters to update",
+        "",
+        "# Errors",
+        "* `MaximumDeadlineExceeded` - If minimum_seconds_to_deadline exceeds MAXIMUM_DEADLINE (90 days)",
+        "* `MaximumMaturityExceeded` - If seconds_to_maturity exceeds MAXIMUM_MATURITY (90 days)",
+        "* `InvalidDiscount` - If maximum_discount is less than minimum_discount",
+        "* `MaximumDiscountExceeded` - If maximum_discount exceeds MAXIMUM_DISCOUNT (10%)"
+      ],
+      "discriminator": [
+        101,
+        194,
+        137,
+        82,
+        34,
+        107,
+        239,
+        117
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "queue_state"
+        },
+        {
+          "name": "withdraw_mint"
+        },
+        {
+          "name": "withdraw_asset_data",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "UpdateWithdrawAssetArgs"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "ProgramConfig",
+      "discriminator": [
+        196,
+        210,
+        90,
+        231,
+        144,
+        149,
+        140,
+        63
+      ]
+    },
+    {
+      "name": "QueueState",
+      "discriminator": [
+        18,
+        227,
+        150,
+        65,
+        218,
+        214,
+        72,
+        191
+      ]
+    },
+    {
+      "name": "UserWithdrawState",
+      "discriminator": [
+        203,
+        226,
+        117,
+        250,
+        185,
+        251,
+        209,
+        162
+      ]
+    },
+    {
+      "name": "WithdrawAssetData",
+      "discriminator": [
+        222,
+        123,
+        55,
+        75,
+        117,
+        35,
+        221,
+        77
+      ]
+    },
+    {
+      "name": "WithdrawRequest",
+      "discriminator": [
+        186,
+        239,
+        174,
+        191,
+        189,
+        13,
+        47,
+        196
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AuthorityUpdated",
+      "discriminator": [
+        133,
+        207,
+        24,
+        122,
+        14,
+        234,
+        91,
+        34
+      ]
+    },
+    {
+      "name": "PendingAuthoritySet",
+      "discriminator": [
+        112,
+        115,
+        80,
+        37,
+        41,
+        177,
+        221,
+        81
+      ]
+    },
+    {
+      "name": "ProgramAuthorityUpdated",
+      "discriminator": [
+        172,
+        190,
+        142,
+        146,
+        101,
+        19,
+        87,
+        104
+      ]
+    },
+    {
+      "name": "ProgramPendingAuthoritySet",
+      "discriminator": [
+        105,
+        16,
+        11,
+        186,
+        226,
+        198,
+        238,
+        130
+      ]
+    },
+    {
+      "name": "QueueDeployed",
+      "discriminator": [
+        157,
+        189,
+        181,
+        240,
+        186,
+        76,
+        142,
+        85
+      ]
+    },
+    {
+      "name": "QueuePaused",
+      "discriminator": [
+        89,
+        197,
+        162,
+        223,
+        106,
+        67,
+        169,
+        133
+      ]
+    },
+    {
+      "name": "QueueUnpaused",
+      "discriminator": [
+        202,
+        71,
+        194,
+        196,
+        102,
+        197,
+        246,
+        253
+      ]
+    },
+    {
+      "name": "SolveAuthorityUpdated",
+      "discriminator": [
+        123,
+        46,
+        70,
+        180,
+        163,
+        106,
+        254,
+        144
+      ]
+    },
+    {
+      "name": "WithdrawAssetDataUpdated",
+      "discriminator": [
+        116,
+        54,
+        182,
+        49,
+        228,
+        133,
+        174,
+        168
+      ]
+    },
+    {
+      "name": "WithdrawCancelled",
+      "discriminator": [
+        162,
+        153,
+        181,
+        47,
+        154,
+        132,
+        183,
+        117
+      ]
+    },
+    {
+      "name": "WithdrawFulfilled",
+      "discriminator": [
+        71,
+        21,
+        145,
+        222,
+        215,
+        28,
+        31,
+        50
+      ]
+    },
+    {
+      "name": "WithdrawRequested",
+      "discriminator": [
+        114,
+        16,
+        240,
+        206,
+        93,
+        128,
+        151,
+        39
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotAuthorized",
+      "msg": "Not authorized"
+    },
+    {
+      "code": 6001,
+      "name": "QueuePaused",
+      "msg": "Queue paused"
+    },
+    {
+      "code": 6002,
+      "name": "WithdrawsNotAllowedForAsset",
+      "msg": "Withdraws not allowed for asset"
+    },
+    {
+      "code": 6003,
+      "name": "UnsupportedWithdrawSidecar",
+      "msg": "Withdraw sidecar CPI not supported by queue"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidDiscount",
+      "msg": "Invalid discount"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidShareAmount",
+      "msg": "Invalid share amount"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidSecondsToDeadline",
+      "msg": "Invalid seconds to deadline"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidBoringVaultProgram",
+      "msg": "Invalid boring vault program"
+    },
+    {
+      "code": 6008,
+      "name": "RequestNotMature",
+      "msg": "Request not mature"
+    },
+    {
+      "code": 6009,
+      "name": "RequestDeadlinePassed",
+      "msg": "Request deadline passed"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidWithdrawMint",
+      "msg": "Invalid withdraw mint"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidTokenProgram",
+      "msg": "Invalid token program"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidShareMint",
+      "msg": "Invalid share mint"
+    },
+    {
+      "code": 6013,
+      "name": "DecimalConversionFailed",
+      "msg": "Decimal conversion failed"
+    },
+    {
+      "code": 6014,
+      "name": "RequestDeadlineNotPassed",
+      "msg": "Request deadline not passed"
+    },
+    {
+      "code": 6015,
+      "name": "MaximumMaturityExceeded",
+      "msg": "Maximum maturity exceeded"
+    },
+    {
+      "code": 6016,
+      "name": "MaximumDeadlineExceeded",
+      "msg": "Maximum deadline exceeded"
+    },
+    {
+      "code": 6017,
+      "name": "MaximumDiscountExceeded",
+      "msg": "Maximum discount exceeded"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidAssociatedTokenAccount",
+      "msg": "Invalid associated token account"
+    },
+    {
+      "code": 6019,
+      "name": "MathError",
+      "msg": "Math error"
+    },
+    {
+      "code": 6020,
+      "name": "ComplianceAccountRequired",
+      "msg": "Compliance account required"
+    },
+    {
+      "code": 6021,
+      "name": "UserNotAllowed",
+      "msg": "User is not an allowed (compliant) user"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidPendingAuthority",
+      "msg": "Invalid pending authority"
+    },
+    {
+      "code": 6023,
+      "name": "SelfTransferNotAllowed",
+      "msg": "Self transfer not allowed"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidAuthority",
+      "msg": "Invalid authority"
+    },
+    {
+      "code": 6025,
+      "name": "IncompatibleWithdrawAuthority",
+      "msg": "Vault withdraw authority is not compatible with this queue"
+    },
+    {
+      "code": 6026,
+      "name": "MissingQueuePermission",
+      "msg": "Queue permission account required for VestingYield vaults"
+    }
+  ],
+  "types": [
+    {
+      "name": "AllowedUser",
+      "docs": [
+        "PDA account that stores an allowed user",
+        "Seeds: [\"allowed-user\", vault, user]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "docs": [
+              "The vault ID used to derive this account's parent vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "user",
+            "docs": [
+              "The user wallet used in this account's PDA derivation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "last_deposit_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "docs": [
+              "The vault ID used to derive this account's parent vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "asset_mint",
+            "docs": [
+              "The asset mint used in this account's PDA derivation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "allow_deposits",
+            "type": "bool"
+          },
+          {
+            "name": "allow_withdrawals",
+            "type": "bool"
+          },
+          {
+            "name": "share_premium_bps",
+            "type": "u16"
+          },
+          {
+            "name": "is_pegged_to_base_asset",
+            "type": "bool"
+          },
+          {
+            "name": "inverse_price_feed",
+            "type": "bool"
+          },
+          {
+            "name": "oracle_source",
+            "docs": [
+              "Oracle implementation with encapsulated parameters and addresses"
+            ],
+            "type": {
+              "defined": {
+                "name": "OracleSource"
+              }
+            }
+          },
+          {
+            "name": "deposit_cpi_digest",
+            "type": "pubkey"
+          },
+          {
+            "name": "withdraw_cpi_digest",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BoringVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": {
+              "defined": {
+                "name": "VaultState"
+              }
+            }
+          },
+          {
+            "name": "teller",
+            "type": {
+              "defined": {
+                "name": "TellerState"
+              }
+            }
+          },
+          {
+            "name": "accrual_mode",
+            "type": {
+              "defined": {
+                "name": "VaultAccrualMode"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DeployArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "boring_vault_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "share_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "solve_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OracleSource",
+      "docs": [
+        "Enumerates the supported on-chain oracle adapters with their addresses and parameters."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SwitchboardV2",
+            "fields": [
+              {
+                "name": "feed_address",
+                "type": "pubkey"
+              },
+              {
+                "name": "min_samples",
+                "type": "u32"
+              },
+              {
+                "name": "max_staleness_slots",
+                "type": "u32"
+              }
+            ]
+          },
+          {
+            "name": "PythV2",
+            "fields": [
+              {
+                "name": "feed_address",
+                "docs": [
+                  "The canonical price feed account address"
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "feed_id",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "max_conf_width_bps",
+                "docs": [
+                  "Maximum allowed confidence as basis points of price (e.g., 500 = 5%)"
+                ],
+                "type": "u16"
+              },
+              {
+                "name": "min_verification_level",
+                "docs": [
+                  "Required Pyth verification level, encoded as a signature-count threshold:",
+                  "- `0` => only `Full` verification is accepted (default, most secure).",
+                  "- `>= 2` => accepts `Partial { num_signatures }` updates whose",
+                  "`num_signatures` is at least this value (`Full` always qualifies too).",
+                  "- `1` is rejected by an operational guard: partial verification must",
+                  "use at least 2 signatures."
+                ],
+                "type": "u8"
+              },
+              {
+                "name": "max_staleness_seconds",
+                "type": "u32"
+              }
+            ]
+          },
+          {
+            "name": "PythV2Pro",
+            "fields": [
+              {
+                "name": "feed_address",
+                "docs": [
+                  "The canonical price feed account address"
+                ],
+                "type": "pubkey"
+              },
+              {
+                "name": "feed_id",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "max_conf_width_bps",
+                "docs": [
+                  "Maximum allowed confidence as basis points of price (e.g., 500 = 5%)"
+                ],
+                "type": "u16"
+              },
+              {
+                "name": "min_verification_level",
+                "docs": [
+                  "Required Pyth verification level. Same encoding as [`PythV2`]."
+                ],
+                "type": "u8"
+              },
+              {
+                "name": "max_staleness_seconds",
+                "type": "u32"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingAuthoritySet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "pending_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Permission",
+      "docs": [
+        "PDA account that stores permissions for",
+        "a given key on a given vault.",
+        "Seeds: [b\"permission\", vault, user]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "docs": [
+              "The vault ID used to derive this permission's parent vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "The key that is granted these permissions"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "can_pause",
+            "docs": [
+              "Flag for whether this key can pause a vault or not"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "can_update_exchange_rate",
+            "docs": [
+              "Flag for whether this key has the Exchange Rate Updater role"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "strategist_group",
+            "docs": [
+              "Bit masking that designates a unique grouping for strategist actions available corresponding with CPI Digest.",
+              "0 [default] = no strategist permission"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramAuthorityUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramPendingAuthoritySet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pending_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueDeployed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "boring_vault_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "share_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "solve_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueuePaused",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority",
+            "docs": [
+              "Staged next `authority`, promoted by `accept_authority`. `Pubkey::default()` when",
+              "no transfer is in flight."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "boring_vault_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "share_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "solve_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QueueUnpaused",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RequestWithdrawArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "share_amount",
+            "type": "u64"
+          },
+          {
+            "name": "discount",
+            "type": "u16"
+          },
+          {
+            "name": "seconds_to_deadline",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SolveAuthorityUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "new_solve_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TellerState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base_asset",
+            "docs": [
+              "Immutable after deployment"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "The share mint's decimals (set to the base mint's decimals during deployment).",
+              "Immutable after deployment"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "exchange_rate",
+            "type": "u64"
+          },
+          {
+            "name": "exchange_rate_high_water_mark",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fees_owed_in_base_asset",
+            "docs": [
+              "Platform fees accrued and awaiting claim, in base-asset atoms."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "performance_fees_owed_in_base_asset",
+            "docs": [
+              "Performance fees accrued and awaiting claim, in base-asset atoms."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_shares_last_update",
+            "type": "u64"
+          },
+          {
+            "name": "supply_last_update_timestamp",
+            "docs": [
+              "TWAS / cumulative-supply clock (EVM: `supplyObservation.lastUpdateTimestamp`).",
+              "Advanced on every cumulative-supply sync (deposit/withdraw/vest/post_loss)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "platform_payout_address",
+            "docs": [
+              "Recipient of claimed platform fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "performance_payout_address",
+            "docs": [
+              "Recipient of claimed performance fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "allowed_exchange_rate_change_upper_bound",
+            "type": "u16"
+          },
+          {
+            "name": "allowed_exchange_rate_change_lower_bound",
+            "type": "u16"
+          },
+          {
+            "name": "minimum_update_delay_in_seconds",
+            "type": "u32"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "performance_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "withdraw_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_deviation_yield_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_deviation_loss_bps",
+            "type": "u16"
+          },
+          {
+            "name": "vesting_state",
+            "type": {
+              "defined": {
+                "name": "VestingState"
+              }
+            }
+          },
+          {
+            "name": "last_strategist_update_timestamp",
+            "docs": [
+              "Admin/strategist cooldown clock (EVM: `lastStrategistUpdateTimestamp`).",
+              "The last time vest_yield or post_loss was called; gates their minimum-update-delay."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "state_last_update_timestamp",
+            "docs": [
+              "Platform/performance fee proration anchor (EVM: `accountantState.lastUpdateTimestamp`).",
+              "Advanced inside `accrue_platform_fee` on every fee accrual",
+              "(deposit/withdraw/vest/rate update)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deposit_cap",
+            "docs": [
+              "Maximum total share supply allowed via deposits (denominated in shares).",
+              "`u64::MAX` disables the cap."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "minimum_vest_duration",
+            "docs": [
+              "Minimum allowed `vest_yield` streaming duration in seconds"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "maximum_vest_duration",
+            "docs": [
+              "Maximum allowed `vest_yield` streaming duration in seconds"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee_remainder",
+            "docs": [
+              "Sub-atom platform fee carry: the part of the accrued platform fee that did not bridge a",
+              "whole base-asset atom, scaled by `FEE_REMAINDER_SCALE`. Always `< FEE_REMAINDER_SCALE`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "performance_fee_remainder",
+            "docs": [
+              "Sub-atom performance fee carry. Same contract as `platform_fee_remainder`."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UpdateWithdrawAssetArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "allow_withdraws",
+            "type": "bool"
+          },
+          {
+            "name": "seconds_to_maturity",
+            "type": "u32"
+          },
+          {
+            "name": "minimum_seconds_to_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "minimum_discount",
+            "type": "u16"
+          },
+          {
+            "name": "maximum_discount",
+            "type": "u16"
+          },
+          {
+            "name": "minimum_shares",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserWithdrawState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "last_nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VaultAccrualMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "ExchangeRateStep"
+          },
+          {
+            "name": "VestingYield"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VaultState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "docs": [
+              "Immutable after deployment"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "accounting_paused",
+            "docs": [
+              "Halts accounting operations and anything related: deposit, withdraw, exchange-rate updates,",
+              "vesting, safe rate reads, claim fees, and share mint/burn."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "teller_paused",
+            "docs": [
+              "Halts deposits and withdrawals"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "manage_paused",
+            "docs": [
+              "Halts manage instruction"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "share_mint",
+            "docs": [
+              "Immutable after deployment"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit_sub_account",
+            "type": "u8"
+          },
+          {
+            "name": "withdraw_sub_account",
+            "type": "u8"
+          },
+          {
+            "name": "share_mover",
+            "type": "pubkey"
+          },
+          {
+            "name": "compliance_mode",
+            "type": "bool"
+          },
+          {
+            "name": "compliance_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "lock_duration_seconds",
+            "docs": [
+              "Share-lock duration in seconds. Must be the source of truth and driver over the",
+              "lock_duration_seconds field on the transfer HookConfig"
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VestingState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "last_virtual_share_price",
+            "docs": [
+              "High-precision, dimensionless virtual share price: the raw ratio",
+              "`total_assets_atomic / total_shares_atomic` scaled by RAY.",
+              "Gains are added here per-share as they vest; the human-readable",
+              "exchange_rate (= lastSharePrice in EVM) is derived as",
+              "`last_virtual_share_price * 10^decimals / RAY`."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "vesting_gains",
+            "docs": [
+              "Total unvested gains in base-asset units (not per-share).",
+              "Set to the full yield_amount on each vest_yield call (= overwrite, not +=)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_vesting_update",
+            "docs": [
+              "The last time a yield update was posted"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "start_vesting_time",
+            "docs": [
+              "The start time for the yield streaming period"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "end_vesting_time",
+            "docs": [
+              "The end time for the yield streaming period"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cumulative_supply",
+            "docs": [
+              "Accumulated supply * time for TWAS calculation"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "vesting_period_start",
+            "docs": [
+              "Start of the current TWAS window, reset by vest_yield"
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawAssetData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "docs": [
+              "The vault ID used in this account's PDA derivation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "asset_mint",
+            "docs": [
+              "The withdrawal mint used in this account's PDA derivation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "allow_withdrawals",
+            "type": "bool"
+          },
+          {
+            "name": "seconds_to_maturity",
+            "type": "u32"
+          },
+          {
+            "name": "minimum_seconds_to_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "minimum_discount",
+            "type": "u16"
+          },
+          {
+            "name": "maximum_discount",
+            "type": "u16"
+          },
+          {
+            "name": "minimum_shares",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawAssetDataUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "allow_withdrawals",
+            "type": "bool"
+          },
+          {
+            "name": "seconds_to_maturity",
+            "type": "u32"
+          },
+          {
+            "name": "minimum_seconds_to_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "minimum_discount",
+            "type": "u16"
+          },
+          {
+            "name": "maximum_discount",
+            "type": "u16"
+          },
+          {
+            "name": "minimum_shares",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "shares_returned",
+            "type": "u64"
+          },
+          {
+            "name": "cancelled_at",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawFulfilled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "solver",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "shares_burned",
+            "type": "u64"
+          },
+          {
+            "name": "assets_paid",
+            "type": "u64"
+          },
+          {
+            "name": "vault_assets_out",
+            "type": "u64"
+          },
+          {
+            "name": "excess_returned",
+            "type": "u64"
+          },
+          {
+            "name": "fulfilled_at",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawRequest",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "asset_out",
+            "type": "pubkey"
+          },
+          {
+            "name": "share_amount",
+            "type": "u64"
+          },
+          {
+            "name": "asset_amount",
+            "type": "u64"
+          },
+          {
+            "name": "creation_time",
+            "type": "u64"
+          },
+          {
+            "name": "seconds_to_maturity",
+            "type": "u32"
+          },
+          {
+            "name": "seconds_to_deadline",
+            "type": "u32"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queue_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "request",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "shares",
+            "type": "u64"
+          },
+          {
+            "name": "assets",
+            "type": "u64"
+          },
+          {
+            "name": "creation_time",
+            "type": "u64"
+          },
+          {
+            "name": "maturity_time",
+            "type": "u64"
+          },
+          {
+            "name": "deadline",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

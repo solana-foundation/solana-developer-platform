@@ -1,5 +1,6 @@
 import {
   type ApiKeyRole,
+  type ApiKeyStatus,
   type ApiKeyWalletBinding,
   type ApiKeyWalletScope,
   getPermissionsForApiKeyRole,
@@ -11,6 +12,7 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import {
   type ExactApiKeyWalletBinding,
+  loadApiKeyWalletAuthorization,
   normalizeApiKeyWalletPermissions,
 } from "@/services/api-key-wallets.service";
 
@@ -46,10 +48,12 @@ function trimWalletId(walletId: string): string {
 }
 
 function normalizeBindings(auth: ApiKeyContext) {
+  // Bindings arrive normalized from the auth middleware; an empty
+  // permissions list is an explicit deny-all and must never widen to "*".
   return auth.walletBindings.map((binding) => ({
     walletId: binding.walletId,
     custodyWalletId: binding.custodyWalletId,
-    permissions: binding.permissions.length > 0 ? binding.permissions : (["*"] as Permission[]),
+    permissions: binding.permissions,
   }));
 }
 
@@ -485,6 +489,30 @@ export function getAllowedApiKeyWalletIdsForPermissions(
     .map((binding) => binding.walletId);
 }
 
+export function getAllowedApiKeyWalletAuthorizationForPermissions(
+  auth: ApiKeyContext,
+  requiredPermissions: Permission[] = []
+): { custodyWalletIds: string[]; providerWalletIds: string[] } | null {
+  if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
+    return null;
+  }
+
+  const bindings = normalizeBindings(auth).filter((binding) =>
+    hasBindingPermission(binding, requiredPermissions)
+  );
+  const custodyWalletIds = bindings.map((binding) => {
+    if (typeof binding.custodyWalletId !== "string" || binding.custodyWalletId.length === 0) {
+      throw new AppError("INTERNAL_ERROR", "API key wallet authorization scope is inconsistent");
+    }
+    return binding.custodyWalletId;
+  });
+
+  return {
+    custodyWalletIds,
+    providerWalletIds: bindings.map((binding) => binding.walletId),
+  };
+}
+
 export function filterApiKeyWallets<T extends { walletId: string }>(
   auth: ApiKeyContext,
   wallets: T[],
@@ -563,4 +591,66 @@ export function resolveApiKeyCustodyWalletId(
     );
   }
   return binding.custodyWalletId as string;
+}
+
+/**
+ * Re-read selected endpoint wallet permissions before new exact-wallet work.
+ * The request auth context may contain a one-hour KV snapshot; duplicate
+ * Provider wallet IDs must become deny-only immediately for Payments writes.
+ */
+export async function assertFreshApiKeyCustodyWalletAccess(
+  db: DatabaseClient,
+  auth: ApiKeyContext,
+  custodyWalletId: string,
+  requiredPermissions: Permission[] = []
+): Promise<void> {
+  if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
+    return;
+  }
+  if (!auth.projectId) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+
+  const currentKey = await db
+    .prepare(
+      `SELECT signing_wallet_id, status, expires_at
+       FROM api_keys
+       WHERE id = ?
+         AND organization_id = ?
+         AND project_id = ?`
+    )
+    .bind(auth.apiKeyId, auth.organizationId, auth.projectId)
+    .first<{
+      signing_wallet_id: string | null;
+      status: ApiKeyStatus;
+      expires_at: string | null;
+    }>();
+  if (!currentKey) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+  // Re-reading the key's PERMISSIONS while trusting the snapshot's word that
+  // the key still exists leaves the hour-long cache window open for exactly the
+  // key someone just revoked. Same predicate as `ApiKeyService.verify`: active,
+  // and not past its expiry.
+  if (
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date())
+  ) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+
+  const freshAuthorization = await loadApiKeyWalletAuthorization(
+    db,
+    auth.apiKeyId,
+    auth.organizationId,
+    auth.projectId,
+    currentKey.signing_wallet_id
+  );
+  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
+    { ...auth, ...freshAuthorization },
+    requiredPermissions
+  );
+  if (!allowedCustodyWalletIds?.includes(custodyWalletId)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
 }

@@ -81,7 +81,7 @@ export function earnVaultDepositAvailability(
   ) {
     return "strategy_unavailable";
   }
-  if (!isVaultDirectDepositEnabled(environment)) {
+  if (!isVaultDirectDepositEnabled(environment, strategy.provider)) {
     return "environment_unavailable";
   }
   if (providerAccess === null) {

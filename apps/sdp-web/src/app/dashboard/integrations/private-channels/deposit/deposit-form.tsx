@@ -1,9 +1,9 @@
 "use client";
 
-import {
-  type CustodyWalletSummary,
-  type PrivateChannelDeposit,
-  privateChannelTokens,
+import type {
+  CustodyWalletSummary,
+  PrivateChannelDeposit,
+  PrivateChannelTokenEligibility,
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
@@ -14,10 +14,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
+import {
+  privateChannelDepositIdempotencyKeyStore,
+  privateChannelDepositRequestFingerprint,
+} from "../value-movement-tracking";
 import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
 import { createDepositAction } from "./actions";
 import { DepositProgress } from "./deposit-progress";
@@ -48,8 +52,13 @@ function depositFormReducer(state: DepositFormState, update: DepositFormUpdate):
   return { ...state, ...patch };
 }
 
-export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
-  const tokens = privateChannelTokens(useSolanaCluster());
+export function DepositForm({
+  wallets,
+  tokens,
+}: {
+  wallets: CustodyWalletSummary[];
+  tokens: PrivateChannelTokenEligibility[];
+}) {
   const [state, updateState] = useReducer(depositFormReducer, {
     walletId: wallets[0]?.walletId ?? "",
     mint: tokens[0]?.mint ?? "",
@@ -124,6 +133,14 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
     );
   }
 
+  if (tokens.length === 0) {
+    return (
+      <p className="text-secondary text-sm">
+        {t("DashboardPrivateChannels.common.noEnabledTokens")}
+      </p>
+    );
+  }
+
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
   // Falls back to the first token so a `mint` left over from a changed token list
@@ -136,13 +153,31 @@ export function DepositForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
     if (getAmountError(amount)) {
       return;
     }
+    // One key per REQUEST, not per press: the same wallet/mint/amount/recipient
+    // claims the same key, so re-pressing submit after a timeout replays the
+    // original deposit instead of making a second one, while editing any field
+    // mints a new key because it is a different deposit.
+    const requestPayload = {
+      walletId,
+      amount: amount.trim(),
+      mint: selectedToken?.mint,
+      recipient: recipient.trim() || undefined,
+    };
+    const fingerprint = privateChannelDepositRequestFingerprint(requestPayload);
+    const idempotencyKey = privateChannelDepositIdempotencyKeyStore.claim(fingerprint);
+
     startTransition(async () => {
-      const result = await createDepositAction({
-        walletId,
-        amount: amount.trim(),
-        mint: selectedToken?.mint,
-        recipient: recipient.trim() || undefined,
-      });
+      const result = await createDepositAction({ ...requestPayload, idempotencyKey });
+      // Retire the key only on an answer that proves what happened. A transport
+      // failure or a 5xx keeps it, so the retry replays rather than depositing
+      // twice; a validation error retires it because nothing was ever sent.
+      applyIdempotencyKeyOutcome(
+        privateChannelDepositIdempotencyKeyStore,
+        fingerprint,
+        result.ok
+          ? { ok: true, status: 200, data: { kind: "deposit" } }
+          : { ok: false, status: result.kind === "server" ? result.status : 400 }
+      );
       if (result.ok) {
         updateState({ deposit: result.deposit });
         toast.success(t("DashboardPrivateChannels.deposit.submitToast"));

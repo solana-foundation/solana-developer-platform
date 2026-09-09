@@ -12,7 +12,7 @@ Webhooks drive a transfer's lifecycle after the quote: `awaiting_payment → set
 - `parse(payload)` — pure wire-format → `RampSettlementEvent` mapping.
 - `process(c, environment, event)` — DB orchestration; calls `applyRampSettlementEvent`.
 
-Canonical example: `LightsparkWebhookProcessor` in `apps/sdp-api/src/routes/webhooks/ramps/lightspark.ts`.
+Canonical examples: the registered processors in `apps/sdp-api/src/routes/webhooks/ramps/` — read the closest one before writing yours.
 
 ## Mount + flow
 
@@ -41,7 +41,7 @@ Signature variety across the six registered webhook providers:
 
 `(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. Narrow the payload with `readString` / `readRecord` / `readNumber` from `@sdp/payments/json`. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
 
-`parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: BVNK channel references not minted by SDP return `undefined` from `readBvnkOfframpReference` and get logged-and-skipped in `process`.
+`parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: references not minted by SDP return `undefined` from the processor's reference reader and get logged-and-skipped in `process`.
 
 `RampSettlementEvent` (`packages/sdp-payments/src/ramps/types.ts`):
 
@@ -69,9 +69,9 @@ async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlement
 
 Then register the class in `RAMP_PROVIDER_WEBHOOK_PROCESSOR` in `apps/sdp-api/src/routes/webhooks/handlers.ts`, or explicitly extend the excluded no-webhook provider union. `applyRampSettlementEvent` finds the transfer by `(provider, reference)`, skips terminal rows on redelivery, maps `kind → status`, persists received amounts for the relevant direction plus settlement economics, and records failed/expired errors.
 
-## Beyond settlement (advanced)
+## Beyond settlement: provisioning auto-advance
 
-BVNK also receives customer/wallet/provisioning events: its `parse` returns a wider `BvnkWebhookEvent` union, and `process` switches on `event.kind`, routing settlement kinds to `applyRampSettlementEvent`-based helpers and the rest to background provisioning helpers. That's an extension — the standard contract a new provider implements is the settlement path above.
+A provider whose counterparty provisioning is async (KYC verification, wallet creation) also moves requirement state from webhooks: `parse` returns a wider provider event union — one event kind per upstream type (customer status changes, wallet creation/status changes, payment status changes) — and `process` switches exhaustively on `event.kind`, routing settlement kinds to `applyRampSettlementEvent`-based helpers and provisioning kinds to helpers that update `counterparty_provider_accounts` rows (never `counterparties.provider_data` — it's deprecated). The requirements GET then reflects the advanced state (`counterparty-requirements`). The standard contract a new provider implements is the settlement path above; add provisioning kinds only when the upstream provisions asynchronously.
 
 ## Rules + verify
 

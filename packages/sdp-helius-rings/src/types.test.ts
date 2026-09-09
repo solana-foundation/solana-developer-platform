@@ -19,6 +19,7 @@ describe("PrivateOperation serialization", () => {
       outerTxSignature: null,
       photonIndexedAt: null,
       failure: null,
+      ringProgramId: null,
       input: {
         walletId: "hw_1",
         opType: "shield",
@@ -28,6 +29,7 @@ describe("PrivateOperation serialization", () => {
       events: [],
       createdAt: "2026-08-11T00:00:00Z",
       updatedAt: "2026-08-11T00:00:00Z",
+      retryOfOperationId: null,
     };
 
     const serialized = JSON.stringify(op);

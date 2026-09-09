@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { useEffect } from "react";
 import { docsHref } from "@/components/dashboard-nav";
+import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -44,16 +45,19 @@ function getMoreGroups(
   options: {
     canReadApprovals: boolean;
     canManageOrgSettings: boolean;
+    dvpEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
+    policiesEnabled: boolean;
   }
 ): MoreGroup[] {
   return [
     {
       title: t("Shared.dashboardShell.manage"),
       items: [
-        ...(options.marketsEnabled && options.earnEnabled
+        // Markets shows for any enabled sub-module, not Earn specifically.
+        ...(options.marketsEnabled && (options.earnEnabled || options.dvpEnabled)
           ? [
               {
                 label: t("Shared.dashboardShell.markets"),
@@ -76,17 +80,21 @@ function getMoreGroups(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        {
-          label: t("Shared.dashboardShell.policies"),
-          href: DASHBOARD_SIDE_NAV_HREFS.policies,
-          icon: ShieldCheckIcon,
-        },
+        ...(options.policiesEnabled
+          ? [
+              {
+                label: t("Shared.dashboardShell.policies"),
+                href: DASHBOARD_SIDE_NAV_HREFS.policies,
+                icon: ShieldCheckIcon,
+              },
+            ]
+          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
           icon: BlocksIcon,
         },
-        ...(options.canReadApprovals
+        ...(options.policiesEnabled && options.canReadApprovals
           ? [
               {
                 label: t("Shared.dashboardShell.approvals"),
@@ -162,26 +170,32 @@ export function DashboardMoreSheet({
   pathname,
   canReadApprovals,
   canManageOrgSettings,
+  dvpEnabled,
   earnEnabled,
   heliusRingsEnabled,
   marketsEnabled,
+  policiesEnabled,
   onClose,
 }: {
   pathname: string;
   canReadApprovals: boolean;
   canManageOrgSettings: boolean;
+  dvpEnabled: boolean;
   earnEnabled: boolean;
   heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
+  policiesEnabled: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations();
   const groups = getMoreGroups(t, {
     canReadApprovals,
     canManageOrgSettings,
+    dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,
+    policiesEnabled,
   });
 
   useEffect(() => {
@@ -193,7 +207,7 @@ export function DashboardMoreSheet({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end xl:hidden">
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:hidden">
       <button
         type="button"
         aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
@@ -225,8 +239,15 @@ export function DashboardMoreSheet({
         </div>
 
         <div className="space-y-6 px-5 pt-2">
-          <div className="rounded-2xl border border-border-default p-2">
+          <div className="space-y-2 rounded-2xl border border-border-default p-2">
             <WorkspaceSwitcher collapsed={false} onOrganizationSwitchingChange={() => {}} />
+            {/* The account menu lives in the sidebar footer, which has no mobile
+                counterpart — this is where phones reach sign-out and feedback. */}
+            <SidebarUserMenu
+              collapsed={false}
+              canManageOrgSettings={canManageOrgSettings}
+              menuSide="top"
+            />
           </div>
 
           {groups.map((group) => (

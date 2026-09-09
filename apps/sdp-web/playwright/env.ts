@@ -4,7 +4,12 @@ import path from "node:path";
 const DEFAULT_CLERK_TEST_ORG_NAME = "Solana";
 const DEFAULT_CLERK_TEST_EMAIL = "e2e-smoke+sdp-web@example.com";
 const BASE_URL = "http://localhost:3100";
-const GCP_DEV_API_URL = "https://api-dev.solana.com";
+const GCP_EXTERNAL_API_URLS = [
+  "https://api-dev.solana.com",
+  "https://api-stage.solana.com",
+  "https://api-preview.solana.com",
+];
+const GCP_DEV_API_URL = GCP_EXTERNAL_API_URLS[0];
 
 type E2EEnvCommon = {
   baseURL: string;
@@ -13,6 +18,7 @@ type E2EEnvCommon = {
   clerkOrgName: string;
   clerkTestEmail: string;
   sdpApiBaseUrl: string;
+  ticketAuth: boolean;
   webServerEnv: Record<string, string>;
 };
 
@@ -121,14 +127,23 @@ export function getE2EEnv(): E2EEnv {
   const explicitExternalApiUrl = useExternalApi
     ? resolveExplicitEnvValue("PLAYWRIGHT_API_URL").replace(/\/$/, "")
     : null;
-  if (explicitExternalApiUrl && explicitExternalApiUrl !== GCP_DEV_API_URL) {
+  if (explicitExternalApiUrl && !GCP_EXTERNAL_API_URLS.includes(explicitExternalApiUrl)) {
     throw new Error(
-      `External GCP smoke only accepts ${GCP_DEV_API_URL}; received ${explicitExternalApiUrl}`
+      `External GCP smoke only accepts ${GCP_EXTERNAL_API_URLS.join(", ")}; received ${explicitExternalApiUrl}`
     );
   }
 
   const clerkSecretKey = resolveEnvValue("CLERK_SECRET_KEY", fallback);
   const clerkPublishableKey = resolveEnvValue("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", fallback);
+  // Explicit opt-in to the production-Clerk sign-in-token flow (stage smoke).
+  // Not inferred from the key prefix: a misconfigured key must fail loudly, not
+  // silently fall back to the @clerk/testing path and pass without exercising it.
+  const ticketAuth = process.env.E2E_CLERK_TICKET_AUTH === "1";
+  if (ticketAuth && !clerkPublishableKey.startsWith("pk_live_")) {
+    throw new Error(
+      "E2E_CLERK_TICKET_AUTH=1 requires a production (pk_live_) Clerk publishable key"
+    );
+  }
   const sdpApiBaseUrl =
     explicitExternalApiUrl ??
     resolveEnvValue(
@@ -166,6 +181,7 @@ export function getE2EEnv(): E2EEnv {
     clerkOrgName: resolveEnvValue("E2E_CLERK_ORG_NAME", fallback, DEFAULT_CLERK_TEST_ORG_NAME),
     ...identityEnv,
     sdpApiBaseUrl,
+    ticketAuth,
     webServerEnv: {
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
       CLERK_SECRET_KEY: clerkSecretKey,

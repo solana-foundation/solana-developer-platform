@@ -18,7 +18,7 @@ describe("verifyRingsIndexed", () => {
   it("dates the observation by Photon's clock rather than this process's", async () => {
     const client = clientReturning({
       context: { slot: 9n, blockTime: 1_800_000_000n },
-      transactions: [{ eventIndex: 0, transaction: {} }],
+      transactions: [{ eventIndex: 0, transaction: { slot: 9n } }],
     });
 
     const result = await verifyRingsIndexed(client, "sig111");
@@ -29,7 +29,7 @@ describe("verifyRingsIndexed", () => {
   it("references the indexed event, not the signature it was asked about", async () => {
     const client = clientReturning({
       context: { slot: 9n, blockTime: 1_800_000_000n },
-      transactions: [{ eventIndex: 2, transaction: {} }],
+      transactions: [{ eventIndex: 2, transaction: { slot: 9n } }],
     });
 
     const result = await verifyRingsIndexed(client, "sig111");
@@ -41,7 +41,7 @@ describe("verifyRingsIndexed", () => {
   it("falls back to the local clock when the indexer reports no block time", async () => {
     const client = clientReturning({
       context: { slot: 9n, blockTime: 0n },
-      transactions: [{ eventIndex: 0, transaction: {} }],
+      transactions: [{ eventIndex: 0, transaction: { slot: 9n } }],
     });
 
     const result = await verifyRingsIndexed(client, "sig111");

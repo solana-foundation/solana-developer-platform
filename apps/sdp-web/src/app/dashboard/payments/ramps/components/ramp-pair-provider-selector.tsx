@@ -1,33 +1,37 @@
 "use client";
 
-import type { Counterparty, CounterpartyEntityType, PaymentsDashboardWallet } from "@sdp/types";
-import {
-  RAMP_PROVIDER_SUPPORT_DETAILS,
-  type RampFiatCurrency,
-} from "@sdp/types/generated/ramp-support";
+import type {
+  Counterparty,
+  CounterpartyEntityType,
+  PaymentsDashboardWallet,
+  RampProviderId,
+  SdpEnvironment,
+} from "@sdp/types";
+import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
+import type { ProviderAvailabilityEntry } from "@sdp/types/provider-access";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/modal";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
-  OFFRAMP_PAIRS,
-  ONRAMP_PAIRS,
+  offrampPairs,
+  onrampPairs,
   RAMP_PROVIDER_LOGOS,
-  RAMP_PROVIDER_OPTIONS,
   type RampDirection,
   type RampPair,
   type RampProviderOption,
   rampPairKey,
   type SelectedRampPair,
+  surfacedRampProviderOptions,
 } from "@/lib/ramps";
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
@@ -36,6 +40,7 @@ import { RampSelectionProvider } from "./ramp-selection-context";
 
 interface RampPairProviderSelectorProps {
   direction: RampDirection;
+  enabledRampProviders: readonly RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   selectedCounterparty: Counterparty | null;
   wallets: readonly PaymentsDashboardWallet[];
@@ -69,12 +74,24 @@ function getDirectionSupport(
   return RAMP_PROVIDER_SUPPORT_DETAILS[provider][direction];
 }
 
-function pairsForDirection(direction: RampDirection): readonly RampPair[] {
+/**
+ * Returns the available ramp pairs for a direction.
+ *
+ * @param direction - The ramp direction.
+ * @param environment - The dashboard environment.
+ * @param enabledRampProviders - The providers enabled for the current request.
+ * @returns The available ramp pairs.
+ */
+function pairsForDirection(
+  direction: RampDirection,
+  environment: SdpEnvironment,
+  enabledRampProviders: readonly RampProviderId[]
+): readonly RampPair[] {
   switch (direction) {
     case "onramp":
-      return ONRAMP_PAIRS;
+      return onrampPairs(environment, enabledRampProviders);
     case "offramp":
-      return OFFRAMP_PAIRS;
+      return offrampPairs(environment, enabledRampProviders);
     default: {
       const exhaustive: never = direction;
       return exhaustive;
@@ -202,6 +219,7 @@ function buildProviderExclusion(args: {
 
 export function RampPairProviderSelector({
   direction,
+  enabledRampProviders,
   rampProviderAccess,
   selectedCounterparty,
   wallets,
@@ -217,19 +235,20 @@ export function RampPairProviderSelector({
   onPairChange,
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
-  const pairs = pairsForDirection(direction);
+  const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]
   );
   const directionProviderOptions = useMemo(
     () =>
-      RAMP_PROVIDER_OPTIONS.filter(
+      surfacedRampProviderOptions(sdpEnvironment, enabledRampProviders).filter(
         (option) => Object.keys(getDirectionSupport(option.id, direction).currencies).length > 0
       ),
-    [direction]
+    [direction, enabledRampProviders, sdpEnvironment]
   );
   const providerExclusions = useMemo(
     () =>

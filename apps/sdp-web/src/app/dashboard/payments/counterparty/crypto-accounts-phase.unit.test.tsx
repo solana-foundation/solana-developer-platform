@@ -26,9 +26,7 @@ import { CryptoAccountsPhase } from "./crypto-accounts-phase";
 
 const steps = [
   { label: "Basics", title: "Basic information" },
-  { label: "Personal", title: "Personal details" },
-  { label: "Address", title: "Location" },
-  { label: "Review", title: "Review and create" },
+  { label: "Crypto wallet", title: "Add a crypto account" },
 ] as const;
 
 describe("CryptoAccountsPhase", () => {
@@ -39,17 +37,15 @@ describe("CryptoAccountsPhase", () => {
     expect(markup).toContain("data-wizard-stepper");
     expect(markup).toContain("data-wizard-scroll-region");
     expect(markup).toContain("data-wizard-actions");
-    expect(markup).toContain("Step 5 of 5");
+    expect(markup).toContain("Step 2 of 2");
     expect(markup).toContain("data-crypto-account-form");
-    expect(markup).not.toContain("h-[70vh]");
   });
 
-  it("preserves the compact self-scrolling layout when embedded in a dialog", () => {
+  it("uses a natural-height layout when embedded in a dialog", () => {
     const markup = renderToStaticMarkup(<CryptoAccountsPhase embedded steps={steps} />);
 
     expect(markup).not.toContain("data-wizard-frame");
-    expect(markup).toContain("h-[70vh]");
-    expect(markup).toContain("overflow-y-auto");
+    expect(markup).not.toContain("overflow-y-auto");
     expect(markup).toContain("data-crypto-account-form");
   });
 });

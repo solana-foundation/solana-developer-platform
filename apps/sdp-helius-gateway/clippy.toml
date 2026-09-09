@@ -1,6 +1,0 @@
-# `unwrap_used` and `expect_used` are denied in `Cargo.toml`'s `[lints.clippy]`
-# because a panic in a handler could surface key material in a message or a
-# backtrace. Tests are the opposite case: a panic IS the failure report, and
-# threading `Result` through assertions would obscure what is being asserted.
-allow-unwrap-in-tests = true
-allow-expect-in-tests = true

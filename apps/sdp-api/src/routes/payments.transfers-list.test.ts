@@ -13,6 +13,7 @@ import {
   seedCachedKey,
   seedCounterparty,
   TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
@@ -28,6 +29,7 @@ describe("Payments routes — list transfers", () => {
     id: string;
     status: string;
     signature?: string | null;
+    custodyWalletId?: string | null;
     walletId?: string;
     counterpartyId?: string | null;
     destination?: string;
@@ -45,13 +47,14 @@ describe("Payments routes — list transfers", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, counterparty_id, source_address, destination_address, token, amount, memo, type, direction, status, provider, provider_reference, signature, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, custody_wallet_id, wallet_id, counterparty_id, source_address, destination_address, token, amount, memo, type, direction, status, provider, provider_reference, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         params.id,
         TEST_ORG.id,
         TEST_PROJECT.id,
+        params.custodyWalletId === undefined ? TEST_CUSTODY_WALLET_ID : params.custodyWalletId,
         params.walletId ?? TEST_WALLET_ID,
         params.counterpartyId ?? null,
         params.source ?? TEST_SOLANA_ADDRESSES.wallet1,
@@ -135,7 +138,7 @@ describe("Payments routes — list transfers", () => {
       ]);
 
       const res = await app.request(
-        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -154,7 +157,32 @@ describe("Payments routes — list transfers", () => {
       expect(statuses).toEqual(["confirmed", "pending"]);
     });
 
-    it("does not pull on-chain history for a walletAddress the org does not own", async () => {
+    it("keeps older exact ledger rows when observed history has no matching signature", async () => {
+      await seedTransfer({
+        id: "xfr_exact_older_than_observed_window",
+        status: "finalized",
+        signature: "older-exact-signature",
+      });
+      getSignaturesForAddressMock.mockResolvedValueOnce([]);
+
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data.map((transfer) => transfer.id)).toEqual([
+        "xfr_exact_older_than_observed_window",
+      ]);
+      expect(body.meta.total).toBe(1);
+    });
+
+    it("rejects the removed walletAddress selector without pulling on-chain history", async () => {
       await seedTransfer({ id: "xfr_db_only_1", status: "pending" });
 
       const res = await app.request(
@@ -163,13 +191,13 @@ describe("Payments routes — list transfers", () => {
         env
       );
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
       expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
-    it("still pulls on-chain history for a tenant-owned walletAddress", async () => {
+    it("pulls on-chain history only for an exact wallet with explicit opt-in", async () => {
       const res = await app.request(
-        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet1}`,
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
         { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
@@ -186,7 +214,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       const res = await app.request(
-        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
         { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
@@ -300,7 +328,7 @@ describe("Payments routes — list transfers", () => {
 
       try {
         const res = await app.request(
-          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
           {
             method: "GET",
             headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -443,7 +471,7 @@ describe("Payments routes — list transfers", () => {
 
       try {
         const res = await app.request(
-          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
           {
             method: "GET",
             headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -562,7 +590,7 @@ describe("Payments routes — list transfers", () => {
 
       try {
         const res = await app.request(
-          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
           {
             method: "GET",
             headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -623,7 +651,7 @@ describe("Payments routes — list transfers", () => {
       expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
-    it("scopes database-backed wallet-address history to the resolved wallet", async () => {
+    it("scopes database-backed history to the exact wallet row", async () => {
       await seedTransfer({
         id: "xfr_address_resolved_outbound",
         status: "confirmed",
@@ -640,13 +668,14 @@ describe("Payments routes — list transfers", () => {
       await seedTransfer({
         id: "xfr_address_other_wallet",
         status: "confirmed",
+        custodyWalletId: null,
         walletId: "wal_payments_other",
         source: TEST_SOLANA_ADDRESSES.wallet2,
         destination: TEST_SOLANA_ADDRESSES.wallet3,
       });
 
       const res = await app.request(
-        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet1}&includeObserved=false`,
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=false`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -667,10 +696,11 @@ describe("Payments routes — list transfers", () => {
       expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
-    it("matches either side of an unowned address in database-backed history", async () => {
+    it("does not infer exact ownership from matching ledger addresses", async () => {
       await seedTransfer({
         id: "xfr_address_external_outbound",
         status: "confirmed",
+        custodyWalletId: null,
         walletId: "wal_external_outbound",
         source: TEST_SOLANA_ADDRESSES.wallet2,
         destination: TEST_SOLANA_ADDRESSES.wallet3,
@@ -678,6 +708,7 @@ describe("Payments routes — list transfers", () => {
       await seedTransfer({
         id: "xfr_address_external_inbound",
         status: "confirmed",
+        custodyWalletId: null,
         walletId: "wal_external_inbound",
         source: TEST_SOLANA_ADDRESSES.wallet3,
         destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -686,13 +717,14 @@ describe("Payments routes — list transfers", () => {
       await seedTransfer({
         id: "xfr_address_external_unrelated",
         status: "confirmed",
+        custodyWalletId: null,
         walletId: "wal_external_unrelated",
         source: TEST_SOLANA_ADDRESSES.wallet3,
         destination: TEST_KORA_FEE_PAYER,
       });
 
       const res = await app.request(
-        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet2}&includeObserved=false`,
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=false`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -705,24 +737,47 @@ describe("Payments routes — list transfers", () => {
         data: Array<{ id: string }>;
         meta: { total: number };
       };
-      expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
-        "xfr_address_external_inbound",
-        "xfr_address_external_outbound",
-      ]);
-      expect(body.meta.total).toBe(2);
+      expect(body.data).toEqual([]);
+      expect(body.meta.total).toBe(0);
     });
 
     it("enforces payments:read wallet grants for database-backed transfer lists", async () => {
+      const writeOnlyCustodyWalletId = "cwlt_payments_write_only";
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          writeOnlyCustodyWalletId,
+          "cust_cfg_payments_test",
+          "wal_payments_write_only",
+          TEST_SOLANA_ADDRESSES.wallet2,
+          "Write-only wallet",
+          "transfer",
+          "active"
+        )
+        .run();
       await seedTransfer({ id: "xfr_wallet_readable", status: "confirmed" });
       await seedTransfer({
         id: "xfr_wallet_write_only",
         status: "confirmed",
+        custodyWalletId: writeOnlyCustodyWalletId,
         walletId: "wal_payments_write_only",
       });
       await seedCachedKey({
         walletBindings: [
-          { walletId: TEST_WALLET_ID, permissions: ["payments:read"] },
-          { walletId: "wal_payments_write_only", permissions: ["payments:write"] },
+          {
+            walletId: TEST_WALLET_ID,
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            permissions: ["payments:read"],
+          },
+          {
+            walletId: "wal_payments_write_only",
+            custodyWalletId: writeOnlyCustodyWalletId,
+            permissions: ["payments:write"],
+          },
         ],
       });
 
@@ -739,7 +794,7 @@ describe("Payments routes — list transfers", () => {
       expect(listBody.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_readable"]);
 
       const forbiddenRes = await app.request(
-        "/v1/payments/transfers?wallet=wal_payments_write_only&includeObserved=false",
+        `/v1/payments/transfers?custodyWalletId=${writeOnlyCustodyWalletId}&includeObserved=false`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -749,10 +804,53 @@ describe("Payments routes — list transfers", () => {
       expect(forbiddenRes.status).toBe(403);
     });
 
+    it("keeps authorized legacy null-pin transfers visible to selected keys", async () => {
+      await seedTransfer({
+        id: "xfr_legacy_authorized",
+        status: "confirmed",
+        custodyWalletId: null,
+        walletId: TEST_WALLET_ID,
+      });
+      await seedTransfer({
+        id: "xfr_legacy_unauthorized",
+        status: "confirmed",
+        custodyWalletId: null,
+        walletId: "wal_legacy_unauthorized",
+      });
+      await seedCachedKey({
+        walletBindings: [
+          {
+            walletId: TEST_WALLET_ID,
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            permissions: ["payments:read"],
+          },
+        ],
+      });
+
+      const response = await app.request(
+        "/v1/payments/transfers?includeObserved=false",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: Array<{ id: string }> };
+      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_legacy_authorized"]);
+    });
+
     it("returns no rows when selected wallets grant no payments:read access", async () => {
       await seedTransfer({ id: "xfr_wallet_not_readable", status: "confirmed" });
       await seedCachedKey({
-        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+        walletBindings: [
+          {
+            walletId: TEST_WALLET_ID,
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            permissions: ["payments:write"],
+          },
+        ],
       });
 
       const res = await app.request(
@@ -779,7 +877,13 @@ describe("Payments routes — list transfers", () => {
         providerReference: "private-provider-reference",
       });
       await seedCachedKey({
-        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+        walletBindings: [
+          {
+            walletId: TEST_WALLET_ID,
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            permissions: ["payments:write"],
+          },
+        ],
       });
 
       const res = await app.request(
@@ -817,8 +921,7 @@ describe("Payments routes — list transfers", () => {
       const matchingQuery = new URLSearchParams({
         provider: "moonpay",
         providerReference: "exact-reference-42",
-        wallet: TEST_WALLET_ID,
-        walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
         search: "quarterly",
         status: "completed",
         category: "ramp",
@@ -908,10 +1011,10 @@ describe("Payments routes — list transfers", () => {
           "xfr_native_sol_pending",
         ]);
 
-        // The wallet-scoped merged path fetches non-chain rows through a
-        // separate SQL query; the filter must be normalized there as well.
+        // The wallet-scoped merged path keeps the exact persisted ledger and
+        // adds missing observations; the filter must be normalized for both.
         const walletRes = await app.request(
-          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}&token=${filter}`,
+          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&token=${filter}&includeObserved=true`,
           {
             method: "GET",
             headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -921,7 +1024,10 @@ describe("Payments routes — list transfers", () => {
 
         expect(walletRes.status).toBe(200);
         const walletBody = (await walletRes.json()) as { data: Array<{ id: string }> };
-        expect(walletBody.data.map((transfer) => transfer.id)).toEqual(["xfr_native_sol_pending"]);
+        expect(walletBody.data.map((transfer) => transfer.id).sort()).toEqual([
+          "xfr_native_sol",
+          "xfr_native_sol_pending",
+        ]);
       }
 
       for (const filter of ["USDC", "usdc", DEVNET_USDC_MINT]) {
@@ -1037,13 +1143,14 @@ describe("Payments routes — list transfers", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: Array<{ id: string; walletId: string }>;
+        data: Array<{ custodyWalletId: string | null; id: string; providerWalletId: string }>;
         meta: { total: number; page: number; pageSize: number; hasMore: boolean };
       };
       expect(body.data).toHaveLength(1);
       expect(body.data[0]).toMatchObject({
         id: "xfr_search_new",
-        walletId: TEST_WALLET_ID,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        providerWalletId: TEST_WALLET_ID,
         counterpartyId,
         counterpartyDisplayName: "MoonPay Test Counterparty",
       });
@@ -1103,7 +1210,8 @@ describe("Payments routes — list transfers", () => {
       );
 
       const query = new URLSearchParams({
-        wallet: TEST_WALLET_ID,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        includeObserved: "true",
         search: "moonpay test",
         from: "2026-01-02T20:00:00+05:00",
         to: "2026-01-03T19:00:00-05:00",
@@ -1143,7 +1251,7 @@ describe("Payments routes — list transfers", () => {
       await seedTransfer({ id: "xfr_wallet_recorded", status: "confirmed" });
 
       const res = await app.request(
-        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}&includeObserved=false`,
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=false`,
         {
           method: "GET",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -1155,6 +1263,28 @@ describe("Payments routes — list transfers", () => {
       const body = (await res.json()) as { data: Array<{ id: string }>; meta: { total: number } };
       expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_recorded"]);
       expect(body.meta.total).toBe(1);
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps exact persisted history readable after the wallet becomes inactive", async () => {
+      await seedTransfer({ id: "xfr_inactive_wallet_history", status: "confirmed" });
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+        .bind(TEST_CUSTODY_WALLET_ID)
+        .run();
+
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=false`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_inactive_wallet_history"]);
       expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
@@ -1230,7 +1360,13 @@ describe("Payments routes — list transfers", () => {
     it("enforces payments:read when getting a transfer by ID", async () => {
       await seedTransfer({ id: "xfr_single_write_only", status: "confirmed" });
       await seedCachedKey({
-        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+        walletBindings: [
+          {
+            walletId: TEST_WALLET_ID,
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            permissions: ["payments:write"],
+          },
+        ],
       });
 
       const res = await app.request(

@@ -30,6 +30,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelTransferRow {
     status: row.status as PrivateChannelTransferRow["status"],
     signature: (row.signature ?? null) as string | null,
     failure_reason: (row.failure_reason ?? null) as string | null,
+    idempotency_key: (row.idempotency_key ?? null) as string | null,
+    idempotency_fingerprint: (row.idempotency_fingerprint ?? null) as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -50,15 +52,32 @@ export function createPostgresPrivateChannelTransferRepository(
     async createTransfer(input: CreatePrivateChannelTransferInput) {
       const row = await db
         .prepare(
-          `INSERT INTO private_channel_transfers (
+          // Admission is decided by ONE statement that first locks the instance
+          // row FOR NO KEY UPDATE: a concurrent beginDraining either commits
+          // first (the lock recheck then fails and nothing is admitted) or waits
+          // behind this insert. Either way the deletion flow's in-flight count
+          // can only shrink, and deletion cannot strand a racing transfer (HOO-1011).
+          `WITH admitting_instance AS (
+               SELECT i.id
+                 FROM private_channel_instances i
+                WHERE i.id = ?
+                  AND i.is_active = TRUE
+                  AND i.draining_at IS NULL
+                  FOR NO KEY UPDATE
+             )
+             INSERT INTO private_channel_transfers (
                id, organization_id, project_id, instance_id, channel_id,
                sender_private_channel_user_id, recipient_private_channel_user_id,
                sender_wallet_id, recipient_verified_wallet_id,
-               sender, recipient, mint, amount, status
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+               sender, recipient, mint, amount, status,
+               idempotency_key, idempotency_fingerprint
+             )
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?
+               FROM admitting_instance
           RETURNING *`
         )
         .bind(
+          input.instanceId,
           generatePrivateChannelTransferId(),
           input.organizationId,
           input.projectId,
@@ -71,8 +90,39 @@ export function createPostgresPrivateChannelTransferRepository(
           input.sender,
           input.recipient,
           input.mint,
-          input.amount
+          input.amount,
+          input.idempotencyKey,
+          input.idempotencyFingerprint
         )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async countNonTerminalByInstance(instanceId: string) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS count FROM private_channel_transfers
+             WHERE instance_id = ? AND status IN ('pending', 'submitted')`
+        )
+        .bind(instanceId)
+        .first<{ count: number }>();
+      // Deletion gates on this count, so a missing or non-numeric row must not
+      // read as "nothing in flight" and clear the way for a delete (HOO-1011).
+      if (typeof row?.count !== "number") {
+        throw new Error("private_channel_transfers in-flight count returned no numeric row");
+      }
+      return row.count;
+    },
+
+    async findTransferByIdempotency(
+      scope: PrivateChannelTransferProjectScope & { idempotencyKey: string }
+    ) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM private_channel_transfers
+             WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(scope.organizationId, scope.projectId, scope.idempotencyKey)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
@@ -89,6 +139,7 @@ export function createPostgresPrivateChannelTransferRepository(
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND (?::text IS NULL OR status = ?)
+              AND (?::boolean IS NOT TRUE OR signature IS NULL)
           RETURNING *`
         )
         .bind(
@@ -97,7 +148,8 @@ export function createPostgresPrivateChannelTransferRepository(
           input.failureReason ?? null,
           input.id,
           input.expectedStatus ?? null,
-          input.expectedStatus ?? null
+          input.expectedStatus ?? null,
+          input.expectedSignatureAbsent ?? false
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
@@ -174,6 +226,7 @@ export function createPostgresPrivateChannelTransferRepository(
               AND i.is_active = TRUE
               AND pcu.organization_id = ?
               AND pcu.project_id = ?
+              AND pcu.disabled_at IS NULL
             ORDER BY (pcu.id = ?) DESC, pcu.id ASC, vw.pubkey ASC, vw.id ASC`
         )
         .bind(

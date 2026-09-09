@@ -1,7 +1,7 @@
 import type {
+  CreatePrivateChannelPrincipalRequest,
   CreatePrivateChannelRequest,
   CustodyWalletSummary,
-  InvitePrivateChannelUserRequest,
   PrivateChannelBalance,
   PrivateChannelDeposit,
   PrivateChannelDto,
@@ -13,12 +13,15 @@ import type {
   PrivateChannelInstance,
   PrivateChannelInstanceEnvelope,
   PrivateChannelInstanceOverview,
+  PrivateChannelPrincipalDto,
+  PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
-  PrivateChannelUserDto,
   PrivateChannelVerifiedWalletDto,
   PrivateChannelWithdrawal,
+  VerifyPrivateChannelWalletRequest,
 } from "@sdp/types";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface FetchPrivateChannelEventsParams {
@@ -56,6 +59,16 @@ export function fetchPrivateChannelOverview(client: SdpApiClient): Promise<{
   overview: PrivateChannelInstanceOverview;
 }> {
   return client.fetch("/v1/private-channels/instance/overview");
+}
+
+/** Read SDP's token registry combined with the connected instance's on-chain allowlist. */
+export async function fetchPrivateChannelTokenEligibility(
+  client: SdpApiClient
+): Promise<PrivateChannelTokenEligibility[]> {
+  const { tokens } = await client.fetch<{ tokens: PrivateChannelTokenEligibility[] }>(
+    "/v1/private-channels/tokens"
+  );
+  return tokens;
 }
 
 /** List channels for the active instance (newest first); ensures the default channel exists. */
@@ -123,13 +136,19 @@ export function fetchPrivateChannelDeposit(
 /**
  * Create a deposit from a custody wallet into the channel escrow. `mint` must be
  * one the instance allows; omitting it uses the instance's first allowed token.
+ *
+ * `idempotencyKey` is REQUIRED by the API and must be minted in the browser, so
+ * that a retry carries the same key and replays instead of depositing twice. See
+ * `dashboard/integrations/private-channels/value-movement-tracking.ts`.
  */
 export function createPrivateChannelDeposit(
   client: SdpApiClient,
-  body: { walletId: string; amount: string; mint?: string; recipient?: string }
+  body: { walletId: string; amount: string; mint?: string; recipient?: string },
+  idempotencyKey: string
 ): Promise<PrivateChannelDeposit> {
   return client.fetch<PrivateChannelDeposit>("/v1/private-channels/deposits", {
     method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body: JSON.stringify(body),
   });
 }
@@ -157,25 +176,20 @@ export function fetchPrivateChannelWithdrawal(
 /**
  * Create a withdrawal: burn a custody wallet's channel balance for later devnet
  * release. `mint` must be one the instance allows; omitting it uses its first.
+ *
+ * `idempotencyKey` is REQUIRED by the API. A burn cannot be undone, so a retry
+ * must carry the same key — see the deposit above.
  */
 export function createPrivateChannelWithdrawal(
   client: SdpApiClient,
-  body: { walletId: string; amount: string; mint?: string; destination?: string }
+  body: { walletId: string; amount: string; mint?: string; destination?: string },
+  idempotencyKey: string
 ): Promise<PrivateChannelWithdrawal> {
   return client.fetch<PrivateChannelWithdrawal>("/v1/private-channels/withdrawals", {
     method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body: JSON.stringify(body),
   });
-}
-
-/** The authenticated user's Private Channels member record and eligible memberships. */
-export async function fetchAuthenticatedPrivateChannelUser(
-  client: SdpApiClient
-): Promise<PrivateChannelUserDto | null> {
-  const { user } = await client.fetch<{ user: PrivateChannelUserDto | null }>(
-    "/v1/private-channels/users/me"
-  );
-  return user;
 }
 
 /** List grouped verified member wallets eligible to receive in one logical channel. */
@@ -189,7 +203,11 @@ export async function fetchPrivateChannelTransferRecipients(
   return recipients;
 }
 
-/** Create a custody-signed verified-wallet transfer in one logical channel. */
+/**
+ * Create a custody-signed verified-wallet transfer in one logical channel.
+ *
+ * `idempotencyKey` is REQUIRED by the API — see the deposit above.
+ */
 export function createPrivateChannelTransfer(
   client: SdpApiClient,
   channelId: string,
@@ -199,12 +217,14 @@ export function createPrivateChannelTransfer(
     amount: string;
     /** Must be one the instance allows; omitting it uses its first allowed token. */
     mint?: string;
-  }
+  },
+  idempotencyKey: string
 ): Promise<PrivateChannelTransfer> {
   return client.fetch<PrivateChannelTransfer>(
     `/v1/private-channels/channels/${encodeURIComponent(channelId)}/transfers`,
     {
       method: "POST",
+      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
       body: JSON.stringify(body),
     }
   );
@@ -235,60 +255,57 @@ export async function fetchPrivateChannelEventReferences(
   return references;
 }
 
-/** List workspace users (invited SDP users), each joined with channel memberships. */
-export async function fetchPrivateChannelUsers(
+/** List project-scoped Private Channels principals and their channel access. */
+export async function fetchPrivateChannelPrincipals(
   client: SdpApiClient
-): Promise<PrivateChannelUserDto[]> {
-  const { users } = await client.fetch<{ users: PrivateChannelUserDto[] }>(
-    "/v1/private-channels/users"
+): Promise<PrivateChannelPrincipalDto[]> {
+  const { principals } = await client.fetch<{ principals: PrivateChannelPrincipalDto[] }>(
+    "/v1/private-channels/principals"
   );
-  return users;
+  return principals;
 }
 
-/**
- * Invite an SDP project user to the SPC workspace. Returns the created user
- * DTO plus the invite URL (email is scaffolded — the admin can copy it).
- */
-export function invitePrivateChannelUser(
+/** Create an additional project-scoped Private Channels principal. */
+export function createPrivateChannelPrincipal(
   client: SdpApiClient,
-  body: InvitePrivateChannelUserRequest
-): Promise<{ user: PrivateChannelUserDto; inviteUrl: string }> {
-  return client.fetch<{ user: PrivateChannelUserDto; inviteUrl: string }>(
-    "/v1/private-channels/users",
+  body: CreatePrivateChannelPrincipalRequest
+): Promise<{ principal: PrivateChannelPrincipalDto }> {
+  return client.fetch<{ principal: PrivateChannelPrincipalDto }>(
+    "/v1/private-channels/principals",
     { method: "POST", body: JSON.stringify(body) }
   );
 }
 
-/** Hard-delete a workspace user (revoke). Cascades to channel memberships. */
-export function deletePrivateChannelUser(
+/** Disable a non-default principal while preserving operation history. */
+export function disablePrivateChannelPrincipal(
   client: SdpApiClient,
-  privateChannelUserId: string
+  principalId: string
 ): Promise<unknown> {
-  return client.fetch(`/v1/private-channels/users/${encodeURIComponent(privateChannelUserId)}`, {
+  return client.fetch(`/v1/private-channels/principals/${encodeURIComponent(principalId)}`, {
     method: "DELETE",
   });
 }
 
-/** Add a workspace user to a channel (idempotent). */
-export function addChannelMembership(
+/** Give a principal access to a channel (idempotent). */
+export function addPrincipalChannelMembership(
   client: SdpApiClient,
   channelId: string,
-  privateChannelUserId: string
+  principalId: string
 ): Promise<unknown> {
-  return client.fetch(
-    `/v1/private-channels/channels/${encodeURIComponent(channelId)}/memberships`,
-    { method: "POST", body: JSON.stringify({ privateChannelUserId }) }
-  );
+  return client.fetch(`/v1/private-channels/channels/${encodeURIComponent(channelId)}/principals`, {
+    method: "POST",
+    body: JSON.stringify({ principalId }),
+  });
 }
 
-/** Remove a workspace user from a channel. */
-export function removeChannelMembership(
+/** Remove a principal's access to a channel. */
+export function removePrincipalChannelMembership(
   client: SdpApiClient,
   channelId: string,
-  privateChannelUserId: string
+  principalId: string
 ): Promise<unknown> {
   return client.fetch(
-    `/v1/private-channels/channels/${encodeURIComponent(channelId)}/memberships/${encodeURIComponent(privateChannelUserId)}`,
+    `/v1/private-channels/channels/${encodeURIComponent(channelId)}/principals/${encodeURIComponent(principalId)}`,
     { method: "DELETE" }
   );
 }
@@ -353,11 +370,12 @@ export async function fetchVerifiedWallets(
  */
 export async function verifyPrivateChannelWallet(
   client: SdpApiClient,
-  walletId: string
+  walletId: string,
+  body: VerifyPrivateChannelWalletRequest = {}
 ): Promise<PrivateChannelVerifiedWalletDto> {
   const { wallet } = await client.fetch<{ wallet: PrivateChannelVerifiedWalletDto }>(
     `/v1/private-channels/wallets/${encodeURIComponent(walletId)}/verify`,
-    { method: "POST" }
+    { method: "POST", body: JSON.stringify(body) }
   );
   return wallet;
 }

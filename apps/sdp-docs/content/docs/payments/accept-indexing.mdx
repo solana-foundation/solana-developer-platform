@@ -3,7 +3,7 @@ title: Indexing and reconciliation
 description: List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
 ---
 
-`GET /v1/payments/transfers` is the workhorse for reconciliation: transfers across your organization's custody wallets, paginated, with filters for direction, status, token, wallet, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker.
+`GET /v1/payments/transfers` is the workhorse for reconciliation. By default, it returns paginated persisted transfer records across your organization's custody wallets, with filters for direction, status, token, exact `custodyWalletId`, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker. To include recent on-chain observations for one exact wallet, set `custodyWalletId` and `includeObserved=true`.
 
 ## Listing inbound transfers
 
@@ -38,10 +38,10 @@ const { data, meta } = await res.json();
 | --- | --- | --- |
 | `direction` | `inbound` \| `outbound` | Common filter. Inbound = payments to wallets you control. |
 | `status` | `pending` \| `processing` \| `confirmed` \| `finalized` \| `failed` | Scope to a single state. |
-| `wallet` | string | SDP custody wallet ID. |
-| `walletAddress` | string | Solana address (alternative to `wallet`). |
+| `custodyWalletId` | string | Exact SDP Wallet ID (`id` from `GET /v1/wallets`). |
+| `includeObserved` | boolean | Default `false`. When `true`, adds recent on-chain activity for the exact `custodyWalletId`; it cannot be used without that filter. Synthetic observed rows have `custodyWalletId: null`. |
 | `token` | string | Filter by token symbol or on-chain mint (exact match against the stored transfer's `token` value). |
-| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. **Fully honored only on the org-scoped path (no `wallet`/`walletAddress` filter).** On the wallet-scoped path the window is honored for the DB-side branch (`pending`/`processing`/`failed`), but the signature-history branch — which fetches recent on-chain signatures and returns the matching DB rows (which can be `confirmed` or `finalized` once the tracker has updated them) plus synthesized rows for signatures with no DB record (always `confirmed`, or `failed` if the on-chain transaction errored — never `finalized`) — replays the last ~200 signatures and ignores the window. For time-windowed reconciliation, prefer org-scoped. Use with offset (`2026-05-14T00:00:00Z`). |
+| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. Use with offset (`2026-05-14T00:00:00Z`). |
 | `page` | integer | Default `1`. |
 | `pageSize` | integer | Default `20`, max `100`. |
 
@@ -60,7 +60,7 @@ Customer-initiated inbound transfers do **not** populate `Transfer.memo` (memo-p
 
 The typical inbound match cycle:
 
-1. **Read** the recent inbound transfers for the relevant token, using the **org-scoped path** (no `wallet`/`walletAddress` filter) so `from`/`to` are honored:
+1. **Read** recent persisted inbound transfers for the relevant token:
    ```text title="Request"
    GET /v1/payments/transfers
      ?direction=inbound
@@ -98,8 +98,8 @@ async function reconcileTick(state: WorkerState) {
   const from = new Date(fromMs).toISOString();
   const to = new Date().toISOString();
 
-  // Use the org-scoped listing (no wallet filter) so `from`/`to` are honored;
-  // see the Query parameters table above.
+  // This lists persisted records. To discover additional recent chain activity,
+  // run the same window per exact wallet with custodyWalletId + includeObserved.
   for await (const tr of listInbound({ from, to })) {
     if (await alreadySeen(tr.id)) continue;
 

@@ -1,6 +1,8 @@
 import { SOL_MINT, type WellKnownTokenSymbol, wellKnownMint } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
+  availableTreasuryCashForWallet,
+  estimatedTreasuryApy,
   formatAllocationShare,
   heldVaultShareMints,
   summarizeTreasuryAllocation,
@@ -349,6 +351,51 @@ describe("summarizeTreasuryAllocation figures", () => {
     expect(summary.remainingShare).toBe("0.999");
     expect(formatAllocationShare(summary.deployedShare, "en")).toBe("0.1%");
     expect(formatAllocationShare(summary.remainingShare, "en")).toBe("99.9%");
+  });
+});
+
+describe("Treasury presentation figures", () => {
+  it("uses the portfolio cash classification for a single wallet", () => {
+    expect(
+      availableTreasuryCashForWallet(
+        wallet([
+          { mint: USDC_MINT, uiAmount: "25.5" },
+          { mint: SOL_MINT, uiAmount: "100" },
+        ])
+      )
+    ).toBe("25.5");
+  });
+
+  it("weights estimated APY by each open position value", () => {
+    const position = (providerReference: string, tokenValue: string) => ({
+      ...openPosition({ tokenValue }),
+      provider: "kamino",
+      providerReference,
+    });
+    expect(
+      estimatedTreasuryApy({
+        positions: [position("vault-a", "100"), position("vault-b", "300")],
+        strategies: [
+          { provider: "kamino", providerReference: "vault-a", currentApy: "0.04" },
+          { provider: "kamino", providerReference: "vault-b", currentApy: "0.08" },
+        ],
+      })
+    ).toBe("0.07");
+  });
+
+  it("keeps estimated APY unavailable when any live input is incomplete", () => {
+    expect(
+      estimatedTreasuryApy({
+        positions: [
+          {
+            ...openPosition({ tokenValue: "100" }),
+            provider: "kamino",
+            providerReference: "missing-rate",
+          },
+        ],
+        strategies: [{ provider: "kamino", providerReference: "another-vault" }],
+      })
+    ).toBeUndefined();
   });
 });
 

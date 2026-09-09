@@ -211,6 +211,75 @@ function availableStableCash(
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
+/** One wallet's available USD-stable cash, using the same classification as the portfolio total. */
+export function availableTreasuryCashForWallet(
+  wallet: TreasuryAllocationWallet
+): string | undefined {
+  return availableStableCash([wallet]);
+}
+
+export interface TreasuryRateStrategy {
+  currentApy?: string;
+  provider: string;
+  providerReference: string;
+}
+
+export interface TreasuryRatePosition extends TreasuryAllocationPosition {
+  provider: string;
+  providerReference: string;
+}
+
+/**
+ * Value-weighted APY across every open position. Missing values, rates, or
+ * catalogue matches poison the estimate so a partial portfolio never looks complete.
+ */
+export function estimatedTreasuryApy({
+  positions,
+  strategies,
+}: {
+  positions: readonly TreasuryRatePosition[] | undefined;
+  strategies: readonly TreasuryRateStrategy[] | undefined;
+}): string | undefined {
+  if (positions === undefined || strategies === undefined) return undefined;
+  const open = positions.filter(isOpenVaultPosition);
+  if (open.length === 0) return undefined;
+
+  const strategyByReference = new Map(
+    strategies.map((strategy) => [
+      JSON.stringify([strategy.provider, strategy.providerReference]),
+      strategy,
+    ])
+  );
+  const values = open.map((position) => position.tokenValue);
+  const rates = open.map(
+    (position) =>
+      strategyByReference.get(JSON.stringify([position.provider, position.providerReference]))
+        ?.currentApy
+  );
+  if (
+    values.some((value) => value === undefined || !isIntlDecimalLiteral(value)) ||
+    rates.some((rate) => rate === undefined || !isIntlDecimalLiteral(rate))
+  ) {
+    return undefined;
+  }
+
+  const validValues = values as string[];
+  const validRates = rates as string[];
+  const valueScale = Math.max(...validValues.map(decimalScale));
+  const rateScale = Math.max(...validRates.map(decimalScale));
+  let totalValue = 0n;
+  let weightedRate = 0n;
+  for (const [index, value] of validValues.entries()) {
+    const valueUnits = parseDecimalAmount(value, valueScale);
+    const rateUnits = parseDecimalAmount(validRates[index], rateScale);
+    totalValue += valueUnits;
+    weightedRate += valueUnits * rateUnits;
+  }
+  if (totalValue === 0n) return undefined;
+  const rateUnits = (weightedRate * 2n + totalValue) / (2n * totalValue);
+  return formatDecimalAmount(rateUnits, rateScale);
+}
+
 /**
  * Value deployed across the open positions given. Undefined when any open
  * position cannot be honestly valued.

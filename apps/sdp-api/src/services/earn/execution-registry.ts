@@ -1,10 +1,15 @@
 import { supportsVaultDirect, supportsVaultWithdraw } from "@sdp/earn/capabilities";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import type {
+  EarnRuntimeContext,
   EarnVaultDirectProvider,
   EarnVaultProvider,
   EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
+import {
+  assertJupiterLendNotPortfolioProvider,
+  JupiterLendVaultDirectClient,
+} from "@sdp/jupiter-lend";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import { resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -14,6 +19,11 @@ import {
   type SdpEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
+import {
+  assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
+  VedaVaultDirectClient,
+} from "@sdp/veda";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
@@ -168,20 +178,31 @@ export function resolveEarnExecutionClient(
   provider: string,
   deadline: VaultDeadline
 ): EarnVaultProvider | null {
+  // Construction stays synchronous and I/O-free for every branch. The clients
+  // await this resolver only when a chain method is invoked, so an idempotent
+  // replay can return from durable state during an RPC outage.
+  const provenRpcUrl = async (_ctx: EarnRuntimeContext, cluster: SolanaCluster) => {
+    const rpcUrl = resolveClusterRpcUrl(env, cluster);
+    await assertClusterEndpoint(env, cluster, rpcUrl);
+    return rpcUrl;
+  };
+  const runOperation = <T>(label: string, operation: (assertActive: () => void) => Promise<T>) =>
+    deadline.run(label, () => operation(() => deadline.assertActive(label)));
+
   if (provider === "kamino") {
-    // Construction remains synchronous and I/O-free. The client awaits this
-    // resolver only when a chain method is invoked, so an idempotent replay can
-    // return from durable state during an RPC outage.
-    const client = new KaminoVaultDirectClient(
-      async (_ctx, cluster) => {
-        const rpcUrl = resolveClusterRpcUrl(env, cluster);
-        await assertClusterEndpoint(env, cluster, rpcUrl);
-        return rpcUrl;
-      },
-      (label, operation) => deadline.run(label, () => operation(() => deadline.assertActive(label)))
-    );
+    const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
     assertNotPortfolioProvider(client);
-    return client;
+    return instrumentVendorPort("kamino", client);
+  }
+  if (provider === "jupiter_lend") {
+    const client = new JupiterLendVaultDirectClient(provenRpcUrl, runOperation);
+    assertJupiterLendNotPortfolioProvider(client);
+    return instrumentVendorPort("jupiter_lend", client);
+  }
+  if (provider === "veda") {
+    const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
+    assertVedaNotPortfolioProvider(client);
+    return instrumentVendorPort("veda", client);
   }
   return null;
 }

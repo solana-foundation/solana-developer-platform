@@ -4,6 +4,7 @@ export interface PaymentRecurringPaymentRow {
   id: string;
   organization_id: string;
   project_id: string;
+  source_custody_wallet_id: string | null;
   source_wallet_id: string;
   source_address: string;
   counterparty_id: string;
@@ -91,6 +92,7 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   old_subscription_id: string | null;
   new_plan_id: string | null;
   new_subscription_id: string | null;
+  new_source_custody_wallet_id: string | null;
   plan_update_signature: string | null;
   plan_creation_signature: string | null;
   authorization_setup_signature: string | null;
@@ -122,6 +124,7 @@ export interface CreatePaymentRecurringPaymentInput {
   id: string;
   organizationId: string;
   projectId: string;
+  sourceCustodyWalletId: string;
   sourceWalletId: string;
   sourceAddress: string;
   counterpartyId: string;
@@ -141,6 +144,7 @@ export interface UpdatePaymentRecurringPaymentInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
+  sourceCustodyWalletId?: string;
   sourceWalletId?: string;
   sourceAddress?: string;
   counterpartyId?: string;
@@ -241,6 +245,7 @@ export interface CreatePaymentRecurringPaymentUpdateAttemptInput {
   oldSubscriptionId: string | null;
   newPlanId: string | null;
   newSubscriptionId: string | null;
+  newSourceCustodyWalletId: string | null;
   planUpdateSignature: string | null;
   planCreationSignature: string | null;
   authorizationSetupSignature: string | null;
@@ -365,10 +370,15 @@ export interface GetLatestPaymentRecurringPaymentActivationAttemptInput {
   statuses?: PaymentRecurringPaymentActivationAttemptStatus[];
 }
 
+export interface PaymentRecurringWalletAuthorization {
+  custodyWalletIds: string[];
+  providerWalletIds: string[];
+}
+
 export interface ListPaymentRecurringPaymentsInput {
   organizationId: string;
   projectId: string;
-  sourceWalletIds?: string[];
+  walletAuthorization?: PaymentRecurringWalletAuthorization;
   status?: PaymentRecurringPaymentStatus;
   counterpartyId?: string;
   limit: number;
@@ -452,7 +462,7 @@ export interface PaymentRecurringPaymentsRepository {
     recurringPaymentId: string;
     organizationId: string;
     projectId: string;
-    sourceWalletIds?: string[];
+    walletAuthorization?: PaymentRecurringWalletAuthorization;
   }): Promise<PaymentRecurringPaymentRow | null>;
   listRecurringPayments(
     params: ListPaymentRecurringPaymentsInput

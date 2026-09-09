@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { canManageOrganizationCredentials, getAuth } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { requirePermissions, unifiedAuthMiddleware } from "./auth";
@@ -25,14 +26,13 @@ export function credentialAdminAuthMiddleware() {
  */
 export function rpcAdminAuthMiddleware() {
   const authenticate = unifiedAuthMiddleware({ allowClerk: true, allowSession: true });
-  const authorize = requirePermissions("org:admin");
 
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     await authenticate(c, async () => {
-      if (c.get("apiKey")) {
-        throw forbidden("RPC connection administration does not accept API keys");
+      if (!canManageOrganizationCredentials(getAuth(c))) {
+        throw forbidden("RPC connection administration requires an organization administrator");
       }
-      await authorize(c, next);
+      await next();
     });
   };
 }

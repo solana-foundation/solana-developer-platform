@@ -1,7 +1,10 @@
 "use client";
 
-import type { CustodyWalletSummary, PrivateChannelWithdrawal } from "@sdp/types";
-import { privateChannelTokens } from "@sdp/types";
+import type {
+  CustodyWalletSummary,
+  PrivateChannelTokenEligibility,
+  PrivateChannelWithdrawal,
+} from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useReducer, useTransition } from "react";
@@ -11,10 +14,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
+import {
+  privateChannelWithdrawalIdempotencyKeyStore,
+  privateChannelWithdrawalRequestFingerprint,
+} from "../value-movement-tracking";
 import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
 import { createWithdrawalAction } from "./actions";
 import { WithdrawProgress } from "./withdraw-progress";
@@ -48,8 +55,13 @@ function withdrawFormReducer(
   return { ...state, ...patch };
 }
 
-export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
-  const tokens = privateChannelTokens(useSolanaCluster());
+export function WithdrawForm({
+  wallets,
+  tokens,
+}: {
+  wallets: CustodyWalletSummary[];
+  tokens: PrivateChannelTokenEligibility[];
+}) {
   const [state, updateState] = useReducer(withdrawFormReducer, {
     walletId: wallets[0]?.walletId ?? "",
     mint: tokens[0]?.mint ?? "",
@@ -124,6 +136,14 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
     );
   }
 
+  if (tokens.length === 0) {
+    return (
+      <p className="text-secondary text-sm">
+        {t("DashboardPrivateChannels.common.noEnabledTokens")}
+      </p>
+    );
+  }
+
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
   // Falls back to the first token so a `mint` left over from a changed token list
@@ -136,13 +156,27 @@ export function WithdrawForm({ wallets }: { wallets: CustodyWalletSummary[] }) {
     if (getAmountError(amount)) {
       return;
     }
+    // One key per REQUEST, not per press — see the deposit form. It matters most
+    // here: the burn is irreversible, so a retry that minted a fresh key would
+    // destroy the balance a second time.
+    const requestPayload = {
+      walletId,
+      amount: amount.trim(),
+      mint: selectedToken?.mint,
+      destination: destination.trim() || undefined,
+    };
+    const fingerprint = privateChannelWithdrawalRequestFingerprint(requestPayload);
+    const idempotencyKey = privateChannelWithdrawalIdempotencyKeyStore.claim(fingerprint);
+
     startTransition(async () => {
-      const result = await createWithdrawalAction({
-        walletId,
-        amount: amount.trim(),
-        mint: selectedToken?.mint,
-        destination: destination.trim() || undefined,
-      });
+      const result = await createWithdrawalAction({ ...requestPayload, idempotencyKey });
+      applyIdempotencyKeyOutcome(
+        privateChannelWithdrawalIdempotencyKeyStore,
+        fingerprint,
+        result.ok
+          ? { ok: true, status: 200, data: { kind: "withdrawal" } }
+          : { ok: false, status: result.kind === "server" ? result.status : 400 }
+      );
       if (result.ok) {
         updateState({ withdrawal: result.withdrawal });
         toast.success(t("DashboardPrivateChannels.withdraw.submitToast"));

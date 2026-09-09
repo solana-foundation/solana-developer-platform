@@ -1,0 +1,442 @@
+{
+  "address": "FSZPGBfPWb6fUQWSwiKv8de55NabpBWgPmB6RV7kDgv9",
+  "metadata": {
+    "name": "hook_program",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "initialize_hook",
+      "discriminator": [
+        37,
+        101,
+        119,
+        255,
+        156,
+        39,
+        252,
+        232
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Authorizes the hook setup. Must be the `vault_state` PDA itself — thus the",
+            "instruction is only callable through a CPI from the Boring Vault program."
+          ],
+          "signer": true
+        },
+        {
+          "name": "share_mint",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  104,
+                  97,
+                  114,
+                  101,
+                  45,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                63,
+                208,
+                133,
+                144,
+                37,
+                230,
+                219,
+                109,
+                35,
+                98,
+                197,
+                125,
+                171,
+                66,
+                209,
+                86,
+                6,
+                59,
+                48,
+                18,
+                215,
+                19,
+                203,
+                79,
+                160,
+                166,
+                180,
+                218,
+                13,
+                62,
+                57,
+                127
+              ]
+            }
+          }
+        },
+        {
+          "name": "hook_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "extra_account_metas",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  116,
+                  114,
+                  97,
+                  45,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_state",
+          "docs": [
+            "from `vault_id`."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        },
+        {
+          "name": "lock_duration_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "compliance_check_enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "update_compliance_check",
+      "discriminator": [
+        31,
+        170,
+        163,
+        151,
+        76,
+        240,
+        73,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Must be the `vault_state` PDA itself"
+          ],
+          "signer": true
+        },
+        {
+          "name": "share_mint"
+        },
+        {
+          "name": "hook_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_state"
+        }
+      ],
+      "args": [
+        {
+          "name": "compliance_check_enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "update_lock_duration",
+      "discriminator": [
+        0,
+        52,
+        113,
+        182,
+        84,
+        135,
+        155,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Must be the `vault_state` PDA itself"
+          ],
+          "signer": true
+        },
+        {
+          "name": "share_mint"
+        },
+        {
+          "name": "hook_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "share_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_state"
+        }
+      ],
+      "args": [
+        {
+          "name": "lock_duration_seconds",
+          "type": "i64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "HookConfig",
+      "discriminator": [
+        137,
+        155,
+        101,
+        95,
+        138,
+        72,
+        8,
+        182
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "HookInitialized",
+      "discriminator": [
+        127,
+        123,
+        212,
+        103,
+        69,
+        142,
+        254,
+        152
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "TransferLockActive",
+      "msg": "Transfer lock active: shares are non-transferable during lock period"
+    },
+    {
+      "code": 6001,
+      "name": "SourceNotAllowed",
+      "msg": "Source wallet is not an allowed user"
+    },
+    {
+      "code": 6002,
+      "name": "DestinationNotAllowed",
+      "msg": "Destination wallet is not an allowed user"
+    },
+    {
+      "code": 6003,
+      "name": "NotAuthorized",
+      "msg": "Not authorized"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidVaultState",
+      "msg": "Invalid vault state"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidAllowedUser",
+      "msg": "Invalid allowed user account"
+    },
+    {
+      "code": 6006,
+      "name": "AlreadyInitialized",
+      "msg": "Extra account metas already initialized"
+    },
+    {
+      "code": 6007,
+      "name": "MathError",
+      "msg": "Math error"
+    },
+    {
+      "code": 6008,
+      "name": "ImmutableOwnerRequired",
+      "msg": "Token account must have the ImmutableOwner extension"
+    }
+  ],
+  "types": [
+    {
+      "name": "HookConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "lock_duration_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "compliance_check_enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hook_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "share_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "lock_duration_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "compliance_check_enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,8 +1,10 @@
 import type { Context, Next } from "hono";
+import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
+  resolveClerkOrganizationClaims,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
@@ -29,7 +31,8 @@ export function clerkOnboardingMiddleware() {
       throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
     }
 
-    if (!payload.org_id) {
+    const organization = resolveClerkOrganizationClaims(payload);
+    if (!organization.organizationId) {
       throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
     }
 
@@ -43,11 +46,34 @@ export function clerkOnboardingMiddleware() {
 
     c.set("clerkOnboarding", {
       clerkUserId: payload.sub,
-      clerkOrgId: payload.org_id,
-      orgSlug: payload.org_slug ?? null,
-      orgRole: payload.org_role ?? null,
+      clerkOrgId: organization.organizationId,
+      orgSlug: organization.organizationSlug,
+      orgRole: organization.organizationRole,
       email,
     });
+
+    // The Clerk-org -> organization mapping lives in an RLS-forced table
+    // (migration 0081) and must be read before a tenant identity exists, so
+    // the lookup runs under the system identity (the same boundary
+    // clerk-auth.ts draws) and the rest of the request narrows to the mapped
+    // organization. An unlinked Clerk org proceeds with the ambient
+    // no-identity context: tenant-table reads stay empty and the handlers
+    // answer linked:false / Organization not found instead of leaking anything.
+    const mapping = await runWithSystemDatabaseIdentity("http:auth", () =>
+      getDb(c.env)
+        .prepare(
+          `SELECT organization_id
+           FROM auth_organization_identities
+           WHERE provider = 'clerk' AND provider_org_id = ?`
+        )
+        .bind(organization.organizationId)
+        .first<{ organization_id: string }>()
+    );
+
+    if (mapping) {
+      await runWithTenantDatabaseIdentity({ organizationId: mapping.organization_id }, next);
+      return;
+    }
 
     await next();
   };

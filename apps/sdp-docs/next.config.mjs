@@ -31,6 +31,14 @@ const nextConfig = {
   },
   async rewrites() {
     return [
+      // Raw <img> references to public/images must use /docs/images/... paths:
+      // production traffic reaches this app through sdp-web's /docs/:path*
+      // proxy, which never forwards root-level /images requests. Map the
+      // prefixed paths back onto the public dir.
+      {
+        source: "/docs/images/:path*",
+        destination: "/images/:path*",
+      },
       // Serve /docs/:slug.md as the markdown representation of each docs page
       {
         source: "/docs/:slug*.md",

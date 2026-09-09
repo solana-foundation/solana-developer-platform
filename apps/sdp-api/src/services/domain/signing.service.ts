@@ -67,6 +67,7 @@ import {
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
+  type CustodyConfigWallet,
   type CustodyWallet,
   type CustodyWalletLookup,
   SigningRequestStorePg,
@@ -273,10 +274,10 @@ export interface SigningConfigurationsResult {
   defaultConfigId: string | null;
 }
 
-export interface CustodyWalletWithProvider extends CustodyWallet {
+export type CustodyWalletWithProvider = CustodyConfigWallet & {
   provider: SigningConfiguration["provider"];
   isDefaultProvider: boolean;
-}
+};
 
 interface ListWalletsOptions {
   provider?: SigningConfiguration["provider"];
@@ -1283,7 +1284,7 @@ export class SigningService {
       setDefault?: boolean;
       provider?: SigningConfiguration["provider"];
     }
-  ): Promise<CustodyWallet> {
+  ): Promise<CustodyConfigWallet> {
     const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
@@ -1309,7 +1310,7 @@ export class SigningService {
       cipher: this.getCustodyCipher(),
     });
 
-    let wallet: CustodyWallet;
+    let wallet: CustodyConfigWallet;
     try {
       wallet = await this.configStore.createWallet(
         config.id,

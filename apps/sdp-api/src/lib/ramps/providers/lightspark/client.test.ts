@@ -1,5 +1,4 @@
 import { LightsparkRampClient } from "@sdp/payments/ramps/providers/lightspark/client";
-import { lightsparkPayoutAccountKey } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13";
@@ -208,9 +207,11 @@ describe("LightsparkRampClient", () => {
       customerId: "Customer:cus_123",
       externalCustomerId: "cpty_123",
       destinationWalletAddress: "ExternalAccount:acc_destination_123",
-      cryptoToken: "USDC",
+      assetRail: "usdc.solana",
       fiatCurrency: "USD",
       fiatAmount: "25",
+      purposeOfPayment: "GOODS_OR_SERVICES",
+      description: "xfr_lightspark_onramp_test",
     });
 
     expect(quote.provider).toBe("lightspark");
@@ -273,9 +274,11 @@ describe("LightsparkRampClient", () => {
       externalCustomerId: "cpty_123",
       payoutAccountId: "ExternalAccount:acc_payout_123",
       sourceWalletAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
-      cryptoToken: "USDC",
+      assetRail: "usdc.solana",
       fiatCurrency: "USD",
       cryptoAmount: "25",
+      purposeOfPayment: "GOODS_OR_SERVICES",
+      description: "xfr_lightspark_offramp_test",
     });
 
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
@@ -294,7 +297,9 @@ describe("LightsparkRampClient", () => {
       },
       lockedCurrencySide: "SENDING",
       lockedCurrencyAmount: 25000000,
-      description: "SDP offramp",
+      description: "xfr_lightspark_offramp_test",
+      purposeOfPayment: "GOODS_OR_SERVICES",
+      senderCustomerInfo: { PURPOSE_OF_PAYMENT: "GOODS_OR_SERVICES" },
     });
 
     expect(quote.provider).toBe("lightspark");
@@ -341,6 +346,29 @@ describe("LightsparkRampClient", () => {
     const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
     expect(body.platformAccountId).toBe("cp_123:USD:ab12cd34ef56ab12");
     expect(account).toEqual({ id: "ExternalAccount:acc_payout_123", status: "ACTIVE" });
+  });
+
+  it("returns payment rails from an external account lookup", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "ExternalAccount:acc_payout_123",
+          status: "ACTIVE",
+          accountInfo: { paymentRails: ["ACH"] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const account = await new LightsparkRampClient().getExternalAccount(LIGHTSPARK_CONTEXT, {
+      accountId: "ExternalAccount:acc_payout_123",
+    });
+
+    expect(account).toEqual({
+      id: "ExternalAccount:acc_payout_123",
+      status: "ACTIVE",
+      accountInfo: { paymentRails: ["ACH"] },
+    });
   });
 
   it("converges on the existing payout account when Grid returns 409", async () => {
@@ -471,9 +499,11 @@ describe("LightsparkRampClient", () => {
         customerId: "Customer:cus_123",
         externalCustomerId: "counterparty_123",
         destinationWalletAddress: "ExternalAccount:acc_destination_123",
-        cryptoToken: "USDC",
+        assetRail: "usdc.solana",
         fiatCurrency: "USD",
         fiatAmount: "25",
+        purposeOfPayment: "GOODS_OR_SERVICES",
+        description: "xfr_lightspark_onramp_mismatch_test",
       })
     ).rejects.toThrow(/does not match the requested/);
   });
@@ -502,32 +532,12 @@ describe("LightsparkRampClient", () => {
         externalCustomerId: "counterparty_123",
         payoutAccountId: "ExternalAccount:acc_payout_123",
         sourceWalletAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
-        cryptoToken: "USDC",
+        assetRail: "usdc.solana",
         fiatCurrency: "USD",
         cryptoAmount: "25",
+        purposeOfPayment: "GOODS_OR_SERVICES",
+        description: "xfr_lightspark_offramp_mismatch_test",
       })
     ).rejects.toThrow(/does not match the requested/);
-  });
-
-  it("derives content-addressed payout account keys", async () => {
-    const key = await lightsparkPayoutAccountKey("USD", {
-      paymentRails: "ACH",
-      routingNumber: "021000021",
-      accountNumber: "12345678901",
-    });
-    const reordered = await lightsparkPayoutAccountKey("USD", {
-      accountNumber: " 12345678901 ",
-      routingNumber: "021000021",
-      paymentRails: "ACH",
-    });
-    const differentDetails = await lightsparkPayoutAccountKey("USD", {
-      paymentRails: "ACH",
-      routingNumber: "021000021",
-      accountNumber: "99999999999",
-    });
-
-    expect(key.startsWith("USD:")).toBe(true);
-    expect(reordered).toBe(key);
-    expect(differentDetails).not.toBe(key);
   });
 });

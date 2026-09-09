@@ -60,11 +60,10 @@ export function TokenSignerSelect({
         {label ?? t("DashboardIssuance.signer.label")}
       </span>
       {isLocked && selectedWallet ? (
-        // Locked signer: a read-only display, so leaving for the wallet page costs
-        // nothing and the link navigates in place.
+        // Keep the operation open while inspecting its signing wallet.
         <WalletIdentityBadge
-          variant="card"
-          walletLink="same-tab"
+          variant="row"
+          walletLink="new-tab"
           identity={toWalletIdentity(selectedWallet, null, {
             unresolvedAs: "custom",
             unlabeled: t("DashboardIssuance.wallet.unlabeled"),
@@ -84,19 +83,21 @@ export function TokenSignerSelect({
           ))}
         </Select>
       )}
-      <p
-        className={[
-          "text-sm leading-5",
-          isError ? "text-destructive-strong" : "text-secondary",
-        ].join(" ")}
-      >
-        {message}
-      </p>
+      {message && (!isLocked || isError || helperText !== undefined) ? (
+        <p
+          className={[
+            "text-sm leading-5",
+            isError ? "text-destructive-strong" : "text-secondary",
+          ].join(" ")}
+        >
+          {message}
+        </p>
+      ) : null}
       {showSelectionSummary && !isUnavailable && selectedWallet && !isLocked ? (
         // Summary of a live selection — the surrounding form holds unsaved state,
         // so inspecting the wallet opens beside it rather than replacing it.
         <WalletIdentityBadge
-          variant="card"
+          variant="row"
           walletLink="new-tab"
           identity={toWalletIdentity(selectedWallet, null, {
             unresolvedAs: "custom",

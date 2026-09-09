@@ -1,4 +1,4 @@
-import type { ZolanaClient } from "@heliuslabs/zolana/client";
+import { RingRpc } from "@heliuslabs/zolana/ring";
 import type { RuntimeHealth, RuntimeHealthStatus } from "@sdp/helius-rings";
 
 /** A slow answer is a red answer: the caller is a dashboard waiting on it. */
@@ -9,20 +9,27 @@ const INDEXER_HEALTH_METHOD = "getIndexerHealth";
 
 export interface RingsHealthInput {
   /**
-   * Only `getLatestBlockhash` is used. Passed as a client rather than a URL
-   * because the URL carries the Helius API key.
+   * Full Helius RPC URL, API key included. Probed over raw JSON-RPC through
+   * `fetch` rather than a Zolana client, so a caller-supplied fetch guards
+   * every probe leg. Never echoed in outcomes — see `classify`.
    */
-  readonly client: Pick<ZolanaClient, "getLatestBlockhash">;
+  readonly solanaRpcUrl: string;
   readonly indexerUrl: string;
   readonly proverUrl: string;
   readonly timeoutMs?: number;
   readonly fetch?: typeof globalThis.fetch;
 }
 
-interface ProbeOutcome {
+export interface ProbeOutcome {
   readonly status: RuntimeHealthStatus;
   /** Absent when green. Never carries a URL or an upstream error message. */
   readonly reason?: string;
+}
+
+export interface RingRpcHealthInput {
+  readonly url: string;
+  readonly timeoutMs?: number;
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -53,15 +60,49 @@ export function withHealthTimeout<T>(work: Promise<T>, timeoutMs = DEFAULT_TIMEO
   });
 }
 
-async function probeRpc(input: RingsHealthInput, timeoutMs: number): Promise<ProbeOutcome> {
+/** Probes the optional custom-ring service without exposing its URL or response. */
+export async function probeRingRpcHealth(input: RingRpcHealthInput): Promise<ProbeOutcome> {
+  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const send = input.fetch ?? globalThis.fetch;
+  const boundedFetch = ((request: RequestInfo | URL, init?: RequestInit) =>
+    send(request, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
+    })) as typeof globalThis.fetch;
+
   try {
-    // The signal is what cancels the request; the wrapper is a backstop, because
-    // the SDK is alpha and an ignored signal would hang the endpoint.
-    await withHealthTimeout(
-      input.client.getLatestBlockhash({ signal: AbortSignal.timeout(timeoutMs) }),
+    await withHealthTimeout(new RingRpc(input.url, { fetch: boundedFetch }).health(), timeoutMs);
+    return { status: "green" };
+  } catch (error) {
+    return classify(error);
+  }
+}
+
+async function probeRpc(input: RingsHealthInput, timeoutMs: number): Promise<ProbeOutcome> {
+  const send = input.fetch ?? globalThis.fetch;
+
+  try {
+    // Wrapped so the budget bounds the body read too, as in `probePhoton`.
+    return await withHealthTimeout(
+      (async () => {
+        const response = await send(input.solanaRpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash" }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+
+        if (!response.ok) {
+          return { status: "red", reason: `http ${response.status}` } as const;
+        }
+
+        const body = (await response.json()) as { error?: unknown };
+        return body.error === undefined
+          ? ({ status: "green" } as const)
+          : ({ status: "red", reason: "reported unhealthy" } as const);
+      })(),
       timeoutMs
     );
-    return { status: "green" };
   } catch (error) {
     return classify(error);
   }
@@ -86,10 +127,13 @@ async function probePhoton(input: RingsHealthInput, timeoutMs: number): Promise<
           return { status: "red", reason: `http ${response.status}` } as const;
         }
 
-        const body = (await response.json()) as { result?: unknown; error?: unknown };
+        const body = (await response.json()) as {
+          result?: unknown;
+          error?: { message?: unknown };
+        };
         if (body.error !== undefined) {
-          // Answering at all means the indexer is up; its state is what is off.
-          return { status: "amber", reason: "reported unhealthy" } as const;
+          const upstream = typeof body.error.message === "string" ? body.error.message : undefined;
+          return { status: "amber", reason: upstream ?? "reported unhealthy" } as const;
         }
 
         return body.result === "ok"
@@ -111,29 +155,57 @@ function proverHealthUrl(proverUrl: string): URL {
   return new URL("health", proverUrl.endsWith("/") ? proverUrl : `${proverUrl}/`);
 }
 
+/**
+ * The second proof a custom-ring transact carries, besides the pool transact.
+ * A prover without it still answers `/health` and still proves default-ring
+ * spends, so liveness alone reports green straight through a total ring-bound
+ * outage: every ring build fails at prove time instead.
+ *
+ * Amber rather than red, because that prover serves the default pool fine.
+ */
+const RING_PROOF_CIRCUIT = "custom-ring";
+
 async function probeProver(input: RingsHealthInput, timeoutMs: number): Promise<ProbeOutcome> {
   const send = input.fetch ?? globalThis.fetch;
 
   try {
-    const response = await withHealthTimeout(
-      send(proverHealthUrl(input.proverUrl), {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-      }),
+    // Wrapped so the budget bounds the body read too, as in `probePhoton`.
+    return await withHealthTimeout(
+      (async () => {
+        const response = await send(proverHealthUrl(input.proverUrl), {
+          method: "GET",
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+
+        if (!response.ok) {
+          return { status: "red", reason: `http ${response.status}` } as const;
+        }
+
+        let circuits: unknown;
+        try {
+          ({ circuits } = (await response.json()) as { circuits?: unknown });
+        } catch {
+          return { status: "amber", reason: "unreadable health body" } as const;
+        }
+
+        // A prover old enough to omit the list is old enough to predate the
+        // circuit, so an unlistable prover is reported the same as one missing it.
+        if (!Array.isArray(circuits)) {
+          return { status: "amber", reason: "circuits not reported" } as const;
+        }
+
+        return circuits.includes(RING_PROOF_CIRCUIT)
+          ? ({ status: "green" } as const)
+          : ({ status: "amber", reason: `no ${RING_PROOF_CIRCUIT} circuit` } as const);
+      })(),
       timeoutMs
     );
-
-    return response.ok ? { status: "green" } : { status: "red", reason: `http ${response.status}` };
   } catch (error) {
     return classify(error);
   }
 }
 
-/**
- * Reports one status per upstream the shielded flows depend on. `gateway` is
- * always green because the adapter runs in this process; it stays on the
- * response because the dashboard is written against four components.
- */
+/** Reports one status per upstream the shielded flows depend on. */
 export async function probeRingsHealth(input: RingsHealthInput): Promise<RuntimeHealth> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -158,7 +230,6 @@ export async function probeRingsHealth(input: RingsHealthInput): Promise<Runtime
     rpc: rpc.status,
     photon: photon.status,
     prover: prover.status,
-    gateway: "green",
   };
 
   return Object.keys(detail).length === 0 ? health : { ...health, detail };

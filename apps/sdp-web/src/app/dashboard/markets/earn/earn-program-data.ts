@@ -22,7 +22,6 @@ import {
   type EarnProgramWithdrawalRecord,
   type EarnProgramWithdrawalResponse,
   type EarnStrategy,
-  type EarnTerminalVaultMovementStatus,
   type EarnVaultDeposit,
   type EarnVaultDepositRecord,
   type EarnVaultDepositRequest,
@@ -38,7 +37,7 @@ import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
@@ -590,14 +589,22 @@ export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExte
   return body.data.summary;
 }
 
+const EXTERNAL_WALLET_SUMMARY_REFRESH_INTERVAL_MS =
+  process.env.NODE_ENV === "development" ? 3_000 : 60_000;
+
 /** Live customer portfolio totals refresh while the Embedded Yield dashboard is mounted. */
 export function useEarnExternalWalletPositionSummary() {
   const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-external-wallet-position-summary",
     () => fetchEarnExternalWalletPositionSummary(),
-    { refreshInterval: 60_000 }
+    { refreshInterval: EXTERNAL_WALLET_SUMMARY_REFRESH_INTERVAL_MS }
   );
-  return { summary: data, error, isLoading, refresh: () => void mutate() };
+  return {
+    summary: data,
+    error,
+    isInitialLoading: isLoading && data === undefined,
+    refresh: () => void mutate(),
+  };
 }
 
 /**
@@ -679,6 +686,8 @@ export async function createEarnVaultDeposit(
     custodyWalletId: input.custodyWalletId,
     amount: input.amount,
     ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
+    ...(input.sourceTokenMint === undefined ? {} : { sourceTokenMint: input.sourceTokenMint }),
+    ...(input.swapSlippageBps === undefined ? {} : { swapSlippageBps: input.swapSlippageBps }),
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-deposits", {
     method: "POST",
@@ -814,8 +823,8 @@ async function fetchAllVaultMovementPages<T>(input: {
  *
  * PAGES TO THE END and fails loudly rather than truncating, like
  * `fetchEarnVaultPositions` and `fetchEarnStrategies`. A silently short page
- * here is a deposit that stops being tracked: its terminal outcome is never
- * announced and the balances it changed are never refreshed.
+ * here is a deposit that stops being tracked: its terminal status is never
+ * reflected in the table and the balances it changed are never refreshed.
  *
  * `settled: false` is what makes that affordable. Asking the server for only
  * the movements that can still change keeps the result small by construction —
@@ -879,6 +888,97 @@ export async function fetchEarnVaultDepositByRequestId(
   return deposit ? { kind: "found", deposit } : { kind: "absent" };
 }
 
+const earnVaultDepositPreviewEnvelopeSchema = z.object({
+  data: z.object({
+    strategyId: z.string(),
+    /** Shares at the provider's live rate, decimal string at share scale. */
+    sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
+    shareDecimals: z.number().int().min(0).max(38),
+    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    /**
+     * SDP intends to sponsor this movement's network fee and rent. Optional
+     * for deploy skew against an older API; absent renders wallet-pays copy,
+     * the safe prior. Swap-funded deposits force wallet-pays client-side.
+     */
+    feeSponsored: z.boolean().optional(),
+  }),
+});
+
+export type EarnVaultDepositPreview = z.infer<typeof earnVaultDepositPreviewEnvelopeSchema>["data"];
+
+export type EarnVaultDepositPreviewResult =
+  | { kind: "quoted"; preview: EarnVaultDepositPreview }
+  | { kind: "unavailable" };
+
+/**
+ * What the vault would mint for this amount right now — the live rate the
+ * deposit modal derives its `minSharesOut` floor from. `unavailable` covers
+ * every failure the same way: a floor must come from a quote or not exist, so
+ * an unreadable quote DISABLES the deposit rather than falling back to
+ * arithmetic on the amount (which is only correct while the rate is 1:1).
+ */
+export async function fetchEarnVaultDepositPreview(
+  input: { strategyId: string; amount: string },
+  signal?: AbortSignal
+): Promise<EarnVaultDepositPreviewResult> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-deposit-previews",
+    {
+      method: "POST",
+      body: { strategyId: input.strategyId, amount: input.amount },
+      signal,
+    }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = earnVaultDepositPreviewEnvelopeSchema.safeParse(result.data);
+  if (!parsed.success) return { kind: "unavailable" };
+  return { kind: "quoted", preview: parsed.data.data };
+}
+
+const earnVaultWithdrawalPreviewEnvelopeSchema = z.object({
+  data: z.object({
+    positionId: z.string(),
+    /** Deposit-token amount at the provider's live rate, decimal string. */
+    assetsOut: z.string().regex(/^\d+(\.\d+)?$/),
+    assetDecimals: z.number().int().min(0).max(38),
+    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    /** Same sponsorship intent as the deposit preview; exits have no swap. */
+    feeSponsored: z.boolean().optional(),
+  }),
+});
+
+export type EarnVaultWithdrawalPreview = z.infer<
+  typeof earnVaultWithdrawalPreviewEnvelopeSchema
+>["data"];
+
+export type EarnVaultWithdrawalPreviewResult =
+  | { kind: "quoted"; preview: EarnVaultWithdrawalPreview }
+  | { kind: "unavailable" };
+
+/**
+ * What redeeming these shares would pay right now — the exit twin of
+ * `fetchEarnVaultDepositPreview`, with the same fail-closed rule: a floor must
+ * come from a quote or not exist, so an unreadable quote DISABLES the exit
+ * confirm rather than guessing a number.
+ */
+export async function fetchEarnVaultWithdrawalPreview(
+  input: { positionId: string; shares: string },
+  signal?: AbortSignal
+): Promise<EarnVaultWithdrawalPreviewResult> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-withdrawal-previews",
+    {
+      method: "POST",
+      body: { positionId: input.positionId, shares: input.shares },
+      signal,
+    }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = earnVaultWithdrawalPreviewEnvelopeSchema.safeParse(result.data);
+  if (!parsed.success) return { kind: "unavailable" };
+  return { kind: "quoted", preview: parsed.data.data };
+}
+
 /**
  * The DISCOVERY tier for in-flight deposits, mirroring `useEarnProgramWithdrawals`.
  *
@@ -912,6 +1012,93 @@ const SETTLED_VAULT_MOVEMENT_STATUSES: ReadonlySet<EarnVaultMovementStatus> = ne
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES
 );
 
+const VAULT_MOVEMENT_FAST_POLL_WINDOW_MS = 15_000;
+const VAULT_MOVEMENT_MEDIUM_POLL_WINDOW_MS = 60_000;
+const VAULT_MOVEMENT_FAST_POLL_MS = 1_000;
+const VAULT_MOVEMENT_MEDIUM_POLL_MS = 2_500;
+const VAULT_MOVEMENT_SLOW_POLL_MS = 5_000;
+const VAULT_MOVEMENT_DEDUPING_MS = 750;
+
+/**
+ * Poll aggressively while Solana is likely advancing the transaction, then
+ * back off without ever replacing the settled table content with a skeleton.
+ */
+export function earnVaultMovementRefreshInterval(input: {
+  settled: boolean;
+  startedAt: number;
+  now?: number;
+}): number {
+  if (input.settled) return 0;
+  const elapsed = Math.max(0, (input.now ?? Date.now()) - input.startedAt);
+  if (elapsed < VAULT_MOVEMENT_FAST_POLL_WINDOW_MS) return VAULT_MOVEMENT_FAST_POLL_MS;
+  if (elapsed < VAULT_MOVEMENT_MEDIUM_POLL_WINDOW_MS) return VAULT_MOVEMENT_MEDIUM_POLL_MS;
+  return VAULT_MOVEMENT_SLOW_POLL_MS;
+}
+
+function useVaultMovementPollStartedAt(movementId: string | undefined): number {
+  return useMemo(() => ({ movementId, startedAt: Date.now() }), [movementId]).startedAt;
+}
+
+function vaultMovementVersion(movement: {
+  movementId: string;
+  status: string;
+  failureReason: string | null;
+  confirmedAt: string | null;
+  settledAt?: string | null;
+}): string {
+  return [
+    movement.movementId,
+    movement.status,
+    movement.failureReason ?? "",
+    movement.confirmedAt ?? "",
+    movement.settledAt ?? "",
+  ].join(":");
+}
+
+interface WatchableVaultMovement {
+  movementId: string;
+  status: string;
+  failureReason: string | null;
+  confirmedAt: string | null;
+  settledAt?: string | null;
+}
+
+function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(input: {
+  movementId: string | undefined;
+  queryKey: readonly [string, string] | null;
+  fetchMovement: (movementId: string) => Promise<Movement | undefined>;
+  isSettled: (movement: Movement) => boolean;
+  onSettled?: (movement: Movement) => void;
+  onUpdated?: (movement: Movement) => void;
+}): Movement | undefined {
+  const { movementId, queryKey, fetchMovement, isSettled, onSettled, onUpdated } = input;
+  const reported = useRef<string | undefined>(undefined);
+  const reportedVersion = useRef<string | undefined>(undefined);
+  const pollStartedAt = useVaultMovementPollStartedAt(movementId);
+
+  const { data } = useSWR(queryKey, ([, watchedId]) => fetchMovement(watchedId), {
+    refreshInterval: (movement) =>
+      earnVaultMovementRefreshInterval({
+        settled: Boolean(movement && isSettled(movement)),
+        startedAt: pollStartedAt,
+      }),
+    dedupingInterval: VAULT_MOVEMENT_DEDUPING_MS,
+    onSuccess: (movement) => {
+      if (!movement) return;
+      const version = vaultMovementVersion(movement);
+      if (reportedVersion.current !== version) {
+        reportedVersion.current = version;
+        onUpdated?.(movement);
+      }
+      if (!isSettled(movement) || reported.current === movement.movementId) return;
+      reported.current = movement.movementId;
+      onSettled?.(movement);
+    },
+  });
+
+  return data;
+}
+
 /**
  * Whether a recorded deposit can still change, and therefore is worth watching.
  *
@@ -923,66 +1110,43 @@ export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boo
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
 }
 
-const VAULT_DEPOSIT_OUTCOME_KEYS = {
-  confirmed: "DashboardEarn.deposit.vaultOutcomeConfirmed",
-  failed: "DashboardEarn.deposit.vaultOutcomeFailed",
-} as const satisfies Record<EarnTerminalVaultMovementStatus, MessageKey>;
+function isEarnVaultDepositSettled(deposit: EarnVaultDepositRecord): boolean {
+  return SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
+}
 
 /**
- * Announce how a submitted vault deposit actually ended, and only once it has
- * ended.
+ * Watch how a submitted vault deposit actually ends, and report it to the
+ * mounted product surface exactly once.
  *
  * `POST /vault-deposits` records the signed transaction BEFORE broadcasting it,
  * so its response is a receipt for a signature, not for a holding. Between that
- * receipt and the chain there are three real outcomes — landed, rejected, or
- * the blockhash expired without it ever landing — and the every-minute
- * reconciliation sweep is the only thing that can tell them apart. This watches
- * the movement until it says one of them.
+ * receipt and the chain there are three real outcomes: landed, rejected, or
+ * the blockhash expired without it ever landing. The detail read observes the
+ * signature directly for fast feedback, while the scheduled reconciliation
+ * sweep remains the durable fallback. This watches the movement until it says
+ * one of them.
  *
- * Polls until the status is terminal (`confirmed | failed`), then announces
- * once. Passing `undefined` — nothing deposited this session — does nothing and
- * issues no requests.
+ * Polls until the status is terminal (`confirmed | failed`), then reports once.
+ * Passing `undefined` (nothing deposited this session) does nothing and
+ * issues no requests. The hook deliberately owns no toast or transient UI;
+ * Treasury renders the live state beside the affected position instead.
  *
- * `onSettled` fires once, right after the announcement, so the caller can
- * refresh the balances the deposit changed and retire the watch: a settled
- * watcher has nothing left to do, and keeping it mounted would accumulate dead
- * SWR subscriptions over a long session.
+ * `onSettled` fires once with the terminal movement so the caller can refresh
+ * the balances it changed and retire the active watch.
  */
-export function useEarnVaultDepositOutcomeToast(
+export function useEarnVaultDepositOutcome(
   movementId: string | undefined,
-  onSettled?: () => void
-): void {
-  const t = useTranslations();
-  const announced = useRef<string | undefined>(undefined);
-  const notifySettled = useEffectEvent(() => onSettled?.());
-
-  const { data } = useSWR(
-    movementId ? earnQueryKeys.vaultDeposit({ movementId }) : null,
-    // The id comes from the KEY, which only exists when it is defined — no cast,
-    // and no second place that has to stay in sync with the null guard.
-    ([, watchedId]) => fetchEarnVaultDeposit(watchedId),
-    {
-      refreshInterval: (deposit) =>
-        deposit && SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status) ? 0 : 5_000,
-      dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
-    }
-  );
-
-  useEffect(() => {
-    if (!data || !SETTLED_VAULT_MOVEMENT_STATUSES.has(data.status)) return;
-    // Once per movement: polling keeps returning the terminal read.
-    if (announced.current === data.movementId) return;
-    announced.current = data.movementId;
-
-    if (data.status === "confirmed") {
-      toast.success(t(VAULT_DEPOSIT_OUTCOME_KEYS.confirmed));
-    } else {
-      // The provider's own reason when there is one — "insufficient funds" is
-      // actionable and "the deposit failed" is not.
-      toast.error(data.failureReason || t(VAULT_DEPOSIT_OUTCOME_KEYS.failed));
-    }
-    notifySettled();
-  }, [data, t]);
+  onSettled?: (deposit: EarnVaultDepositRecord) => void,
+  onUpdated?: (deposit: EarnVaultDepositRecord) => void
+): EarnVaultDepositRecord | undefined {
+  return useEarnVaultMovementOutcome({
+    movementId,
+    queryKey: movementId ? earnQueryKeys.vaultDeposit({ movementId }) : null,
+    fetchMovement: fetchEarnVaultDeposit,
+    isSettled: isEarnVaultDepositSettled,
+    onSettled,
+    onUpdated,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,6 +1219,7 @@ export async function createEarnVaultWithdrawal(
   const body: EarnVaultWithdrawalRequest = {
     positionId: input.positionId,
     shares: input.shares,
+    ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
     method: "POST",
@@ -1184,42 +1349,27 @@ export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): 
   return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
 }
 
-const VAULT_WITHDRAWAL_OUTCOME_KEYS = {
-  finalized: "DashboardEarn.vaultWithdraw.outcomeFinalized",
-  failed: "DashboardEarn.vaultWithdraw.outcomeFailed",
-} as const satisfies Record<"finalized" | "failed", MessageKey>;
+function isEarnVaultWithdrawalSettled(withdrawal: EarnVaultWithdrawal): boolean {
+  return SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
+}
 
-/** Announce how the recorded withdrawal movement ended. */
-export function useEarnVaultWithdrawalOutcomeToast(
+/**
+ * Watch a recorded withdrawal until it settles. The caller owns the visible
+ * state so a long-running chain operation is never reduced to a toast.
+ */
+export function useEarnVaultWithdrawalOutcome(
   movementId: string | undefined,
-  onSettled?: () => void
-): void {
-  const t = useTranslations();
-  const announced = useRef<string | undefined>(undefined);
-  const notifySettled = useEffectEvent(() => onSettled?.());
-
-  const { data } = useSWR(
-    movementId ? earnQueryKeys.vaultWithdrawal({ movementId }) : null,
-    ([, watchedId]) => fetchEarnVaultWithdrawal(watchedId),
-    {
-      refreshInterval: (withdrawal) =>
-        withdrawal && SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status) ? 0 : 5_000,
-      dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
-    }
-  );
-
-  useEffect(() => {
-    if (!data || !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(data.status)) return;
-    if (announced.current === data.movementId) return;
-    announced.current = data.movementId;
-
-    if (data.status === "finalized") {
-      toast.success(t(VAULT_WITHDRAWAL_OUTCOME_KEYS.finalized));
-    } else {
-      toast.error(data.failureReason || t(VAULT_WITHDRAWAL_OUTCOME_KEYS.failed));
-    }
-    notifySettled();
-  }, [data, t]);
+  onSettled?: (withdrawal: EarnVaultWithdrawal) => void,
+  onUpdated?: (withdrawal: EarnVaultWithdrawal) => void
+): EarnVaultWithdrawal | undefined {
+  return useEarnVaultMovementOutcome({
+    movementId,
+    queryKey: movementId ? earnQueryKeys.vaultWithdrawal({ movementId }) : null,
+    fetchMovement: fetchEarnVaultWithdrawal,
+    isSettled: isEarnVaultWithdrawalSettled,
+    onSettled,
+    onUpdated,
+  });
 }
 
 export interface EarnWithdrawalPreviewInput {

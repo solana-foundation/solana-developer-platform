@@ -11,7 +11,29 @@ import { createPostgresPaymentsRepository } from "./payments.repository.postgres
 const TEST_PROJECT_ID = "prj_payments_repo_test";
 const OTHER_PROJECT_ID = "prj_payments_repo_test_other";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
+const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
 const CANCELABLE = ["pending", "awaiting_payment"] as const;
+
+async function seedExactWallet(): Promise<void> {
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO custody_configs
+         (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_payments_repo_exact', ?, NULL, 'test_payments_repo_exact', 'encrypted')
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(TEST_ORG.id)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+       VALUES (?, 'cfg_payments_repo_exact', ?, 'Source111')
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID)
+    .run();
+}
 
 /** Wipes payment_transfers and re-upserts the test organization for filter suites. */
 async function resetPaymentTransfers(): Promise<void> {
@@ -23,14 +45,26 @@ async function resetPaymentTransfers(): Promise<void> {
     )
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
     .run();
+  await seedExactWallet();
 }
 
-function transferInput(overrides: { suffix: string; token?: string; walletId?: string }) {
-  const { suffix, token = "SOL", walletId = TEST_WALLET_ID } = overrides;
+function transferInput(overrides: {
+  suffix: string;
+  token?: string;
+  custodyWalletId?: string;
+  walletId?: string;
+}) {
+  const {
+    suffix,
+    token = "SOL",
+    custodyWalletId = TEST_CUSTODY_WALLET_ID,
+    walletId = TEST_WALLET_ID,
+  } = overrides;
   return {
     id: `xfr_${suffix}`,
     organizationId: TEST_ORG.id,
     projectId: null,
+    custodyWalletId,
     walletId,
     counterpartyId: null,
     sourceAddress: `Source${suffix}`,
@@ -70,9 +104,9 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.prepare("DELETE FROM custody_scope_defaults").run();
+    await db.prepare("DELETE FROM payment_transfers").run();
     await db.prepare("DELETE FROM custody_wallets").run();
     await db.prepare("DELETE FROM custody_configs").run();
-    await db.prepare("DELETE FROM payment_transfers").run();
     await db.prepare("DELETE FROM projects").run();
 
     await db
@@ -96,6 +130,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
         .run();
     }
+    await seedExactWallet();
 
     repo = createPostgresPaymentsRepository(db);
   });
@@ -196,10 +231,27 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     });
     if (!transfer) throw new Error("Expected off-ramp transfer creation to succeed");
 
+    await expect(
+      repo.updateOnchainTransferForRamp({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        custodyWalletId: "cwlt_other",
+        walletId: TEST_WALLET_ID,
+        sourceAddress: "Sourceramp-onchain",
+        destinationAddress: depositAddress,
+        token: "SOL",
+        amount: "1",
+        initiatedByKeyId: "key_ramp_onchain",
+        updatedAt: "2026-08-31T10:00:00.000Z",
+      })
+    ).resolves.toBeNull();
+
     const updated = await repo.updateOnchainTransferForRamp({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
       projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       sourceAddress: "Sourceramp-onchain",
       destinationAddress: depositAddress,
@@ -237,6 +289,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
         projectId: null,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
         walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-occupied",
         destinationAddress: depositAddress,
@@ -433,6 +486,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       id: "xfr_idempotency_metadata",
       organizationId: TEST_ORG.id,
       projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
       sourceAddress: "Source111",
@@ -457,6 +511,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       idempotencyFingerprint: "fp-1",
     });
     expect(created?.idempotency_key).toBe("key-abc");
+    expect(created?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
 
     const found = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
@@ -673,6 +728,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const base = {
       organizationId: TEST_ORG.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
       sourceAddress: "Source111",
@@ -723,6 +779,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const base = {
       organizationId: TEST_ORG.id,
       projectId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
       sourceAddress: "Source111",
@@ -822,6 +879,8 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
 describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   const WALLET_A = "wallet_allowlist_a";
   const WALLET_B = "wallet_allowlist_b";
+  const CUSTODY_WALLET_A = "cwlt_allowlist_a";
+  const CUSTODY_WALLET_B = "cwlt_allowlist_b";
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -834,10 +893,42 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   beforeEach(resetPaymentTransfers);
 
   async function seedTwoWallets() {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_payments_exact_allowlist', ?, NULL, 'test_exact_allowlist', 'encrypted')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key)
+         VALUES
+           (?, 'cfg_payments_exact_allowlist', ?, 'Sourcea-1'),
+           (?, 'cfg_payments_exact_allowlist', ?, 'Sourceb-1')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind(CUSTODY_WALLET_A, WALLET_A, CUSTODY_WALLET_B, WALLET_B)
+      .run();
     const repo = createPostgresPaymentsRepository(getDb(env));
-    await repo.createTransfer(transferInput({ walletId: WALLET_A, suffix: "a-1" }));
-    await repo.createTransfer(transferInput({ walletId: WALLET_A, suffix: "a-2" }));
-    await repo.createTransfer(transferInput({ walletId: WALLET_B, suffix: "b-1" }));
+    await repo.createTransfer(
+      transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-1" })
+    );
+    const legacy = await repo.createTransfer(
+      transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-2" })
+    );
+    if (!legacy) throw new Error("Expected legacy transfer fixture creation to succeed");
+    await db
+      .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
+      .bind(legacy.id)
+      .run();
+    await repo.createTransfer(
+      transferInput({ custodyWalletId: CUSTODY_WALLET_B, walletId: WALLET_B, suffix: "b-1" })
+    );
     return repo;
   }
 
@@ -870,5 +961,48 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     const all = await repo.listTransfers({ ...listArgs, walletIds: undefined });
 
     expect(all.rows).toHaveLength(3);
+  });
+
+  it("filters by one exact wallet", async () => {
+    const repo = await seedTwoWallets();
+
+    const selected = await repo.listTransfers({
+      ...listArgs,
+      custodyWalletId: CUSTODY_WALLET_A,
+    });
+
+    expect(selected.rows.map((row) => row.id)).toHaveLength(1);
+    expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
+  });
+
+  it("authorizes exact rows by custody ID and legacy null rows by Provider ID", async () => {
+    const repo = await seedTwoWallets();
+
+    const authorized = await repo.listTransfers({
+      ...listArgs,
+      walletAuthorization: {
+        custodyWalletIds: [CUSTODY_WALLET_B],
+        providerWalletIds: [WALLET_A],
+      },
+    });
+    const denied = await repo.listTransfers({
+      ...listArgs,
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
+    });
+
+    expect(authorized.rows).toHaveLength(2);
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({
+        custody_wallet_id: CUSTODY_WALLET_B,
+        wallet_id: WALLET_B,
+      })
+    );
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({ custody_wallet_id: null, wallet_id: WALLET_A })
+    );
+    expect(authorized.rows).not.toContainEqual(
+      expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
+    );
+    expect(denied).toEqual({ rows: [], total: 0 });
   });
 });

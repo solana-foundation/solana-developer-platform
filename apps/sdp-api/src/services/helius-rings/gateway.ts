@@ -1,32 +1,17 @@
 import type { RingsGatewayPort, RuntimeHealth } from "@sdp/helius-rings";
 import { HeliusRingsError } from "@sdp/helius-rings";
-import { createRingsGateway } from "@sdp/helius-rings-sdk";
-import { isRingsInsecureHttpAllowed } from "@/lib/feature-flags";
+import {
+  createRingsGateway,
+  type OuterTransactionPolicyInput,
+  validateOuterTransaction as validateSdkOuterTransaction,
+} from "@sdp/helius-rings-sdk";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
+import { createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
+import { type ResolvedRingsConnection, resolveRingsConnection } from "./connection-resolver";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
-import { signRingsOuterTransaction } from "./signer-adapter";
-
-/**
- * The only file in `apps/` allowed to import `@sdp/helius-rings-sdk`: the SDK is
- * pinned to `@solana/kit` 7 and this app to 6, and two majors' branded types can
- * match structurally, so only plain strings cross this seam.
- */
-
-/** SDK config field ← environment key, so the two cannot drift apart. */
-const RINGS_UPSTREAM_ENV_KEYS = {
-  solanaRpcUrl: "HELIUS_RINGS_RPC_URL",
-  indexerUrl: "HELIUS_RINGS_INDEXER_URL",
-  proverUrl: "HELIUS_RINGS_PROVER_URL",
-} as const satisfies Record<string, keyof Env>;
-
-type RingsUpstreams = Record<keyof typeof RINGS_UPSTREAM_ENV_KEYS, string>;
-
-/** Just the variables the gateway reads, so callers need not hold a whole `Env`. */
-export type RingsUpstreamEnv = Pick<
-  Env,
-  (typeof RINGS_UPSTREAM_ENV_KEYS)[keyof typeof RINGS_UPSTREAM_ENV_KEYS]
->;
+import { signRingsMessage, signRingsOuterTransaction } from "./signer-adapter";
 
 export interface RingsGatewayTenant {
   organizationId: string;
@@ -34,49 +19,81 @@ export interface RingsGatewayTenant {
 }
 
 export interface ResolveRingsGatewayDependencies {
-  /** Test seam; production builds the SDK gateway. */
   createGateway?: typeof createRingsGateway;
   signOuterTransaction?: typeof signRingsOuterTransaction;
+  signMessage?: typeof signRingsMessage;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
+  /**
+   * Persists a ring's lookup table the moment bring-up confirms it, so a crash
+   * before the service records the result resumes by adoption instead of
+   * renting a second table. The service wires this to the project-ring repo.
+   */
+  recordRingLookupTable?: (ringProgramId: string, lookupTableAddress: string) => Promise<void>;
 }
 
 /**
- * True when every upstream the SDK needs is set. The indexing poll asks the same
- * question so a half-configured deployment does not warn once per operation.
+ * The SDK's policy input, re-exported under the service's name. The SDK type
+ * deliberately contains only strings and plain DTOs, so no Kit brand crosses
+ * the version boundary and a local mirror would only drift.
  */
-export function ringsUpstreamsConfigured(env: RingsUpstreamEnv): boolean {
-  return !("missing" in readUpstreams(env));
+export type RingsOuterTransactionPolicyInput = OuterTransactionPolicyInput;
+
+export function validateRingsOuterTransaction(
+  input: RingsOuterTransactionPolicyInput
+): Promise<void> {
+  return validateSdkOuterTransaction(input);
 }
 
-/**
- * Builds the gateway for one tenant. The tenant is fixed at construction because
- * the SDK derives shielded key material from it, and a per-call tenant could
- * derive under another organization's path.
- */
-export function resolveRingsGateway(
+export async function resolvePersistedRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
+  connectionId?: string,
+  dependencies: ResolveRingsGatewayDependencies = {}
+): Promise<RingsGatewayPort> {
+  const connection = await resolveRingsConnection({ env, ...tenant, connectionId });
+  return createConfiguredRingsGateway(env, tenant, connection, dependencies);
+}
+
+/**
+ * The fetch every tenant-controlled Rings endpoint is dialed through outside
+ * development: DNS-checked at connect time, redirects refused, so a saved
+ * hostname cannot rebind or bounce the API into a private or metadata address
+ * after passing the literal write-time check. Development returns undefined —
+ * local endpoints legitimately resolve to loopback, which the guard exists to
+ * refuse. The one leg this cannot cover is the Zolana client's own Solana RPC
+ * transport, which the library builds internally (upstream gap).
+ */
+export function ringsEgressFetch(
+  env: Env,
+  options?: { maxResponseBytes?: number }
+): typeof globalThis.fetch | undefined {
+  return env.ENVIRONMENT === "development" ? undefined : createGuardedFetch(options);
+}
+
+export function createConfiguredRingsGateway(
+  env: Env,
+  tenant: RingsGatewayTenant,
+  connection: ResolvedRingsConnection,
   dependencies: ResolveRingsGatewayDependencies = {}
 ): RingsGatewayPort {
-  const configured = readUpstreams(env);
-  if ("missing" in configured) {
-    return new UnconfiguredRingsGateway(configured.missing);
-  }
-
   const signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
+  const signMessage = dependencies.signMessage ?? signRingsMessage;
   const submitOuterTransaction = dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
   const create = dependencies.createGateway ?? createRingsGateway;
+  const recordRingLookupTable = dependencies.recordRingLookupTable;
+  const egressFetch = ringsEgressFetch(env);
 
-  return create({
-    ...configured.upstreams,
+  const gatewayConfig = {
+    solanaRpcUrl: connection.solanaRpcUrl,
+    indexerUrl: connection.indexerUrl,
+    proverUrl: connection.proverUrl,
+    ...(connection.ringRpcUrl ? { ringRpcUrl: connection.ringRpcUrl } : {}),
+    ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
+    ...(egressFetch ? { fetch: egressFetch } : {}),
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
-    // Off unless an operator says otherwise, so a production typo cannot
-    // quietly authorise plaintext.
-    allowInsecureHttp: isRingsInsecureHttpAllowed(env),
-    // The owner's Ed25519 secret stays in custody, so the SDK cannot sign the
-    // registration itself; `owner` names the key the transaction requires.
-    signTransaction: (unsignedTxBase64, owner) =>
+    allowInsecureHttp: connection.allowInsecureHttp,
+    signTransaction: (unsignedTxBase64: string, owner: string) =>
       asDomainFailure(() =>
         signOuterTransaction({
           env,
@@ -86,28 +103,48 @@ export function resolveRingsGateway(
           unsignedTxBase64,
         })
       ),
-    submitTransaction: (signedTxBase64) =>
-      asDomainFailure(() => submitOuterTransaction({ env, signedTxBase64 })),
-  });
+    signMessage: (messageBase64: string, owner: string) =>
+      asDomainFailure(() =>
+        signMessage({
+          env,
+          organizationId: tenant.organizationId,
+          projectId: tenant.projectId,
+          owner,
+          messageBase64,
+        })
+      ),
+    submitTransaction: (signedTxBase64: string) =>
+      asDomainFailure(() =>
+        submitOuterTransaction({ env, signedTxBase64, rpcUrl: connection.solanaRpcUrl })
+      ),
+  };
+  const gateway = create(gatewayConfig);
+  const port = connection.ringRpcUrl
+    ? gateway
+    : {
+        ...gateway,
+        provisionRing: () =>
+          Promise.reject(
+            new HeliusRingsError(
+              "config_error",
+              "ring bring-up needs a Ring RPC URL in the project's Helius Rings configuration"
+            )
+          ),
+      };
+  return instrumentVendorPort("helius-rings", port);
 }
 
-/**
- * What the operator is told when SDP's own signer or RPC failed. Fixed text
- * rather than the upstream message: an RPC error quotes the endpoint it failed
- * on, and this deployment's endpoint carries a Helius API key.
- */
 const ADAPTER_FAILURE_MESSAGES = {
-  signer_failed:
-    "custody could not sign the Rings registration transaction for this wallet's owner",
+  signer_failed: "custody could not sign the Rings transaction or attestation for this owner",
   submit_failed:
     "the Rings registration transaction could not be broadcast; confirm the wallet owner holds devnet SOL for the fee",
+  // Preflight rejection during provisioning: the SDK's own submit hook. Same
+  // shape reason as submit_failed here — the caller has to fix the tx before
+  // provisioning can proceed.
+  manual_reconciliation_required:
+    "the Rings registration transaction was rejected by simulation and never broadcast; verify the wallet owner's balance and reprovision",
 } as const satisfies Record<RingsAdapterError["failureCode"], string>;
 
-/**
- * Translates an adapter failure at the one boundary where SDP's signer and RPC
- * cross into the SDK: its error bridge only recognises Zolana's own classes, so
- * an untranslated `RingsAdapterError` reaches the route as an opaque 500.
- */
 async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
@@ -120,59 +157,18 @@ async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/**
- * Either every upstream value, or the names of the ones that are absent. An
- * empty string counts as absent: a `KEY=` line is an unfilled variable.
- */
-function readUpstreams(
-  env: RingsUpstreamEnv
-): { upstreams: RingsUpstreams } | { missing: string[] } {
-  const upstreams = {} as RingsUpstreams;
-  const missing: string[] = [];
-
-  for (const [field, key] of Object.entries(RINGS_UPSTREAM_ENV_KEYS) as Array<
-    [keyof RingsUpstreams, keyof RingsUpstreamEnv]
-  >) {
-    const value = (env[key] ?? "").trim();
-    if (value === "") {
-      missing.push(key);
-      continue;
-    }
-    upstreams[field] = value;
-  }
-
-  return missing.length > 0 ? { missing } : { upstreams };
-}
-
-/**
- * The gateway for a deployment with something still unset. It does not throw at
- * construction — the service is built outside `withRingsErrors`, so that would
- * 500 even the health probe — so health answers red and the rest fails closed.
- */
 export class UnconfiguredRingsGateway implements RingsGatewayPort {
-  private readonly reason: string;
+  constructor(private readonly reason = "Helius Rings setup is required for this project") {}
 
-  constructor(missingKeys: readonly string[]) {
-    this.reason = `Helius Rings is enabled but ${missingKeys.join(", ")} ${
-      missingKeys.length === 1 ? "is" : "are"
-    } not configured`;
-  }
-
-  /**
-   * Every component red with the same reason: nothing was probed, so naming the
-   * missing variables on all four is what the operator needs whichever they read.
-   */
   async probeHealth(): Promise<RuntimeHealth> {
     return {
       rpc: "red",
       photon: "red",
       prover: "red",
-      gateway: "red",
       detail: {
         rpc: this.reason,
         photon: this.reason,
         prover: this.reason,
-        gateway: this.reason,
       },
     };
   }
@@ -181,7 +177,15 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
     return this.fail();
   }
 
+  async provisionRing(): Promise<never> {
+    return this.fail();
+  }
+
   async readIdentity(): Promise<never> {
+    return this.fail();
+  }
+
+  async rekeyIdentity(): Promise<never> {
     return this.fail();
   }
 
@@ -193,18 +197,10 @@ export class UnconfiguredRingsGateway implements RingsGatewayPort {
     return this.fail();
   }
 
-  async requestProof(): Promise<never> {
-    return this.fail();
-  }
-
   async verifyIndexed(): Promise<never> {
     return this.fail();
   }
 
-  /**
-   * `config_error`, never `gateway_unavailable`: the fix is an environment edit,
-   * so a retry cannot succeed and must not be offered.
-   */
   private fail(): never {
     throw new HeliusRingsError("config_error", this.reason);
   }

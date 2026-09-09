@@ -32,9 +32,10 @@ function render(
 }
 
 describe("TokenSignerSelect", () => {
-  it("locks to an identity card showing the only wallet, without a select", () => {
+  it("shows the only wallet as a compact identity row without a select", () => {
     const markup = render([makeWallet(1)]);
-    expect(markup).toContain('data-testid="wallet-identity-card"');
+    expect(markup).toContain('href="/dashboard/wallets/wal_1"');
+    expect(markup).toContain("Wallet 1");
     expect(markup).toContain("wal_1");
     expect(markup).toContain("PubKey1");
     expect(markup).not.toContain("DashboardIssuance.signer.select");

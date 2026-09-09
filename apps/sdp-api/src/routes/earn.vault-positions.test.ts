@@ -2,7 +2,10 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+} from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -17,10 +20,16 @@ const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
     })),
   };
 });
+const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
+  vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
+);
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
+}));
+vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
+  reconcileEarnVaultMovementReadThrough,
 }));
 
 const ORG = "org_vault_positions";
@@ -518,6 +527,10 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
       createdAt: created.movement.created_at,
       confirmedAt: null,
     });
+    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: created.movement.id })
+    );
   });
 
   it("reads back the terminal state the reconciliation sweep wrote", async () => {
@@ -551,6 +564,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
     // 404, not 403: a caller who may not see the movement must not learn that
     // it exists.
     expect((await getDeposit(sibling.movement.id)).status).toBe(404);
+    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
   });
 
   it("refuses a withdrawal from the deposit path", async () => {

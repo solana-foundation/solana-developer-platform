@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createPrivateChannel, deletePrivateChannel } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
 
-const CHANNELS_PATH = "/dashboard/integrations/private-channels/channels";
+const PRIVATE_CHANNELS_PATH = "/dashboard/integrations/private-channels";
 
 export type CreateChannelResult =
   | { ok: true; channel: PrivateChannelDto }
@@ -26,7 +26,7 @@ export async function createChannelAction(input: {
       name,
       description: input.description?.trim() || undefined,
     });
-    revalidatePath(CHANNELS_PATH);
+    revalidatePath(PRIVATE_CHANNELS_PATH, "layout");
     return { ok: true, channel };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
@@ -39,7 +39,7 @@ export async function deleteChannelAction(id: string): Promise<DeleteChannelResu
   try {
     const client = await createSdpApiClient();
     await deletePrivateChannel(client, id);
-    revalidatePath(CHANNELS_PATH);
+    revalidatePath(PRIVATE_CHANNELS_PATH, "layout");
     return { ok: true };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };

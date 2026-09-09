@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   formatDisplayAmount,
@@ -70,6 +71,8 @@ export function RecurringPaymentsWorkspace({
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
   const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -117,7 +120,7 @@ export function RecurringPaymentsWorkspace({
   };
 
   const walletById = useMemo(
-    () => new Map(wallets.map((wallet) => [wallet.walletId, wallet])),
+    () => new Map(wallets.map((wallet) => [wallet.id, wallet])),
     [wallets]
   );
   const counterpartyById = useMemo(
@@ -126,9 +129,12 @@ export function RecurringPaymentsWorkspace({
   );
 
   const getWalletLabel = (recurringPayment: PaymentRecurringPayment) => {
-    const wallet = walletById.get(recurringPayment.sourceWalletId);
+    const wallet = recurringPayment.sourceCustodyWalletId
+      ? walletById.get(recurringPayment.sourceCustodyWalletId)
+      : undefined;
     return (
-      wallet?.label || (wallet ? shortenAddress(wallet.publicKey) : recurringPayment.sourceWalletId)
+      wallet?.label ||
+      (wallet ? shortenAddress(wallet.publicKey) : recurringPayment.sourceProviderWalletId)
     );
   };
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) =>
@@ -308,7 +314,9 @@ export function RecurringPaymentsWorkspace({
                 <TableBody>
                   {visibleRecurringPayments.map((recurringPayment) => {
                     const resolvedToken = getResolvedToken(recurringPayment);
-                    const wallet = walletById.get(recurringPayment.sourceWalletId);
+                    const wallet = recurringPayment.sourceCustodyWalletId
+                      ? walletById.get(recurringPayment.sourceCustodyWalletId)
+                      : undefined;
                     return (
                       <TableRow
                         key={recurringPayment.id}
@@ -358,7 +366,7 @@ export function RecurringPaymentsWorkspace({
                           )}
                         </TableCell>
                         <TableCell className="hidden text-sm text-secondary lg:table-cell">
-                          {wallet ? (
+                          {wallet && custodyEnabled ? (
                             <EntityLink
                               href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
                               onClick={(event) => event.stopPropagation()}

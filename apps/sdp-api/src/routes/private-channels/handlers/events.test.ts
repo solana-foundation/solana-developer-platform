@@ -117,10 +117,12 @@ describe("Private Channels event handlers", () => {
       .run();
     await db
       .prepare(
-        `INSERT INTO private_channel_users (id, organization_id, project_id, user_id)
-         VALUES (?, ?, ?, ?)`
+        `INSERT INTO private_channel_users
+           (id, organization_id, project_id, user_id, instance_id, name, is_default,
+            spc_user_id, spc_username, spc_credential_ciphertext)
+         VALUES (?, ?, ?, ?, ?, 'Default', true, 'spc_event_handler', 'default', 'encrypted')`
       )
-      .bind(PRIVATE_CHANNEL_USER_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID)
+      .bind(PRIVATE_CHANNEL_USER_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID, INSTANCE_ID)
       .run();
     await db
       .prepare(
@@ -283,14 +285,18 @@ describe("Private Channels event handlers", () => {
     });
   });
 
-  it("returns an empty envelope when the authenticated user has no PC user", async () => {
+  it("uses the project's default identity when the actor has no legacy PC user", async () => {
     const app = buildApp(NON_MEMBER_USER_ID);
 
     for (const path of ["/events", `/channels/${CHANNEL_ID}/events`]) {
       const res = await app.request(path, {}, env);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
-      expect(body.data).toEqual({ events: [], hasMore: false, nextCursor: null });
+      expect(body.data.events.map((event) => event.id).sort()).toEqual(
+        ["pce_member_match", "pce_admin_lifecycle"].sort()
+      );
+      expect(body.data.hasMore).toBe(false);
+      expect(body.data.nextCursor).toBeNull();
     }
   });
 });

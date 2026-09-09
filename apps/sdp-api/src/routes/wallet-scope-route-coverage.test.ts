@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import custodyRoutes from "@/routes/custody";
+import dvpRoutes from "@/routes/dvp";
 import issuanceRoutes from "@/routes/issuance";
 import paymentsRoutes from "@/routes/payments";
 
@@ -160,6 +161,34 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens/:tokenId/seize/prepare",
       "POST /tokens/:tokenId/unfreeze",
       "POST /tokens/:tokenId/unpause",
+    ]);
+  });
+
+  // Every DvP route that touches a TRADE is wallet-scoped: a trade names the
+  // custody wallet holding SDP's leg, so both the write and the reads are bound
+  // to it. Behaviour is covered in dvp.test.ts; this list exists so a new route
+  // cannot be added without someone deciding which it is.
+  it("tracks every wallet-scoped DvP route", () => {
+    // Mint inspection is the exception, and deliberately so: it reads public
+    // chain state about an address the caller already has, to answer the create
+    // form BEFORE a wallet is chosen. Scoping it to a wallet would be scoping a
+    // question that has nothing to do with one.
+    const nonWalletScopedRoutes = new Set(["GET /mints/:mint"]);
+
+    // The two party routes are scoped the same way, by a different question:
+    // the others ask who owns the trade, these ask who holds the key to the
+    // address a leg names. Both answers resolve to custody wallets this caller
+    // holds, so both are wallet-scoped, and `inbound` deliberately takes no
+    // party parameter so it cannot be used to enumerate anyone else's.
+    expect(extractRoutes(dvpRoutes).filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      "GET /trades",
+      "GET /trades/:tradeId",
+      "GET /trades/inbound",
+      "POST /trades",
+      "POST /trades/:tradeId/cancel",
+      "POST /trades/:tradeId/fund",
+      "POST /trades/:tradeId/fund-as-party",
+      "POST /trades/:tradeId/settle",
     ]);
   });
 });

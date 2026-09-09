@@ -1,4 +1,5 @@
 import { vercelAdapter } from "@flags-sdk/vercel";
+import type { RampProviderId } from "@sdp/types";
 import { dedupe, flag } from "flags/next";
 import { getSdpAuth } from "@/lib/sdp-api";
 
@@ -52,6 +53,27 @@ const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities
   };
 });
 
+/**
+ * Creates a Vercel flag for one ramp provider.
+ *
+ * @param provider - The ramp provider identifier.
+ * @param title - The provider's display title.
+ * @returns The provider feature flag definition.
+ */
+function rampProviderFlag(provider: RampProviderId, title: string) {
+  return flag<boolean, DashboardFlagEntities>({
+    key: `ramp-provider-${provider}`,
+    adapter: vercelAdapter(),
+    identify: identifyDashboardEntities,
+    defaultValue: flagDefault(`RAMP_PROVIDER_${provider.toUpperCase()}_ENABLED`, true),
+    description: `Show ${title} as a selectable provider in the onramp and offramp wizards.`,
+    options: [
+      { value: false, label: "Hidden" },
+      { value: true, label: "Enabled" },
+    ],
+  });
+}
+
 export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   key: "homepage-open-signup",
   adapter: vercelAdapter(),
@@ -67,16 +89,42 @@ export const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
-export const organizationOnboarding = flag<boolean, DashboardFlagEntities>({
-  key: "organization-onboarding",
+export const custody = flag<boolean, DashboardFlagEntities>({
+  key: "custody",
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
-  defaultValue: flagDefault("SDP_FLAG_ORGANIZATION_ONBOARDING", true),
+  defaultValue: flagDefault("CUSTODY_ENABLED", false),
   description:
-    "Require newly created organizations to choose RPC and custody providers before entering the dashboard.",
+    "Show the Custody module and Wallets workspace. Off hides every Custody and Wallets surface at once.",
   options: [
-    { value: false, label: "Skip onboarding" },
-    { value: true, label: "Require onboarding" },
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const issuance = flag<boolean, DashboardFlagEntities>({
+  key: "issuance",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("ISSUANCE_ENABLED", false),
+  description:
+    "Show the Issuance module. Off hides every Issuance surface at once, whatever the Asset Profiles flag says.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
+export const policies = flag<boolean, DashboardFlagEntities>({
+  key: "policies",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("POLICIES_ENABLED", false),
+  description:
+    "Show the Policies module, wallet-policy workspaces, and Approvals inbox. API key authoring remains available independently.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
   ],
 });
 
@@ -98,7 +146,8 @@ export const assetProfiles = flag<boolean, DashboardFlagEntities>({
   adapter: vercelAdapter(),
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", true),
-  description: "Show the Asset Profiles issuance wizard and per-token asset management workspace.",
+  description:
+    "Show the Asset Profiles issuance wizard and per-token asset management workspace. Requires the Issuance module flag.",
   options: [
     { value: false, label: "Legacy issuance" },
     { value: true, label: "Asset Profiles" },
@@ -157,6 +206,19 @@ export const markets = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const dvp = flag<boolean, DashboardFlagEntities>({
+  key: "dvp",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("DVP_ENABLED", false),
+  description:
+    "Show the DvP workspace (atomic delivery-versus-payment trades). A sub-module of Markets, so it also requires the markets flag. The swap program is deployed on devnet only, so the API answers 403 everywhere else regardless of this flag.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
 export const earn = flag<boolean, DashboardFlagEntities>({
   key: "earn",
   adapter: vercelAdapter(),
@@ -169,3 +231,11 @@ export const earn = flag<boolean, DashboardFlagEntities>({
     { value: true, label: "Enabled" },
   ],
 });
+
+export const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
+export const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
+export const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
+export const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
+export const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
+export const rampProviderMural = rampProviderFlag("mural", "Mural Pay");
+export const rampProviderStripe = rampProviderFlag("stripe", "Stripe");

@@ -24,7 +24,6 @@ import type {
   RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
-  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -39,6 +38,7 @@ import {
   type ComplianceProviderResult,
   screenAddressCompliance,
 } from "@/lib/compliance";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
@@ -305,7 +305,7 @@ function resolveWalletBalancesSnapshot(
 export async function fetchTransfers(
   options: {
     pageSize: number;
-    walletId?: string;
+    custodyWalletId?: string;
     category?: "wallet" | "ramp";
     counterpartyId?: string;
     statuses?: readonly string[];
@@ -316,7 +316,7 @@ export async function fetchTransfers(
   const transfersQuery = new URLSearchParams({
     page: "1",
     pageSize: String(options.pageSize),
-    ...(options.walletId ? { wallet: options.walletId } : {}),
+    ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
     ...(options.category ? { category: options.category } : {}),
     ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
     ...(options.statuses ? { status: options.statuses.join(",") } : {}),
@@ -378,8 +378,7 @@ export async function fetchTransferById(
 
 export async function cancelRampTransfer(
   input: {
-    provider: RampProviderId;
-    providerReference: string;
+    transferId: string;
   },
   t: Translate
 ): Promise<void> {
@@ -522,7 +521,7 @@ export async function updateWalletPolicy(
 
 export interface CreateTransferInput {
   transferId?: string;
-  source: string;
+  sourceCustodyWalletId: string;
   destination: string;
   token: Address;
   amount: string;
@@ -540,7 +539,7 @@ export async function createTransfer(
     },
     body: JSON.stringify({
       ...(input.transferId ? { transferId: input.transferId } : {}),
-      source: input.source,
+      sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
       token: input.token,
       amount: input.amount,
@@ -631,31 +630,82 @@ export interface CreateTransferBatchResult {
   transfers: TransferRecord[];
 }
 
+export type CreateTransferBatchOutcome =
+  | { kind: "submitted"; result: CreateTransferBatchResult }
+  | { kind: "approval_pending"; message: string };
+
+/**
+ * An HTTP refusal from the batch endpoint, carrying the status so the caller
+ * can decide the idempotency key's fate: a 4xx is a definitive answer and
+ * retires the key, while a 5xx or a network failure (a plain Error) keeps it —
+ * the API may have recorded the batch before the response was lost, and only
+ * a replay with the SAME key can find out without moving the money again.
+ */
+export class TransferBatchRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "TransferBatchRequestError";
+    this.status = status;
+  }
+}
+
+/** An approval hold is specifically the 202 SIGNING_PENDING contract. */
+function isSigningPendingEnvelope(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || !("error" in body)) return false;
+  const error = (body as { error?: unknown }).error;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "SIGNING_PENDING"
+  );
+}
+
+/**
+ * The caller's idempotency key is transport metadata and is never copied into
+ * the JSON body; the proxy route forwards that single header upstream.
+ */
 export async function createTransferBatch(
   input: PaymentTransferBatchRequest,
-  t: Translate
-): Promise<CreateTransferBatchResult> {
+  t: Translate,
+  idempotencyKey: string
+): Promise<CreateTransferBatchOutcome> {
   const response = await fetch("/api/dashboard/payments/transfers/batch", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body: JSON.stringify(input),
   });
-  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
   if (!response.ok) {
-    throw new Error(
+    const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+    throw new TransferBatchRequestError(
       getApiError(
         body,
         t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
-      )
+      ),
+      response.status
     );
+  }
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+  // 202 is inside `response.ok`: an approval hold is an accepted request whose
+  // execution is parked, not a refusal.
+  if (response.status === 202 && isSigningPendingEnvelope(body)) {
+    return {
+      kind: "approval_pending",
+      message: getApiError(body, t("DashboardPayments.batchSend.resultApprovalPending")),
+    };
   }
   if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
   return {
-    batch: body.data.batch,
-    recipients: body.data.recipients,
-    transfers: body.data.transfers,
+    kind: "submitted",
+    result: {
+      batch: body.data.batch,
+      recipients: body.data.recipients,
+      transfers: body.data.transfers,
+    },
   };
 }
 
@@ -744,8 +794,8 @@ type SandboxTransferSimulationInput =
         counterpartyId: string;
         amount: number;
         fiatCurrency: string;
-        cryptoToken: string;
-        destinationWallet: string;
+        assetRail: CryptoRailId;
+        destinationCustodyWalletId: string;
       };
     }
   | {
@@ -794,7 +844,7 @@ export async function runComplianceCheck(
   return {
     address,
     checkedAt: result.checkedAt,
-    providers: result.providers,
+    providers: result.providers.filter((provider) => provider.provider !== "chainalysis"),
   };
 }
 

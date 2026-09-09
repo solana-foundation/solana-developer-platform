@@ -1,92 +1,71 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { sdpApiRequest } from "@/lib/sdp-api";
-import type { CreateAssetDraftInput, CreateAssetDraftResult } from "./draft-mapping";
+import { createSdpApiClient } from "@/lib/sdp-api";
+import { fetchPaymentsWallets } from "../../payments/payments-page.data";
+import { buildDraftPayload, draftSchema } from "./draft-model";
 
-/**
- * Create an issued-token draft together with its Asset Profile in a single call.
- *
- * `POST /v1/issuance/asset-profiles` writes the token row and the profile row in
- * one DB transaction, so there is no orphan-token failure mode to recover from:
- * either both are created or neither is.
- */
-export async function createAssetDraftAction(
-  input: CreateAssetDraftInput
-): Promise<CreateAssetDraftResult> {
+export async function saveIssuanceDraft(
+  input: unknown
+): Promise<{ state: "success" | "error"; message: string; tokenId: string | null }> {
   const t = await getTranslations();
-  const { token } = input;
-
-  const payload: Record<string, unknown> = {
-    name: token.name,
-    symbol: token.symbol,
-    template: token.template,
-    requiresAllowlist: token.requiresAllowlist,
-    // Unconditional: `false` is meaningful here, and omitting it would let the
-    // API default back to `true` and grant the mint a freeze authority the
-    // issuer explicitly declined.
-    isFreezable: token.isFreezable,
-    assetCategory: input.assetCategory,
-    assetType: input.assetType,
-    issuanceMetadata: input.issuanceMetadata,
-  };
-
-  const decimals = Number.parseInt(token.decimals, 10);
-  if (Number.isInteger(decimals)) {
-    payload.decimals = decimals;
+  if (!(await assetProfiles())) {
+    return { state: "error", message: t("DashboardIssuance.draftForm.unavailable"), tokenId: null };
   }
-  if (token.description) {
-    payload.description = token.description;
-  }
-  if (token.uri) {
-    payload.uri = token.uri;
-  }
-  if (token.imageUrl) {
-    payload.imageUrl = token.imageUrl;
-  }
-  if (token.signingWalletId) {
-    payload.signingWalletId = token.signingWalletId;
-  }
-  // Absent = uncapped. buildTokenInput already drops a blank cap, and the API's
-  // decimal-string refinement would reject "".
-  if (token.maxSupply) {
-    payload.maxSupply = token.maxSupply;
-  }
-
+  const parsed = draftSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      state: "error",
+      message: t("DashboardIssuance.draftForm.invalid"),
+      tokenId: null,
+    };
+  const draft = parsed.data;
+  const isStablecoin = draft.assetClass === "stablecoin";
+  const payload = buildDraftPayload(draft);
   try {
-    const response = await sdpApiRequest("/v1/issuance/asset-profiles", {
+    const client = await createSdpApiClient();
+    const wallets = await fetchPaymentsWallets(client.request, {
+      view: "summary",
+      includeBalances: false,
+    });
+    const allowedIds = new Set((wallets.data ?? []).map((wallet) => wallet.walletId));
+    const required = isStablecoin
+      ? Object.values(draft.authorities)
+      : [draft.authorities["mint-authority"], draft.authorities["metadata-authority"]];
+    if (!wallets.ok || required.some((id) => !allowedIds.has(id))) {
+      return {
+        state: "error",
+        message: t("DashboardIssuance.draftForm.walletRequired"),
+        tokenId: null,
+      };
+    }
+    const response = await client.request("/v1/issuance/asset-profiles", {
       method: "POST",
       body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      const body = await response.text();
-      const message =
-        response.status === 403
-          ? t("DashboardIssuance.errors.assetProfilesDisabled")
-          : t("DashboardIssuance.errors.assetDraftCreateFailed", {
-              status: response.status,
-              error: parseErrorMessage(body),
-            });
-      return { state: "error", message, tokenId: null };
+      return {
+        state: "error",
+        message: parseErrorMessage(await response.text()),
+        tokenId: null,
+      };
     }
 
-    const json = (await response.json()) as {
-      data?: { token?: { id?: string } };
-    };
-    const tokenId = json?.data?.token?.id ?? null;
-
+    const body = (await response.json()) as { data?: { token?: { id?: string } } };
     revalidatePath("/dashboard/issuance");
-    return { state: "success", message: t("DashboardIssuance.errors.assetDraftCreated"), tokenId };
+    return {
+      state: "success",
+      message: t("DashboardIssuance.draftForm.saveSuccess"),
+      tokenId: body.data?.token?.id ?? null,
+    };
   } catch (error) {
     return {
       state: "error",
-      message:
-        error instanceof Error
-          ? error.message
-          : t("DashboardIssuance.errors.unableToCreateAssetDraft"),
+      message: error instanceof Error ? error.message : t("DashboardIssuance.draftForm.saveError"),
       tokenId: null,
     };
   }

@@ -31,7 +31,6 @@ function counterpartyWithBvnkRule(ruleId: string): CounterpartyRow {
     display_name: "BVNK Test Counterparty",
     provider_data: {
       bvnk: {
-        customer: { customerReference: "cust_bvnk_123", status: "VERIFIED" },
         wallets: {
           [paymentRuleKey]: {
             walletId: "wallet_bvnk_123",
@@ -56,6 +55,7 @@ describe("bvnkOnrampQuote", () => {
     const counterparty = counterpartyWithBvnkRule(ruleId);
     const input = {
       counterparty,
+      customer: { customerReference: "cust_bvnk_123", status: "VERIFIED" },
       paymentRule: {
         currency: "USDC",
         network: "SOLANA",

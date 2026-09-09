@@ -5,7 +5,8 @@ import {
 } from "@sdp/types";
 import type { PrivateChannelInstanceRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import {
   type AppContext,
   getPrivateChannelEventService,
@@ -29,6 +30,25 @@ export async function requireActiveInstance(c: AppContext): Promise<PrivateChann
   return instance;
 }
 
+/**
+ * The `Idempotency-Key` a value movement reserves against, or a 400.
+ *
+ * Required rather than optional on these three routes, matching the Earn vault
+ * money movers: the key is the ONLY thing that lets SDP tell a retry from a
+ * second intent, and every one of these routes signs and broadcasts. The
+ * app-wide middleware has already validated the header's shape when it is
+ * present, so the only failure left to report is its absence.
+ */
+export function requireIdempotencyKey(c: AppContext, noun: string): string {
+  const key = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (!key) {
+    throw badRequest(
+      `${IDEMPOTENCY_KEY_HEADER} is required for ${noun}. Send a key that stays stable across retries; without one a retried request would move funds twice.`
+    );
+  }
+  return key;
+}
+
 /** Lifecycle emit helper — same scope fields on every call-site. */
 export function emitLifecycle(
   c: AppContext,
@@ -39,16 +59,17 @@ export function emitLifecycle(
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const auth = getAuth(c);
   return getPrivateChannelEventService(c).emit({
     organizationId: instance.organization_id,
     projectId: instance.project_id,
     instanceId: instance.id,
     channelId: extra?.channelId ?? null,
-    sdpUserId: getAuth(c).userId ?? null,
+    sdpUserId: auth.userId ?? null,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE,
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
-    payload: extra?.payload ?? {},
+    payload: { ...extra?.payload, actorId: auth.id, actorType: auth.authType },
   });
 }
 
@@ -73,16 +94,17 @@ export function emitMember(
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const auth = getAuth(c);
   return getPrivateChannelEventService(c).emit({
     organizationId: scope.organizationId,
     projectId: scope.projectId,
     instanceId: scope.instanceId,
     channelId: extra?.channelId ?? null,
-    sdpUserId: getAuth(c).userId ?? null,
+    sdpUserId: auth.userId ?? null,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,
-    payload: extra?.payload ?? {},
+    payload: { ...extra?.payload, actorId: auth.id, actorType: auth.authType },
   });
 }
 
@@ -97,14 +119,15 @@ export function recordInstanceError(
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const auth = getAuth(c);
   return getPrivateChannelEventService(c).recordError({
     organizationId: instance.organization_id,
     projectId: instance.project_id,
     instanceId: instance.id,
     channelId: extra?.channelId ?? null,
-    sdpUserId: getAuth(c).userId ?? null,
+    sdpUserId: auth.userId ?? null,
     type,
-    payload: extra?.payload ?? {},
+    payload: { ...extra?.payload, actorId: auth.id, actorType: auth.authType },
     error,
   });
 }

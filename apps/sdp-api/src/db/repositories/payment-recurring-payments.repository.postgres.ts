@@ -1,4 +1,5 @@
 import type { DatabaseExecutor } from "@/db";
+import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
   ClaimPaymentRecurringPaymentLifecycleInput,
   ClaimPaymentRecurringPaymentUpdateInput,
@@ -21,6 +22,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateAttemptStage,
   PaymentRecurringPaymentUpdateEventRow,
+  PaymentRecurringWalletAuthorization,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
   UpdatePaymentRecurringPaymentCollectionInput,
@@ -33,6 +35,31 @@ import type {
 
 function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
+}
+
+function addWalletAuthorization(
+  clauses: string[],
+  values: unknown[],
+  authorization: PaymentRecurringWalletAuthorization | undefined
+): void {
+  if (!authorization) return;
+
+  const authorizationClauses: string[] = [];
+  if (authorization.custodyWalletIds.length > 0) {
+    authorizationClauses.push(
+      `source_custody_wallet_id IN (${buildInClause(authorization.custodyWalletIds.length)})`
+    );
+    values.push(...authorization.custodyWalletIds);
+  }
+  if (authorization.providerWalletIds.length > 0) {
+    authorizationClauses.push(
+      `(source_custody_wallet_id IS NULL AND source_wallet_id IN (${buildInClause(authorization.providerWalletIds.length)}))`
+    );
+    values.push(...authorization.providerWalletIds);
+  }
+  clauses.push(
+    authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
+  );
 }
 
 function mapStringArray(value: unknown): string[] {
@@ -61,6 +88,7 @@ function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringP
     id: row.id as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
+    source_custody_wallet_id: parseNullableCustodyWalletId(row.source_custody_wallet_id),
     source_wallet_id: row.source_wallet_id as string,
     source_address: row.source_address as string,
     counterparty_id: row.counterparty_id as string,
@@ -142,6 +170,7 @@ function mapUpdateAttemptRow(
     old_subscription_id: (row.old_subscription_id as string | null | undefined) ?? null,
     new_plan_id: (row.new_plan_id as string | null | undefined) ?? null,
     new_subscription_id: (row.new_subscription_id as string | null | undefined) ?? null,
+    new_source_custody_wallet_id: parseNullableCustodyWalletId(row.new_source_custody_wallet_id),
     plan_update_signature: (row.plan_update_signature as string | null | undefined) ?? null,
     plan_creation_signature: (row.plan_creation_signature as string | null | undefined) ?? null,
     authorization_setup_signature:
@@ -274,6 +303,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              id,
              organization_id,
              project_id,
+             source_custody_wallet_id,
              source_wallet_id,
              source_address,
              counterparty_id,
@@ -287,12 +317,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              created_by,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           input.id,
           input.organizationId,
           input.projectId,
+          input.sourceCustodyWalletId,
           input.sourceWalletId,
           input.sourceAddress,
           input.counterpartyId,
@@ -320,7 +351,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
-              SET source_wallet_id =
+              SET source_custody_wallet_id =
+                    CASE WHEN ?::boolean THEN ? ELSE source_custody_wallet_id END,
+                  source_wallet_id =
                     CASE WHEN ?::boolean THEN ? ELSE source_wallet_id END,
                   source_address = CASE WHEN ?::boolean THEN ? ELSE source_address END,
                   counterparty_id = CASE WHEN ?::boolean THEN ? ELSE counterparty_id END,
@@ -361,6 +394,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           RETURNING *`
         )
         .bind(
+          input.sourceCustodyWalletId !== undefined,
+          input.sourceCustodyWalletId ?? null,
           input.sourceWalletId !== undefined,
           input.sourceWalletId ?? null,
           input.sourceAddress !== undefined,
@@ -899,6 +934,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              organization_id,
              project_id,
              recurring_payment_id,
+             new_source_custody_wallet_id,
              mode,
              status,
              stage,
@@ -919,7 +955,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              created_at,
              updated_at
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              ?::text[], ?::jsonb, ?::jsonb, ?, ?, ?, ?
            )`
         )
@@ -928,6 +964,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.organizationId,
           input.projectId,
           input.recurringPaymentId,
+          input.newSourceCustodyWalletId,
           input.mode,
           input.status,
           input.stage,
@@ -1088,10 +1125,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async getRecurringPaymentById(params) {
-      if (params.sourceWalletIds?.length === 0) {
-        return null;
-      }
-
       const clauses = ["id = ?", "organization_id = ?", "project_id = ?"];
       const values: unknown[] = [
         params.recurringPaymentId,
@@ -1099,10 +1132,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         params.projectId,
       ];
 
-      if (params.sourceWalletIds?.length) {
-        clauses.push(`source_wallet_id IN (${buildInClause(params.sourceWalletIds.length)})`);
-        values.push(...params.sourceWalletIds);
-      }
+      addWalletAuthorization(clauses, values, params.walletAuthorization);
 
       const row = await db
         .prepare(
@@ -1128,10 +1158,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         clauses.push("counterparty_id = ?");
         values.push(params.counterpartyId);
       }
-      if (params.sourceWalletIds?.length) {
-        clauses.push(`source_wallet_id IN (${buildInClause(params.sourceWalletIds.length)})`);
-        values.push(...params.sourceWalletIds);
-      }
+      addWalletAuthorization(clauses, values, params.walletAuthorization);
 
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([

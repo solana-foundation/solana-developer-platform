@@ -1,7 +1,0 @@
-# Matches helius-labs/zolana's own pin. Deliberate: this is the toolchain
-# upstream tests against, so a compile failure here is never a toolchain
-# difference we have to rule out first.
-[toolchain]
-channel = "1.97.0"
-components = ["clippy", "rustfmt"]
-profile = "minimal"

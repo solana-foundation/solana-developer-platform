@@ -2,16 +2,16 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   type PrivateChannelEventListEnvelope,
+  type PrivateChannelPrincipalDto,
   type PrivateChannelTransfer,
   type PrivateChannelTransferRecipientDto,
-  type PrivateChannelUserDto,
 } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import {
   createPrivateChannelTransfer,
-  fetchAuthenticatedPrivateChannelUser,
   fetchPrivateChannelEvents,
+  fetchPrivateChannelPrincipals,
   fetchPrivateChannelTransferRecipients,
 } from "./private-channels";
 
@@ -22,14 +22,13 @@ function createClient(response: unknown): SdpApiClient {
   };
 }
 
-const member: PrivateChannelUserDto = {
+const principal: PrivateChannelPrincipalDto = {
   id: "pcu_sender",
-  userId: "user_sender",
-  email: "sender@example.com",
-  name: "Sender",
-  projectRole: null,
+  name: "Default",
+  isDefault: true,
+  status: "active",
   verifiedWalletCount: 1,
-  invitedAt: "2026-07-28T00:00:00.000Z",
+  createdAt: "2026-07-28T00:00:00.000Z",
   channels: [
     {
       id: "channel_alpha",
@@ -74,17 +73,11 @@ const eventEnvelope: PrivateChannelEventListEnvelope = {
 };
 
 describe("private-channel transfer API helpers", () => {
-  it("returns the authenticated member and their eligible channels", async () => {
-    const client = createClient({ user: member });
+  it("returns project principals and their eligible channels", async () => {
+    const client = createClient({ principals: [principal] });
 
-    await expect(fetchAuthenticatedPrivateChannelUser(client)).resolves.toEqual(member);
-    expect(client.fetch).toHaveBeenCalledWith("/v1/private-channels/users/me");
-  });
-
-  it("returns null when the authenticated user is not a private-channel member", async () => {
-    const client = createClient({ user: null });
-
-    await expect(fetchAuthenticatedPrivateChannelUser(client)).resolves.toBeNull();
+    await expect(fetchPrivateChannelPrincipals(client)).resolves.toEqual([principal]);
+    expect(client.fetch).toHaveBeenCalledWith("/v1/private-channels/principals");
   });
 
   it("loads grouped verified recipients for the selected channel", async () => {
@@ -102,16 +95,23 @@ describe("private-channel transfer API helpers", () => {
     const client = createClient(transfer);
 
     await expect(
-      createPrivateChannelTransfer(client, "channel/alpha", {
-        walletId: "wallet_sender",
-        recipientVerifiedWalletId: "pcvw_recipient",
-        amount: "1.25",
-      })
+      createPrivateChannelTransfer(
+        client,
+        "channel/alpha",
+        {
+          walletId: "wallet_sender",
+          recipientVerifiedWalletId: "pcvw_recipient",
+          amount: "1.25",
+        },
+        "idem_transfer_unit"
+      )
     ).resolves.toEqual(transfer);
     expect(client.fetch).toHaveBeenCalledWith(
       "/v1/private-channels/channels/channel%2Falpha/transfers",
       {
         method: "POST",
+        // The reservation rides as a header; the body stays the request itself.
+        headers: { "Idempotency-Key": "idem_transfer_unit" },
         body: JSON.stringify({
           walletId: "wallet_sender",
           recipientVerifiedWalletId: "pcvw_recipient",

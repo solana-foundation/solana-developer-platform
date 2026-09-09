@@ -1,56 +1,125 @@
 "use client";
 
-import { TriangleAlert } from "lucide-react";
+import { ChevronDown, TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Select, SelectItem } from "@/components/ui/select";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
-import { PERMISSION_ROW_ICONS, TokenSettingsSection } from "../../token-settings-section";
+import { shortenAddress, toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
+import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
+import { getSignerWalletOptionLabel } from "../../token-management-workspace.utils";
+import { PERMISSION_ROW_ICONS } from "../../token-settings-section";
+import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
 
 export function PermissionsTab({
   ops,
+  form,
   canManageTokenAdmin,
 }: {
   ops: TokenOperations;
+  form: AssetProfileForm;
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
-
+  const copy = {
+    "mint-authority": [
+      t("DashboardIssuance.simplified.mintPermission"),
+      t("DashboardIssuance.simplified.mintPermissionHint"),
+    ],
+    "freeze-authority": [
+      t("DashboardIssuance.simplified.freezePermission"),
+      t("DashboardIssuance.simplified.freezePermissionHint"),
+    ],
+    "metadata-authority": [
+      t("DashboardIssuance.simplified.metadataPermission"),
+      t("DashboardIssuance.simplified.metadataPermissionHint"),
+    ],
+    "permanent-delegate": [
+      t("DashboardIssuance.simplified.recoveryPermission"),
+      t("DashboardIssuance.simplified.recoveryPermissionHint"),
+    ],
+  };
   return (
-    <div className="space-y-5">
+    <div className="w-full space-y-5">
       {ops.authoritySummary.hasExternal ? <ExternalAuthorityWarning ops={ops} /> : null}
-      <div className="space-y-3">
-        <SectionHeading
-          title={t("DashboardIssuance.management.permissions")}
-          description={t("DashboardIssuance.management.permissionsDescription")}
-        />
-        <TokenSettingsSection
-          mode="permissions"
-          permissionRows={ops.permissionRows}
-          extensionRows={ops.extensionRows}
-          authorityWallets={ops.authorityWallets}
-          showTitle={false}
-          canEditAuthorities={!ops.canDeployToken && canManageTokenAdmin}
-          onCopy={ops.handleCopy}
-          onEditAuthority={ops.handleAuthorityModalOpen}
-        />
-      </div>
-      <div className="space-y-3 pt-2">
-        <SectionHeading
-          title={t("DashboardIssuance.management.extensions")}
-          description={t("DashboardIssuance.management.extensionsDescription")}
-        />
-        <TokenSettingsSection
-          mode="extensions"
-          permissionRows={ops.permissionRows}
-          extensionRows={ops.extensionRows}
-          authorityWallets={ops.authorityWallets}
-          showTitle={false}
-          canEditAuthorities={false}
-          onCopy={ops.handleCopy}
-          onEditAuthority={ops.handleAuthorityModalOpen}
-        />
-      </div>
+      {ops.authorityWalletsLoading ? (
+        <div aria-busy="true" className="divide-y divide-border-subtle">
+          {ops.permissionRows.map((row) => (
+            <div key={row.id} className="flex flex-wrap items-center justify-between gap-4 py-6">
+              <SkeletonBlock className="h-5 w-52" />
+              <SkeletonBlock className="h-10 w-48 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : ops.canDeployToken ? (
+        <div className="w-full space-y-4">
+          {ops.permissionRows.map((row) => (
+            <div
+              key={row.id}
+              className="grid items-center gap-3 border-b border-border-subtle py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)]"
+            >
+              <p className="text-sm font-medium text-primary">{copy[row.id][0]}</p>
+              <Select
+                ariaLabel={copy[row.id][0]}
+                placeholder={t("DashboardIssuance.signer.select")}
+                value={
+                  form.draft.authorityWalletIds?.[row.id] ||
+                  form.draft.signingWalletId ||
+                  ops.authorityWallets[0]?.walletId ||
+                  ""
+                }
+                disabled={!canManageTokenAdmin || form.saving || !ops.authorityWallets.length}
+                onValueChange={(value) => {
+                  if (value)
+                    form.updateDraft({
+                      ...(row.id === "mint-authority" ? { signingWalletId: value } : {}),
+                      authorityWalletIds: { ...form.draft.authorityWalletIds, [row.id]: value },
+                    });
+                }}
+              >
+                {ops.authorityWallets.map((wallet) => (
+                  <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                    {getSignerWalletOptionLabel(wallet, t)}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="divide-y divide-border-subtle">
+          {ops.permissionRows.map((row) => {
+            const wallet = ops.authorityWallets.find((wallet) => wallet.publicKey === row.value);
+            return (
+              <div
+                key={row.id}
+                data-testid={`permission-row-${row.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <p className="text-sm text-primary">{copy[row.id][0]}</p>
+                <TokenDisabledActionTooltip reason={row.editDisabledReason}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    iconRight={row.value ? <ChevronDown className="size-4" /> : undefined}
+                    disabled={
+                      !canManageTokenAdmin || ops.isPending || Boolean(row.editDisabledReason)
+                    }
+                    onClick={() => ops.handleAuthorityModalOpen(row)}
+                    aria-label={`${copy[row.id][0]} ${wallet?.label || (row.value ? shortenAddress(row.value) : t("DashboardIssuance.wallet.none"))}`}
+                  >
+                    {wallet?.label ||
+                      (row.value ? shortenAddress(row.value) : t("DashboardIssuance.wallet.none"))}
+                  </Button>
+                </TokenDisabledActionTooltip>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -63,6 +132,8 @@ export function PermissionsTab({
  */
 function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
   const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
   const externalRows = ops.permissionRows.filter((row) => row.controlStatus === "external");
   const custodyWallet = ops.authorityWallets[0] ?? null;
 
@@ -113,24 +184,17 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
         ) : (
           <p className="text-xs text-warning">
             {t("DashboardIssuance.permissions.externalRemediationNoWallet")}{" "}
-            <Link href="/dashboard/wallets/setup" className="font-medium underline">
-              {t("DashboardIssuance.permissions.createWallet")}
-            </Link>
+            {custodyEnabled ? (
+              <Link href="/dashboard/wallets/setup" className="font-medium underline">
+                {t("DashboardIssuance.permissions.createWallet")}
+              </Link>
+            ) : null}
           </p>
         )}
         <p className="mt-2 text-xs text-warning">
           {t("DashboardIssuance.permissions.externalRemediationNote")}
         </p>
       </div>
-    </div>
-  );
-}
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div>
-      <p className="text-base font-medium text-primary">{title}</p>
-      <p className="mt-0.5 text-sm text-tertiary">{description}</p>
     </div>
   );
 }

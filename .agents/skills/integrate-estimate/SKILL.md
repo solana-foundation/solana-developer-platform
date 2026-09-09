@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 An estimate is a rate preview: "how much USDC for 100 EUR?" It hits the provider's live rate API and nothing else — no counterparty, no wallet, no DB. That makes it the first capability to build: if `estimateOnramp` works, your `register-provider` config reader and credentials are correct.
 
-Choose the closest implementation in `packages/sdp-payments/src/ramps/providers/`: Lightspark for decimal/minor-unit conversion, MoonPay for hosted-provider quote APIs, Stripe for on-ramp-only support, or BVNK for POST-based estimates.
+Choose the closest implementation in `packages/sdp-payments/src/ramps/providers/` — GET- and POST-based estimate APIs, hosted-provider quote APIs, minor-unit conversion, and single-direction support are all represented.
 
 ## Contract
 
@@ -38,7 +38,7 @@ Output `PaymentRampEstimate` (`@sdp/types`, `packages/sdp-types/src/payments.ts`
 
 `ctx` is `{ env, mode }` — read your config with the mode-keyed reader from `register-provider`, then HTTP only. Convert the asset rail with `getCryptoRailAssetLabel` from `@sdp/types/payment-rails`; convert minor units with `parseDecimalAmount` / `formatDecimalAmount` from `@sdp/solana/amount`.
 
-Lightspark's shape: GET the corridor's `exchange-rates` once to learn decimals, again with the amount to get the quote, then map into `PaymentRampEstimate`.
+A common shape: GET the corridor's exchange rate once to learn decimals, again with the amount to get the quote, then map into `PaymentRampEstimate`.
 
 ## Fail loud
 
@@ -58,11 +58,7 @@ The dashboard runtime routes are `POST /v1/payments/ramps/{onramp|offramp}/estim
 
 ## Variety
 
-| Provider | How estimate is sourced |
-|---|---|
-| Lightspark | `GET exchange-rates?sourceCurrency=…&destinationCurrency=…` (corridor, then with amount) |
-| MoonPay | `GET /v3/currencies/{code}/buy_quote` (on) / `sell_quote` (off) |
-| BVNK | `POST` quote with `estimate=true` |
+Estimate sourcing differs per upstream: corridor exchange-rate GETs (once for decimals, again with the amount), per-currency buy/sell quote GETs, or a `POST` quote flagged as estimate-only. Map whichever the upstream offers into `PaymentRampEstimate`.
 
 ## Rules + verify
 

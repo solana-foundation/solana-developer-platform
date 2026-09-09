@@ -19,8 +19,29 @@ export interface HeliusRingsWalletRow {
   status: WalletStatus;
   /** Null until the gateway provisions the shielded identity. */
   shielded_address: string | null;
+  /**
+   * The Solana address the shielded identity is published under, and which
+   * signs its spends. Stored with `shielded_address` because the identity is
+   * derived from it: verifying one without pinning the other proves nothing.
+   */
+  owner_address: string | null;
   /** Photon sync cursor; null before the first successful sync. */
   sync_cursor: string | null;
+  /**
+   * Slot the indexer must have reached before a read of this wallet is trusted,
+   * as a uint64 string. Null until something has touched the wallet on chain.
+   *
+   * Not a resume position: every read is still a full sync. This only says how
+   * far behind is too far behind, because Photon trails the chain and a read
+   * taken too early describes a moment before the last operation existed.
+   */
+  last_indexed_slot: string | null;
+  /**
+   * The custody_wallets row that signs for this identity. Null only on wallets
+   * created before live provisioning existed; `sdp_wallet_id` is the provider's
+   * id and can be reissued, so the immutable row id is what a signer resolves.
+   */
+  custody_wallet_id: string | null;
   material_tag: MaterialTag;
   created_at: string;
   updated_at: string;
@@ -39,11 +60,15 @@ export interface CreateHeliusRingsWalletInput extends HeliusRingsProjectScope {
   sdpWalletId: string;
   name: string;
   materialTag: MaterialTag;
+  /** Null where the caller could not resolve one, as legacy callers cannot. */
+  custodyWalletId?: string | null;
 }
 
 export interface MarkHeliusRingsWalletProvisionedInput extends HeliusRingsProjectScope {
   id: string;
   shieldedAddress: string;
+  /** The owner the identity was registered under; pinned with it. */
+  ownerAddress: string;
   materialTag: MaterialTag;
   /**
    * Compare-and-swap guard: only applies while the wallet is still in this
@@ -57,13 +82,48 @@ export interface UpdateHeliusRingsWalletStatusInput extends HeliusRingsProjectSc
   status: WalletStatus;
 }
 
+export interface ClaimHeliusRingsWalletInput extends HeliusRingsProjectScope {
+  id: string;
+  /**
+   * Compare-and-swap guard: the row as it was read before the registry was
+   * consulted. Status cannot serve as the guard here, because `paused` is both
+   * where a claim lands and where the common recovery starts, so a second
+   * claim would be indistinguishable from the first. Requiring the row to be
+   * untouched makes two concurrent re-keys pick a winner before either reaches
+   * the chain, and any other write in that window refuses the claim — the safe
+   * direction, since nothing irreversible has happened yet.
+   */
+  expectedUpdatedAt: string;
+}
+
+export interface QuarantineHeliusRingsWalletInput extends HeliusRingsProjectScope {
+  id: string;
+  /**
+   * Compare-and-swap guard: the identity the failed read was for. A read that
+   * began before a re-key can land after it, and by then the mismatch it found
+   * describes an identity the wallet has already abandoned.
+   */
+  expectedShieldedAddress: string;
+}
+
 export interface UpdateHeliusRingsWalletSyncCursorInput extends HeliusRingsProjectScope {
   id: string;
   syncCursor: string;
 }
 
+export interface RekeyHeliusRingsWalletInput extends HeliusRingsProjectScope {
+  id: string;
+  /** The identity the rotation published, which the wallet now derives. */
+  shieldedAddress: string;
+  /** Pinned with it, and the first owner this row records when it never provisioned. */
+  ownerAddress: string;
+  materialTag: MaterialTag;
+}
+
 export interface ListHeliusRingsWalletsInput extends HeliusRingsProjectScope {
   limit?: number;
+  /** Undefined is unrestricted; an explicit empty allowlist matches nothing. */
+  sdpWalletIds?: readonly string[];
 }
 
 export interface HeliusRingsWalletRepositoryContext {
@@ -84,13 +144,68 @@ export interface HeliusRingsWalletRepository {
     scope: HeliusRingsProjectScope & { sdpWalletId: string }
   ): Promise<HeliusRingsWalletRow | null>;
   listWallets(input: ListHeliusRingsWalletsInput): Promise<HeliusRingsWalletRow[]>;
+  /** Resolves provider wallet ids without applying the paginated wallet-list limit. */
+  listWalletIdsBySdpWalletIds(
+    input: HeliusRingsProjectScope & { sdpWalletIds: readonly string[] }
+  ): Promise<string[]>;
   /** Returns null when the CAS guard loses, leaving the row untouched. */
   markProvisioned(
     input: MarkHeliusRingsWalletProvisionedInput
   ): Promise<HeliusRingsWalletRow | null>;
   updateStatus(input: UpdateHeliusRingsWalletStatusInput): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Adopts a rotated identity and clears the read position with it.
+   *
+   * Separate from `markProvisioned` because of that clearing: the cursor and
+   * indexed slot describe how far a *particular* identity had been read, and
+   * the rotated wallet is not that identity. Carrying them over would start the
+   * new identity mid-history and silently skip everything before it.
+   *
+   * Accepts any live status, because by the time this runs the decision has
+   * already been made and, in the rotation case, already been written to the
+   * chain. Refusing here would only strand the row behind a registry that
+   * moved without it. Whether a rotation is *allowed* is settled earlier, by
+   * the registry read and by `claimWalletForRekey`.
+   */
+  rekeyWallet(input: RekeyHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Takes the row for an imminent rotation, returning null if another writer
+   * got there first.
+   *
+   * Claiming moves the wallet to `paused` before anything irreversible happens,
+   * which is both honest — its balance is about to be abandoned — and useful: if
+   * the process dies between the transaction landing and the row being updated,
+   * the wallet is left in the state the reconciliation path knows how to finish.
+   *
+   * The claim is exclusive rather than unconditional so that two concurrent
+   * re-keys cannot both reach the chain. Both would rotate to the same derived
+   * identity, so the end state converges, but one of them would be a redundant
+   * irreversible write.
+   */
+  claimWalletForRekey(input: ClaimHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Pauses a wallet whose material stopped deriving its identity, returning
+   * null if the row has since moved to a different identity.
+   *
+   * Guarded rather than unconditional because the finding can arrive stale: a
+   * read that started before a re-key reports a mismatch against the identity
+   * that was abandoned, and applying it would take the recovered wallet back
+   * out of service.
+   */
+  quarantineWallet(input: QuarantineHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
   updateSyncCursor(
     input: UpdateHeliusRingsWalletSyncCursorInput
+  ): Promise<HeliusRingsWalletRow | null>;
+  /**
+   * Moves the read position forward, never back.
+   *
+   * Monotonic because two things advance it — a completed operation and a
+   * sync — and they can report out of order. Taking the lower of the two would
+   * let a later read gate on a position the wallet has already passed, which is
+   * exactly the stale view this is meant to prevent.
+   */
+  advanceIndexedSlot(
+    input: HeliusRingsProjectScope & { id: string; slot: string }
   ): Promise<HeliusRingsWalletRow | null>;
 }
 

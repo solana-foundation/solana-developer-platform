@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // Mirrors packages/sdp-kamino: this package typechecks @sdp/earn's sources
+    // through its workspace import, and `fetch.ts` there references the DOM's
+    // `HeadersInit` / `BodyInit`. Without these libs the failure surfaces here
+    // rather than in the package that owns the code.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    // The IDL layout test reads packages/sdp-veda/idl/*.json at runtime.
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
