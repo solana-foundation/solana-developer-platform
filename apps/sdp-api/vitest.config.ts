@@ -2,7 +2,9 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 import { TEST_WORKER_COUNT } from "./src/test/worker-count";
 
-const isShardedRun = process.env.TEST_SHARD !== undefined;
+// Matches parseTestShard in scripts/run-workspace-tests.mjs: an unset or
+// blank TEST_SHARD means an unsharded run, which must keep thresholds.
+const isShardedRun = process.env.TEST_SHARD !== undefined && process.env.TEST_SHARD.trim() !== "";
 const isCiRun = process.env.CI !== undefined;
 
 export default defineConfig({
