@@ -63,6 +63,11 @@ const CUSTODY_WALLET_ID = "cwlt_dvp_create_test";
 const SETTLEMENT_AUTHORITY = "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY";
 const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 
+// Computed once at module load, NOT per call: the fingerprint hashes the
+// expiry, so two tradeInput() calls straddling a second boundary would be
+// different requests and 409 a replay the test meant to be identical.
+const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
 function tradeInput() {
   return {
     organizationId: TEST_ORG.id,
@@ -76,7 +81,7 @@ function tradeInput() {
     tokenProgramB: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
     amountA: 1000n,
     amountB: 2000n,
-    expiryTimestamp: BigInt(Math.floor(Date.now() / 1000) + 3600),
+    expiryTimestamp: EXPIRY_TIMESTAMP,
     earliestSettlementTimestamp: null,
     refString: null,
     // Null is the ordinary trade: the program records each party's own address.
