@@ -21,6 +21,8 @@ export async function custodyWalletForParty(
   params: { organizationId: string; projectId: string },
   partyAddress: Address
 ): Promise<string | null> {
+  // ponytail: fetch-all-find-one — fine at tens of wallets per project; if an
+  // org ever holds thousands, index custody_wallets(public_key) and point-read.
   const wallets = await new CustodyRuntimeTargets(getDb(env), env, new Map()).listWallets({
     organizationId: params.organizationId,
     projectId: params.projectId,
