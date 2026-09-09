@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildOfframpTransactionPrefill,
-  buildOnrampTransactionPrefill,
-} from "./moneygram-ramp-widget";
+import { buildOfframpTransactionPrefill, buildOnrampTransactionPrefill } from "./moneygram-prefill";
 
 // Personal data MoneyGram collects inside its own widget. The dashboard must
 // never hand any of it over through the transaction prefill; this list is the
