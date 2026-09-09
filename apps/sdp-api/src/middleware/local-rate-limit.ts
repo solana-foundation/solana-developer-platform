@@ -69,7 +69,18 @@ export function localRateLimit(options: LocalRateLimitOptions) {
         },
         "Local rate limit exceeded"
       );
-      throw rateLimited();
+
+      // The window is fixed, so the wait is exact rather than the estimate the
+      // sliding KV limiter has to make. Only the two headers that survive this
+      // limiter's design are sent: the count lives in one instance's memory, so
+      // X-RateLimit-Limit and -Remaining would describe a per-replica allowance
+      // as if it were the caller's budget across the deployment.
+      const windowEndMs = windowStart + options.windowMs;
+      const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
+      c.header("Retry-After", retryAfter.toString());
+      c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
+
+      throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
     }
 
     await next();

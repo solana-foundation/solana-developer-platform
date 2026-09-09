@@ -18,7 +18,9 @@ function buildApp(limits: { maxRequests: number; maxTrackedKeys: number }) {
       maxTrackedKeys: limits.maxTrackedKeys,
     })
   );
-  app.onError((error) => new Response(error.message, { status: 429 }));
+  // Mirrors the API error handler: it answers through the context, so headers
+  // the limiter set before throwing reach the client.
+  app.onError((error, c) => c.text(error.message, 429));
   app.get("/", (c) => c.text("ok"));
   return app;
 }
@@ -65,6 +67,28 @@ describe("localRateLimit", () => {
 
     vi.advanceTimersByTime(60_000);
     expect((await request()).status).toBe(200);
+  });
+
+  it("tells the refused caller when the window reopens", async () => {
+    // A 429 from this limiter has to carry the same wait hint as one from the
+    // KV limiter, or a provider reads two different contracts from one API.
+    // The window is fixed, so the boundary is the exact moment to retry.
+    const app = buildApp({ maxRequests: 1, maxTrackedKeys: 8 });
+    const request = () => app.request("/", fromAddress("203.0.113.7"), CLOUD_RUN_ENV);
+
+    expect((await request()).status).toBe(200);
+
+    vi.advanceTimersByTime(20_000);
+    const refused = await request();
+
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("Retry-After")).toBe("40");
+    expect(refused.headers.get("X-RateLimit-Reset")).toBe("1767225660");
+
+    // Per-instance counting cannot describe a deployment-wide allowance, so the
+    // budget headers are deliberately absent rather than misleading.
+    expect(refused.headers.get("X-RateLimit-Limit")).toBeNull();
+    expect(refused.headers.get("X-RateLimit-Remaining")).toBeNull();
   });
 
   it("holds a spray of distinct addresses to one shared bucket", async () => {
