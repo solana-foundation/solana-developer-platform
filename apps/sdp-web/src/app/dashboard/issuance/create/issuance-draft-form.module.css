@@ -313,6 +313,15 @@
   line-height: 1.4;
 }
 
+/* Two classes so it beats `.controlCopy span` above, which would otherwise mute
+   it back down to the description colour. `--color-warning` is the same token
+   `text-warning` resolves to (sdp-theme.css:92), so light and dark both follow
+   the design system rather than a hardcoded amber. */
+.controlCopy .controlWarning {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
 .toggle {
   position: relative;
   width: 36px;
