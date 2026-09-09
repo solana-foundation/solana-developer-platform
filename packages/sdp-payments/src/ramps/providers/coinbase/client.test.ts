@@ -108,6 +108,19 @@ describe("CoinbaseRampClient.createOnrampQuote (embedded mode)", () => {
     assert.equal(request.body().domain, "sdp-web-smoky.vercel.app");
   });
 
+  it("omits the domain for local hostnames, which Coinbase never allow-lists", async () => {
+    for (const hostname of ["localhost", "127.0.0.1", "LOCALHOST"]) {
+      const request = captureOrderRequest(respond(orderResponse));
+
+      await new CoinbaseRampClient().createOnrampQuote(sandbox, {
+        ...quoteInput,
+        domain: hostname,
+      });
+
+      assert.equal(request.body().domain, undefined, hostname);
+    }
+  });
+
   it("neither returns nor logs the userAuthToken Coinbase sends back", async () => {
     captureOrderRequest(respond(orderResponse));
     const log = mock.method(console, "log", () => undefined);
