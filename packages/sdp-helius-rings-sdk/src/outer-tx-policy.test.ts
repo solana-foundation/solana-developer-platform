@@ -355,6 +355,8 @@ async function createAssociatedTokenInstruction(
     payer?: Address;
     tokenAccount?: Address;
     data?: Uint8Array;
+    /** Only a self-withdrawal's merge with the fee payer may make this writable. */
+    recipientWritable?: boolean;
   }> = {}
 ): Promise<Instruction> {
   const mint = options.mint ?? MINT;
@@ -365,7 +367,10 @@ async function createAssociatedTokenInstruction(
     accounts: [
       { address: options.payer ?? OWNER, role: AccountRole.WRITABLE_SIGNER },
       { address: options.tokenAccount ?? tokenAccount, role: AccountRole.WRITABLE },
-      { address: recipient, role: AccountRole.READONLY },
+      {
+        address: recipient,
+        role: options.recipientWritable ? AccountRole.WRITABLE : AccountRole.READONLY,
+      },
       { address: mint, role: AccountRole.READONLY },
       { address: SYSTEM, role: AccountRole.READONLY },
       { address: SPL_TOKEN_PROGRAM_ID, role: AccountRole.READONLY },
@@ -1280,6 +1285,30 @@ describe("validateOuterTransaction", () => {
       ).resolves.toBeUndefined();
     });
 
+    // Withdrawing to one's own address is ordinary, and there the create's
+    // readonly owner meta is the fee payer: Solana merges the two into one
+    // writable signer, so the expectation has to follow the merge rather than
+    // insist on the readonly role the instruction asked for.
+    it("accepts a withdrawal to the owner's own address on either rail", async () => {
+      await expect(
+        validateOuterTransaction(
+          withdrawalPolicy(await splWithdrawalWire({ recipient: OWNER }), {
+            mint: MINT,
+            to: OWNER,
+          })
+        )
+      ).resolves.toBeUndefined();
+      await expect(
+        validateOuterTransaction(
+          await ringSplWithdrawalPolicyInput({
+            transact: { recipient: OWNER },
+            create: await createAssociatedTokenInstruction({ mint: MINT, recipient: OWNER }),
+            intent: { to: OWNER },
+          })
+        )
+      ).resolves.toBeUndefined();
+    });
+
     it.each([
       [
         "a SOL intent over an SPL settlement",
@@ -1389,6 +1418,25 @@ describe("validateOuterTransaction", () => {
             }),
             { mint: MINT }
           ),
+      ],
+      // The owner's own address may be writable only because Solana merged it
+      // with the signer. Nobody else's may be, on either rail.
+      [
+        "a token-account create that makes the recipient's system account writable",
+        async () =>
+          withdrawalPolicy(
+            await splWithdrawalWire({
+              create: await createAssociatedTokenInstruction({ recipientWritable: true }),
+            }),
+            { mint: MINT }
+          ),
+      ],
+      [
+        "a ring token-account create that makes the recipient's system account writable",
+        async () =>
+          ringSplWithdrawalPolicyInput({
+            create: await createAssociatedTokenInstruction({ mint: MINT, recipientWritable: true }),
+          }),
       ],
       [
         "an extra Memo instruction riding along",

@@ -762,8 +762,11 @@ function validateCreateAssociatedTokenInstruction(
     { address: owner, signer: true, writable: true },
     { address: expected.tokenAccount, signer: false, writable: true },
     // Readonly here and absent from the transact, so an SPL withdrawal never
-    // makes the recipient's system account writable.
-    { address: expected.recipient, writable: false },
+    // makes a third party's system account writable. Withdrawing to one's own
+    // address is the exception the wire forces: the create names the owner,
+    // Solana merges that meta with the fee payer's, and the merged entry is
+    // writable — a role the owner already holds as the signer.
+    { address: expected.recipient, writable: expected.recipient === owner },
     { address: expected.mint, signer: false, writable: false },
     { address: SYSTEM_PROGRAM, signer: false, writable: false },
     { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
