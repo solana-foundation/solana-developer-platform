@@ -603,6 +603,10 @@ importers:
       jose:
         specifier: 6.2.10
         version: 6.2.10
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.2
+        version: 26.1.2
 
   packages/sdp-dvp:
     dependencies:
