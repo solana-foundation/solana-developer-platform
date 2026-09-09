@@ -6,6 +6,8 @@ import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
+const CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS = 30_000;
+
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
   setup.setTimeout(360_000);
   const env = getE2EEnv();
@@ -81,14 +83,16 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   );
 
   await expect
-    .poll(() =>
-      target.evaluate(() => {
-        return (
-          window as unknown as {
-            Clerk?: { organization?: { id?: string } };
-          }
-        ).Clerk?.organization?.id;
-      })
+    .poll(
+      () =>
+        target.evaluate(() => {
+          return (
+            window as unknown as {
+              Clerk?: { organization?: { id?: string } };
+            }
+          ).Clerk?.organization?.id;
+        }),
+      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
     )
     .toBe(identity.organizationId);
 
