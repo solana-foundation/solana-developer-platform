@@ -116,11 +116,11 @@ function loadRampsSdk(sdkUrl: string): Promise<NonNullable<Window["RampsSDK"]>> 
   return rampsSdkPromise;
 }
 
-function buildOfframpTransactionPrefill(
+export function buildOfframpTransactionPrefill(
   fiatCurrency: RampFiatCurrency,
   cryptoAsset: CryptoAssetSymbol,
   cryptoAmount: string
-): MoneygramRampsConfig["transaction"] {
+): NonNullable<MoneygramRampsConfig["transaction"]> {
   const destinationCountry =
     fiatCurrency === "USD" ? "USA" : fiatCurrency === "MXN" ? "MEX" : undefined;
   return {
@@ -132,10 +132,10 @@ function buildOfframpTransactionPrefill(
   };
 }
 
-function buildOnrampTransactionPrefill(
+export function buildOnrampTransactionPrefill(
   fiatAmount: string,
   cryptoAsset: CryptoAssetSymbol
-): MoneygramRampsConfig["transaction"] {
+): NonNullable<MoneygramRampsConfig["transaction"]> {
   return {
     type: "on-ramp",
     amount: toNumberAmount(fiatAmount),
