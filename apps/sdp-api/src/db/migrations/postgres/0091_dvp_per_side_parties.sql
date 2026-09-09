@@ -37,14 +37,19 @@ BEGIN
     SELECT 1 FROM information_schema.columns
      WHERE table_name = 'dvp_trades' AND column_name = 'sdp_leg_funding_signature'
   ) THEN
+    -- A funded leg whose claim the sweep already released carries only the
+    -- receipt (signature NULL, funding_tx set) — it must migrate too, or the
+    -- receipt dies with the column below. COALESCE folds both shapes.
     INSERT INTO dvp_leg_funding_claims
       (trade_id, side, organization_id, project_id, custody_wallet_id,
        signature, expiry_height, funding_tx)
     SELECT id, sdp_side, organization_id, project_id, sdp_wallet_id,
-           sdp_leg_funding_signature, COALESCE(funding_claim_expiry_height, '0'),
+           COALESCE(sdp_leg_funding_signature, sdp_leg_funding_tx),
+           COALESCE(funding_claim_expiry_height, '0'),
            sdp_leg_funding_tx
       FROM dvp_trades
-     WHERE sdp_leg_funding_signature IS NOT NULL AND sdp_side IS NOT NULL
+     WHERE (sdp_leg_funding_signature IS NOT NULL OR sdp_leg_funding_tx IS NOT NULL)
+       AND sdp_side IS NOT NULL
     ON CONFLICT (trade_id, side) DO NOTHING;
   END IF;
 END $$;

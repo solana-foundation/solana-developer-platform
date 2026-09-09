@@ -209,6 +209,18 @@ describe("0091_dvp_per_side_parties", () => {
       fundingTx: "tx_receipt_0091",
     });
 
+    // A funded leg whose claim the sweep released: receipt only (sig NULL).
+    await insertTrade({
+      id: "trade_receipt_only",
+      organizationId,
+      projectId,
+      walletId: "cwlt_backfill",
+      sdpSide: "a",
+      fundingSignature: null,
+      fundingExpiryHeight: null,
+      fundingTx: "tx_receipt_only_0091",
+    });
+
     // A trade with no funding at all — must produce no claim.
     await insertTrade({
       id: "trade_unfunded",
@@ -242,7 +254,7 @@ describe("0091_dvp_per_side_parties", () => {
       `SELECT trade_id, side, organization_id, project_id, custody_wallet_id,
               signature, expiry_height, funding_tx
          FROM dvp_leg_funding_claims
-        WHERE trade_id IN ('trade_funded_claim', 'trade_null_expiry', 'trade_receipt')
+        WHERE trade_id IN ('trade_funded_claim', 'trade_null_expiry', 'trade_receipt', 'trade_receipt_only')
         ORDER BY trade_id, side`
     );
 
@@ -271,6 +283,14 @@ describe("0091_dvp_per_side_parties", () => {
       signature: "sig_receipt_0091",
       expiry_height: "300",
       funding_tx: "tx_receipt_0091",
+    });
+
+    // The receipt-only row (claim already swept on main) migrates as a receipt:
+    // the receipt signature stands in for the swept lock.
+    expect(byTrade.get("trade_receipt_only|a")).toMatchObject({
+      signature: "tx_receipt_only_0091",
+      expiry_height: "0",
+      funding_tx: "tx_receipt_only_0091",
     });
 
     // The unfunded trade produced no claim.
