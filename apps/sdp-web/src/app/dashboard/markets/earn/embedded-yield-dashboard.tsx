@@ -4,6 +4,7 @@ import type {
   EarnExternalWalletPosition,
   EarnExternalWalletPositionSummary,
   EarnExternalWalletStrategyTotal,
+  EarnStrategy,
   SolanaCluster,
 } from "@sdp/types";
 import {
@@ -14,16 +15,15 @@ import {
   InfoIcon,
   Layers3Icon,
   WalletIcon,
-  XIcon,
 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { type CSSProperties, useState } from "react";
+import { Fragment, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Drawer, DrawerClose, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import {
   Table,
@@ -38,8 +38,9 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
+import { earnStrategyLiquidityLabel } from "./earn-format";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
-import { useEarnExternalWalletPositionSummary } from "./earn-program-data";
+import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
 function PortfolioInfoTip({ label }: { label: string }) {
   return (
@@ -60,15 +61,257 @@ function PortfolioInfoTip({ label }: { label: string }) {
   );
 }
 
-function PortfolioMetric({ label, value }: { label: string; value: number }) {
+interface PortfolioChartValue {
+  id: string;
+  label: string;
+  value: number;
+}
+
+interface PortfolioGrowthPoint {
+  id: string;
+  value: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const PORTFOLIO_GROWTH_POINTS = 12;
+const PORTFOLIO_CHART_COLORS = [
+  "var(--sdp-series-1)",
+  "var(--sdp-series-2)",
+  "var(--sdp-series-3)",
+  "var(--sdp-series-4)",
+] as const;
+
+function portfolioPositions(summary: EarnExternalWalletPositionSummary) {
+  const byId = new Map<string, EarnExternalWalletPosition>();
+  for (const strategy of summary.totalsByStrategy) {
+    for (const position of strategy.positions ?? []) byId.set(position.id, position);
+  }
+  return [...byId.values()];
+}
+
+function buildGrowthSeries(
+  positions: EarnExternalWalletPosition[],
+  kind: "positions" | "wallets"
+): PortfolioGrowthPoint[] {
+  const datedPositions = positions
+    .map((position) => ({ position, createdAt: Date.parse(position.createdAt) }))
+    .filter(({ createdAt }) => Number.isFinite(createdAt))
+    .sort((left, right) => left.createdAt - right.createdAt);
+
+  if (datedPositions.length === 0) {
+    return Array.from({ length: PORTFOLIO_GROWTH_POINTS }, (_, index) => ({
+      id: `empty-${index}`,
+      value: 0,
+    }));
+  }
+
+  const firstCreatedAt = datedPositions[0]?.createdAt ?? Date.now();
+  const lastCreatedAt = datedPositions.at(-1)?.createdAt ?? firstCreatedAt;
+  const end = Math.max(Date.now(), lastCreatedAt);
+  const start = Math.min(firstCreatedAt - DAY_MS, end - 6 * DAY_MS);
+  const interval = (end - start) / (PORTFOLIO_GROWTH_POINTS - 1);
+
+  return Array.from({ length: PORTFOLIO_GROWTH_POINTS }, (_, index) => {
+    const boundary = start + interval * index;
+    const visible = datedPositions.filter(({ createdAt }) => createdAt <= boundary);
+    return {
+      id: `${kind}-${index}`,
+      value:
+        kind === "positions"
+          ? visible.length
+          : new Set(visible.map(({ position }) => position.ownerAddress)).size,
+    };
+  });
+}
+
+function GrowthAreaChart({
+  kind,
+  points,
+}: {
+  kind: "positions" | "wallets";
+  points: PortfolioGrowthPoint[];
+}) {
+  const reduceMotion = useReducedMotion();
+  const width = 260;
+  const height = 82;
+  const baseline = 78;
+  const maxValue = Math.max(...points.map(({ value }) => value), 1);
+  const coordinates = points.map(({ value }, index) => ({
+    x: (index / Math.max(points.length - 1, 1)) * width,
+    y: baseline - (value / maxValue) * 62,
+  }));
+  const linePath = coordinates
+    .map(({ x, y }, index) => `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`)
+    .join(" ");
+  const areaPath = `${linePath} L${width} ${height} L0 ${height} Z`;
+  const color = kind === "wallets" ? "var(--sdp-series-4)" : "var(--sdp-series-3)";
+  const gradientId = `portfolio-${kind}-fill`;
+
   return (
-    <Card className="min-w-0 gap-0 rounded-2xl px-7 py-7">
-      <dt className="flex items-center gap-1.5 text-sm leading-5 font-normal text-tertiary">
-        {label}
-      </dt>
-      <dd className="mt-3 text-[28px] leading-8 font-medium tracking-[-0.2px] text-primary tabular-nums">
-        {value}
-      </dd>
+    <motion.svg
+      aria-hidden="true"
+      className="h-[5.25rem] w-full overflow-visible"
+      data-portfolio-chart={kind}
+      initial={reduceMotion ? false : { opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: "easeOut" }}
+      preserveAspectRatio="none"
+      viewBox={`0 0 ${width} ${height}`}
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={`M0 ${baseline} H${width}`} stroke="currentColor" strokeOpacity="0.1" />
+      <motion.path
+        d={areaPath}
+        fill={`url(#${gradientId})`}
+        initial={reduceMotion ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.4 }}
+      />
+      <motion.path
+        d={linePath}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.5"
+        initial={reduceMotion ? false : { pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.65, ease: "easeOut" }}
+      />
+      {coordinates.map(({ x, y }, index) =>
+        index === coordinates.length - 1 ? (
+          <motion.circle
+            animate={{ opacity: 1, scale: 1 }}
+            cx={x}
+            cy={y}
+            fill={color}
+            initial={reduceMotion ? false : { opacity: 0, scale: 0.4 }}
+            key={points[index]?.id}
+            r="3.5"
+            transition={reduceMotion ? { duration: 0 } : { delay: 0.5, duration: 0.2 }}
+          />
+        ) : null
+      )}
+    </motion.svg>
+  );
+}
+
+function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
+  const reduceMotion = useReducedMotion();
+  const positiveValues = values.filter(({ value }) => value > 0);
+  const chartValues =
+    positiveValues.length > 0 ? positiveValues : [{ id: "empty", label: "", value: 1 }];
+  const total = chartValues.reduce((sum, { value }) => sum + value, 0);
+  const radius = 23;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <div
+      className="flex min-h-[5.25rem] items-center justify-between gap-5"
+      data-portfolio-chart="assets"
+    >
+      <motion.svg
+        aria-hidden="true"
+        className="size-[5.25rem] shrink-0 -rotate-90"
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.82 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: "easeOut" }}
+        viewBox="0 0 56 56"
+      >
+        <circle
+          cx="28"
+          cy="28"
+          fill="none"
+          r={radius}
+          stroke="currentColor"
+          strokeOpacity="0.08"
+          strokeWidth="8"
+        />
+        {chartValues.map(({ id, value }, index) => {
+          const length = (value / total) * circumference;
+          const segmentOffset = offset;
+          offset += length;
+          return (
+            <motion.circle
+              animate={{ opacity: 1 }}
+              cx="28"
+              cy="28"
+              fill="none"
+              initial={reduceMotion ? false : { opacity: 0 }}
+              key={id}
+              r={radius}
+              stroke={PORTFOLIO_CHART_COLORS[index % PORTFOLIO_CHART_COLORS.length]}
+              strokeDasharray={`${Math.max(length - 2.5, 0)} ${circumference}`}
+              strokeDashoffset={-segmentOffset}
+              strokeLinecap="round"
+              strokeWidth="8"
+              transition={reduceMotion ? { duration: 0 } : { delay: index * 0.08, duration: 0.35 }}
+            />
+          );
+        })}
+      </motion.svg>
+      <div className="min-w-0 flex-1 space-y-2">
+        {positiveValues.slice(0, 4).map(({ id, label, value }, index) => (
+          <div className="flex items-center justify-between gap-3 text-xs" key={id}>
+            <span className="flex min-w-0 items-center gap-2 text-secondary">
+              <span
+                aria-hidden="true"
+                className="size-2 shrink-0 rounded-full"
+                style={{
+                  backgroundColor: PORTFOLIO_CHART_COLORS[index % PORTFOLIO_CHART_COLORS.length],
+                }}
+              />
+              <span className="truncate">{label}</span>
+            </span>
+            <span className="text-primary tabular-nums">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type PortfolioMetricKind = "assets" | "positions" | "wallets";
+
+function PortfolioMetric({
+  chartValues,
+  growthPoints,
+  kind,
+  label,
+  value,
+}: {
+  chartValues: PortfolioChartValue[];
+  growthPoints?: PortfolioGrowthPoint[];
+  kind: PortfolioMetricKind;
+  label: string;
+  value: number;
+}) {
+  return (
+    <Card
+      className="group min-h-44 min-w-0 gap-0 overflow-hidden rounded-2xl px-5 py-5 transition-[box-shadow,transform] duration-300 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none"
+      data-portfolio-metric={kind}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <dt className="text-sm leading-5 font-normal text-tertiary">{label}</dt>
+        <dd className="text-xl leading-6 font-medium tracking-[-0.2px] text-primary tabular-nums">
+          {value}
+        </dd>
+      </div>
+      <div className="mt-auto pt-4">
+        {kind === "wallets" && growthPoints ? (
+          <GrowthAreaChart kind="wallets" points={growthPoints} />
+        ) : null}
+        {kind === "positions" && growthPoints ? (
+          <GrowthAreaChart kind="positions" points={growthPoints} />
+        ) : null}
+        {kind === "assets" ? <AssetMixChart values={chartValues} /> : null}
+      </div>
     </Card>
   );
 }
@@ -101,170 +344,151 @@ function compactAddress(value: string) {
   return `${value.slice(0, 5)}…${value.slice(-5)}`;
 }
 
-function StrategyWalletDrawer({
+function formatLatestDepositDate(
+  positions: readonly EarnExternalWalletPosition[] | undefined,
+  locale: string
+): string {
+  const latest = (positions ?? []).reduce<number | undefined>((current, position) => {
+    const createdAt = Date.parse(position.createdAt);
+    if (!Number.isFinite(createdAt)) return current;
+    return current === undefined || createdAt > current ? createdAt : current;
+  }, undefined);
+  if (latest === undefined) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "long",
+    timeZone: "UTC",
+  }).format(latest);
+}
+
+function strategyReferenceKey(provider: string, providerReference: string): string {
+  return JSON.stringify([provider, providerReference]);
+}
+
+function StrategyAvailability({ strategy }: { strategy?: EarnStrategy }) {
+  const t = useTranslations();
+  if (!strategy) return <span className="text-sm text-tertiary">—</span>;
+
+  const liquidity = earnStrategyLiquidityLabel(strategy, t) ?? "—";
+  return <span className="text-sm text-secondary">{liquidity}</span>;
+}
+
+function StrategyWalletDetails({
   strategy,
+  strategyDefinition,
   cluster,
-  open,
-  onOpenChange,
 }: {
-  strategy: EarnExternalWalletStrategyTotal | null;
+  strategy: EarnExternalWalletStrategyTotal;
+  strategyDefinition?: EarnStrategy;
   cluster: SolanaCluster;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
 }) {
   const locale = useLocale();
   const t = useTranslations();
-  const positions: EarnExternalWalletPosition[] | null = strategy
-    ? [...(strategy.positions ?? [])].sort((left, right) =>
-        left.ownerAddress.localeCompare(right.ownerAddress)
-      )
-    : null;
+  const positions = [...(strategy.positions ?? [])].sort((left, right) =>
+    left.ownerAddress.localeCompare(right.ownerAddress)
+  );
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="right">
-      <DrawerContent
-        style={
-          {
-            "--drawer-content-width": "min(34rem, calc(100vw - 1rem))",
-          } as CSSProperties
-        }
-      >
-        <div className="flex items-start justify-between border-b border-border-default px-6 py-5">
-          <div>
-            <DrawerTitle className="text-lg font-medium text-primary">
-              {strategy?.label ?? t("DashboardMarkets.earnProgram.customerWallets")}
-            </DrawerTitle>
-            <p className="mt-1 text-sm text-secondary">
-              {strategy
-                ? t(
-                    strategy.walletCount === 1
-                      ? "DashboardMarkets.earnProgram.customerWalletCount"
-                      : "DashboardMarkets.earnProgram.customerWalletCountPlural",
-                    { count: strategy.walletCount }
-                  )
-                : ""}
-            </p>
-          </div>
-          <DrawerClose
-            type="button"
-            aria-label={t("Shared.SharedComponents.close")}
-            className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-          >
-            <XIcon aria-hidden="true" className="size-4" />
-          </DrawerClose>
+    <section aria-label={strategy.label} className="bg-fill-subtle">
+      {!strategy.positions ? (
+        <div className="border-y border-warning-border bg-warning-bg px-6 py-4 text-sm text-warning">
+          {t("DashboardMarkets.earnProgram.walletRefreshError")}
         </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          {strategy && !strategy.positions ? (
-            <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
-              {t("DashboardMarkets.earnProgram.walletRefreshError")}
-            </div>
-          ) : null}
-
-          {positions ? (
-            <div className="space-y-3">
-              {positions.map((position, index) => {
-                const asset = earnMintAsset(position.tokenMint);
-                return (
-                  <article
-                    key={position.id}
-                    className="rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_12px_28px_rgba(0,0,0,0.04)]"
+      ) : (
+        <div className="divide-y divide-border-subtle">
+          {positions.map((position) => {
+            const asset = earnMintAsset(position.tokenMint);
+            return (
+              <article
+                key={position.id}
+                className="grid grid-cols-[minmax(12rem,1.35fr)_minmax(6rem,0.6fr)_minmax(8rem,0.75fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)_auto] items-center gap-5 bg-surface-raised px-6 py-3.5 transition-colors hover:bg-fill-subtle"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
+                    <WalletIcon aria-hidden="true" className="size-3.5" />
+                  </span>
+                  <p className="truncate text-sm text-primary" title={position.ownerAddress}>
+                    {compactAddress(position.ownerAddress)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-secondary">
+                  <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
+                  {asset.symbol}
+                </div>
+                <div>
+                  <p className="mb-1 text-xs text-tertiary">
+                    {t("DashboardMarkets.earnProgram.availability")}
+                  </p>
+                  <StrategyAvailability strategy={strategyDefinition} />
+                </div>
+                <div>
+                  <p className="text-xs text-tertiary">
+                    {t("DashboardMarkets.earnProgram.liveValue")}
+                  </p>
+                  <p className="mt-0.5 text-sm text-primary tabular-nums">
+                    {position.tokenValue === undefined
+                      ? t("DashboardMarkets.earnProgram.valueUnavailable")
+                      : formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-tertiary">
+                    {t("DashboardMarkets.earnProgram.availableShares")}
+                  </p>
+                  <p className="mt-0.5 text-sm text-primary tabular-nums">
+                    {position.withdrawableShares ??
+                      position.shares ??
+                      t("DashboardMarkets.earnProgram.valueUnavailable")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
+                    className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-strong hover:text-primary"
+                    onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-                          <WalletIcon aria-hidden="true" className="size-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-primary">
-                            {t("DashboardMarkets.earnProgram.customerWallet", {
-                              index: index + 1,
-                            })}
-                          </p>
-                          <p className="mt-0.5 font-mono text-xs text-tertiary">
-                            {compactAddress(position.ownerAddress)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
-                          className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
-                          onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
-                        >
-                          <CopyIcon aria-hidden="true" className="size-3.5" />
-                        </button>
-                        <a
-                          aria-label={t("DashboardMarkets.earnProgram.openWalletInExplorer")}
-                          className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
-                          href={explorerAddressUrl(position.ownerAddress, cluster)}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-                        </a>
-                      </div>
-                    </div>
-
-                    <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-border-subtle pt-4">
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardMarkets.earnProgram.liveValue")}
-                        </dt>
-                        <dd className="mt-1 text-sm font-medium text-primary tabular-nums">
-                          {position.tokenValue === undefined
-                            ? t("DashboardMarkets.earnProgram.valueUnavailable")
-                            : formatProviderAmount(position.tokenValue, locale, asset.symbol)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardMarkets.earnProgram.asset")}
-                        </dt>
-                        <dd className="mt-1 flex items-center gap-2 text-sm font-medium text-primary">
-                          <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
-                          {asset.symbol}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardMarkets.earnProgram.vaultShares")}
-                        </dt>
-                        <dd className="mt-1 text-sm text-primary tabular-nums">
-                          {position.shares ?? t("DashboardMarkets.earnProgram.valueUnavailable")}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-tertiary">
-                          {t("DashboardMarkets.earnProgram.availableShares")}
-                        </dt>
-                        <dd className="mt-1 text-sm text-primary tabular-nums">
-                          {position.withdrawableShares ??
-                            t("DashboardMarkets.earnProgram.valueUnavailable")}
-                        </dd>
-                      </div>
-                    </dl>
-                  </article>
-                );
-              })}
-            </div>
-          ) : null}
+                    <CopyIcon aria-hidden="true" className="size-3.5" />
+                  </button>
+                  <a
+                    aria-label={t("DashboardMarkets.earnProgram.openWalletInExplorer")}
+                    className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-strong hover:text-primary"
+                    href={explorerAddressUrl(position.ownerAddress, cluster)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+                  </a>
+                </div>
+              </article>
+            );
+          })}
         </div>
-      </DrawerContent>
-    </Drawer>
+      )}
+    </section>
   );
 }
 
 function PortfolioByStrategy({
   summary,
-  onStrategySelect,
+  strategies,
+  cluster,
+  selectedStrategyId,
+  onStrategyToggle,
 }: {
   summary: EarnExternalWalletPositionSummary;
-  onStrategySelect: (strategy: EarnExternalWalletStrategyTotal) => void;
+  strategies?: EarnStrategy[];
+  cluster: SolanaCluster;
+  selectedStrategyId: string | null;
+  onStrategyToggle: (strategy: EarnExternalWalletStrategyTotal) => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const strategiesByReference = new Map(
+    (strategies ?? []).map((strategy) => [
+      strategyReferenceKey(strategy.provider, strategy.providerReference),
+      strategy,
+    ])
+  );
 
   return (
     <Card className="overflow-hidden rounded-2xl">
@@ -274,70 +498,144 @@ function PortfolioByStrategy({
       </CardHeader>
       <CardContent className="px-0">
         <div className="overflow-x-auto border-y border-border-subtle">
-          <Table style={{ minWidth: "48rem" }}>
+          <Table style={{ minWidth: "72rem" }}>
             <TableHeader>
               <TableRow>
                 <TableHead>{t("DashboardMarkets.earnProgram.strategy")}</TableHead>
                 <TableHead>{t("DashboardMarkets.earnProgram.asset")}</TableHead>
                 <TableHead>{t("DashboardMarkets.earnProgram.customerWallets")}</TableHead>
                 <TableHead>{t("DashboardMarkets.earnProgram.livePositions")}</TableHead>
+                <TableHead>{t("DashboardMarkets.earnProgram.lastDeposit")}</TableHead>
+                <TableHead>{t("DashboardMarkets.earnProgram.availability")}</TableHead>
                 <TableHead align="right">{t("DashboardMarkets.earnProgram.liveValue")}</TableHead>
+                <TableHead align="right">
+                  <span className="sr-only">
+                    {t("DashboardMarkets.earnProgram.customerWallets")}
+                  </span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {summary.totalsByStrategy.flatMap((strategy) =>
-                strategy.totalsByToken.map((total) => {
-                  const asset = earnMintAsset(total.tokenMint);
-                  return (
+              {summary.totalsByStrategy.map((strategy) => {
+                const strategyId = `${strategy.provider}:${strategy.providerReference}`;
+                const detailsId = `strategy-details-${strategyId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                const isOpen = selectedStrategyId === strategyId;
+                const strategyDefinition = strategiesByReference.get(
+                  strategyReferenceKey(strategy.provider, strategy.providerReference)
+                );
+                return (
+                  <Fragment key={strategyId}>
                     <TableRow
-                      key={`${strategy.provider}:${strategy.providerReference}:${total.tokenMint}`}
                       aria-label={t("DashboardMarkets.earnProgram.viewCustomerWallets", {
                         strategy: strategy.label,
                       })}
+                      aria-controls={detailsId}
+                      aria-expanded={isOpen}
                       className="cursor-pointer transition-colors hover:bg-fill-subtle focus-visible:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
                       tabIndex={0}
-                      onClick={() => onStrategySelect(strategy)}
+                      onClick={() => onStrategyToggle(strategy)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          onStrategySelect(strategy);
+                          onStrategyToggle(strategy);
                         }
                       }}
                     >
                       <TableCell>
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm text-primary">{strategy.label}</p>
-                            <p className="mt-0.5 text-xs capitalize text-tertiary">
-                              {strategy.provider}
-                            </p>
-                          </div>
-                          <ChevronRightIcon aria-hidden="true" className="size-4 text-tertiary" />
+                        <div>
+                          <p className="text-sm text-primary">{strategy.label}</p>
+                          <p className="mt-0.5 text-xs capitalize text-tertiary">
+                            {strategy.provider}
+                          </p>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
-                          <span className="text-sm text-primary">{asset.symbol}</span>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                          {strategy.totalsByToken.map((total) => {
+                            const asset = earnMintAsset(total.tokenMint);
+                            return (
+                              <span
+                                className="flex items-center gap-2 text-sm text-primary"
+                                key={total.tokenMint}
+                              >
+                                <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
+                                {asset.symbol}
+                              </span>
+                            );
+                          })}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm tabular-nums">{total.walletCount}</TableCell>
-                      <TableCell className="text-sm tabular-nums">{total.positionCount}</TableCell>
+                      <TableCell className="text-sm tabular-nums">{strategy.walletCount}</TableCell>
+                      <TableCell className="text-sm tabular-nums">
+                        {strategy.positionCount}
+                      </TableCell>
+                      <TableCell className="text-sm text-secondary">
+                        {formatLatestDepositDate(strategy.positions, locale)}
+                      </TableCell>
+                      <TableCell>
+                        <StrategyAvailability strategy={strategyDefinition} />
+                      </TableCell>
                       <TableCell align="right">
-                        {total.tokenValue === undefined ? (
-                          <Badge variant="warning">
-                            {t("DashboardMarkets.earnProgram.valueUnavailable")}
-                          </Badge>
-                        ) : (
-                          <span className="text-sm text-primary tabular-nums">
-                            {formatProviderAmount(total.tokenValue, locale, asset.symbol)}
-                          </span>
-                        )}
+                        <div className="flex flex-col items-end gap-1">
+                          {strategy.totalsByToken.map((total) => {
+                            const asset = earnMintAsset(total.tokenMint);
+                            return total.tokenValue === undefined ? (
+                              <Badge key={total.tokenMint} variant="warning">
+                                {t("DashboardMarkets.earnProgram.valueUnavailable")}
+                              </Badge>
+                            ) : (
+                              <span
+                                className="text-sm text-primary tabular-nums"
+                                key={total.tokenMint}
+                              >
+                                {formatProviderAmount(total.tokenValue, locale, asset.symbol)}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </TableCell>
+                      <TableCell align="right" className="w-12">
+                        <motion.span
+                          animate={{ rotate: isOpen ? 90 : 0 }}
+                          className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary"
+                          transition={{ duration: 0.22, ease: "easeOut" }}
+                        >
+                          <ChevronRightIcon aria-hidden="true" className="size-4" />
+                        </motion.span>
                       </TableCell>
                     </TableRow>
-                  );
-                })
-              )}
+                    <AnimatePresence initial={false}>
+                      {isOpen ? (
+                        <motion.tr
+                          animate={{ opacity: 1 }}
+                          className="border-b border-border-subtle"
+                          exit={{ opacity: 0 }}
+                          id={detailsId}
+                          initial={{ opacity: 0 }}
+                          key={`${strategyId}:details`}
+                          transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                        >
+                          <td className="p-0 align-top" colSpan={8}>
+                            <motion.div
+                              animate={{ height: "auto", opacity: 1 }}
+                              className="overflow-hidden"
+                              exit={{ height: 0, opacity: 0 }}
+                              initial={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                            >
+                              <StrategyWalletDetails
+                                cluster={cluster}
+                                strategy={strategy}
+                                strategyDefinition={strategyDefinition}
+                              />
+                            </motion.div>
+                          </td>
+                        </motion.tr>
+                      ) : null}
+                    </AnimatePresence>
+                  </Fragment>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -350,19 +648,19 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
+  const { strategies } = useEarnStrategies();
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
     detailsVisible: selectedStrategyId !== null,
   });
-  const selectedStrategy =
-    summary?.totalsByStrategy.find(
-      (strategy) => `${strategy.provider}:${strategy.providerReference}` === selectedStrategyId
-    ) ?? null;
+  const positions = summary ? portfolioPositions(summary) : [];
+  const walletGrowth = buildGrowthSeries(positions, "wallets");
+  const positionGrowth = buildGrowthSeries(positions, "positions");
 
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-4 pt-3">
+      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-4 pt-3">
         <div className="flex items-center justify-between gap-4">
           <h2 className="flex items-center gap-2 text-[19px] leading-6 font-medium text-primary">
             {t("DashboardMarkets.earnProgram.dashboardTitle")}
@@ -394,14 +692,34 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
           <>
             <dl className="grid gap-2 sm:grid-cols-3">
               <PortfolioMetric
+                chartValues={summary.totalsByStrategy.map((strategy) => ({
+                  id: `${strategy.provider}:${strategy.providerReference}`,
+                  label: strategy.label,
+                  value: strategy.walletCount,
+                }))}
+                growthPoints={walletGrowth}
+                kind="wallets"
                 label={t("DashboardMarkets.earnProgram.customerWallets")}
                 value={summary.walletCount}
               />
               <PortfolioMetric
+                chartValues={summary.totalsByStrategy.map((strategy) => ({
+                  id: `${strategy.provider}:${strategy.providerReference}`,
+                  label: strategy.label,
+                  value: strategy.positionCount,
+                }))}
+                growthPoints={positionGrowth}
+                kind="positions"
                 label={t("DashboardMarkets.earnProgram.livePositions")}
                 value={summary.positionCount}
               />
               <PortfolioMetric
+                chartValues={summary.totalsByToken.map((total) => ({
+                  id: total.tokenMint,
+                  label: earnMintAsset(total.tokenMint).symbol,
+                  value: total.positionCount,
+                }))}
+                kind="assets"
                 label={t("DashboardMarkets.earnProgram.assetsEarning")}
                 value={summary.totalsByToken.length}
               />
@@ -441,23 +759,19 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
               <PortfolioOnboarding configureHref={configureHref} />
             ) : (
               <PortfolioByStrategy
+                cluster={cluster}
+                selectedStrategyId={selectedStrategyId}
+                strategies={strategies}
                 summary={summary}
-                onStrategySelect={(strategy) =>
-                  setSelectedStrategyId(`${strategy.provider}:${strategy.providerReference}`)
-                }
+                onStrategyToggle={(strategy) => {
+                  const strategyId = `${strategy.provider}:${strategy.providerReference}`;
+                  setSelectedStrategyId((current) => (current === strategyId ? null : strategyId));
+                }}
               />
             )}
           </>
         )}
       </div>
-      <StrategyWalletDrawer
-        cluster={cluster}
-        open={selectedStrategy !== null}
-        strategy={selectedStrategy}
-        onOpenChange={(open) => {
-          if (!open) setSelectedStrategyId(null);
-        }}
-      />
     </DashboardWorkspaceOverviewPanel>
   );
 }

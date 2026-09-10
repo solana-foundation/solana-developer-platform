@@ -236,13 +236,13 @@
       "vaultDepositTitle": "Nạp vào {strategy}",
       "vaultWalletTitle": "Chọn Wallet để nạp từ đó",
       "vaultWalletBody": "SDP ký lệnh vault bằng Wallet này, và Wallet giữ số shares tương ứng. Không có gì được gửi đến địa chỉ nạp.",
-      "vaultAmount": "Số lượng {token}",
+      "vaultAmount": "Số tiền",
       "vaultStrategy": "Vault",
       "vaultBacking": "Tài sản đảm bảo",
       "vaultFrom": "Từ Wallet",
       "vaultWalletUnavailable": "Không thể ký",
       "vaultBalanceUnknown": "Không lấy được số dư ngay lúc này — mạng lưới vẫn là nơi quyết định cuối cùng.",
-      "vaultBalanceAvailable": "{amount} khả dụng trong Wallet này.",
+      "vaultBalanceAvailable": "Khả dụng: {amount}",
       "vaultAmountPrecision": "Nhập số tiền không quá {decimals} chữ số thập phân.",
       "vaultOverBalance": "Số tiền này vượt quá số dư ghi nhận gần nhất của Wallet. Bạn vẫn có thể gửi vì mạng lưới là nơi quyết định cuối cùng.",
       "vaultConfirmNote": "Xác nhận sẽ ký và gửi giao dịch nạp on-chain. Wallet trả phí mạng lưới.",
@@ -320,6 +320,12 @@
       "body": "Quy đổi shares vault về Wallet lưu ký đang giữ chúng. Số tiền nhận về dưới dạng {token} trong cùng Wallet.",
       "sharesLabel": "Shares cần quy đổi",
       "max": "Tối đa",
+      "amountLabel": "Số tiền",
+      "amountAvailable": "Có thể rút {amount}",
+      "amountAvailableOfTotal": "Có thể rút {available} trong tổng số {total}. Hãy unstake phần còn lại trong Kamino trước.",
+      "amountUnavailable": "Giá trị đô la hiện tại không khả dụng nên chưa thể tính giao dịch rút một cách an toàn. Hãy thử lại sau giây lát.",
+      "amountInvalid": "Nhập số tiền đô la lớn hơn 0.",
+      "overAmount": "Số tiền này vượt quá giá trị hiện có thể rút.",
       "sharesHeld": "{shares} shares đang giữ trong vị thế này.",
       "sharesUnknown": "Không lấy được số dư shares ngay lúc này — mạng lưới vẫn là nơi quyết định cuối cùng.",
       "sharesAvailable": "{available} shares có thể rút trong tổng {total}. Hãy unstake phần còn lại trong Kamino trước.",
@@ -651,9 +657,9 @@
     },
     "liquidity": {
       "instant": "Tức thì",
-      "delayed": "Trì hoãn",
-      "delayedDay": "Trì hoãn · 1 ngày",
-      "delayedDays": "Trì hoãn · {days} ngày"
+      "delayed": "T+N",
+      "delayedDay": "T+1 ngày",
+      "delayedDays": "T+{days} ngày"
     }
   }
 }

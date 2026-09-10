@@ -17,13 +17,10 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
-import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
-import { formatTokenQuantity } from "./earn-format";
-import {
-  earnMintAsset,
-  formatProviderAmount,
-  shortenMarketAddress,
-} from "./earn-market-presentation";
+import { compareUnsignedDecimals } from "./earn-decimal";
+import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
+import { formatTokenQuantity, formatUsd } from "./earn-format";
+import { earnMintAsset, shortenMarketAddress } from "./earn-market-presentation";
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawal,
@@ -42,6 +39,13 @@ import {
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultSlippageSection } from "./earn-vault-slippage-section";
+import { earnVaultPositionStatusDisplay, earnVaultWithdrawalUiState } from "./earn-vault-ui-state";
+import {
+  VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
+  validateVaultWithdrawalAmount,
+  vaultWithdrawalAvailableAmount,
+  vaultWithdrawalSharesForAmount,
+} from "./earn-vault-withdraw-amount";
 import {
   forgetVaultWithdrawalFloor,
   recallVaultWithdrawalFloor,
@@ -49,26 +53,6 @@ import {
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
-
-const MAX_SHARES_LENGTH = 128;
-
-type VaultWithdrawalSharesValidation =
-  | { kind: "valid"; canonicalShares: string }
-  | { kind: "invalid" };
-
-/**
- * Validate a share quantity without converting it through a JavaScript number.
- * The share mint's scale is not knowable client-side (share mints are not in
- * the well-known token table), so scale is the BUILDER's check: the API
- * answers over-precision with a readable 400 before anything is signed.
- */
-function validateVaultWithdrawalShares(value: string): VaultWithdrawalSharesValidation {
-  const shares = parseUnsignedDecimal(value, { maxLength: MAX_SHARES_LENGTH });
-  if (!shares || compareUnsignedDecimals(shares.canonical, "0") !== 1) {
-    return { kind: "invalid" };
-  }
-  return { kind: "valid", canonicalShares: shares.canonical };
-}
 
 /** The floor the current quote and tolerance imply, or `undefined` while they cannot. */
 function derivedMinAmountOut(
@@ -123,28 +107,24 @@ function WithdrawalQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultWit
   return null;
 }
 
-function sharesBalanceHint(
+function amountBalanceHint(
   t: ReturnType<typeof useTranslations>,
   locale: string,
-  totalShares: string | undefined,
-  withdrawableShares: string | undefined,
+  positionValue: string | undefined,
+  availableAmount: string | undefined,
   hasStakedShares: boolean
 ): string {
-  if (withdrawableShares === undefined) {
-    return totalShares === undefined
-      ? t("DashboardEarn.vaultWithdraw.sharesUnknown")
-      : t("DashboardEarn.vaultWithdraw.withdrawableUnknown", {
-          shares: formatProviderAmount(totalShares, locale),
-        });
+  if (availableAmount === undefined) {
+    return t("DashboardEarn.vaultWithdraw.amountUnavailable");
   }
-  if (hasStakedShares && totalShares !== undefined) {
-    return t("DashboardEarn.vaultWithdraw.sharesAvailable", {
-      available: formatProviderAmount(withdrawableShares, locale),
-      total: formatProviderAmount(totalShares, locale),
+  if (hasStakedShares && positionValue !== undefined) {
+    return t("DashboardEarn.vaultWithdraw.amountAvailableOfTotal", {
+      available: formatUsd(availableAmount, locale),
+      total: formatUsd(positionValue, locale),
     });
   }
-  return t("DashboardEarn.vaultWithdraw.sharesHeld", {
-    shares: formatProviderAmount(withdrawableShares, locale),
+  return t("DashboardEarn.vaultWithdraw.amountAvailable", {
+    amount: formatUsd(availableAmount, locale),
   });
 }
 
@@ -240,11 +220,13 @@ function WithdrawalResult({
   environment,
   onClose,
   position,
+  requestedAmount,
 }: {
   outcome: WithdrawalOutcome;
   environment: SdpEnvironment;
   onClose: () => void;
   position: EarnVaultPosition;
+  requestedAmount: string;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -254,6 +236,7 @@ function WithdrawalResult({
   if (outcome.kind === "approval_pending") {
     return (
       <>
+        <EarnOutcomeMark tone="warning" />
         <div className="flex items-center gap-2 pr-8">
           <h2
             className="text-base font-medium text-primary outline-none"
@@ -340,9 +323,23 @@ function WithdrawalResult({
               status: t("DashboardEarn.vaultWithdraw.submittedStatus"),
               statusVariant: "default",
             };
+  const sharedStatus = outcome.absorbedByApproval
+    ? null
+    : earnVaultPositionStatusDisplay(
+        earnVaultWithdrawalUiState(withdrawal.status).positionStatus,
+        t("DashboardMarkets.treasury.positionStatusPending"),
+        t("DashboardMarkets.treasury.positionStatusActive")
+      );
+  const status = sharedStatus?.label ?? copy.status;
+  const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
 
   return (
     <>
+      <EarnOutcomeMark
+        tone={
+          statusVariant === "success" ? "success" : statusVariant === "warning" ? "warning" : "info"
+        }
+      />
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -351,7 +348,7 @@ function WithdrawalResult({
         >
           {copy.title}
         </h2>
-        <Badge variant={copy.statusVariant}>{copy.status}</Badge>
+        <Badge variant={statusVariant}>{status}</Badge>
       </div>
       <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
 
@@ -361,9 +358,9 @@ function WithdrawalResult({
           <dd className="max-w-64 text-right text-primary">{positionName}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.sharesLabel")}</dt>
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatProviderAmount(withdrawal.shares, locale)}
+            {formatUsd(requestedAmount, locale)}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
@@ -416,25 +413,26 @@ export interface EarnVaultWithdrawModalProps {
   projectId: string | null;
   onClose: () => void;
   onWithdrawn?: (withdrawal: EarnVaultWithdrawal) => void;
+  onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
 }
 
 /**
- * Exit a vault position: redeem shares back into the custody wallet that holds
- * them. Shares, not token amounts — the share quantity is the exact intent a
- * withdrawal has, and the live position read is the balance that bounds it.
- * The proceeds arrive as the position's deposit token in the same wallet; no
- * destination is ever entered here.
+ * Exit a vault position using a stablecoin amount. The UI converts that amount
+ * from the live position value into the exact share quantity the API requires,
+ * then reviews the provider's payout quote before anything is submitted.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The flow keeps value-moving validation, quote state, and its two UI steps in one auditable state machine.
 export function EarnVaultWithdrawModal({
   position,
   environment,
   projectId,
   onClose,
   onWithdrawn,
+  onMovementUpdated,
 }: EarnVaultWithdrawModalProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const [sharesInput, setSharesInput] = useState("");
+  const [amountInput, setAmountInput] = useState("");
   // Declared per provider in @sdp/types: non-null means this provider REQUIRES
   // an explicit exit floor derived from a live quote. Null renders no slippage
   // control and sends no floor — Kamino's contract is unchanged.
@@ -443,13 +441,40 @@ export function EarnVaultWithdrawModal({
     slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
   );
   const [slippageOpen, setSlippageOpen] = useState(false);
+  const [step, setStep] = useState<"details" | "review">("details");
   const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<WithdrawalOutcome | null>(null);
   const submittingRef = useRef(false);
   const requestControllerRef = useRef<AbortController | null>(null);
-  const panelKey = outcome ? `outcome:${outcome.kind}` : "form";
+  const observedWithdrawal = useEarnVaultWithdrawalOutcome(
+    outcome?.kind === "withdrawal" && !outcome.absorbedByApproval
+      ? outcome.withdrawal.movementId
+      : undefined,
+    undefined,
+    onMovementUpdated
+  );
+  const visibleOutcome: WithdrawalOutcome | null =
+    outcome?.kind === "withdrawal" && observedWithdrawal
+      ? { ...outcome, withdrawal: { ...outcome.withdrawal, ...observedWithdrawal } }
+      : outcome;
+  const progressStep = visibleOutcome
+    ? visibleOutcome.kind !== "withdrawal" || visibleOutcome.absorbedByApproval
+      ? 2
+      : earnVaultWithdrawalUiState(visibleOutcome.withdrawal.status).progressStep
+    : step === "review"
+      ? 1
+      : 0;
+  const progressSteps = [
+    t("DashboardEarn.vaultWithdraw.flowDetails"),
+    t("DashboardEarn.vaultWithdraw.flowReview"),
+    t("DashboardEarn.vaultWithdraw.flowProcessing"),
+    t("DashboardEarn.vaultWithdraw.flowComplete"),
+  ];
+  const panelKey = visibleOutcome
+    ? `outcome:${visibleOutcome.kind}:${visibleOutcome.kind === "withdrawal" ? visibleOutcome.withdrawal.status : "approval"}`
+    : `form:${step}`;
   const contentRef = useModalFocus({
     focusKey: panelKey,
     initialFocusSelector: "[data-modal-focus-target]",
@@ -469,27 +494,30 @@ export function EarnVaultWithdrawModal({
   );
 
   const asset = earnMintAsset(position.tokenMint);
-  const sharesValidation = validateVaultWithdrawalShares(sharesInput);
+  const amountValidation = validateVaultWithdrawalAmount(amountInput);
   const totalShares = position.shares;
   const withdrawableShares = position.withdrawableShares;
+  const availableAmount = vaultWithdrawalAvailableAmount(position);
+  const sharesToRedeem =
+    amountValidation.kind === "valid"
+      ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
+      : undefined;
   const hasStakedShares =
     totalShares !== undefined &&
     withdrawableShares !== undefined &&
     compareUnsignedDecimals(totalShares, withdrawableShares) === 1;
-  const overWithdrawableShares =
-    sharesValidation.kind === "valid" && withdrawableShares !== undefined
-      ? compareUnsignedDecimals(sharesValidation.canonicalShares, withdrawableShares) === 1
+  const overAvailableAmount =
+    amountValidation.kind === "valid" && availableAmount !== undefined
+      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
       : false;
-  const sharesError =
-    sharesInput.trim() === "" || sharesValidation.kind === "valid"
+  const amountError =
+    amountInput.trim() === "" || amountValidation.kind === "valid"
       ? null
-      : t("DashboardEarn.vaultWithdraw.sharesInvalid");
+      : t("DashboardEarn.vaultWithdraw.amountInvalid");
   const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
   const slippageInvalid = slippagePolicy !== null && slippageBps === null;
   const quoteShares =
-    slippagePolicy !== null && sharesValidation.kind === "valid"
-      ? sharesValidation.canonicalShares
-      : null;
+    slippagePolicy !== null && sharesToRedeem !== undefined ? sharesToRedeem : null;
   // The key serializes EVERY quote input, per the hook's contract: shares
   // alone would keep serving the previous position's quote across a swap.
   const quoteKey = quoteShares === null ? null : JSON.stringify([position.id, quoteShares]);
@@ -504,8 +532,9 @@ export function EarnVaultWithdrawModal({
   );
   const quote = quoteForKey(rawQuote, quoteKey);
   const minAmountOut = derivedMinAmountOut(slippageBps, quote);
-  const submitBlocked =
-    sharesValidation.kind !== "valid" || (slippagePolicy !== null && minAmountOut === undefined);
+  const continueBlocked =
+    amountValidation.kind !== "valid" || sharesToRedeem === undefined || overAvailableAmount;
+  const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
   async function submitResolvedIntent(controller: AbortController, shares: string) {
     const fingerprint = vaultWithdrawalRequestFingerprint({
@@ -576,7 +605,7 @@ export function EarnVaultWithdrawModal({
   }
 
   async function submit() {
-    if (submittingRef.current || submitBlocked || sharesValidation.kind !== "valid") return;
+    if (submittingRef.current || submitBlocked || sharesToRedeem === undefined) return;
 
     const controller = new AbortController();
     requestControllerRef.current?.abort();
@@ -586,7 +615,7 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      await submitResolvedIntent(controller, sharesValidation.canonicalShares);
+      await submitResolvedIntent(controller, sharesToRedeem);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(
@@ -606,16 +635,22 @@ export function EarnVaultWithdrawModal({
     position: position.label || shortenMarketAddress(position.providerReference),
   });
 
-  if (outcome) {
+  if (visibleOutcome) {
     return (
       <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
         <div className="p-6" ref={contentRef}>
-          <WithdrawalResult
-            environment={environment}
-            onClose={onClose}
-            outcome={outcome}
-            position={position}
-          />
+          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
+          <EarnFlowTransition stepKey={panelKey}>
+            <WithdrawalResult
+              environment={environment}
+              onClose={onClose}
+              outcome={visibleOutcome}
+              position={position}
+              requestedAmount={
+                amountValidation.kind === "valid" ? amountValidation.canonicalAmount : amountInput
+              }
+            />
+          </EarnFlowTransition>
         </div>
       </Modal>
     );
@@ -624,147 +659,193 @@ export function EarnVaultWithdrawModal({
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
       <div aria-busy={submitting} className="p-6" ref={contentRef}>
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {modalLabel}
-        </h2>
-        <p className="mt-2 max-w-md text-sm leading-5 text-secondary">
-          {t("DashboardEarn.vaultWithdraw.body", { token: asset.symbol })}
-        </p>
-
-        <div className="mt-5 flex flex-col gap-2">
-          <div className="flex items-end justify-between gap-3">
-            <Label htmlFor="earn-vault-withdraw-shares">
-              {t("DashboardEarn.vaultWithdraw.sharesLabel")}
-            </Label>
-            <Button
-              disabled={submitting || withdrawableShares === undefined}
-              onClick={() => {
-                if (withdrawableShares === undefined) return;
-                setSharesInput(withdrawableShares);
-                setSubmitError(null);
-              }}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              {t("DashboardEarn.vaultWithdraw.max")}
-            </Button>
-          </div>
-          <Input
-            aria-describedby="earn-vault-withdraw-balance earn-vault-withdraw-note"
-            aria-invalid={sharesError ? true : undefined}
-            disabled={submitting}
-            id="earn-vault-withdraw-shares"
-            inputMode="decimal"
-            maxLength={MAX_SHARES_LENGTH}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              setSharesInput(event.target.value);
-              setSubmitError(null);
-            }}
-            placeholder="0.00"
-            value={sharesInput}
-          />
-          <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
-            {sharesBalanceHint(t, locale, totalShares, withdrawableShares, hasStakedShares)}
-          </div>
-          {sharesError ? (
-            <p className="text-xs text-error" role="alert">
-              {sharesError}
-            </p>
-          ) : null}
-          {overWithdrawableShares ? (
-            <p className="text-xs text-warning" role="status">
-              {t("DashboardEarn.vaultWithdraw.overShares")}
-            </p>
-          ) : null}
-        </div>
-
-        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
-            <dd className="text-right text-primary">{asset.symbol}</dd>
-          </div>
-          {position.tokenValue !== undefined ? (
-            <div className="flex items-baseline justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.positionValue")}</dt>
-              <dd className="text-right tabular-nums text-primary">
-                {formatTokenQuantity(position.tokenValue, locale, asset.symbol)}
-              </dd>
-            </div>
-          ) : null}
-          {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-            <div className="flex items-baseline justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
-              <dd className="text-right tabular-nums text-primary">
-                {formatTokenQuantity(quote.preview.assetsOut, locale, asset.symbol)}
-              </dd>
-            </div>
-          ) : null}
-          {minAmountOut !== undefined ? (
-            <div className="flex items-baseline justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
-              <dd className="text-right tabular-nums text-primary">
-                {formatTokenQuantity(minAmountOut, locale, asset.symbol)}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-
-        <WithdrawalQuoteNotices quote={quote} />
-
-        {slippagePolicy ? (
-          <VaultSlippageSection
-            help={t("DashboardEarn.vaultWithdraw.slippageHelp")}
-            idPrefix="earn-vault-withdraw"
-            input={slippageInput}
-            invalid={slippageInvalid}
-            onChange={(value) => {
-              setSlippageInput(value);
-              setSubmitError(null);
-            }}
-            onToggle={() => setSlippageOpen((open) => !open)}
-            open={slippageOpen}
-            submitting={submitting}
-            toleranceBps={slippageBps}
-          />
-        ) : null}
-
-        <p className="mt-4 text-xs leading-5 text-tertiary" id="earn-vault-withdraw-note">
-          {/* From the position, not the quote: Kamino declares no exit floor
-              and so never quotes, which left its note stuck on wallet-pays. */}
-          {position.feeSponsored
-            ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
-            : t("DashboardEarn.vaultWithdraw.confirmNote")}
-        </p>
-        {submitError ? (
-          <p
-            className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-            role="alert"
+        <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
+        <EarnFlowTransition stepKey={step}>
+          <h2
+            className="pr-8 text-lg font-medium leading-6 text-primary outline-none"
+            data-modal-focus-target
+            tabIndex={-1}
           >
-            {submitError}
-          </p>
-        ) : null}
+            {modalLabel}
+          </h2>
 
-        <div className="mt-6 flex justify-end gap-2">
-          <Button disabled={submitting} onClick={onClose} variant="outline">
-            {t("DashboardEarn.deposit.cancel")}
-          </Button>
-          <Button
-            disabled={submitting || submitBlocked}
-            iconLeft={
-              submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
-            }
-            onClick={() => void submit()}
-          >
-            {submitting
-              ? t("DashboardEarn.vaultWithdraw.submitting")
-              : t("DashboardEarn.vaultWithdraw.submit")}
-          </Button>
-        </div>
+          {step === "details" ? (
+            <>
+              <div className="mt-5 flex flex-col gap-2">
+                <div className="flex items-end justify-between gap-3">
+                  <Label htmlFor="earn-vault-withdraw-amount">
+                    {t("DashboardEarn.vaultWithdraw.amountLabel")}
+                  </Label>
+                  <Button
+                    disabled={submitting || availableAmount === undefined}
+                    onClick={() => {
+                      if (availableAmount === undefined) return;
+                      setAmountInput(availableAmount);
+                      setSubmitError(null);
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {t("DashboardEarn.vaultWithdraw.max")}
+                  </Button>
+                </div>
+                <Input
+                  aria-describedby="earn-vault-withdraw-balance"
+                  aria-invalid={amountError ? true : undefined}
+                  disabled={submitting}
+                  id="earn-vault-withdraw-amount"
+                  inputMode="decimal"
+                  maxDecimals={VAULT_WITHDRAWAL_AMOUNT_DECIMALS}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    setAmountInput(event.target.value);
+                    setSubmitError(null);
+                  }}
+                  placeholder="0.00"
+                  value={amountInput}
+                />
+                <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
+                  {amountBalanceHint(
+                    t,
+                    locale,
+                    position.tokenValue,
+                    availableAmount,
+                    hasStakedShares
+                  )}
+                </div>
+                {amountError ? (
+                  <p className="text-xs text-error" role="alert">
+                    {amountError}
+                  </p>
+                ) : null}
+                {overAvailableAmount ? (
+                  <p className="text-xs text-warning" role="status">
+                    {t("DashboardEarn.vaultWithdraw.overAmount")}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="mt-6">
+                <Button
+                  className="!w-full"
+                  disabled={continueBlocked}
+                  onClick={() => {
+                    setSubmitError(null);
+                    setStep("review");
+                  }}
+                >
+                  {t("DashboardEarn.deposit.continueAction")}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mt-1 text-sm text-secondary">
+                {t("DashboardEarn.deposit.progressReview")}
+              </p>
+
+              <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+                <div className="flex items-baseline justify-between gap-5">
+                  <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+                  <dd className="max-w-64 text-right text-primary">
+                    {position.label || shortenMarketAddress(position.providerReference)}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-5">
+                  <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
+                  <dd className="text-right tabular-nums text-primary">
+                    {amountValidation.kind === "valid"
+                      ? formatUsd(amountValidation.canonicalAmount, locale)
+                      : amountInput}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-5">
+                  <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
+                  <dd className="text-right text-primary">{asset.symbol}</dd>
+                </div>
+                {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
+                  <div className="flex items-baseline justify-between gap-5">
+                    <dt className="text-tertiary">
+                      {t("DashboardEarn.vaultWithdraw.expectedAmount")}
+                    </dt>
+                    <dd className="text-right tabular-nums text-primary">
+                      {formatTokenQuantity(quote.preview.assetsOut, locale, asset.symbol)}
+                    </dd>
+                  </div>
+                ) : null}
+                {minAmountOut !== undefined ? (
+                  <div className="flex items-baseline justify-between gap-5">
+                    <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
+                    <dd className="text-right tabular-nums text-primary">
+                      {formatTokenQuantity(minAmountOut, locale, asset.symbol)}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+
+              <WithdrawalQuoteNotices quote={quote} />
+
+              {slippagePolicy ? (
+                <VaultSlippageSection
+                  help={t("DashboardEarn.vaultWithdraw.slippageHelp")}
+                  idPrefix="earn-vault-withdraw"
+                  input={slippageInput}
+                  invalid={slippageInvalid}
+                  onChange={(value) => {
+                    setSlippageInput(value);
+                    setSubmitError(null);
+                  }}
+                  onToggle={() => setSlippageOpen((open) => !open)}
+                  open={slippageOpen}
+                  submitting={submitting}
+                  toleranceBps={slippageBps}
+                />
+              ) : null}
+
+              <p className="mt-4 text-xs leading-5 text-tertiary">
+                {/* From the position, not the quote: Kamino declares no exit floor
+                    and so never quotes, which left its note stuck on wallet-pays. */}
+                {position.feeSponsored
+                  ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
+                  : t("DashboardEarn.vaultWithdraw.confirmNote")}
+              </p>
+              {submitError ? (
+                <p
+                  className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
+                  role="alert"
+                >
+                  {submitError}
+                </p>
+              ) : null}
+
+              <div className="mt-6 flex gap-2">
+                <Button
+                  className="flex-1"
+                  disabled={submitting}
+                  onClick={() => {
+                    setSubmitError(null);
+                    setStep("details");
+                  }}
+                  variant="outline"
+                >
+                  {t("DashboardEarn.deposit.back")}
+                </Button>
+                <Button
+                  className="flex-[2]"
+                  disabled={submitting || submitBlocked}
+                  iconLeft={
+                    submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
+                  }
+                  onClick={() => void submit()}
+                >
+                  {submitting
+                    ? t("DashboardEarn.vaultWithdraw.submitting")
+                    : t("DashboardEarn.vaultWithdraw.submit")}
+                </Button>
+              </div>
+            </>
+          )}
+        </EarnFlowTransition>
       </div>
     </Modal>
   );

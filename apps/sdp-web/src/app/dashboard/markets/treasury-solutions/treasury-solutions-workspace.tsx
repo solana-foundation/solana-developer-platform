@@ -4,8 +4,6 @@ import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
-  type EarnVaultDirectMovementStatus,
-  type EarnVaultMovementStatus,
   type EarnVaultPosition,
   type EarnVaultWithdrawal,
   earnProgramSolanaPayoutTokens,
@@ -29,7 +27,7 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
@@ -47,7 +45,6 @@ import {
   useDashboardWorkspace,
   useOptionalDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
@@ -79,7 +76,6 @@ import {
 } from "../earn/earn-program-data";
 import {
   type EarnProviderAccess,
-  type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
@@ -87,6 +83,11 @@ import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
 } from "../earn/earn-vault-deposit-modal";
+import {
+  earnVaultDepositUiState,
+  earnVaultPositionStatusDisplay,
+  earnVaultWithdrawalUiState,
+} from "../earn/earn-vault-ui-state";
 import {
   EarnVaultWithdrawalOutcomeTracker,
   EarnVaultWithdrawModal,
@@ -182,67 +183,6 @@ function replaceTrackedVaultMovement<
   );
 }
 
-const TREASURY_DEPOSIT_STATUS = {
-  pending: {
-    description: "DashboardMarkets.treasury.depositStatusPendingDescription",
-    label: "DashboardMarkets.treasury.depositStatusPending",
-    variant: "warning",
-  },
-  submitted: {
-    description: "DashboardMarkets.treasury.depositStatusSubmittedDescription",
-    label: "DashboardMarkets.treasury.depositStatusSubmitted",
-    variant: "default",
-  },
-  confirmed: {
-    description: "DashboardMarkets.treasury.depositStatusConfirmedDescription",
-    label: "DashboardMarkets.treasury.depositStatusConfirmed",
-    variant: "success",
-  },
-  failed: {
-    description: "DashboardMarkets.treasury.depositStatusFailedDescription",
-    label: "DashboardMarkets.treasury.depositStatusFailed",
-    variant: "danger",
-  },
-} as const satisfies Readonly<
-  Record<
-    EarnVaultMovementStatus,
-    { description: MessageKey; label: MessageKey; variant: BadgeVariant }
-  >
->;
-
-const TREASURY_WITHDRAWAL_STATUS = {
-  requested: {
-    description: "DashboardMarkets.treasury.withdrawalStatusRequestedDescription",
-    label: "DashboardMarkets.treasury.withdrawalStatusRequested",
-    variant: "warning",
-  },
-  submitted: {
-    description: "DashboardMarkets.treasury.withdrawalStatusSubmittedDescription",
-    label: "DashboardMarkets.treasury.withdrawalStatusSubmitted",
-    variant: "default",
-  },
-  confirmed: {
-    description: "DashboardMarkets.treasury.withdrawalStatusConfirmedDescription",
-    label: "DashboardMarkets.treasury.withdrawalStatusConfirmed",
-    variant: "warning",
-  },
-  finalized: {
-    description: "DashboardMarkets.treasury.withdrawalStatusFinalizedDescription",
-    label: "DashboardMarkets.treasury.withdrawalStatusFinalized",
-    variant: "success",
-  },
-  failed: {
-    description: "DashboardMarkets.treasury.withdrawalStatusFailedDescription",
-    label: "DashboardMarkets.treasury.withdrawalStatusFailed",
-    variant: "danger",
-  },
-} as const satisfies Readonly<
-  Record<
-    EarnVaultDirectMovementStatus,
-    { description: MessageKey; label: MessageKey; variant: BadgeVariant }
-  >
->;
-
 function TreasuryInfoTip({ label }: { label: string }) {
   return (
     <TooltipProvider>
@@ -264,30 +204,32 @@ function TreasuryInfoTip({ label }: { label: string }) {
 
 function TreasuryPositionStatusBadge({ activity }: { activity?: TrackedVaultActivity }) {
   const t = useTranslations();
-  const status = activity
-    ? activity.kind === "deposit"
-      ? TREASURY_DEPOSIT_STATUS[activity.movement.status]
-      : TREASURY_WITHDRAWAL_STATUS[activity.movement.status]
-    : {
-        description: "DashboardMarkets.treasury.positionStatusActiveDescription" as const,
-        label: "DashboardMarkets.treasury.positionStatusActive" as const,
-        variant: "outline" as const,
-      };
+  const positionStatus = activity
+    ? (activity.kind === "deposit"
+        ? earnVaultDepositUiState(activity.movement.status)
+        : earnVaultWithdrawalUiState(activity.movement.status)
+      ).positionStatus
+    : "active";
+  const display = earnVaultPositionStatusDisplay(
+    positionStatus,
+    t("DashboardMarkets.treasury.positionStatusPending"),
+    t("DashboardMarkets.treasury.positionStatusActive")
+  );
   const description =
-    activity?.movement.status === "failed" && activity.movement.failureReason
-      ? activity.movement.failureReason
-      : t(status.description);
+    positionStatus === "pending"
+      ? t("DashboardMarkets.treasury.positionStatusPendingDescription")
+      : t("DashboardMarkets.treasury.positionStatusActiveDescription");
 
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            aria-label={`${t(status.label)}: ${description}`}
+            aria-label={`${display.label}: ${description}`}
             className="inline-flex cursor-help border-0 bg-transparent p-0"
             type="button"
           >
-            <Badge variant={status.variant}>{t(status.label)}</Badge>
+            <Badge variant={display.variant}>{display.label}</Badge>
           </button>
         </TooltipTrigger>
         <TooltipContent className="max-w-64 text-xs leading-5">{description}</TooltipContent>
@@ -527,17 +469,6 @@ function strategyPositionValue(
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
 
-// Exhaustive by construction: a new availability variant fails this map's
-// compile instead of collapsing to a bare "Unavailable".
-const TREASURY_AVAILABILITY_LABELS = {
-  available: "DashboardMarkets.treasury.depositAvailable",
-  cluster_unavailable: "DashboardMarkets.treasury.clusterUnavailable",
-  strategy_unavailable: "DashboardMarkets.treasury.depositUnavailable",
-  environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
-  access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
-  provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
-} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
-
 function TreasuryPositionIdentity({ name, provider }: { name: string; provider: string }) {
   return (
     <div className="min-w-0">
@@ -594,7 +525,7 @@ function StrategyTable({
             >
               {t("DashboardMarkets.treasury.apy")}
             </SortableNumericTableHead>
-            <TableHead className="w-[18%]">{t("DashboardMarkets.treasury.status")}</TableHead>
+            <TableHead className="w-[18%]">{t("DashboardMarkets.treasury.tvl")}</TableHead>
             <TableHead align="right" className="w-[14%]">
               {t("DashboardMarkets.treasury.actions")}
             </TableHead>
@@ -613,12 +544,9 @@ function StrategyTable({
             );
             const canDeposit = availability === "available";
             const provider = earnProviderLabel(strategy.provider);
-            const statusLabel =
-              availability === "cluster_unavailable"
-                ? t(TREASURY_AVAILABILITY_LABELS.cluster_unavailable, {
-                    cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
-                  })
-                : t(TREASURY_AVAILABILITY_LABELS[availability]);
+            const tvl = strategy.riskMetadata?.tvlUsd;
+            const tvlUsd =
+              typeof tvl === "number" && Number.isFinite(tvl) && tvl >= 0 ? String(tvl) : undefined;
             return (
               <TableRow key={strategy.id}>
                 <TableCell>
@@ -649,10 +577,8 @@ function StrategyTable({
                 <TableCell className="text-sm text-primary tabular-nums">
                   {formatProviderApy(strategy.currentApy, locale)}
                 </TableCell>
-                <TableCell className="text-sm text-secondary">
-                  <span className="block truncate" title={statusLabel}>
-                    {statusLabel}
-                  </span>
+                <TableCell className="text-sm text-primary tabular-nums">
+                  {formatUsd(tvlUsd, locale, 2)}
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex justify-end gap-2">
@@ -714,10 +640,6 @@ function ActiveVaultPositionsCard({
     const current = latestActivityByPositionId.get(activity.movement.positionId);
     const activityCreatedAt = activity.movement.createdAt;
     const currentCreatedAt = current?.movement.createdAt;
-    // Server timestamps are authoritative when both movements have one. Until
-    // a just-submitted deposit's detail read supplies its timestamp, compare
-    // the order in which this client observed the movements. This avoids both
-    // browser clock skew and a timestamp-less deposit masking a later exit.
     const isNewer =
       current === undefined ||
       (activityCreatedAt !== undefined && currentCreatedAt !== undefined
@@ -725,9 +647,7 @@ function ActiveVaultPositionsCard({
           (activityCreatedAt === currentCreatedAt &&
             activity.movement.observedOrder > current.movement.observedOrder)
         : activity.movement.observedOrder > current.movement.observedOrder);
-    if (isNewer) {
-      latestActivityByPositionId.set(activity.movement.positionId, activity);
-    }
+    if (isNewer) latestActivityByPositionId.set(activity.movement.positionId, activity);
   };
   for (const deposit of deposits) rememberLatest({ kind: "deposit", movement: deposit });
   for (const withdrawal of withdrawals) {
@@ -1285,6 +1205,13 @@ export function TreasurySolutionsWorkspace({
     });
   }, []);
 
+  const updateVaultDepositWatch = useCallback((updatedDeposit: EarnVaultDepositRecord) => {
+    setVaultDepositWatches((current) => replaceTrackedVaultMovement(current, updatedDeposit));
+  }, []);
+  const updateVaultWithdrawalWatch = useCallback((updatedWithdrawal: EarnVaultWithdrawal) => {
+    setVaultWithdrawalWatches((current) => replaceTrackedVaultMovement(current, updatedWithdrawal));
+  }, []);
+
   const activeWallets = wallets ?? [];
   // Every share mint the page knows about, from positions AND the catalogue:
   // a wallet can hold receipt tokens for a strategy it has no recorded
@@ -1437,6 +1364,7 @@ export function TreasurySolutionsWorkspace({
             refreshPositions();
             refreshWalletBalances();
           }}
+          onMovementUpdated={updateVaultDepositWatch}
           strategy={depositStrategy}
         />
       ) : null}
@@ -1462,6 +1390,7 @@ export function TreasurySolutionsWorkspace({
             refreshPositions();
             refreshWalletBalances();
           }}
+          onMovementUpdated={updateVaultWithdrawalWatch}
           position={withdrawPosition}
           projectId={selectedProjectId}
         />
@@ -1479,11 +1408,7 @@ export function TreasurySolutionsWorkspace({
         <EarnVaultWithdrawalOutcomeTracker
           key={`vault-withdrawal:${withdrawal.movementId}`}
           movementId={withdrawal.movementId}
-          onUpdated={(updatedWithdrawal) => {
-            setVaultWithdrawalWatches((current) =>
-              replaceTrackedVaultMovement(current, updatedWithdrawal)
-            );
-          }}
+          onUpdated={updateVaultWithdrawalWatch}
           onSettled={(settledWithdrawal) => {
             setVaultWithdrawalWatches((current) =>
               replaceTrackedVaultMovement(current, settledWithdrawal)
@@ -1503,11 +1428,7 @@ export function TreasurySolutionsWorkspace({
         <EarnVaultDepositOutcomeTracker
           key={`vault-deposit:${deposit.movementId}`}
           movementId={deposit.movementId}
-          onUpdated={(updatedDeposit) => {
-            setVaultDepositWatches((current) =>
-              replaceTrackedVaultMovement(current, updatedDeposit)
-            );
-          }}
+          onUpdated={updateVaultDepositWatch}
           onSettled={(settledDeposit) => {
             setVaultDepositWatches((current) =>
               replaceTrackedVaultMovement(current, settledDeposit)

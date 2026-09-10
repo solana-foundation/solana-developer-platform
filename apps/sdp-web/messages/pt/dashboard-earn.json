@@ -274,9 +274,9 @@
     },
     "liquidity": {
       "instant": "Instantânea",
-      "delayed": "Diferida",
-      "delayedDay": "Diferida · 1 dia",
-      "delayedDays": "Diferida · {days} dias"
+      "delayed": "T+N",
+      "delayedDay": "T+1 dia",
+      "delayedDays": "T+{days} dias"
     }
   },
   "DashboardEarn": {
@@ -521,13 +521,13 @@
       "vaultDepositTitle": "Depositar em {strategy}",
       "vaultWalletTitle": "Escolha a Wallet de onde depositar",
       "vaultWalletBody": "A SDP assina a instrução do vault com esta Wallet, e a Wallet detém as shares resultantes. Nada é enviado para um endereço de depósito.",
-      "vaultAmount": "Valor de {token}",
+      "vaultAmount": "Valor",
       "vaultStrategy": "Vault",
       "vaultBacking": "Lastro",
       "vaultFrom": "Da Wallet",
       "vaultWalletUnavailable": "Assinatura indisponível",
       "vaultBalanceUnknown": "Saldo indisponível no momento — a rede continua sendo a autoridade.",
-      "vaultBalanceAvailable": "{amount} disponíveis nesta Wallet.",
+      "vaultBalanceAvailable": "Disponível: {amount}",
       "vaultAmountPrecision": "Digite um valor com no máximo {decimals} casas decimais.",
       "vaultOverBalance": "Isso excede o último saldo observado desta Wallet. Você ainda pode enviar porque a rede toma a decisão final.",
       "vaultConfirmNote": "Confirmar assina e envia o depósito on-chain. A Wallet paga a taxa de rede.",
@@ -578,6 +578,12 @@
       "body": "Resgate as shares do vault de volta para a Wallet de custódia que as detém. Os valores chegam como {token} na mesma Wallet.",
       "sharesLabel": "Shares a resgatar",
       "max": "Máx.",
+      "amountLabel": "Valor",
+      "amountAvailable": "{amount} disponível",
+      "amountAvailableOfTotal": "{available} disponível de {total} no total. Faça unstake do restante no Kamino primeiro.",
+      "amountUnavailable": "O valor atual em dólares está indisponível, portanto esta retirada não pode ser calculada com segurança. Tente novamente em instantes.",
+      "amountInvalid": "Insira um valor em dólares maior que zero.",
+      "overAmount": "Isso excede o valor atualmente disponível para retirada.",
       "sharesHeld": "{shares} shares mantidas nesta posição.",
       "sharesUnknown": "O saldo de shares está indisponível no momento — a rede continua sendo a autoridade.",
       "sharesAvailable": "{available} shares disponíveis para retirar de {total} no total. Faça unstake do restante no Kamino primeiro.",

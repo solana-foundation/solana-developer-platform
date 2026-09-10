@@ -281,9 +281,9 @@
     },
     "liquidity": {
       "instant": "Instant",
-      "delayed": "Différé",
-      "delayedDay": "Différé · 1 jour",
-      "delayedDays": "Différé · {days} jours"
+      "delayed": "T+N",
+      "delayedDay": "T+1 jour",
+      "delayedDays": "T+{days} jours"
     }
   },
   "DashboardEarn": {
@@ -528,13 +528,13 @@
       "vaultDepositTitle": "Déposer dans {strategy}",
       "vaultWalletTitle": "Choisissez le Wallet depuis lequel déposer",
       "vaultWalletBody": "SDP signe l'instruction du vault avec ce Wallet, et le Wallet détient les parts résultantes. Rien n'est envoyé à une adresse de dépôt.",
-      "vaultAmount": "Montant en {token}",
+      "vaultAmount": "Montant",
       "vaultStrategy": "Vault",
       "vaultBacking": "Garantie",
       "vaultFrom": "Depuis le Wallet",
       "vaultWalletUnavailable": "Signature indisponible",
       "vaultBalanceUnknown": "Solde indisponible pour le moment — le réseau reste l'autorité de référence.",
-      "vaultBalanceAvailable": "{amount} disponibles dans ce Wallet.",
+      "vaultBalanceAvailable": "Disponible : {amount}",
       "vaultAmountPrecision": "Saisissez un montant avec au plus {decimals} décimales.",
       "vaultOverBalance": "Ce montant dépasse le dernier solde observé de ce Wallet. Vous pouvez quand même soumettre, car le réseau prend la décision finale.",
       "vaultConfirmNote": "Confirmer signe et soumet le dépôt on-chain. Le Wallet paie les frais de réseau.",
@@ -585,6 +585,12 @@
       "body": "Rachetez les parts de vault dans le Wallet de custody qui les détient. Les produits arrivent sous forme de {token} dans le même Wallet.",
       "sharesLabel": "Parts à racheter",
       "max": "Max",
+      "amountLabel": "Montant",
+      "amountAvailable": "{amount} disponible",
+      "amountAvailableOfTotal": "{available} disponible sur {total} au total. Désengagez le reste dans Kamino d'abord.",
+      "amountUnavailable": "La valeur actuelle en dollars est indisponible, ce retrait ne peut donc pas être calculé en toute sécurité. Réessayez dans un instant.",
+      "amountInvalid": "Saisissez un montant en dollars supérieur à zéro.",
+      "overAmount": "Ce montant dépasse la somme actuellement disponible au retrait.",
       "sharesHeld": "{shares} parts détenues dans cette position.",
       "sharesUnknown": "Solde de parts indisponible pour le moment — le réseau reste l'autorité.",
       "sharesAvailable": "{available} parts disponibles au retrait sur {total} au total. Désengagez (unstake) le reste dans Kamino d'abord.",

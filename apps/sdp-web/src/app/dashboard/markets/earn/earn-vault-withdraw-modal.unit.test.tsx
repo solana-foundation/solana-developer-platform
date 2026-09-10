@@ -37,7 +37,7 @@ const position: EarnVaultPosition = {
   feeSponsored: false,
   shares: "10",
   withdrawableShares: "6",
-  tokenValue: "10.5",
+  tokenValue: "10",
 };
 
 function withdrawal(status: EarnVaultWithdrawal["status"]): EarnVaultWithdrawal {
@@ -87,27 +87,51 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("EarnVaultWithdrawModal", () => {
-  it("caps Max at unstaked withdrawable shares", async () => {
+  it("caps Max at the dollar value of unstaked withdrawable shares", async () => {
     const user = userEvent.setup();
     renderModal();
+    const progress = screen.getByRole("navigation", { name: "Progress" });
+    expect(
+      Array.from(progress.querySelectorAll("li"), (item) => item.textContent?.replace(/^\d/, ""))
+    ).toEqual(["Details", "Review", "Processing", "Complete"]);
 
     await user.click(screen.getByRole("button", { name: "Max" }));
 
-    expect((screen.getByLabelText("Shares") as HTMLInputElement).value).toBe("6");
-    expect(screen.getByText(/6 withdrawable of 10 total/)).toBeTruthy();
+    expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("6");
+    expect(screen.getByText(/\$6.00 available of \$10.00 total/)).toBeTruthy();
   });
 
-  it("names SDP as the fee payer when the position says the exit is sponsored", () => {
+  it("reviews the withdrawal before confirmation and preserves the amount on back", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2.5" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByText("$2.50")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm withdrawal" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("2.5");
+  });
+
+  it("names SDP as the fee payer when the position says the exit is sponsored", async () => {
     // From the position, never the quote: Kamino declares no exit floor, so no
     // quote is fetched and a flag riding on it could never surface here.
     renderModal(vi.fn(), { ...position, feeSponsored: true });
+    const user = userEvent.setup();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(screen.getByText("The custody wallet signs. SDP covers the network fee.")).toBeTruthy();
     expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
   });
 
-  it("keeps the wallet-pays note for an unsponsored exit", () => {
+  it("keeps the wallet-pays note for an unsponsored exit", async () => {
     renderModal();
+    const user = userEvent.setup();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(screen.getByText("The custody wallet signs and pays the network fee.")).toBeTruthy();
   });
@@ -126,7 +150,7 @@ describe("EarnVaultWithdrawModal", () => {
     );
 
     expect((screen.getByRole("button", { name: "Max" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/withdrawable balance is unavailable/)).toBeTruthy();
+    expect(screen.getByText(/current dollar value is unavailable/)).toBeTruthy();
   });
 
   it("renders a recorded response as queued without a premature explorer link", async () => {
@@ -139,12 +163,14 @@ describe("EarnVaultWithdrawModal", () => {
     });
     const { onWithdrawn } = renderModal();
 
-    await user.type(screen.getByLabelText("Shares"), "6");
-    await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await user.type(screen.getByLabelText("Amount"), "6");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
 
     expect(await screen.findByText("Withdrawal queued")).toBeTruthy();
     expect(screen.getByText(/Signed and recorded/)).toBeTruthy();
-    expect(screen.getByText("Queued")).toBeTruthy();
+    expect(screen.getByText("Processing")).toBeTruthy();
+    expect(screen.getByText("Pending")).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
     expect(onWithdrawn).toHaveBeenCalledWith(recorded);
   });
@@ -180,8 +206,12 @@ describe("exit slippage floors (quote-derived)", () => {
 
   async function enterVedaShares(shares = "5") {
     screen.getByRole("dialog");
-    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: shares } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: shares } });
     await advancePastQuoteDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
     // The floor waits on the debounced live quote; the summary row appearing is
     // the signal that confirm is armed with a quote-derived floor.
     expect(screen.getByText("Minimum received")).toBeTruthy();
@@ -216,8 +246,12 @@ describe("exit slippage floors (quote-derived)", () => {
     mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({ kind: "unavailable" });
     renderModal(vi.fn(), vedaPosition);
     screen.getByRole("dialog");
-    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
     await advancePastQuoteDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
 
     expect(screen.getByText(/live payout quote is unavailable/)).toBeTruthy();
     expect(
@@ -262,9 +296,10 @@ describe("exit slippage floors (quote-derived)", () => {
     });
     renderModal();
     screen.getByRole("dialog");
-    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
 
     await screen.findByText("Withdrawal submitted");
     expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
