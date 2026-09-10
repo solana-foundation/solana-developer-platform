@@ -7,6 +7,7 @@ import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -308,6 +309,8 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     body.burn.amount,
     token.decimals
   );
+
+  await assertApprovedWalletOperationCustodyWallet(c, wallet.custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(wallet.custodyWalletId);
 

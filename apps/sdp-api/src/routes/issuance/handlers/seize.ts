@@ -6,6 +6,7 @@ import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -228,6 +229,8 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   const source = assertValidAddress(body.seize.source, "source");
   const destination = assertValidAddress(body.seize.destination, "destination");
 
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
+
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
   await admitIssuanceRuntimeExecution({
@@ -409,6 +412,13 @@ export async function extractSeizePolicyCandidate(
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
+  if (
+    body.seize.delegateAuthority !== undefined &&
+    body.seize.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
+
   const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,

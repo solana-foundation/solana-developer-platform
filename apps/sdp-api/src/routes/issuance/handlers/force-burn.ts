@@ -6,6 +6,7 @@ import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -212,6 +213,8 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
 
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
+
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
   await admitIssuanceRuntimeExecution({
@@ -389,6 +392,13 @@ export async function extractForceBurnPolicyCandidate(
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
+  if (
+    body.forceBurn.delegateAuthority !== undefined &&
+    body.forceBurn.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
+
   const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
