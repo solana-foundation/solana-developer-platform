@@ -11,7 +11,7 @@
  * (never `process.env`), the same discipline as `config.ts`.
  */
 
-import type { RpcEnv } from "@sdp/rpc";
+import { isForbiddenRpcError, type RpcEnv } from "@sdp/rpc";
 import { createRpc, getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
@@ -82,13 +82,30 @@ export async function getChannelTokenBalance(
     tokenProgram,
   });
 
-  // Disambiguate "no account" from a real RPC failure up front: a missing ATA is
-  // an expected zero balance, whereas getTokenAccountBalance would throw for it.
-  const account = await getAccountInfo(rpc, tokenAccount);
+  // Disambiguate "no account" from a real RPC failure with the existence probe: a
+  // missing ATA is an expected zero balance, whereas getTokenAccountBalance would
+  // throw for it. The SPC gateway does NOT answer a missing/never-credited account
+  // with a null result like a full node — it replies HTTP 403
+  // (`-32002 "account not owned by caller"`) for any account it can't attribute to
+  // the caller. So a 403 HERE means "no such account for this owner" → zero. (A
+  // real cross-owner probe is also masked to zero, which is safe: it reveals
+  // nothing, and the balance route is caller-scoped anyway.)
+  let account: Awaited<ReturnType<typeof getAccountInfo>>;
+  try {
+    account = await getAccountInfo(rpc, tokenAccount);
+  } catch (error) {
+    if (isForbiddenRpcError(error)) {
+      return { tokenAccount, balance: null };
+    }
+    throw error;
+  }
   if (account === null) {
     return { tokenAccount, balance: null };
   }
 
+  // The probe just confirmed the account exists and is attributable to the caller,
+  // so a failure of the balance read below — including a 403 — is anomalous and is
+  // deliberately NOT masked to zero: it surfaces rather than hiding a real problem.
   const { value } = await rpc.getTokenAccountBalance(tokenAccount).send();
   return {
     tokenAccount,
