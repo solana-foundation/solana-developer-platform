@@ -221,6 +221,7 @@ interface ConnectionCredentialRow {
 
 interface LockedConnectionWalletCreationRow {
   provider_credential_id: string;
+  provider_credential_scope_key: string;
   status: string;
   last_check_status: string | null;
   provider_account_fingerprint: string | null;
@@ -229,7 +230,6 @@ interface LockedConnectionWalletCreationRow {
 
 interface LockedCredentialWalletCreationRow {
   status: string;
-  credential_version: number;
 }
 
 interface CreatedConnectionWalletRow {
@@ -1015,7 +1015,7 @@ export class CustodyRuntimeTargets {
       }
 
       const connection = await tx.queryOne<LockedConnectionWalletCreationRow>(
-        `SELECT provider_credential_id, status, last_check_status,
+        `SELECT provider_credential_id, provider_credential_scope_key, status, last_check_status,
                 provider_account_fingerprint, default_custody_wallet_id
          FROM custody_connections
          WHERE id = ? AND organization_id = ? AND project_id = ?
@@ -1026,23 +1026,33 @@ export class CustodyRuntimeTargets {
         throw conflict("Custody Connection changed during wallet creation");
       }
 
+      // A Privy wallet belongs to the Provider account, not one Credential
+      // version. Rotation and rollback may change the pointer while the
+      // Provider request is in flight, so re-lock the current scoped
+      // Credential and rely on the unchanged account fingerprint above.
       const currentCredential = await tx.queryOne<LockedCredentialWalletCreationRow>(
-        `SELECT status, credential_version
+        `SELECT status
          FROM provider_credentials
          WHERE id = ?
            AND organization_id = ?
-           AND project_id = ?
+           AND provider = ?
+           AND scope_key = ?
+           AND (project_id IS NULL OR project_id = ?)
          FOR UPDATE`,
-        [credential.provider_credential_id, target.organizationId, target.projectId]
+        [
+          connection.provider_credential_id,
+          target.organizationId,
+          target.provider,
+          connection.provider_credential_scope_key,
+          target.projectId,
+        ]
       );
       if (
         connection.status !== "active" ||
         connection.last_check_status !== "success" ||
         connection.provider_account_fingerprint !== credential.provider_account_fingerprint ||
         connection.default_custody_wallet_id === null ||
-        connection.provider_credential_id !== credential.provider_credential_id ||
-        currentCredential?.status !== "active" ||
-        currentCredential.credential_version !== credential.credential_version
+        currentCredential?.status !== "active"
       ) {
         throw conflict("Custody Connection changed during wallet creation");
       }

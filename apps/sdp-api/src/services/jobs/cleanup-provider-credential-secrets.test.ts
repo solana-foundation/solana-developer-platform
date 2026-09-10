@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { rootLogger } from "@/runtime/logger";
 import type { CredentialSecretStore } from "@/services/credential-secret-store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
+import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { cleanupRetiredProviderCredentialSecrets } from "./cleanup-provider-credential-secrets";
@@ -356,6 +358,110 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
     expect((await credentialState("pcred_expired_gcp")).secret_retention_expires_at).toBeNull();
   });
 
+  it("lets an in-flight rollback win before destroying the predecessor secret", async () => {
+    const predecessorId = "pcred_rollback_wins";
+    const currentId = "pcred_rollback_wins_current";
+    const connectionId = "conn_rollback_wins";
+    const retentionExpiresAt = new Date(Date.now() + 1_500).toISOString();
+    await insertCredential({
+      id: predecessorId,
+      backend: "gcp_secret_manager",
+      retentionExpiresAt,
+    });
+    await insertCredential({ id: currentId, status: "active", rotatedFromId: predecessorId });
+    await insertConnection(connectionId, currentId);
+
+    let releaseRollback: (() => void) | undefined;
+    let markRollbackReady: (() => void) | undefined;
+    const rollbackGate = new Promise<void>((resolve) => {
+      releaseRollback = resolve;
+    });
+    const rollbackReady = new Promise<void>((resolve) => {
+      markRollbackReady = resolve;
+    });
+    const rollback = getDb(env).transaction(async (tx) => {
+      const changed = await new ProviderCredentialStore(tx).rollBackCredential({
+        organizationId: ORGANIZATION_ID,
+        currentId,
+        predecessorId,
+        predecessorScopeKey: "__organization__",
+        expectedConnectionIds: [connectionId],
+      });
+      expect(changed).toBe(true);
+      markRollbackReady?.();
+      await rollbackGate;
+    });
+    await rollbackReady;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.max(0, Date.parse(retentionExpiresAt) - Date.now() + 50));
+    });
+
+    const cleanupStore = new ProviderCredentialSecretCleanupStore(getDb(env));
+    await expect(
+      cleanupStore.listPendingDestructions(
+        {
+          id: predecessorId,
+          organization_id: ORGANIZATION_ID,
+          secret_ref: `projects/p/secrets/sdp-provider-credentials-${predecessorId}`,
+        },
+        25
+      )
+    ).resolves.toEqual([expect.objectContaining({ id: predecessorId })]);
+    const fenced = cleanupStore.fenceGcpCleanupCandidate({
+      id: predecessorId,
+      expectedSecretVersionRef: `projects/p/secrets/sdp-provider-credentials-${predecessorId}/versions/7`,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(destroyVersion).not.toHaveBeenCalled();
+
+    releaseRollback?.();
+    await rollback;
+    await expect(fenced).resolves.toBeNull();
+    expect(destroyVersion).not.toHaveBeenCalled();
+    await expect(credentialState(predecessorId)).resolves.toMatchObject({
+      status: "active",
+      secret_retention_expires_at: null,
+    });
+  });
+
+  it("makes rollback ineligible after cleanup wins", async () => {
+    const predecessorId = "pcred_cleanup_wins";
+    const currentId = "pcred_cleanup_wins_current";
+    const connectionId = "conn_cleanup_wins";
+    await insertCredential({
+      id: predecessorId,
+      backend: "gcp_secret_manager",
+      retentionExpiresAt: "2020-01-01T00:00:00.000Z",
+    });
+    await insertCredential({ id: currentId, status: "active", rotatedFromId: predecessorId });
+    await insertConnection(connectionId, currentId);
+
+    await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
+      cleaned: 1,
+      skipped: 0,
+      failed: 0,
+    });
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        const changed = await new ProviderCredentialStore(tx).rollBackCredential({
+          organizationId: ORGANIZATION_ID,
+          currentId,
+          predecessorId,
+          predecessorScopeKey: "__organization__",
+          expectedConnectionIds: [connectionId],
+        });
+        if (!changed) throw new Error("Rollback is no longer eligible");
+      })
+    ).rejects.toThrow("Rollback is no longer eligible");
+    expect(destroyVersion).toHaveBeenCalledOnce();
+    expect(
+      await getDb(env).queryOne<{ provider_credential_id: string }>(
+        "SELECT provider_credential_id FROM custody_connections WHERE id = ?",
+        [connectionId]
+      )
+    ).toEqual({ provider_credential_id: currentId });
+  });
+
   it("isolates GCP failures, keeps their marker, and rejects once with redacted telemetry", async () => {
     const rawFailure =
       "raw upstream detail for projects/p/secrets/sdp-provider-credentials-pcred_a_failure/versions/7";
@@ -393,6 +499,59 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
     expect(JSON.stringify(logError.mock.calls)).not.toContain(rawFailure);
     expect(JSON.stringify(logError.mock.calls)).not.toContain("raw upstream detail");
   });
+
+  it.each(["failed_validation", "deactivated"] as const)(
+    "retries cleanup for a GCP rotation candidate that ends %s without changing its status",
+    async (status) => {
+      const predecessorId = `pcred_${status}_predecessor`;
+      const candidateId = `pcred_${status}_candidate`;
+      await insertCredential({ id: predecessorId, status: "active" });
+      await insertCredential({
+        id: candidateId,
+        status: "pending",
+        backend: "gcp_secret_manager",
+        rotatedFromId: predecessorId,
+      });
+      const credentialStore = new ProviderCredentialStore(getDb(env));
+      const transitioned =
+        status === "failed_validation"
+          ? await credentialStore.recordRotationFailure(candidateId, "invalid_credentials")
+          : await credentialStore.deactivateRotationCandidate({
+              organizationId: ORGANIZATION_ID,
+              candidateId,
+              predecessorId,
+            });
+      expect(transitioned).toBe(true);
+      const retentionExpiresAt = (await credentialState(candidateId)).secret_retention_expires_at;
+      expect(retentionExpiresAt).toEqual(expect.any(String));
+      destroyVersion.mockRejectedValueOnce(new Error("transient GCP failure"));
+
+      await expect(cleanupRetiredProviderCredentialSecrets(env)).rejects.toThrow(
+        "Provider Credential secret cleanup failed for 1 row(s)"
+      );
+      await expect(credentialState(candidateId)).resolves.toMatchObject({
+        status,
+        secret_retention_expires_at: retentionExpiresAt,
+      });
+
+      await makeCleanupDue(candidateId);
+      await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
+        cleaned: 1,
+        skipped: 0,
+        failed: 0,
+      });
+      expect(destroyVersion).toHaveBeenCalledTimes(2);
+      expect(destroyVersion).toHaveBeenLastCalledWith({
+        secretVersionRef: `projects/p/secrets/sdp-provider-credentials-${candidateId}/versions/7`,
+        signal: expect.any(AbortSignal),
+        requireDestroyed: true,
+      });
+      await expect(credentialState(candidateId)).resolves.toMatchObject({
+        status,
+        secret_retention_expires_at: null,
+      });
+    }
+  );
 
   it("does not clear a GCP marker that changed while the destroy was in flight", async () => {
     await insertCredential({
