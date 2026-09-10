@@ -35,6 +35,7 @@ function mapRow(row: Record<string, unknown>): HeliusRingsWalletRow {
         : String(row.last_indexed_slot),
     custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     material_tag: row.material_tag as HeliusRingsWalletRow["material_tag"],
+    key_authority: row.key_authority as HeliusRingsWalletRow["key_authority"],
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -53,12 +54,18 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
              sdp_wallet_id,
              name,
              material_tag,
-             custody_wallet_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             custody_wallet_id,
+             key_authority
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (project_id, sdp_wallet_id)
            -- Self-assignment so RETURNING * emits the row that already exists.
            -- DO NOTHING would return zero rows and make a retried provision
            -- look like a failure.
+           --
+           -- key_authority is deliberately absent from this SET: unlike
+           -- custody_wallet_id it is never filled in or repointed on replay.
+           -- The wallet's keys live wherever the first insert said they do, and
+           -- the deployment default may have changed since.
            DO UPDATE SET updated_at = helius_rings_wallets.updated_at,
                          -- Fills in the link for a wallet created before this
                          -- column existed, but never repoints one that is
@@ -77,7 +84,10 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           input.sdpWalletId,
           input.name,
           input.materialTag,
-          input.custodyWalletId ?? null
+          input.custodyWalletId ?? null,
+          // Explicit like material_tag, whose column default likewise exists for
+          // the rows the migration backfilled rather than for this insert.
+          input.keyAuthority ?? "deterministic"
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

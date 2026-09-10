@@ -1,5 +1,9 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { describe, expect, it } from "vitest";
+import {
+  createDeterministicMaterialSource,
+  DETERMINISTIC_KA_SEED,
+} from "./deterministic-ka/index.js";
 import { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
 
 const CONFIG: RingsGatewayConfig = {
@@ -10,6 +14,9 @@ const CONFIG: RingsGatewayConfig = {
   projectId: "proj_1",
   signTransaction: async (unsigned) => unsigned,
   submitTransaction: async () => "sig",
+  // The gateway has no default authority, so a test that reaches material has to
+  // name one the same way the composition root does.
+  material: createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED }),
   allowInsecureHttp: true,
   healthTimeoutMs: 50,
 };

@@ -36,7 +36,14 @@ export default defineConfig({
         ],
       },
     },
-    include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
+    // scripts/ is outside tsconfig's include, so its tests are the only automated
+    // check on one-off migrations that run against production data.
+    include: [
+      "src/**/*.test.ts",
+      "src/**/*.spec.ts",
+      "src/__tests__/**/*.unit.ts",
+      "scripts/**/*.test.ts",
+    ],
     exclude: ["node_modules", "dist"],
     coverage: {
       provider: "v8",

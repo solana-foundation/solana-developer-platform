@@ -40,12 +40,106 @@ configuration without changing this schema.
 | --- | --- |
 | `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
 | `SOLANA_NETWORK` | Must be `devnet`. |
-
-> **The seed is public.** Identities derive from `INSECURE_TEST_SEED_DEVNET_ONLY!!`
-> in `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`. Devnet only.
+| `HELIUS_RINGS_KEY_AUTHORITY` | Authority new wallets are pinned to: `database`, or `deterministic` in development only. Defaults to `database`, falling back to `deterministic` when unset in development. |
+| `RINGS_KEY_ENCRYPTION_KEY` | Base64 256-bit key sealing shielded material. Required by the `database` authority. |
+| `RINGS_KEY_KMS_KEY_NAME` | Optional Cloud KMS key for envelope encryption of the same material. |
 
 Missing setup → the dashboard shows the configuration form; direct port methods
 fail with `config_error`.
+
+## Key authority
+
+Where a wallet's shielded keys come from is **per wallet**, recorded in
+`helius_rings_wallets.key_authority` at creation and never changed. The identity
+is derived from specific key bytes and re-derived on every use, so the authority
+that provisioned a wallet is the only one that can serve it. `HELIUS_RINGS_KEY_AUTHORITY`
+sets what *new* wallets are pinned to; changing it leaves existing wallets alone.
+
+| Authority | Keys | At rest | Selectable |
+| --- | --- | --- | --- |
+| `deterministic` | HKDF from a public seed plus `org/project/walletId` | Nothing stored | `development` only |
+| `database` | Random per wallet, generated once | Sealed in `helius_rings_key_refs` | Everywhere |
+
+`deterministic` exists for local work and tests. Outside `ENVIRONMENT=development`
+it cannot be selected at all — setting `HELIUS_RINGS_KEY_AUTHORITY=deterministic`
+in production is a `config_error`, and the default there is `database`. A
+production deployment with no `RINGS_KEY_ENCRYPTION_KEY` therefore fails to
+provision rather than quietly minting identities anyone can derive.
+
+> **The `deterministic` seed is public.** Identities derive from
+> `INSECURE_TEST_SEED_DEVNET_ONLY!!` in
+> `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`, so anyone with the
+> source can read or spend those notes.
+
+Wallets pinned to `deterministic` before that gate existed are still **served** in
+production, because refusing them would brick the wallets without making their
+keys any less derivable. Migrating them is what ends the exposure, and the process
+logs an error naming the command below until none are left.
+
+### Migrating wallets to stored keys
+
+The script reads `DATABASE_URL` and `RINGS_KEY_ENCRYPTION_KEY` from the
+environment and loads no `.env` file of its own, so export them first. Sourcing
+`.env.local` keeps the key out of shell history:
+
+```bash
+cd apps/sdp-api
+set -a && . ./.env.local && set +a
+
+pnpm rings:keys:migrate --dry-run   # report only, writes nothing
+pnpm rings:keys:migrate
+```
+
+The migration is **lossless and identity-preserving**. Because `deterministic` is a
+pure function of the seed and the wallet's `org/project/id`, the script recomputes
+the exact bytes each identity was built from, checks they reproduce the published
+`shielded_address`, seals them under `RINGS_KEY_ENCRYPTION_KEY`, and only then
+re-pins the wallet. Notes stay spendable, and nothing touches the chain — unlike a
+re-key, which abandons whatever the old keys hold.
+
+Per wallet:
+
+- **Provisioned** — verify, seal, re-pin. Identity unchanged.
+- **Never provisioned** — re-pinned without sealing, so it generates random keys
+  when it provisions rather than inheriting seed-derived ones.
+- **Identity does not match the seed** — skipped and reported. Such a wallet is
+  already broken, and sealing unverified bytes would make that permanent because
+  `createKeyRef` never overwrites.
+
+Set `RINGS_KEY_ENCRYPTION_KEY` and **back it up before running**. Sealing is
+write-once and the re-pin is a compare-and-swap, so reruns are safe; rerun until
+`skipped` and `failed` both reach zero. A non-zero exit means wallets are still on
+the seed authority.
+
+The script is a one-shot and lives entirely in
+`apps/sdp-api/scripts/migrate-rings-key-authority.ts`, outside `src/`. Nothing in
+the app imports it, so once every deployment reports `skipped=0 failed=0`,
+deleting that file, its test, and the `rings:keys:migrate` entry in `package.json`
+is the whole cleanup. It is marked `TODO(rings-key-migration)` for that reason.
+
+> **`RINGS_KEY_ENCRYPTION_KEY` is not recoverable.** It is the only thing that
+> opens a `database` wallet's material, and that material is the only thing that
+> derives the identity its notes are encrypted to. Lose the key and every note
+> those wallets hold is unspendable — there is no re-issue path, unlike a custody
+> credential or an SPC password. Back it up before provisioning anything real, and
+> keep it separate from `CUSTODY_ENCRYPTION_KEY` so one compromise is not both.
+
+Authorities are registered in `apps/sdp-api/src/services/helius-rings/key-authority/`.
+The gateway receives a router that resolves each request's wallet to its pinned
+authority, because one gateway serves both sides of a private transfer and the two
+sides can differ. A gateway built without a key authority refuses every method
+that touches material rather than falling back to the seed; health probes do not
+need one.
+
+Two behaviours follow from sealing being write-once:
+
+- A wallet that has already published an identity is served **read-only**. If its
+  stored material is missing, the request fails with `config_error` instead of
+  sealing fresh keys that could not derive the published identity.
+- Re-keying discards the stored material first (`rotateKeyAuthorityMaterial`),
+  because a re-key that merely asked for material would read the old blobs back
+  and republish the identity it was trying to abandon. Under `deterministic` there
+  is nothing to rotate, so re-keying such a wallet republishes the same identity.
 
 ## State machine
 

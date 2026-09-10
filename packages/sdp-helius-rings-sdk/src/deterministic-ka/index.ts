@@ -1,6 +1,8 @@
 export {
   createDeterministicMaterialSource,
+  type DerivedKeyBytes,
   type DeterministicMaterialSourceConfig,
+  deriveKeyBytes,
   deriveMaterial,
 } from "./derivation.js";
 export {

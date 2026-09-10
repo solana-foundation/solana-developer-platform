@@ -50,6 +50,16 @@ export const PRIVATE_HISTORY_DIRECTIONS = ["inbound", "outbound", "self"] as con
 
 export const KEY_KINDS = ["viewing", "nullifier"] as const;
 
+/**
+ * Where a wallet's shielded keys come from. Pinned per wallet at creation and
+ * never changed: the identity is derived from specific key bytes, so the
+ * authority that provisioned a wallet is the only one that can serve it.
+ *
+ * `deterministic` recomputes material from a public seed and stores nothing.
+ * `database` generates it once and keeps it sealed at rest.
+ */
+export const RINGS_KEY_AUTHORITIES = ["deterministic", "database"] as const;
+
 export const MATERIAL_TAGS = ["simulated", "live"] as const;
 
 export const RUNTIME_HEALTH_COMPONENTS = ["rpc", "prover", "photon"] as const;

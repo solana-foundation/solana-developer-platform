@@ -76,6 +76,7 @@ const providedEnv: Env = {
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
   CREDENTIAL_FINGERPRINT_PEPPER: "test-credential-fingerprint-pepper-for-unit-tests",
   SPC_CREDENTIAL_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+  RINGS_KEY_ENCRYPTION_KEY: "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",

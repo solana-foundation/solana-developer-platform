@@ -107,6 +107,36 @@ describe("HeliusRingsKeyRefRepository / HeliusRingsZoneRepository (postgres)", (
       expect(replay?.key_version).toBe("v1");
     });
 
+    it("clears one wallet's blobs for a re-key without touching another's", async () => {
+      for (const kind of ["viewing", "nullifier"] as const) {
+        await keyRefRepo.createKeyRef({
+          walletId,
+          kind,
+          ciphertext: `sealed-${kind}`,
+          keyVersion: "v1",
+          materialTag: "live",
+        });
+      }
+      await keyRefRepo.createKeyRef({
+        walletId: otherWalletId,
+        kind: "viewing",
+        ciphertext: "sealed-other",
+        keyVersion: "v1",
+        materialTag: "live",
+      });
+
+      expect(await keyRefRepo.deleteKeyRefsByWallet({ walletId })).toBe(2);
+
+      // Clearing is what lets the next seal start cold, since createKeyRef
+      // refuses to overwrite.
+      expect(await keyRefRepo.listKeyRefsByWallet({ walletId })).toEqual([]);
+      expect(await keyRefRepo.listKeyRefsByWallet({ walletId: otherWalletId })).toHaveLength(1);
+    });
+
+    it("reports nothing deleted for a wallet holding no blobs", async () => {
+      expect(await keyRefRepo.deleteKeyRefsByWallet({ walletId })).toBe(0);
+    });
+
     it("keeps one blob per kind per wallet", async () => {
       await keyRefRepo.createKeyRef({
         walletId,

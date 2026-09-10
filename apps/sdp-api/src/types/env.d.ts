@@ -68,6 +68,8 @@ export interface Env {
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
   SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
+  RINGS_KEY_ENCRYPTION_KEY?: string; // For encrypting Rings shielded key material in DB
+  RINGS_KEY_KMS_KEY_NAME?: string; // Optional Cloud KMS key for Rings key envelopes
   // Email configuration
   EMAIL_FROM?: string;
   RESEND_API_KEY?: string;
@@ -241,6 +243,10 @@ export interface Env {
 
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
+  // Key authority new Rings wallets are provisioned under: 'deterministic'
+  // (seed-derived, stores nothing) or 'database' (random, sealed at rest).
+  // Existing wallets keep the authority they were created with regardless.
+  HELIUS_RINGS_KEY_AUTHORITY?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;

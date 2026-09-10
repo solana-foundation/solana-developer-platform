@@ -73,7 +73,57 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
       shielded_address: null,
       sync_cursor: null,
       material_tag: "simulated",
+      // Existing rows predate authority selection, so the seed-derived one is
+      // the only default that keeps their identities deriving as before.
+      key_authority: "deterministic",
     });
+  });
+
+  it("pins the key authority the caller asks for", async () => {
+    const wallet = await repo.createWallet({
+      ...scope,
+      sdpWalletId: "wal_db_ka",
+      name: "Treasury",
+      materialTag: "simulated",
+      keyAuthority: "database",
+    });
+
+    expect(wallet?.key_authority).toBe("database");
+  });
+
+  it("refuses an authority outside the supported set", async () => {
+    const wallet = await createWallet("wal_check");
+
+    // The column's CHECK is what makes reading this back into a TypeScript union
+    // honest, so assert it rather than assuming it.
+    await expect(
+      getDb(env)
+        .prepare("UPDATE helius_rings_wallets SET key_authority = ? WHERE id = ?")
+        .bind("enclave", wallet.id)
+        .run()
+    ).rejects.toThrow();
+  });
+
+  it("keeps the pinned authority when provisioning is retried under a new default", async () => {
+    const first = await repo.createWallet({
+      ...scope,
+      sdpWalletId: "wal_pin",
+      name: "Treasury",
+      materialTag: "simulated",
+      keyAuthority: "deterministic",
+    });
+    const replay = await repo.createWallet({
+      ...scope,
+      sdpWalletId: "wal_pin",
+      name: "Treasury",
+      materialTag: "simulated",
+      keyAuthority: "database",
+    });
+
+    // The wallet's keys live wherever the first insert said they do. Repointing
+    // it would leave the identity it published underivable.
+    expect(replay?.id).toBe(first?.id);
+    expect(replay?.key_authority).toBe("deterministic");
   });
 
   it("returns the existing wallet when provisioning is retried", async () => {

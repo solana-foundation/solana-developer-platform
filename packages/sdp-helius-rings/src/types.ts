@@ -7,6 +7,7 @@ import type {
   PRIVATE_HISTORY_DIRECTIONS,
   PRIVATE_HISTORY_KINDS,
   RING_STATUSES,
+  RINGS_KEY_AUTHORITIES,
   RUNTIME_HEALTH_COMPONENTS,
   RUNTIME_HEALTH_STATUSES,
   TRANSFER_MODES,
@@ -20,6 +21,7 @@ export type OperationState = (typeof OPERATION_STATES)[number];
 export type OpType = (typeof OP_TYPES)[number];
 export type FailureCode = (typeof FAILURE_CODES)[number];
 export type KeyKind = (typeof KEY_KINDS)[number];
+export type RingsKeyAuthority = (typeof RINGS_KEY_AUTHORITIES)[number];
 export type MaterialTag = (typeof MATERIAL_TAGS)[number];
 export type PrivateHistoryKind = (typeof PRIVATE_HISTORY_KINDS)[number];
 export type PrivateHistoryDirection = (typeof PRIVATE_HISTORY_DIRECTIONS)[number];

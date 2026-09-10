@@ -62,6 +62,35 @@ function selectViewingKeyBytes(seed: Uint8Array, path: string): Uint8Array {
   );
 }
 
+/** The raw secrets one wallet's identity is built from. */
+export interface DerivedKeyBytes {
+  readonly viewingKeyBytes: Uint8Array;
+  readonly nullifierKeyBytes: Uint8Array;
+}
+
+/**
+ * The raw key bytes for one wallet, without wrapping them in material that
+ * destroys itself.
+ *
+ * These are unguarded secrets: nothing here zeroes them, so a caller holds them
+ * until they fall out of scope. It exists so material sealed under a different
+ * authority can reproduce exactly what this one derives — that is what lets a
+ * wallet move to stored keys while keeping the identity it already published.
+ * Prefer {@link createDeterministicMaterialSource} for anything else.
+ */
+export function deriveKeyBytes(seed: Uint8Array, request: MaterialRequest): DerivedKeyBytes {
+  if (seed.length !== SEED_BYTE_LENGTH) {
+    throw new Error(`The Rings derivation seed must be ${SEED_BYTE_LENGTH} bytes.`);
+  }
+
+  const path = derivationPath(request);
+
+  return {
+    viewingKeyBytes: selectViewingKeyBytes(seed, path),
+    nullifierKeyBytes: derive(seed, `nullifier/${path}`, NULLIFIER_KEY_BYTE_LENGTH),
+  };
+}
+
 /**
  * Derives one wallet's material from the master seed. Service code should go
  * through {@link createDeterministicMaterialSource}, which destroys the keys for
@@ -71,15 +100,8 @@ export async function deriveMaterial(
   seed: Uint8Array,
   request: MaterialRequest
 ): Promise<ShieldedMaterial> {
-  if (seed.length !== SEED_BYTE_LENGTH) {
-    throw new Error(`The Rings derivation seed must be ${SEED_BYTE_LENGTH} bytes.`);
-  }
-
-  const path = derivationPath(request);
-
   return createShieldedMaterial({
-    viewingKeyBytes: selectViewingKeyBytes(seed, path),
-    nullifierKeyBytes: derive(seed, `nullifier/${path}`, NULLIFIER_KEY_BYTE_LENGTH),
+    ...deriveKeyBytes(seed, request),
     owner: request.owner,
   });
 }

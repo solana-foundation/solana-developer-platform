@@ -20,11 +20,6 @@ import {
 } from "@sdp/helius-rings";
 import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
-import {
-  createDeterministicMaterialSource,
-  DETERMINISTIC_KA_SEED,
-  warnDeterministicKeyAuthority,
-} from "./deterministic-ka/index.js";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";
@@ -60,6 +55,16 @@ export interface RingsGatewayConfig {
     ringProgramId: string,
     lookupTableAddress: string
   ) => Promise<void>;
+  /**
+   * Where this gateway's wallets get their shielded keys. Required by every
+   * method that touches material; health probes do not, so a probe-only gateway
+   * can leave it out.
+   *
+   * No default: a gateway that silently fell back to the seed-derived authority
+   * would hand a production deployment identities anyone with this source can
+   * derive, and it would do so without failing anything.
+   */
+  readonly material?: ShieldedMaterialSource;
   readonly tree?: string;
   readonly allowInsecureHttp?: boolean;
   readonly healthTimeoutMs?: number;
@@ -130,14 +135,15 @@ function requireRingBringUpConfig(config: RingsGatewayConfig): {
 
 export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort {
   let pending: Promise<ZolanaClient> | undefined;
-  let materialSource: ShieldedMaterialSource | undefined;
 
   function requireMaterial(): ShieldedMaterialSource {
-    if (!materialSource) {
-      warnDeterministicKeyAuthority();
-      materialSource = createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED });
+    if (!config.material) {
+      throw new HeliusRingsError(
+        "config_error",
+        "this Rings gateway was built without a key authority, so it cannot read or spend shielded material"
+      );
     }
-    return materialSource;
+    return config.material;
   }
 
   function client(): Promise<ZolanaClient> {

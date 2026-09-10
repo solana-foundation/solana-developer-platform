@@ -10,6 +10,7 @@ import { createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { type ResolvedRingsConnection, resolveRingsConnection } from "./connection-resolver";
+import { createRoutingMaterialSource } from "./key-authority";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsMessage, signRingsOuterTransaction } from "./signer-adapter";
 
@@ -93,6 +94,15 @@ export function createConfiguredRingsGateway(
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: connection.allowInsecureHttp,
+    // Routes per wallet rather than per gateway: one gateway serves both sides
+    // of a private transfer, and each side is pinned to its own authority. The
+    // repositories behind it resolve on first use, so this stays free for the
+    // probe-only gateways that never ask for material.
+    material: createRoutingMaterialSource({
+      env,
+      organizationId: tenant.organizationId,
+      projectId: tenant.projectId,
+    }),
     signTransaction: (unsignedTxBase64: string, owner: string) =>
       asDomainFailure(() =>
         signOuterTransaction({

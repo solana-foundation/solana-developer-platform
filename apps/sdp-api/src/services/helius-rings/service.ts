@@ -33,6 +33,7 @@ import {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
+  createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
@@ -66,6 +67,7 @@ import {
   UnconfiguredRingsGateway,
   validateRingsOuterTransaction,
 } from "./gateway";
+import { resolveDefaultKeyAuthority, rotateKeyAuthorityMaterial } from "./key-authority";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "./signer-adapter";
@@ -318,6 +320,10 @@ export class HeliusRingsService {
       name: input.name,
       materialTag: "simulated",
       custodyWalletId: input.custodyWalletId ?? null,
+      // Pinned here and never revisited. A replay keeps whatever the first
+      // insert recorded, so changing the deployment default cannot move a
+      // wallet's keys out from under the identity it published.
+      keyAuthority: resolveDefaultKeyAuthority(this.env),
     });
     if (!wallet) {
       throw new AppError("INTERNAL_ERROR", "rings wallet reservation returned no row");
@@ -478,6 +484,19 @@ export class HeliusRingsService {
           return claimed;
         },
         async () => {
+          // Before the gateway republishes anything: the authority holding this
+          // wallet's keys has to discard them, or a stored-key authority would
+          // read the old material back and republish the identity this re-key
+          // exists to abandon. Safe here and nowhere else — the claim above took
+          // an exclusive lock and the operator confirmed the loss by name.
+          await rotateKeyAuthorityMaterial({
+            env: this.env,
+            organizationId: this.tenant.organizationId,
+            keyRefs: createHeliusRingsKeyRefRepository(this.env),
+            walletId: wallet.id,
+            keyAuthority: wallet.key_authority,
+          });
+
           const rotated = await (await this.resolveGateway()).rekeyIdentity({
             walletId: wallet.id,
             owner,

@@ -43,4 +43,14 @@ export interface HeliusRingsKeyRefRepository {
   createKeyRef(input: CreateHeliusRingsKeyRefInput): Promise<HeliusRingsKeyRefRow | null>;
   getKeyRef(input: { walletId: string; kind: KeyKind }): Promise<HeliusRingsKeyRefRow | null>;
   listKeyRefsByWallet(input: { walletId: string }): Promise<HeliusRingsKeyRefRow[]>;
+  /**
+   * Discards every key a wallet holds, so the next seal starts cold.
+   *
+   * The one caller is a re-key, which has already decided to abandon whatever
+   * the published keys hold. Nothing else may call this: because `createKeyRef`
+   * is write-once, these blobs are the only copy of the material the wallet's
+   * identity derives from, and deleting them outside a rotation makes the wallet
+   * unreadable rather than merely stale.
+   */
+  deleteKeyRefsByWallet(input: { walletId: string }): Promise<number>;
 }

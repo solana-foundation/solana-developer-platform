@@ -22,6 +22,7 @@
     "org:tier:local": "tsx scripts/set-organization-tier-local.ts",
     "sponsorship:budget": "tsx scripts/sponsorship-budget.ts",
     "keygen:local": "tsx scripts/generate-local-keypair.ts",
+    "rings:keys:migrate": "tsx scripts/migrate-rings-key-authority.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",

@@ -1,4 +1,9 @@
-import type { MaterialTag, PrivateWallet, WalletStatus } from "@sdp/helius-rings";
+import type {
+  MaterialTag,
+  PrivateWallet,
+  RingsKeyAuthority,
+  WalletStatus,
+} from "@sdp/helius-rings";
 import type { RepositoryDbClient } from "./base";
 
 export function generateHeliusRingsWalletId(): string {
@@ -43,6 +48,12 @@ export interface HeliusRingsWalletRow {
    */
   custody_wallet_id: string | null;
   material_tag: MaterialTag;
+  /**
+   * Where this wallet's shielded keys come from. Pinned at creation and never
+   * updated: the identity is derived from specific key bytes, so a wallet
+   * cannot change hands between authorities without abandoning its notes.
+   */
+  key_authority: RingsKeyAuthority;
   created_at: string;
   updated_at: string;
 }
@@ -62,6 +73,12 @@ export interface CreateHeliusRingsWalletInput extends HeliusRingsProjectScope {
   materialTag: MaterialTag;
   /** Null where the caller could not resolve one, as legacy callers cannot. */
   custodyWalletId?: string | null;
+  /**
+   * The authority that will hold this wallet's keys, from the deployment's
+   * configured default. Omitted falls back to the column default, which is the
+   * seed-derived authority every pre-existing wallet uses.
+   */
+  keyAuthority?: RingsKeyAuthority;
 }
 
 export interface MarkHeliusRingsWalletProvisionedInput extends HeliusRingsProjectScope {

@@ -61,5 +61,13 @@ export function createPostgresHeliusRingsKeyRefRepository(db: AppDb): HeliusRing
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
+
+    async deleteKeyRefsByWallet(input: { walletId: string }) {
+      const result = await db
+        .prepare(`DELETE FROM helius_rings_key_refs WHERE wallet_id = ? RETURNING id`)
+        .bind(input.walletId)
+        .all<Record<string, unknown>>();
+      return result.results.length;
+    },
   };
 }
