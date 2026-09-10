@@ -184,6 +184,74 @@ it("keeps independently loaded wallets usable when supporting data fails", async
 });
 
 it.each([true, false])(
+  "settings show save controls immediately and Discard exits editing (changed: %s)",
+  async (changed) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => Response.json({ data: authorityData([wallet]) }))
+    );
+    const user = userEvent.setup();
+    render(<AssetManagementWorkspace token={token} assetProfile={profile} tokenError={null} />, {
+      wrapper,
+    });
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Edit settings" }));
+    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(
+      true
+    );
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    if (changed) {
+      await user.type(screen.getByLabelText("Description"), " changed");
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+    }
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByRole("button", { name: "Edit settings" })).toBeTruthy();
+    expect(screen.queryByLabelText("Description")).toBeNull();
+    expect(screen.getByText("Original description")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Discard" })).toBeNull());
+    expect(saveProfile).not.toHaveBeenCalled();
+  }
+);
+
+it.each(["success", "error"] as const)(
+  "settings only exit editing after a successful save (%s)",
+  async (state) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => Response.json({ data: authorityData([wallet]) }))
+    );
+    saveProfile.mockResolvedValue({ state, message: state, assetProfile: null });
+    const user = userEvent.setup();
+    render(<AssetManagementWorkspace token={token} assetProfile={profile} tokenError={null} />, {
+      wrapper,
+    });
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Edit settings" }));
+    await user.type(screen.getByLabelText("Description"), " changed");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(
+        false
+      )
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(saveProfile).toHaveBeenCalledOnce());
+    if (state === "success") {
+      expect(screen.getByRole("button", { name: "Edit settings" })).toBeTruthy();
+      expect(screen.queryByLabelText("Description")).toBeNull();
+    } else {
+      expect(screen.queryByRole("button", { name: "Edit settings" })).toBeNull();
+      expect(screen.getByLabelText("Description")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Discard" })).toBeTruthy();
+    }
+  }
+);
+
+it.each([true, false])(
   "pending draft Save and Deploy follow wallet availability despite supporting-data failure (%s)",
   async (walletsAvailable) => {
     vi.stubGlobal(

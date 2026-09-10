@@ -74,6 +74,7 @@ export function AssetManagementWorkspace({
   const requestedTab = resolveTab(requestedTabParam);
   const reducedMotion = useReducedMotion();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ operations: true });
+  const [editingSettings, setEditingSettings] = useState(false);
   const toggleSection = (section: string, open: boolean) =>
     setOpenSections((current) => ({ ...current, [section]: open }));
 
@@ -187,7 +188,12 @@ export function AssetManagementWorkspace({
           onOpenChange={(open) => toggleSection("settings", open)}
         >
           <div className="pt-5">
-            <DetailsTab token={token} form={form} />
+            <DetailsTab
+              token={token}
+              form={form}
+              editing={editingSettings}
+              onEdit={() => setEditingSettings(true)}
+            />
           </div>
         </AnimatedSection>
         <AnimatedSection
@@ -203,11 +209,17 @@ export function AssetManagementWorkspace({
       </div>
 
       <AssetProfileSaveBar
+        editing={editingSettings}
         dirty={form.dirty}
         saving={form.saving}
         errorCount={form.showErrors ? form.errorCount : 0}
-        onSave={() => void form.save()}
-        onDiscard={form.discard}
+        onSave={async () => {
+          if (await form.save()) setEditingSettings(false);
+        }}
+        onDiscard={() => {
+          form.discard();
+          setEditingSettings(false);
+        }}
       >
         {form.requiresMetadataSigner &&
         (ops.metadataSignerSelection.wallets.length !== 1 ||

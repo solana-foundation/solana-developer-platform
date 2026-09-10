@@ -19,7 +19,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -224,11 +224,15 @@ function CreateSurface(props: CreateSurfaceProps) {
             })}
             steps={STEP_KEYS.map((key) => t(`DashboardIssuance.draftForm.${key}`))}
           />
+          <h2 id="issuance-step-heading" className="mt-5 text-xl font-medium text-primary">
+            {t(`DashboardIssuance.draftForm.${STEP_KEYS[step]}`)}
+          </h2>
         </div>
         <div className={styles.wizardScrollRegion}>
           <div className={styles.focusGrid}>
             <form
               id="issuance-draft-step"
+              aria-labelledby="issuance-step-heading"
               className={styles.stepStage}
               onSubmit={(event) => {
                 event.preventDefault();
@@ -681,12 +685,18 @@ function PermissionsStep({
   walletsError: string | null;
 }) {
   const t = useTranslations();
+  const router = useRouter();
+  useEffect(() => {
+    if (wallets.length || walletsError) return;
+    // Wallet setup opens separately so returning never loses the current draft.
+    const refreshWallets = () => router.refresh();
+    window.addEventListener("focus", refreshWallets);
+    return () => window.removeEventListener("focus", refreshWallets);
+  }, [router, wallets.length, walletsError]);
+
   return (
     <div className={styles.permissionsStack}>
       {walletsError ? <p role="alert">{walletsError}</p> : null}
-      {!wallets.length && !walletsError ? (
-        <p>{t("DashboardIssuance.draftForm.noWallets")}</p>
-      ) : null}
       {permissionKeys(draft).map((key) => (
         <Field key={key} label={t(authorityCopy[key])} required>
           <select
@@ -710,6 +720,21 @@ function PermissionsStep({
           </select>
         </Field>
       ))}
+      {!wallets.length && !walletsError ? (
+        <p className="text-sm text-secondary">
+          {t("DashboardIssuance.draftForm.noWallets")}{" "}
+          <a
+            href="/dashboard/wallets"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t("DashboardIssuance.draftForm.viewWalletsNewTab")}
+            className="inline-flex items-center gap-1 text-primary underline underline-offset-4"
+          >
+            {t("DashboardIssuance.draftForm.viewWallets")}
+            <ExternalLink size={14} aria-hidden />
+          </a>
+        </p>
+      ) : null}
     </div>
   );
 }

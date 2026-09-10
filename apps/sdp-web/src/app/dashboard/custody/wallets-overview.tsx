@@ -5,9 +5,6 @@ import { PlusIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CUSTODY_CAPABILITY_LABEL_KEYS,
-  CUSTODY_PROVIDER_CATALOG,
-  type CustodyProviderCatalogEntry,
   formatCustodyProviderName,
   isKnownCustodyProvider,
   type KnownCustodyProvider,
@@ -25,6 +22,8 @@ import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
+import { resolveCustodyProviderAvailability } from "./provider-display-status";
+import { WalletProviderChoices } from "./wallet-provider-choices";
 import { WalletProviderMark } from "./wallet-provider-mark";
 import {
   filterWallets,
@@ -37,6 +36,7 @@ type OpenCreateWallet = (provider: KnownCustodyProvider | null) => void;
 
 interface WalletsOverviewProps {
   canManageCustody: boolean;
+  connectedProviders: KnownCustodyProvider[];
   enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
   showConnectionsLink: boolean;
@@ -54,13 +54,6 @@ function getWalletProvider(wallet: CustodyWalletSummary): KnownCustodyProvider |
   return wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
 }
 
-function getEnabledProviderEntries(
-  enabledProviders: KnownCustodyProvider[]
-): CustodyProviderCatalogEntry[] {
-  const enabledProviderSet = new Set(enabledProviders);
-  return CUSTODY_PROVIDER_CATALOG.filter((provider) => enabledProviderSet.has(provider.id));
-}
-
 function CreateWalletTile({ onClick }: { onClick: () => void }) {
   const t = useTranslations();
   return (
@@ -73,62 +66,6 @@ function CreateWalletTile({ onClick }: { onClick: () => void }) {
     >
       <PlusIcon className="h-6 w-6" />
     </button>
-  );
-}
-
-function ProviderChoiceCard({
-  isDisabled,
-  onCreateWallet,
-  provider,
-}: {
-  isDisabled: boolean;
-  onCreateWallet: OpenCreateWallet;
-  provider: CustodyProviderCatalogEntry;
-}) {
-  const t = useTranslations();
-  return (
-    <article className="flex min-h-[300px] flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]">
-      <div className="flex items-start justify-between gap-3">
-        <WalletProviderMark provider={provider.id} />
-      </div>
-
-      <div className="mt-5 space-y-2">
-        <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-primary">
-          {provider.label}
-        </h3>
-        <p className="text-sm leading-6 text-secondary">{t(provider.descriptionKey)}</p>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {provider.capabilities.map((feature) => (
-          <span
-            key={feature}
-            className="rounded-full border border-border-default bg-fill-subtle px-2.5 py-1 text-[11px] font-medium text-secondary"
-          >
-            {t(CUSTODY_CAPABILITY_LABEL_KEYS[feature])}
-          </span>
-        ))}
-      </div>
-
-      <div className="mt-auto pt-6">
-        <Button
-          type="button"
-          variant="secondary"
-          className="w-full"
-          onClick={() => onCreateWallet(provider.id)}
-          disabled={isDisabled}
-          title={
-            isDisabled
-              ? t("DashboardCustody.providerAdditionalWalletUnavailable", {
-                  provider: provider.label,
-                })
-              : undefined
-          }
-        >
-          {t("DashboardCustody.newWallet")}
-        </Button>
-      </div>
-    </article>
   );
 }
 
@@ -242,6 +179,7 @@ function WalletCardsGrid({
 
 export function WalletsOverview({
   canManageCustody,
+  connectedProviders,
   enabledProviders,
   configsError,
   showConnectionsLink,
@@ -262,10 +200,11 @@ export function WalletsOverview({
   const debouncedSearch = useDebounce(normalizeWalletSearchQuery(searchValue), 200);
   const lastUrlSearchRef = useRef(initialSearch);
   const syncingFromUrlRef = useRef<string | null>(null);
-  const enabledProviderEntries = useMemo(
-    () => getEnabledProviderEntries(enabledProviders),
-    [enabledProviders]
+  const providerAvailability = useMemo(
+    () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
+    [connectedProviders, enabledProviders]
   );
+  const hasAvailableProvider = providerAvailability.some((provider) => provider.isSelectable);
   const normalizedSearch = normalizeWalletSearchQuery(effectiveSearchValue);
   const visibleWallets = useMemo(
     () => filterWallets(wallets, normalizedSearch),
@@ -341,23 +280,15 @@ export function WalletsOverview({
               : t("DashboardCustody.walletCreationLimited")}
           </p>
           {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
-          {canManageCustody && enabledProviderEntries.length === 0 ? (
-            <p className="text-sm text-secondary">{t("DashboardCustody.noWalletProvidersTier")}</p>
-          ) : null}
         </div>
 
-        {canManageCustody && enabledProviderEntries.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {enabledProviderEntries.map((provider) => (
-              <ProviderChoiceCard
-                key={provider.id}
-                provider={provider}
-                isDisabled={false}
-                onCreateWallet={onCreateWallet}
-              />
-            ))}
-          </div>
-        ) : null}
+        <WalletProviderChoices
+          availability={providerAvailability}
+          canSelect={canManageCustody}
+          grouped={false}
+          selectedProvider={null}
+          onSelect={onCreateWallet}
+        />
       </div>
     );
   }
@@ -400,7 +331,7 @@ export function WalletsOverview({
               </Link>
             </Button>
           ) : null}
-          {canManageCustody && enabledProviderEntries.length > 0 ? (
+          {canManageCustody && hasAvailableProvider ? (
             <Button
               type="button"
               className="w-full sm:w-auto"
@@ -431,7 +362,7 @@ export function WalletsOverview({
           </div>
         ) : (
           <WalletCardsGrid wallets={walletsWithProvider} canManageCustody={canManageCustody}>
-            {!normalizedSearch && canManageCustody && enabledProviderEntries.length > 0 ? (
+            {!normalizedSearch && canManageCustody && hasAvailableProvider ? (
               <CreateWalletTile onClick={() => onCreateWallet(null)} />
             ) : null}
           </WalletCardsGrid>

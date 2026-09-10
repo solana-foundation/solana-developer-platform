@@ -133,12 +133,12 @@ export function useAssetProfileForm({
 
   const save = async () => {
     if (!dirty || saving) {
-      return;
+      return false;
     }
     if (errorCount > 0) {
       setShowErrors(true);
       toast.error(t("DashboardIssuance.assetProfileForm.fixHighlightedFields"));
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -172,7 +172,7 @@ export function useAssetProfileForm({
 
       if (result.state === "error") {
         toast.error(result.message);
-        return;
+        return false;
       }
 
       toast.success(result.message);
@@ -188,6 +188,7 @@ export function useAssetProfileForm({
         );
       }
       router.refresh();
+      return true;
     } finally {
       setSaving(false);
     }
