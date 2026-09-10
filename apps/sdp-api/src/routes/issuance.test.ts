@@ -882,9 +882,6 @@ describe("Issuance Routes", () => {
           env
         );
 
-        if (response.status !== 403) {
-          console.log("DEBUG", response.status, await response.clone().text());
-        }
         expect(response.status).toBe(403);
         expect(signerSpy).not.toHaveBeenCalled();
         expect(effectSpy).not.toHaveBeenCalled();
