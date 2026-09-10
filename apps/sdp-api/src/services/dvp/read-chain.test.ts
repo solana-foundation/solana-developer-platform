@@ -221,7 +221,9 @@ describe("readEscrowState", () => {
   it("reads a live escrow", async () => {
     fetchEncodedAccounts.mockResolvedValue([tokenAccount(ESCROW_A, { amount: 400n })]);
 
-    await expect(readEscrowState(rpc, ESCROW_A, T22, MINT, SWAP)).resolves.toEqual({
+    await expect(
+      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP)
+    ).resolves.toEqual({
       amount: 400n,
       frozen: false,
     });
@@ -230,6 +232,8 @@ describe("readEscrowState", () => {
   it("returns null for an escrow that is not on chain yet", async () => {
     fetchEncodedAccounts.mockResolvedValue([missing(ESCROW_A)]);
 
-    await expect(readEscrowState(rpc, ESCROW_A, T22, MINT, SWAP)).resolves.toBeNull();
+    await expect(
+      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP)
+    ).resolves.toBeNull();
   });
 });

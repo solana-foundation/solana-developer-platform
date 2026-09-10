@@ -97,14 +97,12 @@ function readLeg(
  */
 export async function readEscrowState(
   rpc: SolanaRpc,
-  escrow: Address,
-  tokenProgram: Address,
-  mint: Address,
+  leg: DvpLegAddress,
   swapDvp: Address
 ): Promise<{ amount: bigint; frozen: boolean } | null> {
-  const [account] = await fetchEncodedAccounts(rpc, [escrow]);
-  const leg = readLeg(account, { escrow, tokenProgram, mint }, swapDvp);
-  return leg.exists ? { amount: leg.amount, frozen: leg.frozen } : null;
+  const [account] = await fetchEncodedAccounts(rpc, [leg.escrow]);
+  const observed = readLeg(account, leg, swapDvp);
+  return observed.exists ? { amount: observed.amount, frozen: observed.frozen } : null;
 }
 
 /**

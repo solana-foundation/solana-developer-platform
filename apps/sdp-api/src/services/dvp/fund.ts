@@ -73,13 +73,7 @@ export async function readDvpLegShortfall(
   side: DvpTradeSide
 ): Promise<bigint> {
   const leg = legOfSide(trade, side);
-  const state = await readEscrowState(
-    solanaRpc.createRpc(env),
-    leg.escrow,
-    leg.tokenProgram,
-    leg.mint,
-    trade.swapDvp
-  );
+  const state = await readEscrowState(solanaRpc.createRpc(env), leg, trade.swapDvp);
   if (state === null) {
     throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
   }
@@ -235,20 +229,12 @@ export async function executeDvpFunding(
     userBSettlementDestination: onChain.userBSettlementDestination,
     settlementAuthority: onChain.settlementAuthority,
   };
-  const termsMatch =
-    live.userA === recorded.userA &&
-    live.userB === recorded.userB &&
-    live.mintA === recorded.mintA &&
-    live.mintB === recorded.mintB &&
-    live.amountA === recorded.amountA &&
-    live.amountB === recorded.amountB &&
-    live.expiryTimestamp === recorded.expiryTimestamp &&
-    live.userASettlementDestination === recorded.userASettlementDestination &&
-    live.userBSettlementDestination === recorded.userBSettlementDestination &&
-    live.settlementAuthority === recorded.settlementAuthority;
-  if (!termsMatch) {
+  const mismatched = (Object.keys(recorded) as (keyof typeof recorded)[]).filter(
+    (term) => live[term] !== recorded[term]
+  );
+  if (mismatched.length > 0) {
     getLogger().warn(
-      { tradeId: trade.id, swapDvp: trade.swapDvp, recorded, onChain: live },
+      { tradeId: trade.id, swapDvp: trade.swapDvp, mismatched, recorded, onChain: live },
       "dvp funding: on-chain trade does not match recorded terms"
     );
     throw conflict(
@@ -346,7 +332,7 @@ export async function executeDvpFunding(
   // deposit capped at the target, which is a program change, not an API one.
   // Aborting is the safe half of the trade-off: a refused top-up is retryable,
   // an over-funded escrow depends on the surplus-refund path working.
-  const recheck = await readEscrowState(rpc, escrow, tokenProgram, mint, trade.swapDvp);
+  const recheck = await readEscrowState(rpc, plan.leg, trade.swapDvp);
   if (recheck === null) {
     throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
   }
