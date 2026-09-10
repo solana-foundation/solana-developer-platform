@@ -10,7 +10,7 @@ import {
   testSignMessage,
 } from "../test/shielded-identity-fixtures.js";
 import { createCustodyMaterialSource } from "./derivation.js";
-import { clearSeedCache } from "./seed-cache.js";
+import { clearSeedCache, invalidateCachedSeed } from "./seed-cache.js";
 
 /** No cache unless a case is about caching, so one call means one signature. */
 function source(signMessage = testSignMessage, ttlMs = 0) {
@@ -126,6 +126,32 @@ describe("createCustodyMaterialSource", () => {
       await cached.withMaterial(TEST_REQUEST, async () => undefined);
       await cached.withMaterial(TEST_FOREIGN_REQUEST, async () => undefined);
 
+      expect(signMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ["invalidateCachedSeed", () => invalidateCachedSeed(TEST_OWNER)],
+      ["clearSeedCache", () => clearSeedCache()],
+    ])("a fetch pending when %s runs does not repopulate the cache", async (_name, invalidate) => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const signMessage = vi.fn(async (messageBase64: string, owner: string) => {
+        await gate;
+        return testSignMessage(messageBase64, owner);
+      });
+      const cached = source(signMessage, 60_000);
+
+      const pending = cached.withMaterial(TEST_REQUEST, async () => undefined);
+      invalidate();
+      release();
+      await pending;
+
+      await cached.withMaterial(TEST_REQUEST, async () => undefined);
+
+      // The second operation must sign again: a seed discarded mid-flight has
+      // to stay discarded, or a re-key can be undone by a slow custody call.
       expect(signMessage).toHaveBeenCalledTimes(2);
     });
 

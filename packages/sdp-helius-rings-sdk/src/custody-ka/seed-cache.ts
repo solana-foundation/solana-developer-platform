@@ -60,11 +60,20 @@ export async function withCachedSeed(
 
   const fetching = fetch()
     .then((seed) => {
-      store(owner, seed, ttlMs, config.maxEntries ?? DEFAULT_MAX_ENTRIES);
+      // Store only while this fetch is still the tracked one: an invalidation
+      // during the custody round trip means this seed may be pre-rotation, and
+      // a discarded seed has to stay discarded.
+      if (inFlight.get(owner) === fetching) {
+        store(owner, seed, ttlMs, config.maxEntries ?? DEFAULT_MAX_ENTRIES);
+      }
       return seed;
     })
     .finally(() => {
-      inFlight.delete(owner);
+      // Identity-checked so this cannot delete a newer fetch that started
+      // after an invalidation removed this one.
+      if (inFlight.get(owner) === fetching) {
+        inFlight.delete(owner);
+      }
     });
 
   inFlight.set(owner, fetching);
@@ -93,6 +102,8 @@ function evict(owner: string): void {
 /** Drops one owner's seed, for a re-key or a custody wallet going inactive. */
 export function invalidateCachedSeed(owner: string): void {
   evict(owner);
+  // Also disown a fetch already in flight, so it cannot store what it returns.
+  inFlight.delete(owner);
 }
 
 /** Test seam, and the thing to call if a process ever needs to shed secrets. */
