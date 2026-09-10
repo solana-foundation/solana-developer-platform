@@ -733,6 +733,33 @@ export class TokenService {
   }
 
   /**
+   * The image URL of each issued token behind the given mints, in one query.
+   *
+   * A mint the tenant never issued is absent from the result; callers decide
+   * what absence means for them. Reads only the token record's own image
+   * column, never chain or off-chain metadata.
+   *
+   * @param mints - Mint addresses to look up; duplicates are harmless.
+   * @returns Mint address to image URL (null when the token has no artwork).
+   */
+  async listTokenImagesByMints(mints: readonly string[]): Promise<Map<string, string | null>> {
+    if (mints.length === 0) {
+      return new Map();
+    }
+    const tenant = this.tenantTokenScope();
+    const placeholders = mints.map(() => "?").join(", ");
+    const result = await this.db
+      .prepare(
+        `SELECT mint_address, image_url
+         FROM issued_tokens
+         WHERE mint_address IN (${placeholders})${tenant.clause}`
+      )
+      .bind(...mints, ...tenant.values)
+      .all<{ mint_address: string; image_url: string | null }>();
+    return new Map(result.results.map((row) => [row.mint_address, row.image_url]));
+  }
+
+  /**
    * Page a project's tokens with server-side search, filtering and sorting.
    *
    * `total` reflects the active filters, so it is the count the caller should

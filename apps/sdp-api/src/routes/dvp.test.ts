@@ -29,6 +29,11 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+// Artwork for the seeded trades' two mints, when the reader's organization has
+// issued them: mint A carries an image, mint B is issued without one.
+const ISSUED_IMAGE_A = "https://cdn.example.test/atd.png";
+const ISSUED_IMAGE_B = "https://cdn.example.test/dusd.png";
+
 // The cross-org party that reads a trade it did not create. Its whole reason
 // to exist is that attribution and funding claims do NOT cross to it.
 const PARTY_ORG = { id: "org_dvp_party", name: "DvP Party Org", slug: "dvp-party-org" };
@@ -377,6 +382,37 @@ async function seedCounterpartyForParty(
     throw new Error("failed to seed counterparty account");
   }
   return { counterpartyId: counterparty.id, accountId: account.id };
+}
+
+/**
+ * An issued-token row behind a mint, so the leg projection can resolve its
+ * image. `imageUrl` null seeds an issued token without artwork.
+ */
+async function seedIssuedTokenMint(params: {
+  mintAddress: string;
+  organizationId: string;
+  projectId: string;
+  imageUrl: string | null;
+}): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issued_tokens
+        (id, organization_id, project_id, mint_address, name, symbol, decimals, status, created_by, image_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      `tok_dvp_${crypto.randomUUID()}`,
+      params.organizationId,
+      params.projectId,
+      params.mintAddress,
+      "Issued DvP Token",
+      "IDT",
+      6,
+      "active",
+      TEST_USER.id,
+      params.imageUrl
+    )
+    .run();
 }
 
 /** The seeded row's own timestamps, so a full-shape assertion stays exact. */
@@ -840,6 +876,20 @@ describe("DvP routes", () => {
 
     it("answers the creator's view: custodied side, counterparty label, live-claim signature", async () => {
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
+      // Mint A is this org's issued token WITH artwork; mint B is this org's
+      // issued token WITHOUT artwork — both must resolve from the token record.
+      await seedIssuedTokenMint({
+        mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_A,
+      });
+      await seedIssuedTokenMint({
+        mintAddress: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: null,
+      });
       await seedTradeFor({
         tradeId: "dvp_full",
         counterpartyAccountIdA: accountId,
@@ -869,6 +919,7 @@ describe("DvP routes", () => {
             amount: "1000",
             decimals: null,
             symbol: null,
+            imageUrl: ISSUED_IMAGE_A,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
             funding: {
@@ -891,6 +942,7 @@ describe("DvP routes", () => {
             amount: "2000",
             decimals: null,
             symbol: null,
+            imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
             funding: null,
@@ -921,6 +973,15 @@ describe("DvP routes", () => {
       // of cross-org claim HIDING would bake the bypass artifact in. The
       // boundary itself is covered by db-level policy tests.
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
+      // The creator org ISSUED mint A with artwork. The party org must still
+      // see null: images resolve against the READER's organization, so another
+      // org's issued token never lends its artwork across the tenant boundary.
+      await seedIssuedTokenMint({
+        mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_A,
+      });
       await seedTradeFor({ tradeId: "dvp_party_view", counterpartyAccountIdA: accountId });
       await seedPartyOrg();
       const { createdAt, updatedAt } = await readTradeTimestamps("dvp_party_view");
@@ -950,6 +1011,7 @@ describe("DvP routes", () => {
             amount: "1000",
             decimals: null,
             symbol: null,
+            imageUrl: null,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
             funding: null,
@@ -967,6 +1029,7 @@ describe("DvP routes", () => {
             amount: "2000",
             decimals: null,
             symbol: null,
+            imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
             funding: null,
@@ -991,6 +1054,14 @@ describe("DvP routes", () => {
 
     it("lists the same derived shapes, one page at a time", async () => {
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
+      // One issued mint with artwork named by BOTH pages' trades: the image
+      // resolves once per distinct mint and serves every row that names it.
+      await seedIssuedTokenMint({
+        mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_A,
+      });
       await seedTradeFor({
         tradeId: "dvp_list_1",
         swapDvp: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
@@ -1007,8 +1078,11 @@ describe("DvP routes", () => {
             id: string;
             kind: string;
             legs: {
-              a: { party: { wallet: { id: string } | null; counterparty: unknown } };
-              b: { party: { wallet: { id: string } | null } };
+              a: {
+                party: { wallet: { id: string } | null; counterparty: unknown };
+                imageUrl: string | null;
+              };
+              b: { party: { wallet: { id: string } | null }; imageUrl: string | null };
             };
           }[];
         };
@@ -1035,6 +1109,7 @@ describe("DvP routes", () => {
         amount: "1000",
         decimals: null,
         symbol: null,
+        imageUrl: ISSUED_IMAGE_A,
         escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
         settlementDestination: PARTY_A_ADDRESS,
         funding: null,
@@ -1045,6 +1120,10 @@ describe("DvP routes", () => {
       expect(second.kind).toBe("bilateral");
       expect(second.legs.a.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
       expect(second.legs.b.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
+      // The second row names the same mint, and serves the same image from the
+      // page-level resolution — one lookup per distinct mint, not per row.
+      expect(second.legs.a.imageUrl).toBe(ISSUED_IMAGE_A);
+      expect(second.legs.b.imageUrl).toBeNull();
     });
 
     // The list is capped with no cursor, so the filters must narrow SERVER-SIDE:
@@ -1158,6 +1237,15 @@ describe("DvP routes", () => {
     it("tells the party which leg is theirs, with derived party objects and no attribution", async () => {
       await seedTradeFor({ tradeId: "dvp_inbound_seen" });
       await seedPartyOrg();
+      // The party org ITSELF issued mint B with artwork: the inbound view
+      // resolves images against the reader's organization, so its own token
+      // shows — while the creator's unissued mint A stays null.
+      await seedIssuedTokenMint({
+        mintAddress: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        organizationId: PARTY_ORG.id,
+        projectId: PARTY_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_B,
+      });
 
       const res = await app.request("/v1/dvp/trades/inbound", { headers: partyAuthHeaders() }, env);
       expect(res.status).toBe(200);
@@ -1185,15 +1273,41 @@ describe("DvP routes", () => {
       }
       expect(trade.id).toBe("dvp_inbound_seen");
       expect(trade.yourSide).toBe("a");
-      expect(trade.legs.a.party).toEqual({
-        address: PARTY_A_ADDRESS,
-        counterparty: null,
-        wallet: { id: "cwlt_dvp_party", name: null },
+      expect(trade.legs.a).toEqual({
+        party: {
+          address: PARTY_A_ADDRESS,
+          counterparty: null,
+          wallet: { id: "cwlt_dvp_party", name: null },
+        },
+        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        amount: "1000",
+        decimals: null,
+        symbol: null,
+        imageUrl: null,
+        escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+        settlementDestination: PARTY_A_ADDRESS,
+        observedAmount: null,
+        frozen: null,
+        outcome: "awaiting",
       });
-      expect(trade.legs.b.party).toEqual({
-        address: PARTY_B_EXTERNAL,
-        counterparty: null,
-        wallet: null,
+      expect(trade.legs.b).toEqual({
+        party: {
+          address: PARTY_B_EXTERNAL,
+          counterparty: null,
+          wallet: null,
+        },
+        mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        amount: "2000",
+        decimals: null,
+        symbol: null,
+        imageUrl: ISSUED_IMAGE_B,
+        escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+        settlementDestination: PARTY_B_EXTERNAL,
+        observedAmount: null,
+        frozen: null,
+        outcome: "awaiting",
       });
       // The inbound shape carries neither the creator's derived kind nor the
       // funding claims — both belong to organizations that can read the row.

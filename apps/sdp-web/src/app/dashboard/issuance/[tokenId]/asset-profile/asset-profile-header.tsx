@@ -2,16 +2,12 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import { ArrowUpRightIcon, CopyIcon, PlayIcon, RefreshCw, RocketIcon } from "lucide-react";
-import { useState } from "react";
+import { TokenLogo } from "@/components/token-logo";
 import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { getCategoryPresentation } from "../../create/asset-taxonomy";
-import {
-  formatSupply,
-  tokenMarkInitial,
-  tokenStatusPresentation,
-} from "../../issuance-token-fields";
+import { formatSupply, tokenStatusPresentation } from "../../issuance-token-fields";
 import { shortenAddress } from "../../wallet-identity";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import { formatDate } from "../token-management-workspace.utils";
@@ -91,7 +87,7 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
       <div className="flex flex-row items-start justify-between gap-3 sm:flex-col sm:gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 items-start gap-4">
           <div className="hidden sm:block">
-            <TokenLogo imageUrl={token.imageUrl} symbol={token.symbol} />
+            <TokenLogo imageUrl={token.imageUrl} symbol={token.symbol} className="h-11 w-11" />
           </div>
 
           <div className="flex min-w-0 flex-col gap-1.5">
@@ -197,32 +193,6 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
         ) : null}
       </dl>
     </header>
-  );
-}
-
-// The 44px identity mark: the issuer's artwork, or a quiet monogram standing in
-// for artwork they haven't supplied.
-function TokenLogo({ imageUrl, symbol }: { imageUrl: string | null; symbol: string }) {
-  const [failed, setFailed] = useState(false);
-  return (
-    <div
-      aria-hidden="true"
-      className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-border-subtle"
-    >
-      {imageUrl && !failed ? (
-        // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
-        <img
-          src={imageUrl}
-          alt=""
-          onError={() => setFailed(true)}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-fill-subtle text-sm font-semibold text-tertiary">
-          {tokenMarkInitial(symbol)}
-        </div>
-      )}
-    </div>
   );
 }
 

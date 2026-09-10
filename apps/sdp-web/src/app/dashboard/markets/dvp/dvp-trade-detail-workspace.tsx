@@ -17,6 +17,7 @@ import { AnimatePresence } from "motion/react";
 import { Fragment, type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
+import { TokenLogo } from "@/components/token-logo";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { HeightReveal } from "@/components/ui/height-reveal";
@@ -261,25 +262,17 @@ function ExchangeSummary({ trade }: { trade: DvpTrade }) {
     trade.kind === "principal" && trade.legs.b.party.wallet !== null
       ? [trade.legs.b, trade.legs.a]
       : [trade.legs.a, trade.legs.b];
-  const amount = (leg: DvpTradeLeg) =>
-    `${formatLegAmount(leg.amount, leg.decimals)}${leg.symbol ? ` ${leg.symbol}` : ""}`;
   return (
     <span className="text-secondary text-sm">
-      {t(labels.given)} {amount(given)} · {t(labels.taken)} {amount(taken)}
+      {t(labels.given)} {legAmountWithSymbol(given)} · {t(labels.taken)}{" "}
+      {legAmountWithSymbol(taken)}
     </span>
   );
 }
 
-/** A token's mark: the first letter of its symbol in a circle, until mints carry logos. */
-function TokenMark({ symbol }: { symbol: string }) {
-  return (
-    <span
-      aria-hidden
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fill font-semibold text-primary text-sm"
-    >
-      {symbol.slice(0, 1).toUpperCase()}
-    </span>
-  );
+/** "100 USDC", or just "100" for a mint without a symbol. */
+function legAmountWithSymbol(leg: DvpTradeLeg): string {
+  return `${formatLegAmount(leg.amount, leg.decimals)}${leg.symbol ? ` ${leg.symbol}` : ""}`;
 }
 
 /** The line under the amount: progress while open, the outcome once closed. */
@@ -376,7 +369,9 @@ function LegCard({
       )}
 
       <div className="mt-5 flex items-center gap-3">
-        {leg.symbol ? <TokenMark symbol={leg.symbol} /> : null}
+        {leg.symbol ? (
+          <TokenLogo imageUrl={leg.imageUrl} symbol={leg.symbol} className="h-9 w-9" />
+        ) : null}
         <p className="font-semibold text-3xl text-primary tracking-tight tabular-nums">
           {target}
           {leg.symbol ? (

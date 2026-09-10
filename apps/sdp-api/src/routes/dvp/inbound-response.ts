@@ -33,6 +33,8 @@ interface DvpInboundLegResponse {
   amount: string;
   decimals: number | null;
   symbol: string | null;
+  /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
+  imageUrl: string | null;
   /** The address to pay. The whole of this party's integration. */
   escrow: string;
   /** Where this leg's proceeds land. On chain, and worth checking before paying. */
@@ -83,13 +85,18 @@ function inboundParty(
  *
  * @param inbound - The trade, the caller's side on it, and their matching address.
  * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @param mintImages - Each mint's issued-token image resolved for the CALLER's
+ *   organization, so the creator's issued token never lends it artwork.
  * @returns The wire shape a party viewer receives.
  */
 export function toDvpInboundResponse(
   inbound: DvpInboundTrade,
-  callerAddresses: ReadonlyMap<string, DvpCallerWallet>
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
+  mintImages: ReadonlyMap<string, string | null>
 ): DvpInboundTradeResponse {
   const { trade, side, party } = inbound;
+  const mintAImage = mintImages.get(trade.mintA);
+  const mintBImage = mintImages.get(trade.mintB);
 
   return {
     id: trade.id,
@@ -106,6 +113,7 @@ export function toDvpInboundResponse(
         amount: trade.amountA,
         decimals: trade.decimalsA,
         symbol: trade.symbolA,
+        imageUrl: mintAImage === undefined ? null : mintAImage,
         escrow: trade.escrowA,
         settlementDestination: trade.userASettlementDestination,
         observedAmount: trade.escrowAAmount,
@@ -119,6 +127,7 @@ export function toDvpInboundResponse(
         amount: trade.amountB,
         decimals: trade.decimalsB,
         symbol: trade.symbolB,
+        imageUrl: mintBImage === undefined ? null : mintBImage,
         escrow: trade.escrowB,
         settlementDestination: trade.userBSettlementDestination,
         observedAmount: trade.escrowBAmount,

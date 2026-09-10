@@ -465,4 +465,24 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(html).not.toContain("Fund this leg");
     expect(html).not.toContain("Both legs must be funded");
   });
+
+  // The API resolves the mint's image when this organization issued it; a
+  // foreign mint has no image and the letter mark stands in.
+  it("renders the mint's image on a leg that has one, the letter mark otherwise", () => {
+    const html = renderDetail(
+      trade({
+        legs: {
+          a: testLeg({
+            escrow: LEG_ESCROW_A,
+            imageUrl: "https://cdn.example.test/atd.png",
+          }),
+          b: testLeg({ escrow: LEG_ESCROW_B, imageUrl: null }),
+        },
+      })
+    );
+
+    expect(html).toContain('src="https://cdn.example.test/atd.png"');
+    // The fixture symbol "ATD" monograms to its first character.
+    expect(html).toContain(">A</div>");
+  });
 });

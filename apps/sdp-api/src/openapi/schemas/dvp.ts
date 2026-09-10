@@ -103,6 +103,10 @@ const dvpTradeLegSchema = z
   .object({
     party: dvpTradePartySchema,
     mint: z.string().openapi({ description: "Mint delivered on this leg." }),
+    imageUrl: z.string().url().nullable().openapi({
+      description:
+        "Image of the leg's mint when it is a token this organization issued through SDP; null otherwise.",
+    }),
     tokenProgram: z.string().openapi({
       description:
         "Token program owning the mint. A single trade may legitimately mix legacy SPL and Token-2022.",
@@ -218,6 +222,10 @@ const dvpInboundLegSchema = z
     }),
     symbol: z.string().nullable().openapi({
       description: "The mint's symbol, or null when it carries no metadata.",
+    }),
+    imageUrl: z.string().url().nullable().openapi({
+      description:
+        "Image of the leg's mint when it is a token this organization issued through SDP; null otherwise.",
     }),
     escrow: z.string().openapi({
       description:
