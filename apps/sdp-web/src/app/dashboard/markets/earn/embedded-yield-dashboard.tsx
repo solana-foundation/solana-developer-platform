@@ -349,8 +349,10 @@ function PortfolioByStrategy({
 export function EmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
-  const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary();
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
+  const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
+    detailsVisible: selectedStrategyId !== null,
+  });
   const selectedStrategy =
     summary?.totalsByStrategy.find(
       (strategy) => `${strategy.provider}:${strategy.providerReference}` === selectedStrategyId

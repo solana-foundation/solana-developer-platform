@@ -240,6 +240,31 @@ describe("external-wallet position reads", () => {
     );
   });
 
+  it("keeps owner addresses but omits position details from the default summary", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get("/v1/earn/external-wallet/positions/summary");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        summary: {
+          totalsByStrategy: Array<Record<string, unknown>>;
+        };
+      };
+    };
+
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      ownerAddresses: [OWNER_A],
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
+  });
+
   it("returns exactly one wallet and leaves an unreadable live value unavailable", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   error: undefined as Error | undefined,
   isInitialLoading: false,
   fetchPositions: vi.fn<() => Promise<EarnExternalWalletPosition[]>>(),
+  summaryOptions: vi.fn<(options?: { detailsVisible?: boolean }) => void>(),
 }));
 
 vi.mock("@/lib/use-solana-cluster", () => ({
@@ -23,11 +24,14 @@ vi.mock("@/lib/use-solana-cluster", () => ({
 
 vi.mock("./earn-program-data", () => ({
   fetchEarnExternalWalletPositions: mocks.fetchPositions,
-  useEarnExternalWalletPositionSummary: () => ({
-    summary: mocks.summary,
-    error: mocks.error,
-    isInitialLoading: mocks.isInitialLoading,
-  }),
+  useEarnExternalWalletPositionSummary: (options?: { detailsVisible?: boolean }) => {
+    mocks.summaryOptions(options);
+    return {
+      summary: mocks.summary,
+      error: mocks.error,
+      isInitialLoading: mocks.isInitialLoading,
+    };
+  },
 }));
 
 function renderWithEnglish(children: ReactNode) {
@@ -45,6 +49,7 @@ afterEach(() => {
   mocks.error = undefined;
   mocks.isInitialLoading = false;
   mocks.fetchPositions.mockReset();
+  mocks.summaryOptions.mockReset();
   vi.useRealTimers();
 });
 
@@ -249,7 +254,9 @@ describe("EmbeddedYieldDashboard", () => {
     renderWithEnglish(
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
+    expect(mocks.summaryOptions).toHaveBeenLastCalledWith({ detailsVisible: false });
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for USDC Core Yield" }));
+    expect(mocks.summaryOptions).toHaveBeenLastCalledWith({ detailsVisible: true });
 
     const drawer = screen.getByRole("dialog", { name: "USDC Core Yield" });
     expect(within(drawer).getByText("Customer wallet 31")).toBeTruthy();
