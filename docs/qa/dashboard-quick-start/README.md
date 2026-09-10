@@ -2,6 +2,12 @@
 
 The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress and opens the guide on click. Both the expanded guide's X and the sidebar card's X ask for confirmation before hiding the guide, with a reminder that it can be resumed in Settings → Onboarding. Cancel returns to the current step without changing progress. Escape or following the step's action still minimizes the guide. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
 
+## Dark-mode separation — September 10
+
+- The guide and dismissal confirmation use the existing darker panel surface in dark mode, with a stronger shadow and a 60% black, lightly blurred backdrop. Light mode retains the existing surface and backdrop.
+- Visually checked both dialogs with the actual component and application CSS at 1280 × 720 in both themes, plus 390 × 700 in dark mode. The confirmation stays distinct above the guide, and cancel returns focus to the guide’s X.
+- All 17 guide tests passed, along with web typecheck, scoped Biome, and module-boundary checks. The isolated fixture used synthetic workspace data.
+
 ## Expanded guide layout — September 10
 
 - Removed the visible SDP quick start label inside the guide. The dialog retains its accessible name.

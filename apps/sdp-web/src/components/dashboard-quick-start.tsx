@@ -23,7 +23,8 @@ import {
 import styles from "./dashboard-quick-start.module.css";
 
 const serverSnapshot = () => null;
-const dialogClassName = `${styles.enter} fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[420px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-6 text-primary shadow-xl`;
+const dialogClassName = `${styles.enter} fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[420px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-6 text-primary shadow-xl dark:bg-surface-sunken dark:shadow-2xl dark:shadow-black/60`;
+const overlayClassName = "fixed inset-0 z-50 bg-black/40 dark:bg-black/60 dark:backdrop-blur-[2px]";
 const stepCopy = {
   "api-key": {
     number: 1,
@@ -191,7 +192,7 @@ function QuickStartDismissButton({
         </button>
       </AlertDialog.Trigger>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+        <AlertDialog.Overlay className={overlayClassName} />
         <AlertDialog.Content className={dialogClassName}>
           <AlertDialog.Title className="text-base font-medium">
             {t("Shared.quickStart.dismissTitle")}
@@ -354,7 +355,7 @@ export function DashboardQuickStart({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Overlay className={overlayClassName} />
           <Dialog.Content
             onCloseAutoFocus={(event) => {
               if (launcherRef.current) {
