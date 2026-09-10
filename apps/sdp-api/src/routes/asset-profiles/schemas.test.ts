@@ -61,9 +61,6 @@ describe("issuanceMetadataSchema asset link validation", () => {
   });
 
   it("refuses an active-content scheme that opens a value carrying prose", () => {
-    // A body containing whitespace is not evidence of prose: a consumer handed
-    // `javascript:alert(1) // note` as an href still runs it, so the leading
-    // scheme decides, not whether the whole string looks URI-shaped.
     for (const notes of [
       "javascript:alert(1) // note",
       "data:text/html,<script>alert(1)</script> screenshot below",
@@ -73,9 +70,35 @@ describe("issuanceMetadataSchema asset link validation", () => {
     }
   });
 
+  it("refuses an active-content scheme split by characters a URL parser drops", () => {
+    for (const notes of [
+      "java\tscript:alert(1)",
+      "java\nscript:alert(1)",
+      "java\rscript:alert(1)",
+      "\u0001javascript:alert(1)",
+      "da\tta:text/html,<script>alert(1)</script>",
+    ]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(false);
+    }
+  });
+
+  it("leaves values that parse to no scheme unconstrained", () => {
+    for (const notes of [
+      "Follow us: javascript is fun",
+      "A description with: a colon",
+      "1st place: winner",
+    ]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(true);
+    }
+  });
+
+  it("keeps non-executing schemes usable", () => {
+    for (const notes of ["urn:uuid:1-2-3", "mailto:team@example.test"]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(true);
+    }
+  });
+
   it("refuses an active-content URI under a key the name pattern never covered", () => {
-    // `banner`, `avatar` and `thumbnail` are rendered like any other link but
-    // matched none of the link key names, so the value is what has to decide.
     for (const key of ["banner", "avatar", "thumbnail"]) {
       const result = issuanceMetadataSchema.safeParse({
         asset: { [key]: "javascript:alert(1)" },

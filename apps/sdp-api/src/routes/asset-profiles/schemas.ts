@@ -19,13 +19,6 @@ const MAX_LINK_LENGTH = 2048;
 // the same way.
 const ACTIVE_CONTENT_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "blob:", "file:"]);
 
-// The leading scheme of a string, if it opens with one. Judged on the prefix
-// rather than on the whole string being URI-shaped: a browser handed
-// `javascript:alert(1) // note` as an href runs it, so a body containing
-// whitespace is not evidence that the value is prose. Text that merely quotes a
-// scheme mid-sentence never starts with one and stays unconstrained.
-const LEADING_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
-
 const parseUri = (value: string): URL | null => {
   try {
     return new URL(value.trim());
@@ -40,8 +33,8 @@ const isHttpUrl = (value: string): boolean => {
 };
 
 const isActiveContentUri = (value: string): boolean => {
-  const scheme = LEADING_SCHEME_PATTERN.exec(value.trim())?.[0];
-  return scheme !== undefined && ACTIVE_CONTENT_SCHEMES.has(scheme.toLowerCase());
+  const protocol = parseUri(value)?.protocol;
+  return protocol !== undefined && ACTIVE_CONTENT_SCHEMES.has(protocol.toLowerCase());
 };
 
 function collectActiveContentIssues(
