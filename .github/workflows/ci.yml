@@ -208,10 +208,10 @@ jobs:
               echo "$1=false" >> "$GITHUB_OUTPUT"
             fi
           }
-          detect api '^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/run-workspace-tests\.mjs|scripts/doppler/|\.github/workflows/ci\.yml)'
-          detect rest '^(apps/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
-          detect e2e '^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
-          detect docker '^(apps/|packages/|package\.json|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|docker-compose(\.ci)?\.yml|\.dockerignore|\.github/workflows/ci\.yml)'
+          detect api '^(apps/sdp-api/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/run-workspace-tests\.mjs|scripts/doppler/|\.github/workflows/ci\.yml)'
+          detect rest '^(apps/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
+          detect e2e '^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
+          detect docker '^(apps/|packages/|package\.json|\.npmrc|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|docker-compose(\.ci)?\.yml|\.dockerignore|\.github/workflows/ci\.yml)'
 
   test:
     name: Unit Tests (api ${{ matrix.shard }}/8)
