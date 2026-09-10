@@ -421,13 +421,15 @@ export class ApiKeyService {
     organizationId: string,
     projectId: string,
     gracePeriodHours: number,
+    actorPermissions: Permission[],
     pepper?: string
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by
+                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by,
+                ak.expires_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ? AND ak.status = 'active'`
@@ -445,11 +447,20 @@ export class ApiKeyService {
         allowed_ips: string | null;
         signing_wallet_id: string | null;
         created_by: string;
+        expires_at: string | null;
       }>();
 
     if (!existing) {
       return null;
     }
+
+    assertGrantableApiKeyPermissions(
+      actorPermissions,
+      existing.role,
+      existing.permissions === null
+        ? null
+        : parsePostgresJson<Permission[]>(existing.permissions)
+    );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
     const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(existing.environment);
@@ -492,8 +503,8 @@ export class ApiKeyService {
           .prepare(
             `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
           )
           .bind(
             newKeyId,
@@ -508,7 +519,8 @@ export class ApiKeyService {
             existing.permissions,
             existing.allowed_ips,
             existing.signing_wallet_id,
-            keyId
+            keyId,
+            existing.expires_at
           )
           .run();
 
@@ -555,7 +567,7 @@ export class ApiKeyService {
         keyPrefix: newPrefix,
         role: existing.role,
         environment: existing.environment,
-        expiresAt: null,
+        expiresAt: existing.expires_at,
         createdAt: new Date().toISOString(),
       },
       previousKey: {

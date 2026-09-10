@@ -28,6 +28,7 @@ import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.servic
 import {
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
+  assertBindingsWithinActorWalletScope,
   resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
@@ -275,6 +276,14 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     connectionId,
   });
 
+  const actorApiKey = c.get("apiKey");
+  if (actorApiKey) {
+    assertBindingsWithinActorWalletScope(actorApiKey, [
+      walletSelection.defaultSigningWalletId,
+      ...walletSelection.bindings.map((binding) => binding.walletId),
+    ]);
+  }
+
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
@@ -462,6 +471,10 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot update the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   // Verify key belongs to this organization and the current project scope
@@ -482,6 +495,14 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     signingWalletIds: body.signingWalletIds,
     walletBindings: body.walletBindings,
   });
+
+  const updateActorApiKey = c.get("apiKey");
+  if (updateActorApiKey && walletSelection.touched) {
+    assertBindingsWithinActorWalletScope(updateActorApiKey, [
+      walletSelection.defaultSigningWalletId,
+      ...walletSelection.bindings.map((binding) => binding.walletId),
+    ]);
+  }
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (walletSelection.touched) {
@@ -722,6 +743,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     actor.organizationId,
     projectId,
     gracePeriodHours,
+    actor.permissions,
     c.env.API_KEY_PEPPER
   );
 

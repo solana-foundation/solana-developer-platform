@@ -12,6 +12,7 @@ import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   resolveCreateWalletScope,
+  assertBindingsWithinActorWalletScope,
   resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
@@ -142,6 +143,14 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     provisionWallet: provisionWalletRequested,
     connectionId,
   });
+
+  const actorApiKey = c.get("apiKey");
+  if (actorApiKey) {
+    assertBindingsWithinActorWalletScope(actorApiKey, [
+      walletSelection.defaultSigningWalletId,
+      ...walletSelection.bindings.map((binding) => binding.walletId),
+    ]);
+  }
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];

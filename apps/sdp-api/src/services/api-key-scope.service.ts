@@ -461,6 +461,42 @@ export function resolveApiKeySigningWalletId(
   return null;
 }
 
+/**
+ * A wallet-scoped key granting wallet access it does not itself hold is a
+ * scope escape: the minted key outlives every restriction placed on its
+ * author. Non-key actors and all-wallet keys are unconstrained here.
+ */
+export function assertBindingsWithinActorWalletScope(
+  actor: {
+    walletScope?: ApiKeyWalletScope;
+    signingWalletId?: string | null;
+    walletBindings?: ApiKeyWalletBinding[];
+  },
+  walletIds: Array<string | null | undefined>
+): void {
+  const scoped =
+    actor.walletScope === "selected" ||
+    (actor.walletScope === undefined &&
+      ((actor.walletBindings?.length ?? 0) > 0 || actor.signingWalletId != null));
+  if (!scoped) {
+    return;
+  }
+  const allowed = new Set(
+    (actor.walletBindings ?? []).map((binding) => binding.walletId)
+  );
+  if (actor.signingWalletId) {
+    allowed.add(actor.signingWalletId);
+  }
+  for (const walletId of walletIds) {
+    if (walletId && !allowed.has(walletId)) {
+      throw new AppError(
+        "INSUFFICIENT_PERMISSIONS",
+        "Cannot grant an API key access to a wallet outside your own wallet scope"
+      );
+    }
+  }
+}
+
 export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null {
   if (auth.authType !== "api_key") {
     return null;
