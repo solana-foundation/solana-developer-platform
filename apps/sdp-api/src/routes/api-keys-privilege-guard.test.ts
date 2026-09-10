@@ -186,6 +186,38 @@ describe("API key privilege guards", () => {
     expect(body.error.message).toContain("outside your own wallet scope");
   });
 
+  it("refuses a wallet-scoped key minting an all-wallets key", async () => {
+    const scopedHash = await hashString("sk_test_privilege_scoped3", env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, scopedHash, {
+      ...WRITER_CACHED,
+      id: "key_privilege_scoped3",
+      walletScope: "selected",
+      signingWalletIds: ["wal_scope_own"],
+      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
+    });
+
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer sk_test_privilege_scoped3",
+        },
+        body: JSON.stringify({
+          name: "All wallets escape",
+          role: "api_readonly",
+          walletScope: "all",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("outside your own wallet scope");
+  });
+
   it("lets a wallet-scoped key grant a wallet inside its own scope", async () => {
     const scopedHash = await hashString("sk_test_privilege_scoped2", env.API_KEY_PEPPER);
     await seedCachedApiKey(env, scopedHash, {

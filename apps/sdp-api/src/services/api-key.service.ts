@@ -457,9 +457,7 @@ export class ApiKeyService {
     assertGrantableApiKeyPermissions(
       actorPermissions,
       existing.role,
-      existing.permissions === null
-        ? null
-        : parsePostgresJson<Permission[]>(existing.permissions)
+      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions)
     );
 
     const newKeyId = `key_${crypto.randomUUID()}`;

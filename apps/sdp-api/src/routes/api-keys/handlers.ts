@@ -26,9 +26,9 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
+  assertBindingsWithinActorWalletScope,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
-  assertBindingsWithinActorWalletScope,
   resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
@@ -278,10 +278,14 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
 
   const actorApiKey = c.get("apiKey");
   if (actorApiKey) {
-    assertBindingsWithinActorWalletScope(actorApiKey, [
-      walletSelection.defaultSigningWalletId,
-      ...walletSelection.bindings.map((binding) => binding.walletId),
-    ]);
+    assertBindingsWithinActorWalletScope(
+      actorApiKey,
+      [
+        walletSelection.defaultSigningWalletId,
+        ...walletSelection.bindings.map((binding) => binding.walletId),
+      ],
+      walletScope
+    );
   }
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
@@ -498,10 +502,14 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
 
   const updateActorApiKey = c.get("apiKey");
   if (updateActorApiKey && walletSelection.touched) {
-    assertBindingsWithinActorWalletScope(updateActorApiKey, [
-      walletSelection.defaultSigningWalletId,
-      ...walletSelection.bindings.map((binding) => binding.walletId),
-    ]);
+    assertBindingsWithinActorWalletScope(
+      updateActorApiKey,
+      [
+        walletSelection.defaultSigningWalletId,
+        ...walletSelection.bindings.map((binding) => binding.walletId),
+      ],
+      body.walletScope
+    );
   }
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 

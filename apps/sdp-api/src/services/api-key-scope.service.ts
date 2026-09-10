@@ -472,7 +472,8 @@ export function assertBindingsWithinActorWalletScope(
     signingWalletId?: string | null;
     walletBindings?: ApiKeyWalletBinding[];
   },
-  walletIds: Array<string | null | undefined>
+  walletIds: Array<string | null | undefined>,
+  requestedWalletScope?: ApiKeyWalletScope
 ): void {
   const scoped =
     actor.walletScope === "selected" ||
@@ -481,9 +482,13 @@ export function assertBindingsWithinActorWalletScope(
   if (!scoped) {
     return;
   }
-  const allowed = new Set(
-    (actor.walletBindings ?? []).map((binding) => binding.walletId)
-  );
+  if (requestedWalletScope === "all") {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      "Cannot grant an API key access to a wallet outside your own wallet scope"
+    );
+  }
+  const allowed = new Set((actor.walletBindings ?? []).map((binding) => binding.walletId));
   if (actor.signingWalletId) {
     allowed.add(actor.signingWalletId);
   }
