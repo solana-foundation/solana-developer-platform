@@ -9,6 +9,11 @@
     },
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/migrate-rings-key-authority.ts",
+    "scripts/migrate-rings-key-authority.test.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

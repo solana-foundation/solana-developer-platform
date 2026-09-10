@@ -53,7 +53,9 @@ heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRi
 heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
 heliusRings.post(
   "/wallets/:walletId/rekey",
-  requirePermissions("payments:write"),
+  // Re-key bypasses payment policy and intentionally abandons whatever the old
+  // shielded identity holds, so ordinary payment-write access is not enough.
+  requirePermissions("payments:write", "custody:admin"),
   rekeyRingsWallet
 );
 heliusRings.get(

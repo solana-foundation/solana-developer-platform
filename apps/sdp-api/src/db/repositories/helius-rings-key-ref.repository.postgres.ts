@@ -92,7 +92,7 @@ export function createPostgresHeliusRingsKeyRefRepository(db: AppDb): HeliusRing
                    AND g.kind IN ('viewing', 'nullifier')
                    AND g.previous_ciphertext IS NULL
               ) = 2
-          RETURNING k.*`
+          RETURNING k.id`
         )
         .bind(
           input.viewing.ciphertext,
@@ -101,25 +101,8 @@ export function createPostgresHeliusRingsKeyRefRepository(db: AppDb): HeliusRing
           input.nullifier.keyVersion,
           input.walletId
         )
-        .all<Record<string, unknown>>();
-      return result.results.map(mapRow);
-    },
-
-    async restoreKeyRefRotation(input: { walletId: string }) {
-      const result = await db
-        .prepare(
-          `UPDATE helius_rings_key_refs
-              SET ciphertext = previous_ciphertext,
-                  key_version = COALESCE(previous_key_version, key_version),
-                  previous_ciphertext = NULL,
-                  previous_key_version = NULL
-            WHERE wallet_id = ?
-              AND previous_ciphertext IS NOT NULL
-          RETURNING *`
-        )
-        .bind(input.walletId)
-        .all<Record<string, unknown>>();
-      return result.results.map(mapRow);
+        .all<{ id: string }>();
+      return result.results.length;
     },
 
     async commitKeyRefRotation(input: { walletId: string }) {

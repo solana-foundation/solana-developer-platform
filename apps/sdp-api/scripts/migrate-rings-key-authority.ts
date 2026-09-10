@@ -1,10 +1,10 @@
 // ONE-SHOT MIGRATION.
 //
-// TODO(rings-key-migration): delete this file, its test, and the
-// `rings:keys:migrate` entry in package.json once every deployment reports
-// migrated with skipped=0 and failed=0. Nothing under src/ imports this, so that
-// is the whole cleanup — which is also why it reaches for repositories and the
-// cipher directly instead of adding permanent service surface for a single run.
+// TODO(rings-key-migration): once every deployment reports skipped=0, failed=0,
+// and remaining=0, delete this file, its test, the `rings:keys:migrate` package
+// entry, and their two explicit tsconfig includes. Nothing under src/ imports the
+// script, which is also why it reaches for repositories and the cipher directly
+// instead of adding permanent service surface for a single run.
 //
 // Moves Helius Rings wallets off the seed-derived key authority onto stored keys.
 //
@@ -16,12 +16,17 @@
 // would discard everything the old keys hold — that difference is why this
 // verifies before it writes.
 //
-// Safe to rerun: sealing is write-once and the re-pin is a compare-and-swap, so a
-// second run reports everything as already migrated. Rerun until skipped and
-// failed both reach zero.
+// Safe to rerun: sealing is write-once and the re-pin is a compare-and-swap.
+// Migrated rows leave the scan, so a completed rerun reports remaining=0. Rerun
+// until skipped, failed, and remaining all reach zero.
 //
-// Reads DATABASE_URL and RINGS_KEY_ENCRYPTION_KEY from the environment; nothing
-// here loads a .env file. Locally, export them first:
+// Run only after Rings writes are stopped, active provisioning/re-key requests
+// have drained, and the new deployment has fully replaced old replicas. A
+// provisioner that already loaded deterministic material can otherwise publish it
+// after this script re-pins the pending row.
+//
+// Reads DATABASE_URL and the configured Rings cipher from the environment;
+// nothing here loads a .env file. Locally, export them first:
 //
 //   cd apps/sdp-api && set -a && . ./.env.local && set +a
 //   pnpm rings:keys:migrate --dry-run
@@ -97,10 +102,13 @@ async function sealKey(
   bytes: Uint8Array
 ): Promise<Uint8Array> {
   const organizationId = wallet.organization_id;
-  const ciphertext = await deps.cipher.encrypt(
-    organizationId,
-    Buffer.from(bytes).toString("base64")
-  );
+  const encoded = Buffer.from(bytes);
+  let ciphertext: string;
+  try {
+    ciphertext = await deps.cipher.encrypt(organizationId, encoded.toString("base64"));
+  } finally {
+    encoded.fill(0);
+  }
   const row = await deps.keyRefs.createKeyRef({
     walletId: wallet.id,
     kind,
@@ -109,24 +117,26 @@ async function sealKey(
     materialTag: "live",
   });
   if (!row) throw new Error(`sealing the ${kind} key returned no row`);
-  return new Uint8Array(
-    Buffer.from(await deps.cipher.decrypt(organizationId, row.ciphertext), "base64")
-  );
+  const decoded = Buffer.from(await deps.cipher.decrypt(organizationId, row.ciphertext), "base64");
+  try {
+    return Uint8Array.from(decoded);
+  } finally {
+    decoded.fill(0);
+  }
 }
 
 /**
- * What sealing would find, without writing anything.
+ * What sealing will find, before writing anything.
  *
- * Existing material is what separates a preview from a guess: `createKeyRef`
- * preserves the blob already there, so a wallet holding keys that differ from the
- * verified derivation is one the real run will skip rather than migrate.
+ * Shared by preview and real mode: `createKeyRef` preserves a blob already there,
+ * so validating both kinds first prevents the real run from writing a missing
+ * kind and only then discovering that its partner makes the wallet unmigratable.
  */
-async function previewSeal(
+async function validateExistingMaterial(
   deps: MigrateWalletDeps,
   wallet: HeliusRingsWalletRow,
-  shieldedAddress: string,
   derived: DerivedKeyBytes
-): Promise<MigrationOutcome> {
+): Promise<Extract<MigrationOutcome, { kind: "skipped" }> | null> {
   const kinds = [
     ["viewing", derived.viewingKeyBytes],
     ["nullifier", derived.nullifierKeyBytes],
@@ -135,18 +145,40 @@ async function previewSeal(
   for (const [kind, expected] of kinds) {
     const row = await deps.keyRefs.getKeyRef({ walletId: wallet.id, kind });
     if (!row) continue;
-    const stored = new Uint8Array(
-      Buffer.from(await deps.cipher.decrypt(wallet.organization_id, row.ciphertext), "base64")
+    const decoded = Buffer.from(
+      await deps.cipher.decrypt(wallet.organization_id, row.ciphertext),
+      "base64"
     );
-    if (!sameBytes(stored, expected)) {
-      return {
-        kind: "skipped",
-        reason: `an existing ${kind} key does not match the verified derivation; left pinned unchanged`,
-      };
+    const stored = Uint8Array.from(decoded);
+    decoded.fill(0);
+    try {
+      if (!sameBytes(stored, expected)) {
+        return {
+          kind: "skipped",
+          reason: `an existing ${kind} key does not match the verified derivation; left pinned unchanged`,
+        };
+      }
+    } finally {
+      stored.fill(0);
     }
   }
 
-  return { kind: "migrated", shieldedAddress };
+  return null;
+}
+
+const CIPHER_PREFLIGHT_ORG = "rings-key-migration-preflight";
+const CIPHER_PREFLIGHT_PLAINTEXT = Buffer.from(
+  "sdp-rings-key-migration-cipher-preflight",
+  "utf8"
+).toString("base64");
+
+/** Proves the selected environment/KMS cipher can open what it writes before any row changes. */
+export async function verifyMigrationCipher(cipher: CustodyCipher): Promise<void> {
+  const ciphertext = await cipher.encrypt(CIPHER_PREFLIGHT_ORG, CIPHER_PREFLIGHT_PLAINTEXT);
+  const opened = await cipher.decrypt(CIPHER_PREFLIGHT_ORG, ciphertext);
+  if (opened !== CIPHER_PREFLIGHT_PLAINTEXT) {
+    throw new Error("Rings key cipher preflight failed its round-trip");
+  }
 }
 
 export async function migrateWallet(
@@ -185,56 +217,77 @@ export async function migrateWallet(
     owner: wallet.owner_address,
   });
 
-  const candidate = await createShieldedMaterial({ ...derived, owner: wallet.owner_address });
-  let derivedIdentity: string;
   try {
-    derivedIdentity = canonicalShieldedIdentity(candidate.shieldedAddress);
+    const candidate = await createShieldedMaterial({ ...derived, owner: wallet.owner_address });
+    let derivedIdentity: string;
+    try {
+      derivedIdentity = canonicalShieldedIdentity(candidate.shieldedAddress);
+    } finally {
+      candidate.destroy();
+    }
+
+    // Refuse anything the seed does not reproduce. Such a wallet is already
+    // broken, and importing mismatched keys would make it permanent because
+    // createKeyRef never overwrites.
+    if (derivedIdentity !== wallet.shielded_address) {
+      return {
+        kind: "skipped",
+        reason: `the seed derives ${derivedIdentity}, not the published ${wallet.shielded_address}`,
+      };
+    }
+
+    const existingMismatch = await validateExistingMaterial(deps, wallet, derived);
+    if (existingMismatch) return existingMismatch;
+
+    if (deps.dryRun) return { kind: "migrated", shieldedAddress: wallet.shielded_address };
+
+    const storedViewing = await sealKey(deps, wallet, "viewing", derived.viewingKeyBytes);
+    try {
+      const storedNullifier = await sealKey(deps, wallet, "nullifier", derived.nullifierKeyBytes);
+      try {
+        // What came back is what the database authority will read on the next
+        // use. If it differs, another writer sealed first and re-pinning would
+        // hand the wallet keys deriving a different identity.
+        if (
+          !sameBytes(storedViewing, derived.viewingKeyBytes) ||
+          !sameBytes(storedNullifier, derived.nullifierKeyBytes)
+        ) {
+          return {
+            kind: "skipped",
+            reason:
+              "stored key material does not match the verified derivation; left pinned unchanged",
+          };
+        }
+      } finally {
+        storedNullifier.fill(0);
+      }
+    } finally {
+      storedViewing.fill(0);
+    }
+
+    return (await deps.repin(wallet))
+      ? { kind: "migrated", shieldedAddress: wallet.shielded_address }
+      : { kind: "skipped", reason: "the wallet changed authority concurrently" };
   } finally {
-    candidate.destroy();
+    derived.viewingKeyBytes.fill(0);
+    derived.nullifierKeyBytes.fill(0);
   }
-
-  // Refuse anything the seed does not reproduce. Such a wallet is already broken —
-  // the gateway's own identity assertion would reject it too — and importing keys
-  // that do not match would only make the breakage permanent, since createKeyRef
-  // never overwrites.
-  if (derivedIdentity !== wallet.shielded_address) {
-    return {
-      kind: "skipped",
-      reason: `the seed derives ${derivedIdentity}, not the published ${wallet.shielded_address}`,
-    };
-  }
-
-  if (deps.dryRun) {
-    return await previewSeal(deps, wallet, wallet.shielded_address, derived);
-  }
-
-  const storedViewing = await sealKey(deps, wallet, "viewing", derived.viewingKeyBytes);
-  const storedNullifier = await sealKey(deps, wallet, "nullifier", derived.nullifierKeyBytes);
-
-  // What came back is what the database authority will read on the next use. If it
-  // is not what was verified above, something else sealed this wallet first and
-  // re-pinning would hand it keys deriving a different identity.
-  if (
-    !sameBytes(storedViewing, derived.viewingKeyBytes) ||
-    !sameBytes(storedNullifier, derived.nullifierKeyBytes)
-  ) {
-    return {
-      kind: "skipped",
-      reason: "stored key material does not match the verified derivation; left pinned unchanged",
-    };
-  }
-
-  return (await deps.repin(wallet))
-    ? { kind: "migrated", shieldedAddress: wallet.shielded_address }
-    : { kind: "skipped", reason: "the wallet changed authority concurrently" };
 }
 
 interface Counters {
   migrated: number;
   repinned: number;
-  alreadyMigrated: number;
   skipped: number;
   failed: number;
+}
+
+export function migrationRunFailed(input: {
+  dryRun: boolean;
+  skipped: number;
+  failed: number;
+  remaining: number;
+}): boolean {
+  return input.skipped > 0 || input.failed > 0 || (!input.dryRun && input.remaining > 0);
 }
 
 /**
@@ -284,7 +337,6 @@ function record(
       );
       return;
     case "already-migrated":
-      counters.alreadyMigrated += 1;
       return;
     case "skipped":
       counters.skipped += 1;
@@ -297,17 +349,19 @@ async function main(): Promise<void> {
   const env = getProcessEnv();
   const dryRun = process.argv.includes("--dry-run");
 
-  if (!env.RINGS_KEY_ENCRYPTION_KEY && !env.RINGS_KEY_KMS_KEY_NAME) {
+  if (!env.RINGS_KEY_ENCRYPTION_KEY) {
     throw new Error(
-      "RINGS_KEY_ENCRYPTION_KEY (or RINGS_KEY_KMS_KEY_NAME) must be set; it is what seals the migrated keys. " +
-        "Back it up before running: losing it makes every migrated wallet unspendable."
+      "RINGS_KEY_ENCRYPTION_KEY must be set, including alongside KMS so v1 rows remain readable. " +
+        "Back up every configured Rings wrapping key before running."
     );
   }
 
   const db = getDb(env);
+  const cipher = createRingsKeyCipher(env);
+  await verifyMigrationCipher(cipher);
   const deps: MigrateWalletDeps = {
     keyRefs: createHeliusRingsKeyRefRepository(env),
-    cipher: createRingsKeyCipher(env),
+    cipher,
     dryRun,
     repin: async (wallet) => {
       // Unreachable in a preview, and loud rather than silent if that ever stops
@@ -330,7 +384,6 @@ async function main(): Promise<void> {
   const counters: Counters = {
     migrated: 0,
     repinned: 0,
-    alreadyMigrated: 0,
     skipped: 0,
     failed: 0,
   };
@@ -351,14 +404,26 @@ async function main(): Promise<void> {
       }
     }
 
+    // The keyset scan is stable for rows it saw, but an old replica could insert
+    // a deterministic wallet behind its cursor while this one-shot is running.
+    // The final count is the authoritative success condition.
+    const remainingRow = await db
+      .prepare(
+        `SELECT count(*)::text AS count
+           FROM helius_rings_wallets
+          WHERE key_authority = 'deterministic'`
+      )
+      .first<{ count: string }>();
+    const remaining = Number(remainingRow?.count ?? "0");
+
     console.info(
       `${dryRun ? "Preview" : "Done"}. migrated=${counters.migrated} ` +
-        `repinned=${counters.repinned} already=${counters.alreadyMigrated} ` +
-        `skipped=${counters.skipped} failed=${counters.failed}`
+        `repinned=${counters.repinned} skipped=${counters.skipped} ` +
+        `failed=${counters.failed} remaining=${remaining}`
     );
     // Skips and failures leave wallets on the public seed, which is the condition
     // this migration exists to end, so they must not read as success.
-    if (counters.skipped > 0 || counters.failed > 0) {
+    if (migrationRunFailed({ dryRun, ...counters, remaining })) {
       console.error(
         dryRun
           ? "Some wallets would not migrate. Resolve the reasons above before running for real."

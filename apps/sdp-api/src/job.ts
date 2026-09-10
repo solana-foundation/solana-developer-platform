@@ -30,6 +30,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
+import { verifyRingsKeyAuthorityConfiguration } from "@/services/helius-rings/key-authority";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
@@ -118,6 +119,7 @@ export async function runCronJob(): Promise<void> {
     throw new Error("REDIS_URL is required for the reconciliation job");
   }
   assertCustodyEncryptionScheme(env);
+  await verifyRingsKeyAuthorityConfiguration(env);
   getManagedReconciliationCron(env);
   getManagedReconciliationMaxRuntimeMinutes(env);
   assertSigningProviderAllowed(env);

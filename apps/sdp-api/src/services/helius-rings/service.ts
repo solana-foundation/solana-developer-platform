@@ -451,28 +451,10 @@ export class HeliusRingsService {
         `rings-rekey:${wallet.id}`,
         async (tx) => {
           const txDb = asTransactionalClient(tx);
-          // An in-flight or signed-failed operation still belongs to the
-          // abandoned identity. If it later completes, advanceIndexedSlot would
-          // write that slot onto the new keys and skip their history. Refuse
-          // until it is reconciled or voided.
-          const blocking = await createPostgresHeliusRingsOperationRepository(
-            txDb
-          ).findBlockingOperation({
-            ...this.tenant,
-            walletId: wallet.id,
-            opTypes: [...OP_TYPES],
-          });
-          if (blocking) {
-            throw new HeliusRingsError(
-              "conflict",
-              `operation ${blocking.id} has not settled; reconcile or void it before re-keying this wallet`
-            );
-          }
-          // Guarded by the row as it was before the registry read, so a rival
-          // that slipped in while this one was reading the chain loses here
-          // rather than rotating a wallet whose state it never saw. The claim
-          // runs on the lock's executor so it does not check out a second
-          // pool connection while this session still holds the lock.
+          // Claim first so operation entry and re-key contend on the same wallet
+          // row. If an operation locked it first, this waits and the blocking
+          // query below sees its committed proving state. If this claim wins,
+          // operation entry wakes to a paused wallet and refuses to advance.
           const claimed = await createPostgresHeliusRingsWalletRepository(txDb).claimWalletForRekey(
             {
               ...this.tenant,
@@ -484,6 +466,26 @@ export class HeliusRingsService {
             throw new HeliusRingsError(
               "conflict",
               "this rings wallet is no longer in a state that can be re-keyed; read it again and retry"
+            );
+          }
+
+          // An in-flight or signed-failed operation still belongs to the
+          // abandoned identity. If it later completes, advanceIndexedSlot would
+          // write that slot onto the new keys and skip their history. An incoming
+          // transfer is equally unsafe: it can create notes for the key this
+          // rotation discards. Refuse until either is reconciled or voided.
+          const blocking = await createPostgresHeliusRingsOperationRepository(
+            txDb
+          ).findBlockingOperation({
+            ...this.tenant,
+            walletId: wallet.id,
+            opTypes: [...OP_TYPES],
+            recipientAddress: wallet.shielded_address,
+          });
+          if (blocking) {
+            throw new HeliusRingsError(
+              "conflict",
+              `operation ${blocking.id} has not settled; reconcile or void it before re-keying this wallet`
             );
           }
           return claimed;
@@ -558,14 +560,10 @@ export class HeliusRingsService {
   }
 
   /**
-   * Publishes a rotated identity, deciding which ending the staged material gets.
-   *
-   * The chain write is the point of no return, so it is the only thing this
-   * guards. Committing as soon as it succeeds — rather than after the row catches
-   * up — is deliberate: from that moment the staged keys are the only ones that
-   * derive the published identity, so a later persistence failure has to leave
-   * them in place for `reconcileRotatedIdentity` to adopt. Rolling back a
-   * published rotation would be the very outage this staging exists to prevent.
+   * Publishes and commits a rotated identity. A rejection leaves material staged
+   * because it cannot prove the chain stayed put; a confirmed return commits
+   * before the wallet row catches up so reconciliation can always derive what the
+   * chain publishes.
    */
   private async publishRotatedIdentity(
     rotation: KeyAuthorityRotation,
@@ -573,35 +571,13 @@ export class HeliusRingsService {
     owner: string
   ) {
     const gateway = await this.resolveGateway();
-    const rotated = await gateway
-      .rekeyIdentity({ walletId, owner })
-      .catch(async (error: unknown) => {
-        // Nothing was published, so the wallet still owns the identity it
-        // advertises. Putting the old material back leaves it stale rather than
-        // holding keys that derive an identity nobody has.
-        await this.restoreRotationMaterial(rotation, walletId);
-        throw error;
-      });
+    // A rejection does not prove the chain stayed put: submission, confirmation,
+    // and the post-confirmation read can all fail after broadcast. Keep the pair
+    // staged on every error. A retry either reuses it while the registry is still
+    // foreign, or sees `ours` and reconciles a transaction that landed.
+    const rotated = await gateway.rekeyIdentity({ walletId, owner });
     await rotation.commit();
     return rotated;
-  }
-
-  /**
-   * Undoes staged material, without letting that failure replace the one that
-   * caused it — the publish error is what explains why the re-key stopped.
-   */
-  private async restoreRotationMaterial(
-    rotation: KeyAuthorityRotation,
-    walletId: string
-  ): Promise<void> {
-    try {
-      await rotation.rollback();
-    } catch (rollbackError) {
-      getLogger().error(
-        { walletId, err: rollbackError },
-        "rings re-key could not restore the material it staged; this wallet cannot derive its published identity until the rotation is finished or rolled back by hand"
-      );
-    }
   }
 
   /**
@@ -620,6 +596,18 @@ export class HeliusRingsService {
     owner: string,
     actor: HeliusRingsActor
   ): Promise<PrivateWallet> {
+    // The chain already publishes the current material, so the replaced blobs no
+    // longer derive an identity this wallet owns. Clear them before any early
+    // return or row update: both can succeed and then crash, and cleanup must stay
+    // retryable from the settled shape too.
+    await commitKeyAuthorityRotation({
+      env: this.env,
+      organizationId: this.tenant.organizationId,
+      keyRefs: createHeliusRingsKeyRefRepository(this.env),
+      walletId: wallet.id,
+      keyAuthority: wallet.key_authority,
+    });
+
     const settled =
       wallet.status === "ready" &&
       wallet.owner_address === owner &&
@@ -644,18 +632,6 @@ export class HeliusRingsService {
         "this rings wallet is no longer in a state that can adopt its published identity; read it again and retry"
       );
     }
-
-    // The rotation this is the tail of may have published without committing, in
-    // which case the material it replaced is still staged. Those blobs derive an
-    // identity the wallet has now abandoned, and a row that keeps its previous
-    // slot reads as mid-rotation and would block the next re-key.
-    await commitKeyAuthorityRotation({
-      env: this.env,
-      organizationId: this.tenant.organizationId,
-      keyRefs: createHeliusRingsKeyRefRepository(this.env),
-      walletId: wallet.id,
-      keyAuthority: wallet.key_authority,
-    });
 
     getLogger().warn(
       {
@@ -981,8 +957,9 @@ export class HeliusRingsService {
       return this.toPrivateOperation(paused);
     }
 
-    const proving = await this.transition(operation.id, "approval_required", "approved");
+    const proving = await this.enterProving(operation);
     if (!proving) return this.toPrivateOperation(await this.requireOperation(operation.id));
+    if (proving.state !== "proving") return this.toPrivateOperation(proving);
     return this.toPrivateOperation(await this.runPipeline(proving));
   }
 
@@ -1024,8 +1001,9 @@ export class HeliusRingsService {
         return this.toPrivateOperation(operation);
       }
       await this.events.append({ operationId: operation.id, kind: "approval.granted" });
-      const proving = await this.transition(operation.id, "approval_required", "approved");
+      const proving = await this.enterProving(operation);
       if (!proving) return this.toPrivateOperation(await this.requireOperation(operation.id));
+      if (proving.state !== "proving") return this.toPrivateOperation(proving);
       return this.toPrivateOperation(await this.runPipeline(proving));
     }
 
@@ -1395,6 +1373,114 @@ export class HeliusRingsService {
   }
 
   /**
+   * Crosses approval_required → proving while holding every wallet row whose
+   * material the operation will use.
+   *
+   * Re-key claims the same row before checking blockers. That ordering closes
+   * both sides of the race: if this transaction wins, re-key waits and then sees
+   * the committed proving operation; if re-key wins, this wakes to `paused` and
+   * never starts work against material being abandoned.
+   */
+  private async enterProving(
+    operation: HeliusRingsOperationRow
+  ): Promise<HeliusRingsOperationRow | null> {
+    // Find the recipient only to include its row in the lock set. Validation
+    // remains inside runPipeline so an invalid recipient follows the operation
+    // state machine's fail edge rather than escaping as a request error.
+    const requiresRecipient = operation.op_type === "transfer_registered";
+    const recipient =
+      requiresRecipient && operation.to_addr
+        ? await this.wallets.getWalletByShieldedAddress({
+            ...this.tenant,
+            shieldedAddress: operation.to_addr,
+          })
+        : null;
+    const walletIds = [
+      ...new Set([operation.wallet_id, ...(recipient ? [recipient.id] : [])]),
+    ].sort();
+
+    const entered = await getDb(this.env).transaction(async (tx) => {
+      const txDb = asTransactionalClient(tx);
+      const locked = await txDb
+        .prepare(
+          `SELECT id, status, shielded_address
+             FROM helius_rings_wallets
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND id = ANY(?)
+            ORDER BY id
+              FOR UPDATE`
+        )
+        .bind(this.tenant.organizationId, this.tenant.projectId, walletIds)
+        .all<{ id: string; status: string; shielded_address: string | null }>();
+
+      const sender = locked.results.find((wallet) => wallet.id === operation.wallet_id);
+      const lockedRecipient = recipient
+        ? locked.results.find((wallet) => wallet.id === recipient.id)
+        : undefined;
+      let blockedMessage: string | null = null;
+      if (!sender || sender.status === "pending") {
+        blockedMessage = "this rings wallet has no provisioned identity yet";
+      } else if (sender.status !== "ready") {
+        blockedMessage = "this rings wallet is being re-keyed or changed identity before execution";
+      } else if (requiresRecipient && !recipient) {
+        blockedMessage =
+          "the private transfer recipient must be a ready, provisioned wallet in this project";
+      } else if (
+        requiresRecipient &&
+        (lockedRecipient?.status !== "ready" ||
+          lockedRecipient?.shielded_address !== operation.to_addr)
+      ) {
+        blockedMessage =
+          "the private transfer recipient is being re-keyed or changed identity before execution";
+      }
+      const operations = createPostgresHeliusRingsOperationRepository(txDb);
+      return blockedMessage
+        ? await operations.failOperation({
+            ...this.tenant,
+            id: operation.id,
+            expectedState: "approval_required",
+            code: "invalid_input",
+            message: blockedMessage,
+            retryable: false,
+          })
+        : await operations.transitionState({
+            ...this.tenant,
+            id: operation.id,
+            expectedState: "approval_required",
+            nextState: "proving",
+          });
+    });
+
+    if (entered?.state === "proving") {
+      await this.events.append({
+        operationId: operation.id,
+        kind: "state.transitioned",
+        payload: { from: "approval_required", to: "proving" },
+      });
+    } else if (entered?.state === "failed") {
+      getLogger().warn(
+        {
+          operationId: operation.id,
+          opType: operation.op_type,
+          walletId: operation.wallet_id,
+          from: "approval_required",
+          code: "invalid_input",
+          retryable: false,
+          reason: entered.failure_message,
+        },
+        "rings operation failed"
+      );
+      await this.events.append({
+        operationId: operation.id,
+        kind: "operation.failed",
+        payload: { code: "invalid_input", retryable: false },
+      });
+    }
+    return entered;
+  }
+
+  /**
    * Drives an operation from `proving` as far as the port allows:
    * build → proof → sign → submit → indexing. The first port failure takes the
    * state's fail edge; adapter failures carry their own codes.
@@ -1420,6 +1506,12 @@ export class HeliusRingsService {
       // the outer transaction is built for, and the key that must sign it.
       const owner = await this.requireOwner(current.wallet_id);
       const wallet = await this.requireWallet(current.wallet_id);
+      if (wallet.status !== "ready") {
+        throw new HeliusRingsError(
+          "conflict",
+          "this rings wallet is not ready; finish or cancel its re-key before executing"
+        );
+      }
       // Three independent reads: the transfer recipient's ShieldedAddress (the
       // SDK reloads its material transiently to lift it out), the spend's ring
       // pair (a ring shield builds from the pinned id alone, keeping 0073's
@@ -1714,12 +1806,14 @@ export class HeliusRingsService {
     if (shieldedAddress === operation.wallet_id) {
       throw new HeliusRingsError("invalid_input", "cannot transfer to self");
     }
-    const rows = await this.wallets.listWallets({ ...this.tenant });
-    const recipient = rows.find((row) => row.shielded_address === shieldedAddress);
-    if (!recipient?.owner_address || !recipient.shielded_address) {
+    const recipient = await this.wallets.getWalletByShieldedAddress({
+      ...this.tenant,
+      shieldedAddress,
+    });
+    if (!recipient?.owner_address || !recipient.shielded_address || recipient.status !== "ready") {
       throw new HeliusRingsError(
         "invalid_input",
-        "the private transfer recipient must be a provisioned wallet in this project"
+        "the private transfer recipient must be a ready, provisioned wallet in this project"
       );
     }
     if (recipient.id === operation.wallet_id) {

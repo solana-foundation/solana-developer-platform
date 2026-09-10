@@ -18,9 +18,11 @@ import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 import { beginDbMaterialRotation, createDbMaterialSource } from "./database";
 import {
+  assertRingsKeyAuthorityConfiguration,
   beginKeyAuthorityRotation,
   createRoutingMaterialSource,
   resolveDefaultKeyAuthority,
+  verifyRingsKeyAuthorityConfiguration,
 } from "./index";
 
 const ORG = "org_ka";
@@ -86,8 +88,7 @@ function fakeKeyRefs(): HeliusRingsKeyRefRepository & { rows: Map<string, Helius
     async listKeyRefsByWallet({ walletId }) {
       return [...rows.values()].filter((row) => row.wallet_id === walletId);
     },
-    // Mirrors the SQL: staging is all-or-nothing across both kinds, and restoring
-    // fires on whatever is staged.
+    // Mirrors the SQL: staging is all-or-nothing across both kinds.
     async stageKeyRefRotation({ walletId, viewing, nullifier }) {
       const targets = [
         ["viewing", viewing],
@@ -95,10 +96,10 @@ function fakeKeyRefs(): HeliusRingsKeyRefRepository & { rows: Map<string, Helius
       ] as const;
       const current = targets.map(([kind]) => rows.get(key(walletId, kind)));
       if (!current.every((row) => row !== undefined && row.previous_ciphertext === null)) {
-        return [];
+        return 0;
       }
 
-      return targets.map(([kind, material], index) => {
+      for (const [index, [kind, material]] of targets.entries()) {
         const existing = current[index] as HeliusRingsKeyRefRow;
         const staged: HeliusRingsKeyRefRow = {
           ...existing,
@@ -108,24 +109,8 @@ function fakeKeyRefs(): HeliusRingsKeyRefRepository & { rows: Map<string, Helius
           previous_key_version: existing.key_version,
         };
         rows.set(key(walletId, kind), staged);
-        return staged;
-      });
-    },
-    async restoreKeyRefRotation({ walletId }) {
-      const staged = [...rows.entries()].filter(
-        ([, row]) => row.wallet_id === walletId && row.previous_ciphertext !== null
-      );
-      return staged.map(([mapKey, row]) => {
-        const restored: HeliusRingsKeyRefRow = {
-          ...row,
-          ciphertext: row.previous_ciphertext as string,
-          key_version: row.previous_key_version ?? row.key_version,
-          previous_ciphertext: null,
-          previous_key_version: null,
-        };
-        rows.set(mapKey, restored);
-        return restored;
-      });
+      }
+      return 2;
     },
     async commitKeyRefRotation({ walletId }) {
       const staged = [...rows.entries()].filter(
@@ -234,6 +219,44 @@ describe("resolveDefaultKeyAuthority", () => {
   });
 });
 
+describe("assertRingsKeyAuthorityConfiguration", () => {
+  it("does nothing while Rings is disabled", () => {
+    expect(() => assertRingsKeyAuthorityConfiguration(PROD)).not.toThrow();
+  });
+
+  it("allows development to use the deterministic authority without a cipher", () => {
+    expect(() =>
+      assertRingsKeyAuthorityConfiguration({ ...DEV, HELIUS_RINGS_ENABLED: "true" })
+    ).not.toThrow();
+  });
+
+  it("requires a cipher when an enabled deployment selects database keys", () => {
+    expect(() =>
+      assertRingsKeyAuthorityConfiguration({ ...PROD, HELIUS_RINGS_ENABLED: "true" })
+    ).toThrow(/Rings key encryption is not configured/);
+  });
+
+  it("rejects an invalid environment key before accepting traffic", () => {
+    expect(() =>
+      assertRingsKeyAuthorityConfiguration({
+        ...PROD,
+        HELIUS_RINGS_ENABLED: "true",
+        RINGS_KEY_ENCRYPTION_KEY: "not-32-bytes",
+      })
+    ).toThrow(/32 bytes/);
+  });
+
+  it("round-trips the selected cipher before accepting traffic", async () => {
+    await expect(
+      verifyRingsKeyAuthorityConfiguration({
+        ...PROD,
+        HELIUS_RINGS_ENABLED: "true",
+        RINGS_KEY_ENCRYPTION_KEY: ENV.RINGS_KEY_ENCRYPTION_KEY,
+      })
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("createDbMaterialSource", () => {
   it("generates and seals both keys on a cold provision", async () => {
     const keyRefs = fakeKeyRefs();
@@ -270,6 +293,24 @@ describe("createDbMaterialSource", () => {
 
     expect(second).toBe(first);
     expect([...keyRefs.rows.values()].map((row) => row.ciphertext)).toEqual(sealed);
+  });
+
+  it("loads both key kinds from one repository snapshot", async () => {
+    const keyRefs = fakeKeyRefs();
+    const cipher = fakeCipher();
+    const config = { keyRefs, cipher, organizationId: ORG, mayCreate: true };
+    const expected = await identityOf(createDbMaterialSource(config), "hrw_snapshot");
+
+    const getKeyRef = vi
+      .spyOn(keyRefs, "getKeyRef")
+      .mockRejectedValue(new Error("per-kind reads must not be used"));
+    const listKeyRefs = vi.spyOn(keyRefs, "listKeyRefsByWallet");
+
+    expect(
+      await identityOf(createDbMaterialSource({ ...config, mayCreate: false }), "hrw_snapshot")
+    ).toBe(expected);
+    expect(getKeyRef).not.toHaveBeenCalled();
+    expect(listKeyRefs).toHaveBeenCalledTimes(1);
   });
 
   it("records the cipher generation that sealed each row", async () => {
@@ -315,7 +356,7 @@ describe("createDbMaterialSource", () => {
     });
 
     await expect(identityOf(source, "hrw_lost")).rejects.toThrow(
-      /no stored key material and is past provisioning/
+      /no complete stored key pair and is past provisioning/
     );
     expect(keyRefs.rows.size).toBe(0);
   });
@@ -408,30 +449,6 @@ describe("beginDbMaterialRotation", () => {
     ).not.toBe(before);
   });
 
-  it("restores the exact previous identity when the rotation is rolled back", async () => {
-    const keyRefs = fakeKeyRefs();
-    const store = { keyRefs, cipher: fakeCipher(), organizationId: ORG };
-    const before = await identityOf(
-      createDbMaterialSource({ ...store, mayCreate: true }),
-      "hrw_back"
-    );
-    const sealedBefore = (await keyRefs.listKeyRefsByWallet({ walletId: "hrw_back" })).map(
-      (row) => row.ciphertext
-    );
-
-    const rotation = await beginDbMaterialRotation({ ...store, walletId: "hrw_back" });
-    await rotation.rollback();
-
-    // The point of staging: a re-key that never reached the chain leaves the
-    // wallet able to derive the identity it still advertises.
-    expect(
-      await identityOf(createDbMaterialSource({ ...store, mayCreate: false }), "hrw_back")
-    ).toBe(before);
-    expect(
-      (await keyRefs.listKeyRefsByWallet({ walletId: "hrw_back" })).map((row) => row.ciphertext)
-    ).toEqual(sealedBefore);
-  });
-
   it("keeps the new keys and forgets the old ones once committed", async () => {
     const keyRefs = fakeKeyRefs();
     const store = { keyRefs, cipher: fakeCipher(), organizationId: ORG };
@@ -445,10 +462,9 @@ describe("beginDbMaterialRotation", () => {
     await rotation.commit();
 
     // A re-key prompted by a compromised key must not leave those bytes behind,
-    // and a rollback after publication would abandon the published identity.
+    // and the committed identity must keep deriving from the staged pair.
     const rows = await keyRefs.listKeyRefsByWallet({ walletId: "hrw_commit" });
     expect(rows.every((row) => row.previous_ciphertext === null)).toBe(true);
-    await rotation.rollback();
     expect(
       await identityOf(createDbMaterialSource({ ...store, mayCreate: false }), "hrw_commit")
     ).toBe(staged);
@@ -468,10 +484,12 @@ describe("beginDbMaterialRotation", () => {
       nullifier: { ciphertext: "sealed(org_ka):new-nullifier", keyVersion: "v2" },
     });
 
-    expect(staged).toHaveLength(2);
-    expect(staged.map((row) => row.previous_ciphertext)).toEqual(
-      before.map((row) => row.ciphertext)
-    );
+    expect(staged).toBe(2);
+    expect(
+      (await keyRefs.listKeyRefsByWallet({ walletId: "hrw_atomic" })).map(
+        (row) => row.previous_ciphertext
+      )
+    ).toEqual(before.map((row) => row.ciphertext));
   });
 
   it("refuses to stage when the wallet is already mid-rotation", async () => {
@@ -489,17 +507,14 @@ describe("beginDbMaterialRotation", () => {
         viewing: { ciphertext: "sealed(org_ka):third-viewing", keyVersion: "v3" },
         nullifier: { ciphertext: "sealed(org_ka):third-nullifier", keyVersion: "v3" },
       })
-    ).toEqual([]);
+    ).toBe(0);
     expect(await keyRefs.listKeyRefsByWallet({ walletId: "hrw_twice" })).toEqual(staged);
   });
 
   it("adopts a rotation a crashed attempt left staged instead of stacking another", async () => {
     const keyRefs = fakeKeyRefs();
     const store = { keyRefs, cipher: fakeCipher(), organizationId: ORG };
-    const original = await identityOf(
-      createDbMaterialSource({ ...store, mayCreate: true }),
-      "hrw_crash"
-    );
+    await identityOf(createDbMaterialSource({ ...store, mayCreate: true }), "hrw_crash");
     await beginDbMaterialRotation({ ...store, walletId: "hrw_crash" });
     const abandoned = await keyRefs.listKeyRefsByWallet({ walletId: "hrw_crash" });
 
@@ -509,10 +524,62 @@ describe("beginDbMaterialRotation", () => {
     const resumed = await beginDbMaterialRotation({ ...store, walletId: "hrw_crash" });
 
     expect(await keyRefs.listKeyRefsByWallet({ walletId: "hrw_crash" })).toEqual(abandoned);
-    await resumed.rollback();
+    await resumed.commit();
     expect(
-      await identityOf(createDbMaterialSource({ ...store, mayCreate: false }), "hrw_crash")
-    ).toBe(original);
+      (await keyRefs.listKeyRefsByWallet({ walletId: "hrw_crash" })).every(
+        (row) => row.previous_ciphertext === null
+      )
+    ).toBe(true);
+  });
+
+  it("resumes a complete staged pair without generating another pair first", async () => {
+    const keyRefs = fakeKeyRefs();
+    const store = { keyRefs, cipher: fakeCipher(), organizationId: ORG };
+    await identityOf(createDbMaterialSource({ ...store, mayCreate: true }), "hrw_resume");
+    await beginDbMaterialRotation({ ...store, walletId: "hrw_resume" });
+    const staged = await keyRefs.listKeyRefsByWallet({ walletId: "hrw_resume" });
+
+    const unavailableCipher: CustodyCipher = {
+      encrypt: async () => {
+        throw new Error("KMS unavailable");
+      },
+      decrypt: store.cipher.decrypt.bind(store.cipher),
+    };
+    const resumed = await beginDbMaterialRotation({
+      keyRefs,
+      cipher: unavailableCipher,
+      organizationId: ORG,
+      walletId: "hrw_resume",
+    });
+
+    expect(await keyRefs.listKeyRefsByWallet({ walletId: "hrw_resume" })).toEqual(staged);
+    await resumed.commit();
+  });
+
+  it("does not mistake one staged row for a complete staged pair", async () => {
+    const keyRefs = fakeKeyRefs();
+    const viewing = await keyRefs.createKeyRef({
+      walletId: "hrw_single_staged",
+      kind: "viewing",
+      ciphertext: "sealed(org_ka):current",
+      keyVersion: "v2",
+      materialTag: "live",
+    });
+    if (!viewing) throw new Error("viewing fixture was not created");
+    keyRefs.rows.set("hrw_single_staged/viewing", {
+      ...viewing,
+      previous_ciphertext: "sealed(org_ka):previous",
+      previous_key_version: "v1",
+    });
+
+    await expect(
+      beginDbMaterialRotation({
+        keyRefs,
+        cipher: fakeCipher(),
+        organizationId: ORG,
+        walletId: "hrw_single_staged",
+      })
+    ).rejects.toThrow(/one viewing and one nullifier key/);
   });
 
   it("seals fresh keys for a wallet that never provisioned", async () => {
@@ -522,8 +589,8 @@ describe("beginDbMaterialRotation", () => {
     const rotation = await beginDbMaterialRotation({ ...store, walletId: "hrw_cold" });
     await rotation.commit();
 
-    // Nothing to put back, so rotation degrades to a first seal rather than
-    // failing on a missing row.
+    // With no prior pair, rotation degrades to a first seal rather than failing
+    // on a missing row.
     expect(await keyRefs.listKeyRefsByWallet({ walletId: "hrw_cold" })).toHaveLength(2);
   });
 
@@ -557,8 +624,6 @@ describe("beginKeyAuthorityRotation", () => {
       walletId: "hrw_det",
       keyAuthority: "deterministic",
     });
-    // Both endings stay callable so the caller needs no special case.
-    await rotation.rollback();
     await rotation.commit();
 
     expect(keyRefs.rows.size).toBe(0);
@@ -591,34 +656,6 @@ describe("beginKeyAuthorityRotation", () => {
     expect(rows.map((row) => row.ciphertext)).not.toContain("stale-nullifier");
     // Committed, so the material it replaced is gone rather than recoverable.
     expect(rows.map((row) => row.previous_ciphertext)).toEqual([null, null]);
-  });
-
-  it("puts a database wallet's material back when the rotation is rolled back", async () => {
-    const keyRefs = fakeKeyRefs();
-    for (const kind of ["viewing", "nullifier"] as const) {
-      await keyRefs.createKeyRef({
-        walletId: "hrw_db_back",
-        kind,
-        ciphertext: `sealed(org_ka):${kind}-original`,
-        keyVersion: "sdp-rings-key-encryption-v1",
-        materialTag: "live",
-      });
-    }
-
-    const rotation = await beginKeyAuthorityRotation({
-      env: ENV,
-      organizationId: ORG,
-      keyRefs,
-      walletId: "hrw_db_back",
-      keyAuthority: "database",
-    });
-    await rotation.rollback();
-
-    for (const kind of ["viewing", "nullifier"] as const) {
-      const row = await keyRefs.getKeyRef({ walletId: "hrw_db_back", kind });
-      expect(row?.ciphertext).toBe(`sealed(org_ka):${kind}-original`);
-      expect(row?.previous_ciphertext).toBeNull();
-    }
   });
 
   it("refuses to re-key a database wallet whose stored pair is incomplete", async () => {
@@ -728,7 +765,7 @@ describe("createRoutingMaterialSource", () => {
     // must not mint and permanently seal keys for that recipient as a side
     // effect of someone else's transfer.
     await expect(identityOf(source, "hrw_ready")).rejects.toThrow(
-      /no stored key material and is past provisioning/
+      /no complete stored key pair and is past provisioning/
     );
     expect(keyRefs.rows.size).toBe(0);
   });
@@ -742,45 +779,8 @@ describe("createRoutingMaterialSource", () => {
     ]);
 
     await expect(identityOf(source, "hrw_paused")).rejects.toThrow(
-      /no stored key material and is past provisioning/
+      /no complete stored key pair and is past provisioning/
     );
-  });
-
-  it("reads each wallet once per request", async () => {
-    const rows = [walletRow({ id: "hrw_cached" })];
-    const wallets = fakeWallets(rows);
-    const getWalletById = vi.spyOn(wallets, "getWalletById");
-    const source = createRoutingMaterialSource({
-      env: ENV,
-      organizationId: ORG,
-      projectId: PROJECT,
-      wallets: () => wallets,
-      keyRefs: () => fakeKeyRefs(),
-    });
-
-    await identityOf(source, "hrw_cached");
-    await identityOf(source, "hrw_cached");
-
-    expect(getWalletById).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not cache a failed lookup", async () => {
-    const wallets = fakeWallets([]);
-    const getWalletById = vi.spyOn(wallets, "getWalletById");
-    const source = createRoutingMaterialSource({
-      env: ENV,
-      organizationId: ORG,
-      projectId: PROJECT,
-      wallets: () => wallets,
-      keyRefs: () => fakeKeyRefs(),
-    });
-
-    await expect(identityOf(source, "hrw_missing")).rejects.toThrow(/no Rings wallet with that id/);
-    await expect(identityOf(source, "hrw_missing")).rejects.toThrow(/no Rings wallet with that id/);
-
-    // A remembered rejection would make every later wallet in the same request
-    // inherit this one's failure.
-    expect(getWalletById).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a wallet pinned to an authority it cannot serve", async () => {

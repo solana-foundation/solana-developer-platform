@@ -41,8 +41,8 @@ configuration without changing this schema.
 | `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
 | `SOLANA_NETWORK` | Must be `devnet`. |
 | `HELIUS_RINGS_KEY_AUTHORITY` | Authority new wallets are pinned to: `database`, or `deterministic` in development only. Defaults to `database`, falling back to `deterministic` when unset in development. |
-| `RINGS_KEY_ENCRYPTION_KEY` | Base64 256-bit key sealing shielded material. Required by the `database` authority. |
-| `RINGS_KEY_KMS_KEY_NAME` | Optional Cloud KMS key for envelope encryption of the same material. |
+| `RINGS_KEY_ENCRYPTION_KEY` | Base64 256-bit key for v1 shielded-material ciphertext. Required by the `database` authority, including alongside KMS so legacy rows always remain readable. |
+| `RINGS_KEY_KMS_KEY_NAME` | Optional Cloud KMS key for v2 envelope encryption. When set, new writes use KMS while the environment key remains the v1 decryptor. |
 
 Missing setup → the dashboard shows the configuration form; direct port methods
 fail with `config_error`.
@@ -62,9 +62,11 @@ sets what *new* wallets are pinned to; changing it leaves existing wallets alone
 
 `deterministic` exists for local work and tests. Outside `ENVIRONMENT=development`
 it cannot be selected at all — setting `HELIUS_RINGS_KEY_AUTHORITY=deterministic`
-in production is a `config_error`, and the default there is `database`. A
-production deployment with no `RINGS_KEY_ENCRYPTION_KEY` therefore fails to
-provision rather than quietly minting identities anyone can derive.
+in production is a `config_error`, and the default there is `database`. An
+enabled production deployment without `RINGS_KEY_ENCRYPTION_KEY` therefore fails
+startup rather than quietly minting identities anyone can derive. When KMS is
+selected, startup also validates its resource name and performs an
+encrypt/decrypt round-trip before accepting traffic.
 
 > **The `deterministic` seed is public.** Identities derive from
 > `INSECURE_TEST_SEED_DEVNET_ONLY!!` in
@@ -78,9 +80,10 @@ logs an error naming the command below until none are left.
 
 ### Migrating wallets to stored keys
 
-The script reads `DATABASE_URL` and `RINGS_KEY_ENCRYPTION_KEY` from the
-environment and loads no `.env` file of its own, so export them first. Sourcing
-`.env.local` keeps the key out of shell history:
+The script reads `DATABASE_URL` plus the configured Rings cipher
+(`RINGS_KEY_ENCRYPTION_KEY` and optional `RINGS_KEY_KMS_KEY_NAME`) from the environment
+and loads no `.env` file of its own, so export them first. Sourcing `.env.local`
+keeps the environment key out of shell history:
 
 ```bash
 cd apps/sdp-api
@@ -90,10 +93,17 @@ pnpm rings:keys:migrate --dry-run   # report only, writes nothing
 pnpm rings:keys:migrate
 ```
 
+Before either command, stop Rings write traffic and wait for active provisioning
+and re-key requests to drain. The script changes pending wallets from
+`deterministic` to `database`; running beside a provisioner that already loaded
+the deterministic material can otherwise let that request publish the old keys
+after the row moved. Also wait for the new deployment to finish rolling out so an
+old replica cannot create another deterministic row behind the scan cursor.
+
 The migration is **lossless and identity-preserving**. Because `deterministic` is a
 pure function of the seed and the wallet's `org/project/id`, the script recomputes
 the exact bytes each identity was built from, checks they reproduce the published
-`shielded_address`, seals them under `RINGS_KEY_ENCRYPTION_KEY`, and only then
+`shielded_address`, seals them under the selected Rings cipher, and only then
 re-pins the wallet. Notes stay spendable, and nothing touches the chain — unlike a
 re-key, which abandons whatever the old keys hold.
 
@@ -106,23 +116,29 @@ Per wallet:
   already broken, and sealing unverified bytes would make that permanent because
   `createKeyRef` never overwrites.
 
-Set `RINGS_KEY_ENCRYPTION_KEY` and **back it up before running**. Sealing is
-write-once and the re-pin is a compare-and-swap, so reruns are safe; rerun until
-`skipped` and `failed` both reach zero. A non-zero exit means wallets are still on
-the seed authority.
+Back up the key that actually seals the rows before running: the environment key
+for v1, or the KMS key and its recovery/IAM configuration for v2. Dry-run performs
+a non-persisted encrypt/decrypt round-trip before scanning. Both modes validate
+all existing blobs before a real run writes a missing kind. Sealing is write-once
+and the re-pin is a compare-and-swap, so reruns are safe; rerun until `skipped`,
+`failed`, and `remaining` all reach zero. The final `remaining` count is
+authoritative and catches deterministic rows created concurrently behind the
+keyset cursor.
 
 The script is a one-shot and lives entirely in
 `apps/sdp-api/scripts/migrate-rings-key-authority.ts`, outside `src/`. Nothing in
-the app imports it, so once every deployment reports `skipped=0 failed=0`,
-deleting that file, its test, and the `rings:keys:migrate` entry in `package.json`
-is the whole cleanup. It is marked `TODO(rings-key-migration)` for that reason.
+the app imports it, so once every deployment reports `skipped=0`, `failed=0`,
+and `remaining=0`, delete that file, its test, the `rings:keys:migrate` entry in
+`package.json`, and the two explicit script entries in the API `tsconfig.json`.
+It is marked `TODO(rings-key-migration)` for that reason.
 
-> **`RINGS_KEY_ENCRYPTION_KEY` is not recoverable.** It is the only thing that
-> opens a `database` wallet's material, and that material is the only thing that
-> derives the identity its notes are encrypted to. Lose the key and every note
-> those wallets hold is unspendable — there is no re-issue path, unlike a custody
-> credential or an SPC password. Back it up before provisioning anything real, and
-> keep it separate from `CUSTODY_ENCRYPTION_KEY` so one compromise is not both.
+> **The active Rings wrapping key is not replaceable from chain data.** A v1 row
+> needs `RINGS_KEY_ENCRYPTION_KEY`; a v2 row needs the configured KMS key and
+> working access to it. Lose the relevant key and every note those rows control is
+> unspendable — there is no re-issue path, unlike a custody credential or an SPC
+> password. Back up the environment key and, when configured, the KMS recovery
+> configuration before provisioning anything real, and keep them separate from
+> custody encryption so one compromise is not both.
 
 Authorities are registered in `apps/sdp-api/src/services/helius-rings/key-authority/`.
 The gateway receives a router that resolves each request's wallet to its pinned
@@ -151,8 +167,9 @@ is kept in the row's `previous_ciphertext` slot until the outcome is known:
   staged keys are now the only ones deriving a published identity and
   `reconcileRotatedIdentity` needs them. A re-key prompted by a key compromise
   also must not leave the old bytes recoverable.
-- The gateway fails → the rotation is **rolled back** and the wallet derives the
-  identity it still advertises. It is stale, not broken.
+- The gateway fails → the outcome is ambiguous, so the rotation stays staged and
+  the wallet stays paused. A retry republishes the same pair if the registry is
+  still foreign, or reconciles and commits it if the transaction landed.
 
 Both kinds are staged in a single statement, all-or-nothing. A wallet's identity
 comes from the viewing and nullifier keys together, so a process that exited
@@ -162,16 +179,20 @@ an identity nobody published — a window no application-level guard can close.
 A row with a non-null `previous_ciphertext` is mid-rotation, which resolves one of
 two ways:
 
-- A re-key finds a rotation already fully staged. Because the re-key path holds an
-  exclusive per-wallet lock for the whole rotation, that can only be the leftovers
-  of an attempt that died before publishing, so the staged material is published
-  as-is rather than a second generation being stacked on top.
+- A re-key finds a rotation already fully staged. It republishes that material
+  as-is rather than stacking a second generation; this is safe whether the prior
+  attempt died before broadcast or returned an ambiguous error.
 - The rotation published but the commit did not run. `readIdentity` then answers
   `ours` and `reconcileRotatedIdentity` adopts the address and commits the
   rotation, clearing the slot.
 
 Anything else — an incomplete pair, or a mix of staged and unstaged rows — is
 refused, because finishing it would mean guessing which generation was published.
+
+Re-key requires both `payments:write` and `custody:admin`. It claims the wallet
+row before checking blockers, while operations lock every sender/recipient wallet
+row before entering `proving`. This shared row-lock boundary makes either the
+operation visible to re-key or the paused wallet visible to the operation.
 
 ## State machine
 

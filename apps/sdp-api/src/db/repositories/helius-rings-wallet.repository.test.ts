@@ -19,7 +19,13 @@ const OWNER_ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 let repo: HeliusRingsWalletRepository;
 
 async function createWallet(sdpWalletId: string, name = "Treasury") {
-  const wallet = await repo.createWallet({ ...scope, sdpWalletId, name, materialTag: "simulated" });
+  const wallet = await repo.createWallet({
+    ...scope,
+    sdpWalletId,
+    name,
+    materialTag: "simulated",
+    keyAuthority: "deterministic",
+  });
   if (!wallet) throw new Error("wallet fixture was not created");
   return wallet;
 }
@@ -145,9 +151,36 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
       sdpWalletId: "wal_shared",
       name: "Treasury",
       materialTag: "simulated",
+      keyAuthority: "deterministic",
     });
 
     expect(other?.project_id).toBe(OTHER_PROJECT_ID);
+  });
+
+  it("looks up a transfer recipient by shielded address without a list window", async () => {
+    const wallet = await createWallet("wal_by_shielded_address");
+    await repo.markProvisioned({
+      ...scope,
+      id: wallet.id,
+      shieldedAddress: "rings1pointlookup",
+      ownerAddress: OWNER_ADDRESS,
+      materialTag: "live",
+      expectedStatus: "pending",
+    });
+
+    await expect(
+      repo.getWalletByShieldedAddress({
+        ...scope,
+        shieldedAddress: "rings1pointlookup",
+      })
+    ).resolves.toMatchObject({ id: wallet.id });
+    await expect(
+      repo.getWalletByShieldedAddress({
+        organizationId: TEST_ORG.id,
+        projectId: OTHER_PROJECT_ID,
+        shieldedAddress: "rings1pointlookup",
+      })
+    ).resolves.toBeNull();
   });
 
   describe("markProvisioned", () => {

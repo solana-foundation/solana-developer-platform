@@ -402,15 +402,25 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async findBlockingOperation(
-      input: HeliusRingsProjectScope & { walletId: string; opTypes: readonly string[] }
+      input: HeliusRingsProjectScope & {
+        walletId: string;
+        opTypes: readonly string[];
+        recipientAddress?: string | null;
+      }
     ) {
-      // The same predicate the two unique indexes carry, deliberately in step
-      // with them: this exists to give the caller a real message before the
-      // index gives them a constraint name.
+      // The state predicate matches the two unique indexes. The optional
+      // recipient arm is specific to re-key: an incoming transfer is owned by
+      // another wallet, so no per-sender uniqueness index can protect it.
+      const incoming = input.recipientAddress
+        ? " OR (op_type = 'transfer_registered' AND to_addr = ?)"
+        : "";
+      const bindings: unknown[] = [input.walletId];
+      if (input.recipientAddress) bindings.push(input.recipientAddress);
+      bindings.push(input.organizationId, input.projectId, [...input.opTypes]);
       const row = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE wallet_id = ?
+            WHERE (wallet_id = ?${incoming})
               AND organization_id = ?
               AND project_id = ?
               AND op_type = ANY(?)
@@ -421,7 +431,7 @@ export function createPostgresHeliusRingsOperationRepository(
             ORDER BY created_at ASC
             LIMIT 1`
         )
-        .bind(input.walletId, input.organizationId, input.projectId, [...input.opTypes])
+        .bind(...bindings)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },

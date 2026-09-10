@@ -4,7 +4,7 @@ import {
   createShieldedMaterial,
   deriveKeyBytes,
 } from "@sdp/helius-rings-sdk";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CreateHeliusRingsKeyRefInput,
   HeliusRingsKeyRefRepository,
@@ -13,7 +13,12 @@ import type {
 import type { HeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { createDbMaterialSource } from "@/services/helius-rings/key-authority/database";
-import { type MigrateWalletDeps, migrateWallet } from "./migrate-rings-key-authority";
+import {
+  type MigrateWalletDeps,
+  migrateWallet,
+  migrationRunFailed,
+  verifyMigrationCipher,
+} from "./migrate-rings-key-authority";
 
 const ORG = "org_mig";
 const PROJECT = "prj_mig";
@@ -66,9 +71,6 @@ function fakeKeyRefs(): HeliusRingsKeyRefRepository & { rows: Map<string, Helius
     },
     // The migration never rotates; these exist only to satisfy the port.
     async stageKeyRefRotation() {
-      throw new Error("the migration must not rotate key material");
-    },
-    async restoreKeyRefRotation() {
       throw new Error("the migration must not rotate key material");
     },
     async commitKeyRefRotation() {
@@ -261,6 +263,23 @@ describe("migrateWallet", () => {
     expect(store.get(wallet.id)?.key_authority).toBe("deterministic");
   });
 
+  it("validates every existing blob before writing a missing key", async () => {
+    const wallet = walletRow({ shielded_address: await seedIdentity(walletRow()) });
+    store.set(wallet.id, wallet);
+    await keyRefs.createKeyRef({
+      walletId: wallet.id,
+      kind: "nullifier",
+      ciphertext: `sealed(${ORG}):${Buffer.from(new Uint8Array(31).fill(7)).toString("base64")}`,
+      keyVersion: "sdp-rings-key-encryption-v1",
+      materialTag: "live",
+    });
+
+    expect(await migrate(wallet)).toMatchObject({ kind: "skipped" });
+    // The viewing row was absent before validation. Writing it before discovering
+    // the bad nullifier would leave a partial pair the preview never predicted.
+    expect([...keyRefs.rows.values()].map((row) => row.kind)).toEqual(["nullifier"]);
+  });
+
   describe("dry run", () => {
     it("predicts a migration without writing anything", async () => {
       const wallet = walletRow({ shielded_address: await seedIdentity(walletRow()) });
@@ -330,5 +349,36 @@ describe("migrateWallet", () => {
     store.set(wallet.id, { ...wallet, key_authority: "database" });
 
     expect(await migrate(wallet)).toMatchObject({ kind: "skipped" });
+  });
+});
+
+describe("verifyMigrationCipher", () => {
+  it("round-trips the selected cipher before scanning wallets", async () => {
+    const encrypt = vi.fn(fakeCipher().encrypt);
+    const decrypt = vi.fn(fakeCipher().decrypt);
+
+    await verifyMigrationCipher({ encrypt, decrypt });
+
+    expect(encrypt).toHaveBeenCalledOnce();
+    expect(decrypt).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a cipher that cannot open what it sealed", async () => {
+    await expect(
+      verifyMigrationCipher({
+        encrypt: async () => "opaque",
+        decrypt: async () => Buffer.from("different").toString("base64"),
+      })
+    ).rejects.toThrow(/round-trip/);
+  });
+});
+
+describe("migrationRunFailed", () => {
+  it("does not treat preview candidates as rows the preview failed to migrate", () => {
+    expect(migrationRunFailed({ dryRun: true, skipped: 0, failed: 0, remaining: 4 })).toBe(false);
+  });
+
+  it("fails a real run while any deterministic row remains", () => {
+    expect(migrationRunFailed({ dryRun: false, skipped: 0, failed: 0, remaining: 1 })).toBe(true);
   });
 });

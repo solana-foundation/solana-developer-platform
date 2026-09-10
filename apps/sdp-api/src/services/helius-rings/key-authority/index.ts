@@ -15,6 +15,7 @@ import type {
   HeliusRingsWalletRepository,
   HeliusRingsWalletRow,
 } from "@/db/repositories/helius-rings-wallet.repository";
+import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { createRingsKeyCipher } from "@/lib/rings-key-crypto";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -32,8 +33,6 @@ export interface AuthorityContext {
   readonly mayCreate: boolean;
 }
 
-type AuthorityFactory = (context: AuthorityContext) => ShieldedMaterialSource;
-
 let warnedLegacySeedWallet = false;
 
 /** Once per process, not once per wallet, so a busy project cannot flood the log. */
@@ -48,72 +47,15 @@ function warnLegacySeedWallet(): void {
   );
 }
 
-/**
- * Every key authority SDP can serve a wallet from.
- *
- * The `satisfies` is the point of writing this as a map: adding an id to
- * `RINGS_KEY_AUTHORITIES` without adding a factory here is a type error, so the
- * set of authorities and the set of implementations cannot drift.
- */
-const authorityFactories = {
-  deterministic: ({ env }) => {
-    // Still served in production, but only for wallets pinned before the seed
-    // authority was closed off. Refusing outright would brick them without
-    // making their keys any less public; migrating them is what fixes that, so
-    // this names the command that does it.
-    if (env.ENVIRONMENT !== "development") {
-      warnLegacySeedWallet();
-    }
-    warnDeterministicKeyAuthority();
-    return createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED });
-  },
-  database: ({ env, organizationId, keyRefs, mayCreate }) =>
-    createDbMaterialSource({
-      keyRefs,
-      cipher: createRingsKeyCipher(env),
-      organizationId,
-      mayCreate,
-    }),
-} satisfies Record<RingsKeyAuthority, AuthorityFactory>;
-
-type MaterialRotator = (context: RotationContext) => Promise<KeyAuthorityRotation>;
-
-/**
- * A rotation that has staged new material but not yet accepted it. The caller
- * publishes between the two, so which one it calls says whether the chain moved.
- */
+/** A rotation whose staged material is committed once the chain publishes it. */
 export interface KeyAuthorityRotation {
   commit(): Promise<void>;
-  rollback(): Promise<void>;
 }
 
-/** For authorities with nothing to stage, so both endings stay callable. */
+/** For authorities with nothing to stage. */
 const NO_ROTATION: KeyAuthorityRotation = {
   async commit() {},
-  async rollback() {},
 };
-
-/**
- * How each authority accepts a rotation it did not begin, for the reconciliation
- * that adopts an identity already on chain.
- *
- * A rotation whose publish landed but whose commit did not leaves the replaced
- * blobs staged. They derive an identity the wallet has abandoned, and a row that
- * keeps its previous slot reads as mid-rotation forever, so adoption has to clear
- * them.
- */
-const rotationCommitters = {
-  deterministic: async () => undefined,
-  database: async ({ keyRefs, walletId }: RotationContext) => {
-    await keyRefs.commitKeyRefRotation({ walletId });
-  },
-} satisfies Record<RingsKeyAuthority, (context: RotationContext) => Promise<void>>;
-
-export async function commitKeyAuthorityRotation(
-  context: RotationContext & { readonly keyAuthority: string }
-): Promise<void> {
-  await rotationCommitters[requireKnownAuthority(context.keyAuthority)](context);
-}
 
 export interface RotationContext {
   readonly env: Env;
@@ -123,26 +65,54 @@ export interface RotationContext {
 }
 
 /**
- * How each authority rotates a wallet's keys, for the one caller that abandons
- * an identity on purpose.
+ * Everything one authority can do. Keeping creation, rotation, and reconciliation
+ * together makes the registry exhaustive once rather than maintaining three maps
+ * that can drift independently.
  *
- * Exhaustive for the same reason as `authorityFactories`: a new authority has to
- * state what rotation means for it rather than inheriting a silent no-op, since
- * "rotation did nothing" is the failure mode that matters here.
+ * Adding an id to `RINGS_KEY_AUTHORITIES` without a complete descriptor is a type
+ * error. In particular, a new authority must state what rotation means rather
+ * than inheriting a silent no-op.
  */
-const materialRotators = {
-  // Material is a pure function of the seed and the wallet's path, so there is
-  // nothing to rotate or to put back. Re-keying such a wallet republishes the
-  // same identity; that was already true before authorities were selectable.
-  deterministic: async () => NO_ROTATION,
-  database: async ({ env, organizationId, keyRefs, walletId }) =>
-    await beginDbMaterialRotation({
-      keyRefs,
-      cipher: createRingsKeyCipher(env),
-      organizationId,
-      walletId,
-    }),
-} satisfies Record<RingsKeyAuthority, MaterialRotator>;
+interface AuthorityDescriptor {
+  create(context: AuthorityContext): ShieldedMaterialSource;
+  beginRotation(context: RotationContext): Promise<KeyAuthorityRotation>;
+  commitRotation(context: RotationContext): Promise<void>;
+}
+
+const authorities = {
+  deterministic: {
+    create: ({ env }) => {
+      // Still served in production, but only for wallets pinned before the seed
+      // authority was closed off. Refusing would brick them without making their
+      // keys less public; the migration is what ends that exposure.
+      if (env.ENVIRONMENT !== "development") warnLegacySeedWallet();
+      warnDeterministicKeyAuthority();
+      return createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED });
+    },
+    // Purely derived material has nothing to stage or commit.
+    beginRotation: async () => NO_ROTATION,
+    commitRotation: async () => undefined,
+  },
+  database: {
+    create: ({ env, organizationId, keyRefs, mayCreate }) =>
+      createDbMaterialSource({
+        keyRefs,
+        cipher: createRingsKeyCipher(env),
+        organizationId,
+        mayCreate,
+      }),
+    beginRotation: async ({ env, organizationId, keyRefs, walletId }) =>
+      await beginDbMaterialRotation({
+        keyRefs,
+        cipher: createRingsKeyCipher(env),
+        organizationId,
+        walletId,
+      }),
+    commitRotation: async ({ keyRefs, walletId }) => {
+      await keyRefs.commitKeyRefRotation({ walletId });
+    },
+  },
+} satisfies Record<RingsKeyAuthority, AuthorityDescriptor>;
 
 const KNOWN_AUTHORITIES: ReadonlySet<string> = new Set(RINGS_KEY_AUTHORITIES);
 
@@ -161,18 +131,24 @@ function requireKnownAuthority(authority: string): RingsKeyAuthority {
 
 /**
  * Stages fresh key material for a wallet, dispatching on the authority it is
- * pinned to, and hands back the two ways the rotation can end.
+ * pinned to, and returns the commit to run once publication is confirmed.
  *
  * Must run before the gateway republishes the identity, because the identity is
  * derived from the new bytes, and only from the re-key path, which has taken an
- * exclusive lock and had the operator confirm the loss. The caller owes the
- * rotation exactly one ending: `commit` once the chain has the new identity,
- * `rollback` if it never got there.
+ * exclusive lock and had the operator confirm the loss. A gateway error leaves
+ * it staged: a rejection cannot distinguish "never broadcast" from "landed but
+ * confirmation failed", and the next chain read is the safe way to decide.
  */
 export async function beginKeyAuthorityRotation(
   context: RotationContext & { readonly keyAuthority: string }
 ): Promise<KeyAuthorityRotation> {
-  return await materialRotators[requireKnownAuthority(context.keyAuthority)](context);
+  return await authorities[requireKnownAuthority(context.keyAuthority)].beginRotation(context);
+}
+
+export async function commitKeyAuthorityRotation(
+  context: RotationContext & { readonly keyAuthority: string }
+): Promise<void> {
+  await authorities[requireKnownAuthority(context.keyAuthority)].commitRotation(context);
 }
 
 /**
@@ -192,8 +168,8 @@ function selectableAuthorities(env: Env): readonly RingsKeyAuthority[] {
  * The default differs by environment on purpose. Development keeps the
  * seed-derived authority so local work and tests need no key configured, while
  * production defaults to stored keys and refuses the seed outright. A production
- * deployment with no `RINGS_KEY_ENCRYPTION_KEY` therefore fails to provision
- * rather than quietly minting identities anyone can derive.
+ * deployment with neither Rings cipher setting therefore fails startup rather
+ * than quietly minting identities anyone can derive.
  */
 export function resolveDefaultKeyAuthority(env: Env): RingsKeyAuthority {
   const selectable = selectableAuthorities(env);
@@ -210,6 +186,30 @@ export function resolveDefaultKeyAuthority(env: Env): RingsKeyAuthority {
     );
   }
   return configured as RingsKeyAuthority;
+}
+
+/** Fails startup before an enabled database authority can accept traffic without a cipher. */
+export function assertRingsKeyAuthorityConfiguration(env: Env): void {
+  if (!isHeliusRingsEnabled(env)) return;
+  if (resolveDefaultKeyAuthority(env) === "database") {
+    createRingsKeyCipher(env);
+  }
+}
+
+const CIPHER_PREFLIGHT_ORG = "rings-key-authority-preflight";
+const CIPHER_PREFLIGHT_VALUE = "rings-key-authority-preflight";
+
+/** Exercises the active local/KMS path before the process accepts Rings work. */
+export async function verifyRingsKeyAuthorityConfiguration(env: Env): Promise<void> {
+  assertRingsKeyAuthorityConfiguration(env);
+  if (!isHeliusRingsEnabled(env) || resolveDefaultKeyAuthority(env) !== "database") return;
+
+  const cipher = createRingsKeyCipher(env);
+  const ciphertext = await cipher.encrypt(CIPHER_PREFLIGHT_ORG, CIPHER_PREFLIGHT_VALUE);
+  const opened = await cipher.decrypt(CIPHER_PREFLIGHT_ORG, ciphertext);
+  if (opened !== CIPHER_PREFLIGHT_VALUE) {
+    throw new HeliusRingsError("config_error", "Rings key cipher failed its startup round-trip");
+  }
 }
 
 export interface RoutingMaterialSourceConfig {
@@ -245,39 +245,22 @@ export function createRoutingMaterialSource(
   const { env, organizationId, projectId } = config;
   const walletsOf = config.wallets ?? (() => createHeliusRingsWalletRepository(env));
   const keyRefsOf = config.keyRefs ?? (() => createHeliusRingsKeyRefRepository(env));
-  // One gateway serves one request, so this is short-lived by construction. It
-  // exists so a spend that touches two wallets does not re-read either.
-  const cache = new Map<string, Promise<HeliusRingsWalletRow>>();
 
-  function loadWallet(walletId: string): Promise<HeliusRingsWalletRow> {
-    const cached = cache.get(walletId);
-    if (cached) return cached;
-
-    const pending = walletsOf()
-      .getWalletById({ organizationId, projectId, id: walletId })
-      .then((row) => {
-        if (!row) {
-          throw new HeliusRingsError(
-            "invalid_input",
-            "no Rings wallet with that id exists in this project"
-          );
-        }
-        return row;
-      })
-      .catch((error: unknown) => {
-        // A failed read must not be remembered, or every later wallet in the
-        // same request inherits the failure.
-        cache.delete(walletId);
-        throw error;
-      });
-    cache.set(walletId, pending);
-    return pending;
+  async function loadWallet(walletId: string): Promise<HeliusRingsWalletRow> {
+    const row = await walletsOf().getWalletById({ organizationId, projectId, id: walletId });
+    if (!row) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "no Rings wallet with that id exists in this project"
+      );
+    }
+    return row;
   }
 
   return {
     async withMaterial(request: MaterialRequest, use) {
       const wallet = await loadWallet(request.walletId);
-      const source = authorityFactories[requireKnownAuthority(wallet.key_authority)]({
+      const source = authorities[requireKnownAuthority(wallet.key_authority)].create({
         env,
         organizationId,
         keyRefs: keyRefsOf(),

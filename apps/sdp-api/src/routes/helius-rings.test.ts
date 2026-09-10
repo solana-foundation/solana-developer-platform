@@ -133,6 +133,7 @@ async function seedAuth(): Promise<void> {
     name: "Treasury",
     materialTag: "simulated",
     custodyWalletId: "cw_hr_route",
+    keyAuthority: "deterministic",
   });
   if (!wallet) throw new Error("rings wallet fixture was not created");
   ringsWalletId = wallet.id;
@@ -820,6 +821,7 @@ describe("Helius Rings routes", () => {
         sdpWalletId: "wal_hr_route_pending",
         name: "Pending",
         materialTag: "simulated",
+        keyAuthority: "deterministic",
       });
       if (!pending) throw new Error("pending wallet fixture was not created");
 
@@ -849,6 +851,33 @@ describe("Helius Rings routes", () => {
         },
         env
       );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("POST /wallets/:walletId/rekey", () => {
+    it("requires custody administration in addition to payments write", async () => {
+      const developerKey = { id: "key_hr_rekey_developer", raw: "sk_test_helius_rings_rekey_dev" };
+      await seedCachedApiKey(env, await hashString(developerKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: developerKey.id,
+        role: "api_developer",
+        permissions: ["payments:read", "payments:write"],
+      });
+
+      const res = await app.request(
+        `/v1/helius-rings/wallets/${ringsWalletId}/rekey`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${developerKey.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ confirmation: "Treasury" }),
+        },
+        env
+      );
+
       expect(res.status).toBe(403);
     });
   });

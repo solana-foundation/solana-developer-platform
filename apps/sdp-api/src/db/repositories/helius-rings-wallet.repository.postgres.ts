@@ -85,9 +85,10 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           input.name,
           input.materialTag,
           input.custodyWalletId ?? null,
-          // Explicit like material_tag, whose column default likewise exists for
-          // the rows the migration backfilled rather than for this insert.
-          input.keyAuthority ?? "deterministic"
+          // Explicit like material_tag. The database default exists only so old
+          // application revisions survive the rolling deployment of migration
+          // 0092; current callers must make the authority decision themselves.
+          input.keyAuthority
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
@@ -111,6 +112,19 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
             WHERE sdp_wallet_id = ? AND organization_id = ? AND project_id = ?`
         )
         .bind(scope.sdpWalletId, scope.organizationId, scope.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async getWalletByShieldedAddress(scope: HeliusRingsProjectScope & { shieldedAddress: string }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM helius_rings_wallets
+            WHERE shielded_address = ?
+              AND organization_id = ?
+              AND project_id = ?`
+        )
+        .bind(scope.shieldedAddress, scope.organizationId, scope.projectId)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },

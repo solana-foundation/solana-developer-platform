@@ -742,7 +742,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Rings key Cloud KMS key name",
     pattern: /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+$/,
-    help: "Optional Cloud KMS key used for Rings key envelope encryption. Keep the Rings key encryption key configured too: KMS authenticates through the GCE metadata server, so non-GCP deployments run on the key-in-environment path.",
+    help: "Optional Cloud KMS key used for Rings key envelope encryption. When set, new rows use KMS and the Rings key encryption key remains required as the legacy v1 decryptor.",
   },
   {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",

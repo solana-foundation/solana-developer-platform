@@ -132,6 +132,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       sdpWalletId: "wal_hro_repo_test",
       name: "Treasury",
       materialTag: "simulated",
+      keyAuthority: "deterministic",
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;
@@ -551,6 +552,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         sdpWalletId: "wal_hro_zone_other",
         name: "Operations",
         materialTag: "simulated",
+        keyAuthority: "deterministic",
       });
       if (!other) throw new Error("wallet fixture was not created");
       const zone = await createPostgresHeliusRingsZoneRepository(getDb(env)).createZone({
@@ -625,6 +627,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         sdpWalletId: "wal_hro_unauthorized",
         name: "Unauthorized",
         materialTag: "simulated",
+        keyAuthority: "deterministic",
       });
       if (!unauthorizedWallet) throw new Error("wallet fixture was not created");
       const unauthorized = await repo.reserveIntent(
@@ -663,6 +666,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
           sdpWalletId: `wal_inflight_${tag}`,
           name: tag,
           materialTag: "simulated",
+          keyAuthority: "deterministic",
         });
         if (!row) throw new Error("wallet fixture was not created");
         return row.id;

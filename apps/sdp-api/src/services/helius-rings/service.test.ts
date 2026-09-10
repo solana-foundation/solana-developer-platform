@@ -322,6 +322,7 @@ describe("HeliusRingsService", () => {
       sdpWalletId: "wal_hrs_service_test",
       name: "Treasury",
       materialTag: "simulated",
+      keyAuthority: "deterministic",
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;
@@ -517,6 +518,7 @@ describe("HeliusRingsService", () => {
         sdpWalletId: "wal_unprovisioned",
         name: "Fresh",
         materialTag: "simulated",
+        keyAuthority: "deterministic",
       });
       if (!wallet) throw new Error("wallet fixture was not created");
 
@@ -677,6 +679,7 @@ describe("HeliusRingsService", () => {
         sdpWalletId: "wal_never_provisioned",
         name: "Test 1",
         materialTag: "simulated",
+        keyAuthority: "deterministic",
       });
       if (!fresh) throw new Error("wallet fixture was not created");
 
@@ -717,6 +720,44 @@ describe("HeliusRingsService", () => {
       );
       expect(inFlight.state).toBe("indexing");
       await pause();
+      const gateway = foreignGateway();
+      const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
+
+      await expect(rekey(gateway, "Treasury")).rejects.toMatchObject({
+        code: "conflict",
+        message: expect.stringMatching(/not settled/),
+      });
+      expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    it("refuses to re-key while an in-flight transfer targets this wallet", async () => {
+      const sender = await wallets().createWallet({
+        ...tenant,
+        sdpWalletId: "wal_incoming_sender",
+        name: "Sender",
+        materialTag: "simulated",
+        keyAuthority: "deterministic",
+      });
+      if (!sender) throw new Error("sender fixture was not created");
+      const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
+      const incoming = await operations.reserveIntent({
+        ...tenant,
+        ringsConnectionId: TEST_CONNECTION_ID,
+        walletId: sender.id,
+        opType: "transfer_registered",
+        intentKey: "sha256:incoming-during-rekey",
+        assetMint: USDC_MINT,
+        amountRaw: "1000000",
+        toAddr: WALLET_SHIELDED_IDENTITY,
+        transferMode: "registered",
+      });
+      await operations.transitionState({
+        ...tenant,
+        id: incoming.operation.id,
+        expectedState: "draft",
+        nextState: "proving",
+      });
+
       const gateway = foreignGateway();
       const rekeyIdentity = vi.spyOn(gateway, "rekeyIdentity");
 
@@ -816,7 +857,7 @@ describe("HeliusRingsService", () => {
 
     /**
      * Puts a wallet on the stored-key authority with known sealed material, so a
-     * rotation has something real to replace and put back.
+     * rotation has something real to stage and later discard.
      */
     async function pinToDatabaseAuthority() {
       await getDb(env)
@@ -836,7 +877,7 @@ describe("HeliusRingsService", () => {
       return keyRefs;
     }
 
-    it("puts back the material it staged when the rotation never reaches the chain", async () => {
+    it("keeps staged material when a gateway failure may have happened after broadcast", async () => {
       await pause();
       const keyRefs = await pinToDatabaseAuthority();
       const gateway = foreignGateway();
@@ -844,13 +885,14 @@ describe("HeliusRingsService", () => {
 
       await expect(rekey(gateway, "Treasury")).rejects.toThrow(/rpc down/);
 
-      // Nothing was published, so the wallet still owns the identity it
-      // advertises and has to keep the only material that derives it. Discarding
-      // it here would leave the row pointing at an identity nothing can reach.
+      // A rejected submit, confirmation timeout, or failed post-confirmation read
+      // is not evidence that the chain stayed put. Retaining both generations is
+      // the only safe outcome: a retry reuses the staged pair if the old record
+      // remains, or reconciles it if the new record landed.
       for (const kind of ["viewing", "nullifier"] as const) {
         const row = await keyRefs.getKeyRef({ walletId, kind });
-        expect(row?.ciphertext).toBe(`sealed-${kind}`);
-        expect(row?.previous_ciphertext).toBeNull();
+        expect(row?.ciphertext).not.toBe(`sealed-${kind}`);
+        expect(row?.previous_ciphertext).toBe(`sealed-${kind}`);
       }
     });
 
@@ -880,7 +922,7 @@ describe("HeliusRingsService", () => {
         viewing: { ciphertext: "sealed-published-viewing", keyVersion: "v2" },
         nullifier: { ciphertext: "sealed-published-nullifier", keyVersion: "v2" },
       });
-      expect(staged).toHaveLength(2);
+      expect(staged).toBe(2);
 
       const gateway = new InMemoryRingsGateway();
       vi.spyOn(gateway, "readIdentity").mockResolvedValue({
@@ -896,6 +938,40 @@ describe("HeliusRingsService", () => {
         const row = await keyRefs.getKeyRef({ walletId, kind });
         expect(row?.ciphertext).toBe(`sealed-published-${kind}`);
         expect(row?.previous_ciphertext).toBeNull();
+      }
+    });
+
+    it("clears staged material even when the published identity is already settled locally", async () => {
+      const keyRefs = await pinToDatabaseAuthority();
+      await keyRefs.stageKeyRefRotation({
+        walletId,
+        viewing: { ciphertext: "sealed-published-viewing", keyVersion: "v2" },
+        nullifier: { ciphertext: "sealed-published-nullifier", keyVersion: "v2" },
+      });
+      await getDb(env)
+        .prepare(
+          `UPDATE helius_rings_wallets
+              SET status = 'ready', shielded_address = ?, owner_address = ?
+            WHERE id = ?`
+        )
+        .bind("rings1rotated", WALLET_OWNER, walletId)
+        .run();
+
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "ours",
+        derivedShieldedAddress: "rings1rotated",
+        publishedShieldedAddress: "rings1rotated",
+        mismatch: null,
+      });
+
+      await expect(rekey(gateway, "Treasury")).rejects.toMatchObject({ code: "conflict" });
+
+      // Cleanup must happen before the settled short-circuit. Otherwise a crash
+      // after row adoption leaves the replaced key recoverable and every future
+      // rotation sees this wallet as permanently mid-rotation.
+      for (const kind of ["viewing", "nullifier"] as const) {
+        expect((await keyRefs.getKeyRef({ walletId, kind }))?.previous_ciphertext).toBeNull();
       }
     });
 
@@ -1114,6 +1190,69 @@ describe("HeliusRingsService", () => {
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "invalid_input" });
       expect(operation.failure?.message).toMatch(/private transfer recipient/);
+    });
+
+    it("does not enter proving when the recipient disappears before wallet locking", async () => {
+      const recipientAddress = getBase58Decoder().decode(
+        Uint8Array.from([...new Uint8Array(32).fill(8), ...new Uint8Array(33).fill(9)])
+      );
+      const actualWallets = createHeliusRingsWalletRepository(env);
+      const recipient = await actualWallets.createWallet({
+        ...tenant,
+        sdpWalletId: "wal_recipient_rekey_race",
+        name: "Recipient",
+        materialTag: "simulated",
+        keyAuthority: "deterministic",
+      });
+      if (!recipient) throw new Error("recipient fixture was not created");
+      await actualWallets.markProvisioned({
+        ...tenant,
+        id: recipient.id,
+        shieldedAddress: recipientAddress,
+        ownerAddress: WALLET_OWNER,
+        materialTag: "simulated",
+        expectedStatus: "pending",
+      });
+
+      let lookups = 0;
+      const racingWallets = {
+        ...actualWallets,
+        async getWalletByShieldedAddress(
+          input: Parameters<typeof actualWallets.getWalletByShieldedAddress>[0]
+        ) {
+          lookups += 1;
+          // The first lookup drives admission. Returning no row simulates the old
+          // address disappearing because recipient re-key completed just before
+          // it; a later fresh read must not revive this operation.
+          if (lookups === 1) return null;
+          return actualWallets.getWalletByShieldedAddress(input);
+        },
+      };
+      const gateway = new InMemoryRingsGateway({
+        indexingDelayMs: 0,
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+      const buildOperation = vi.spyOn(gateway, "buildOperation");
+      expect((await actualWallets.getWalletById({ ...tenant, id: walletId }))?.status).toBe(
+        "ready"
+      );
+
+      const operation = await liveishService({ gateway, wallets: racingWallets }).prepareOperation(
+        operationInput({
+          clientNonce: "nonce-recipient-rekey-race",
+          opType: "transfer_registered",
+          to: recipientAddress,
+          transferMode: "registered",
+        }),
+        actorContext
+      );
+
+      expect(operation).toMatchObject({
+        state: "failed",
+        failure: { code: "invalid_input", retryable: false },
+      });
+      expect(lookups).toBe(1);
+      expect(buildOperation).not.toHaveBeenCalled();
     });
 
     it("ends in failed:policy_denied when the policy denies", async () => {
@@ -1463,6 +1602,7 @@ describe("HeliusRingsService", () => {
         sdpWalletId: "wal_unprovisioned_op",
         name: "Fresh",
         materialTag: "simulated",
+        keyAuthority: "deterministic",
       });
       if (!fresh) throw new Error("wallet fixture was not created");
 
@@ -1823,6 +1963,50 @@ describe("HeliusRingsService", () => {
       approvalStatus = "approved";
       const advanced = await svc.executeOperation(paused.id);
       expect(advanced.state).toBe("indexing");
+    });
+
+    it("does not enter proving after a re-key claim pauses the wallet", async () => {
+      const gateway = new InMemoryRingsGateway({
+        indexingDelayMs: 0,
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+      const buildOperation = vi.spyOn(gateway, "buildOperation");
+      const actualWallets = createHeliusRingsWalletRepository(env);
+      const staleWallets = {
+        ...actualWallets,
+        async getWalletById(input: Parameters<typeof actualWallets.getWalletById>[0]) {
+          const row = await actualWallets.getWalletById(input);
+          // Simulates a read that began before the re-key claim committed. The
+          // transaction's locked row, not this later stale read, must arbitrate.
+          return row ? { ...row, status: "ready" as const } : null;
+        },
+      };
+      const svc = liveishService({
+        gateway,
+        wallets: staleWallets,
+        enforcePolicy: policyStub("approval_required", {
+          requiresApproval: true,
+          approvalRequestId: "apr_rekey_barrier",
+        }),
+        getApprovalStatus: async () => "approved",
+      });
+      const waiting = await svc.prepareOperation(
+        operationInput({ clientNonce: "nonce-rekey-barrier" }),
+        actorContext
+      );
+      expect(waiting.state).toBe("approval_required");
+      await actualWallets.updateStatus({
+        ...tenant,
+        id: walletId,
+        status: "paused",
+      });
+
+      const blocked = await svc.executeOperation(waiting.id);
+      expect(blocked).toMatchObject({
+        state: "failed",
+        failure: { code: "invalid_input", retryable: false },
+      });
+      expect(buildOperation).not.toHaveBeenCalled();
     });
 
     it("fails a rejected approval as non-retryable", async () => {

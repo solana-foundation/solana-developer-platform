@@ -124,6 +124,7 @@ describe("HeliusRingsEventRepository (postgres)", () => {
       sdpWalletId: "wal_hre_repo_test",
       name: "Treasury",
       materialTag: "simulated",
+      keyAuthority: "deterministic",
     });
     if (!wallet) throw new Error("wallet fixture was not created");
 

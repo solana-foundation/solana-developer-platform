@@ -62,16 +62,12 @@ function generateKeyBytes(kind: KeyKind): Uint8Array {
 
 async function open(store: KeyStore, row: HeliusRingsKeyRefRow): Promise<Uint8Array> {
   const plaintext = await store.cipher.decrypt(store.organizationId, row.ciphertext);
-  return new Uint8Array(Buffer.from(plaintext, "base64"));
-}
-
-async function readSealed(
-  store: KeyStore,
-  walletId: string,
-  kind: KeyKind
-): Promise<Uint8Array | null> {
-  const row = await store.keyRefs.getKeyRef({ walletId, kind });
-  return row ? await open(store, row) : null;
+  const decoded = Buffer.from(plaintext, "base64");
+  try {
+    return Uint8Array.from(decoded);
+  } finally {
+    decoded.fill(0);
+  }
 }
 
 /**
@@ -81,11 +77,16 @@ async function readSealed(
  * than trusting the local bytes is what stops the two kinds from coming from
  * different writers, which would build an identity neither of them published.
  */
-async function seal(store: KeyStore, walletId: string, kind: KeyKind): Promise<Uint8Array> {
-  const ciphertext = await store.cipher.encrypt(
-    store.organizationId,
-    Buffer.from(generateKeyBytes(kind)).toString("base64")
-  );
+async function seal(store: KeyStore, walletId: string, kind: KeyKind): Promise<void> {
+  const generated = generateKeyBytes(kind);
+  const encoded = Buffer.from(generated);
+  let ciphertext: string;
+  try {
+    ciphertext = await store.cipher.encrypt(store.organizationId, encoded.toString("base64"));
+  } finally {
+    generated.fill(0);
+    encoded.fill(0);
+  }
   const row = await store.keyRefs.createKeyRef({
     walletId,
     kind,
@@ -99,7 +100,6 @@ async function seal(store: KeyStore, walletId: string, kind: KeyKind): Promise<U
       `sealing the Rings ${kind} key for this wallet returned no row`
     );
   }
-  return await open(store, row);
 }
 
 export interface DbMaterialSourceConfig extends KeyStore {
@@ -122,43 +122,63 @@ export interface DbMaterialSourceConfig extends KeyStore {
 export function createDbMaterialSource(config: DbMaterialSourceConfig): ShieldedMaterialSource {
   const { mayCreate, ...store } = config;
 
-  async function loadKey(walletId: string, kind: KeyKind): Promise<Uint8Array> {
-    const existing = await readSealed(store, walletId, kind);
-    if (existing) return existing;
+  async function loadPair(walletId: string): Promise<{
+    viewingKeyBytes: Uint8Array;
+    nullifierKeyBytes: Uint8Array;
+  }> {
+    let rows = await store.keyRefs.listKeyRefsByWallet({ walletId });
+    let viewing = rows.find((row) => row.kind === "viewing");
+    let nullifier = rows.find((row) => row.kind === "nullifier");
 
-    if (!mayCreate) {
-      // Reached when something asks for the keys of a wallet that already
-      // published an identity but has no stored material — one whose keys were
-      // lost, or one provisioned under a different authority. Generating here
-      // would seal a keypair that cannot derive the published identity, and
-      // because sealing is write-once that would be permanent.
+    if (!(viewing && nullifier)) {
+      if (!mayCreate) {
+        // Reached when something asks for the keys of a wallet that already
+        // published an identity but has no complete stored pair. Generating here
+        // would permanently seal material that cannot derive that identity.
+        throw new HeliusRingsError(
+          "config_error",
+          "this Rings wallet has no complete stored key pair and is past provisioning, so new keys cannot be sealed for it"
+        );
+      }
+
+      // Sequential on a cold provision: do not seal a nullifier key when viewing
+      // generation fails. createKeyRef is write-once, so concurrent provisioners
+      // converge; the reload below reads the winning pair in one snapshot.
+      if (!viewing) await seal(store, walletId, "viewing");
+      if (!nullifier) await seal(store, walletId, "nullifier");
+      rows = await store.keyRefs.listKeyRefsByWallet({ walletId });
+      viewing = rows.find((row) => row.kind === "viewing");
+      nullifier = rows.find((row) => row.kind === "nullifier");
+    }
+
+    if (!(viewing && nullifier) || rows.length !== 2) {
       throw new HeliusRingsError(
         "config_error",
-        "this Rings wallet has no stored key material and is past provisioning, so new keys cannot be sealed for it"
+        "this Rings wallet does not hold exactly one viewing and one nullifier key"
       );
     }
 
-    return await seal(store, walletId, kind);
+    const viewingKeyBytes = await open(store, viewing);
+    try {
+      const nullifierKeyBytes = await open(store, nullifier);
+      return { viewingKeyBytes, nullifierKeyBytes };
+    } catch (error) {
+      viewingKeyBytes.fill(0);
+      throw error;
+    }
   }
 
   return {
     async withMaterial(request: MaterialRequest, use) {
-      // Sequential rather than concurrent: the viewing key is the one that can
-      // fail to generate, and on a cold provision there is no reason to seal a
-      // nullifier key for a wallet whose viewing key never materialized.
-      const viewingKeyBytes = await loadKey(request.walletId, "viewing");
-      const nullifierKeyBytes = await loadKey(request.walletId, "nullifier");
-
-      const material = await createShieldedMaterial({
-        viewingKeyBytes,
-        nullifierKeyBytes,
-        owner: request.owner,
-      });
-
+      const pair = await loadPair(request.walletId);
+      let material: Awaited<ReturnType<typeof createShieldedMaterial>> | undefined;
       try {
+        material = await createShieldedMaterial({ ...pair, owner: request.owner });
         return await use(material);
       } finally {
-        material.destroy();
+        material?.destroy();
+        pair.viewingKeyBytes.fill(0);
+        pair.nullifierKeyBytes.fill(0);
       }
     },
   };
@@ -173,10 +193,15 @@ async function generateSealed(
   store: KeyStore,
   kind: KeyKind
 ): Promise<{ ciphertext: string; keyVersion: string }> {
-  const ciphertext = await store.cipher.encrypt(
-    store.organizationId,
-    Buffer.from(generateKeyBytes(kind)).toString("base64")
-  );
+  const generated = generateKeyBytes(kind);
+  const encoded = Buffer.from(generated);
+  let ciphertext: string;
+  try {
+    ciphertext = await store.cipher.encrypt(store.organizationId, encoded.toString("base64"));
+  } finally {
+    generated.fill(0);
+    encoded.fill(0);
+  }
   return { ciphertext, keyVersion: keyVersionOf(ciphertext) };
 }
 
@@ -190,88 +215,72 @@ async function generateSealed(
  * statement.
  */
 async function stage(store: KeyStore, walletId: string): Promise<void> {
-  const staged = await store.keyRefs.stageKeyRefRotation({
-    walletId,
-    viewing: await generateSealed(store, "viewing"),
-    nullifier: await generateSealed(store, "nullifier"),
-  });
-  if (staged.length > 0) return;
+  const classify = (rows: HeliusRingsKeyRefRow[]): "empty" | "steady" | "staged" | "invalid" => {
+    if (rows.length === 0) return "empty";
+    if (
+      rows.length !== 2 ||
+      !rows.some((row) => row.kind === "viewing") ||
+      !rows.some((row) => row.kind === "nullifier")
+    ) {
+      return "invalid";
+    }
+    const stagedCount = rows.filter((row) => row.previous_ciphertext !== null).length;
+    if (stagedCount === 0) return "steady";
+    if (stagedCount === 2) return "staged";
+    return "invalid";
+  };
 
   const existing = await store.keyRefs.listKeyRefsByWallet({ walletId });
-  if (existing.length === 0) {
-    // A re-key of a wallet that never provisioned. Sealing need not be atomic:
-    // there is no earlier generation to be inconsistent with, and a missing kind
-    // is sealed by the next read.
+  const state = classify(existing);
+  if (state === "staged") {
+    // A previous attempt retained this pair because it could not know whether
+    // publication happened. Reuse it; another generation would bury the only
+    // material that can still match either possible chain state.
+    return;
+  }
+  if (state === "invalid") {
+    throw new HeliusRingsError(
+      "conflict",
+      "this Rings wallet's stored key material cannot be re-keyed: it must hold one viewing and one nullifier key in the same rotation state"
+    );
+  }
+  if (state === "empty") {
+    // A re-key of a wallet that never provisioned. A missing kind is completed
+    // by the next material read if the process exits between these writes.
     await seal(store, walletId, "viewing");
     await seal(store, walletId, "nullifier");
     return;
   }
 
-  if (existing.every((row) => row.previous_ciphertext !== null)) {
-    // A previous attempt staged this material and then died before publishing —
-    // died, because the re-key path holds an exclusive per-wallet lock for the
-    // whole rotation, so a live rotation could not have let this one in. Had it
-    // published, `readIdentity` would have answered `ours` and sent this wallet
-    // to reconciliation instead. So the staged keys are unpublished and safe to
-    // publish, which is better than staging again: it keeps the replaced material
-    // restorable instead of stacking a second generation on top.
-    return;
-  }
+  const staged = await store.keyRefs.stageKeyRefRotation({
+    walletId,
+    viewing: await generateSealed(store, "viewing"),
+    nullifier: await generateSealed(store, "nullifier"),
+  });
+  if (staged === 2) return;
 
-  // Either an incomplete pair or a mix of staged and unstaged rows. Neither can
-  // be re-keyed without guessing which generation something published, and an
-  // incomplete pair derives nothing, so it is the provisioning path's to finish.
+  // Defensive concurrent-writer recovery. The advisory re-key lock makes this
+  // unusual, but a second process or an operator can still stage directly.
+  const after = classify(await store.keyRefs.listKeyRefsByWallet({ walletId }));
+  if (after === "staged") return;
   throw new HeliusRingsError(
     "conflict",
-    "this Rings wallet's stored key material cannot be re-keyed: it must hold one viewing and one nullifier key with no rotation in flight"
+    "this Rings wallet's key pair changed while its rotation was being staged"
   );
 }
 
 /**
- * Begins replacing a wallet's sealed material, and returns the two ways the
- * rotation can end.
- *
- * Rotation cannot go through `withMaterial`: sealing is write-once, so a re-key
- * that merely asked for material would read the old blobs back and republish the
- * identity it was trying to abandon — succeeding while rotating nothing. It also
- * has to happen *before* the gateway publishes, because the identity published is
- * derived from the new bytes.
- *
- * That ordering used to make the gateway call unrecoverable: the old keys were
- * deleted, so a failed signature or submission left the wallet advertising an
- * identity nothing could derive. Staging moves the point of no return to the
- * chain write, where it belongs — {@link DbMaterialRotation.rollback} puts the
- * old material back if nothing was published, and
- * {@link DbMaterialRotation.commit} discards it once something was.
+ * Stages replacement material before the gateway publishes. A rejection leaves
+ * it staged because the chain outcome is ambiguous; the next read retries or
+ * reconciles the same pair.
  */
-export interface DbMaterialRotation {
-  /**
-   * Accepts the new material and drops the replaced blob. Call this once the new
-   * identity is on chain, whether or not the row caught up: from that moment the
-   * old material derives an identity the wallet no longer owns, and keeping it is
-   * exactly what a re-key after a key compromise must not do.
-   */
-  commit(): Promise<void>;
-  /**
-   * Puts the replaced material back, for a rotation that never published. The
-   * wallet derives its recorded identity again, so it is stale rather than
-   * broken. Idempotent, because the restore only fires on a staged row.
-   */
-  rollback(): Promise<void>;
-}
-
-export async function beginDbMaterialRotation(
-  input: RotateDbMaterialInput
-): Promise<DbMaterialRotation> {
+export async function beginDbMaterialRotation(input: RotateDbMaterialInput) {
   const { walletId, ...store } = input;
   await stage(store, walletId);
 
   return {
     async commit() {
       await store.keyRefs.commitKeyRefRotation({ walletId });
-    },
-    async rollback() {
-      await store.keyRefs.restoreKeyRefRotation({ walletId });
     },
   };
 }

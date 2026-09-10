@@ -185,6 +185,7 @@ describe("pollRingsIndexing", () => {
       sdpWalletId: "wal_hr_job_test",
       name: "Treasury",
       materialTag: "simulated",
+      keyAuthority: "deterministic",
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;

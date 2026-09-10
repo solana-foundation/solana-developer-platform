@@ -20,6 +20,10 @@ import { noopObservability } from "@/runtime/observability";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
+import {
+  assertRingsKeyAuthorityConfiguration,
+  verifyRingsKeyAuthorityConfiguration,
+} from "@/services/helius-rings/key-authority";
 import type { Env } from "@/types/env";
 
 const DEFAULT_PORT = 8787;
@@ -100,12 +104,14 @@ function assertRequiredEnv(env: Env): void {
     throw new Error("REDIS_URL is required for the Node runtime");
   }
   assertCustodyEncryptionScheme(env);
+  assertRingsKeyAuthorityConfiguration(env);
   assertSigningProviderAllowed(env);
 }
 
 async function main(): Promise<void> {
   const env = getProcessEnv();
   assertRequiredEnv(env);
+  await verifyRingsKeyAuthorityConfiguration(env);
 
   // Validate boot-time process.env tunables before opening any sockets, so a
   // typo fails immediately instead of after a partial startup.

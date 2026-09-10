@@ -73,12 +73,8 @@ export interface CreateHeliusRingsWalletInput extends HeliusRingsProjectScope {
   materialTag: MaterialTag;
   /** Null where the caller could not resolve one, as legacy callers cannot. */
   custodyWalletId?: string | null;
-  /**
-   * The authority that will hold this wallet's keys, from the deployment's
-   * configured default. Omitted falls back to the column default, which is the
-   * seed-derived authority every pre-existing wallet uses.
-   */
-  keyAuthority?: RingsKeyAuthority;
+  /** The authority that will hold this wallet's keys, resolved by the caller. */
+  keyAuthority: RingsKeyAuthority;
 }
 
 export interface MarkHeliusRingsWalletProvisionedInput extends HeliusRingsProjectScope {
@@ -159,6 +155,10 @@ export interface HeliusRingsWalletRepository {
   ): Promise<HeliusRingsWalletRow | null>;
   getWalletBySdpWalletId(
     scope: HeliusRingsProjectScope & { sdpWalletId: string }
+  ): Promise<HeliusRingsWalletRow | null>;
+  /** Point lookup for a registered-transfer recipient; never applies the list limit. */
+  getWalletByShieldedAddress(
+    scope: HeliusRingsProjectScope & { shieldedAddress: string }
   ): Promise<HeliusRingsWalletRow | null>;
   listWallets(input: ListHeliusRingsWalletsInput): Promise<HeliusRingsWalletRow[]>;
   /** Resolves provider wallet ids without applying the paginated wallet-list limit. */

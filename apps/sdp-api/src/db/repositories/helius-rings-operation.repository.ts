@@ -244,7 +244,16 @@ export interface HeliusRingsOperationRepository {
    * reports a constraint name rather than the situation.
    */
   findBlockingOperation(
-    input: HeliusRingsProjectScope & { walletId: string; opTypes: readonly string[] }
+    input: HeliusRingsProjectScope & {
+      walletId: string;
+      opTypes: readonly string[];
+      /**
+       * Also blocks an in-flight registered transfer targeting this address.
+       * Re-keying a recipient while one can still land would create notes for
+       * material the rotation is about to abandon.
+       */
+      recipientAddress?: string | null;
+    }
   ): Promise<HeliusRingsOperationRow | null>;
   /**
    * `failed` → `completed`, for a signed failure Photon turns out to hold.
