@@ -39,9 +39,12 @@ export {
   partySlotSchema,
 } from "./use-dvp-parties";
 
-/** A month out: long enough to fund and settle, well inside the program's cap. */
+/** A month out at end of day, local: long enough to fund and settle, well inside the program's cap. */
 function defaultExpiry(): string {
-  return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}T23:59`;
 }
 
 /**
@@ -54,10 +57,9 @@ function defaultExpiry(): string {
 const createFormSchema = z.object({
   partyA: partySlotSchema,
   partyB: partySlotSchema,
+  /** The expiry as a local wall-clock datetime, "YYYY-MM-DDTHH:mm". */
   expiry: z.string().min(1),
   refString: z.string(),
-  /** Empty means the project settlement wallet pays; only a picked one is sent. */
-  payerWalletId: z.string(),
 });
 
 export type DvpCreateFormValues = z.infer<typeof createFormSchema>;
@@ -66,7 +68,6 @@ export type DvpCreateFormValues = z.infer<typeof createFormSchema>;
 const termsStepSchema = z.object({
   expiry: z.string().min(1),
   refString: z.string(),
-  payerWalletId: z.string(),
 });
 
 export { termsStepSchema };
@@ -86,10 +87,8 @@ export interface DvpCreateForm {
   error: string | null;
   expiry: string;
   refString: string;
-  payerWalletId: string;
   setExpiry: (next: string) => void;
   setParty: (side: "a" | "b", next: DvpCreateFormValues["partyA"]) => void;
-  setPayerWalletId: (next: string) => void;
   setRefString: (next: string) => void;
   submit: (event: React.FormEvent) => void;
   submitting: boolean;
@@ -120,6 +119,8 @@ function canCreateTrade(input: {
   /** Both party slots filled and the two addresses differ. */
   partiesReady: boolean;
   destinationLooksWrong: boolean;
+  /** The expiry datetime; the picker's Clear can empty it on review. */
+  expiry: string;
 }): boolean {
   const { asset, cash } = input;
   // Never while a leg's scale is still being read. The amount would be encoded
@@ -135,7 +136,7 @@ function canCreateTrade(input: {
   // a round trip that costs a custody-provider call.
   const partiesUsable = Boolean(input.partiesReady && !input.destinationLooksWrong);
 
-  return legsResolved && amountsResolved && partiesUsable;
+  return legsResolved && amountsResolved && partiesUsable && input.expiry.trim().length > 0;
 }
 
 /**
@@ -168,31 +169,32 @@ function resolveWalletBalance(
 
 export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
-  const asset = useDvpLeg(context.tokens);
-  const cash = useDvpLeg(cashOptions);
+  // The asset starts unselected — the trade's whole point is choosing it. The
+  // cash leg preselects the cluster's first stablecoin, which is almost always
+  // the answer.
+  const asset = useDvpLeg(context.tokens, false);
+  const cash = useDvpLeg(cashOptions, true);
   const { error, submit: send, submitting } = useDvpCreateSubmit();
 
   const { values, setField } = useZodForm(createFormSchema, {
-    // The first wallet delivers the asset leg by default; the cash side starts
-    // as a pasted address. With no wallets both slots start empty.
-    partyA: context.wallets[0]
-      ? { mode: "wallet", walletId: context.wallets[0].id }
-      : { mode: "address", address: "" },
+    // Both slots start empty: the pickers offer counterparties and pasted
+    // addresses, and neither side has an assumable default.
+    partyA: { mode: "address", address: "" },
     partyB: { mode: "address", address: "" },
     expiry: defaultExpiry(),
     refString: "",
-    payerWalletId: "",
   });
 
   const destinations = useDvpDestinations();
   const parties = deriveDvpParties({ partyA: values.partyA, partyB: values.partyB }, context);
-  const { expiry, refString, payerWalletId } = values;
+  const { expiry, refString } = values;
 
   const ready = canCreateTrade({
     asset,
     cash,
     partiesReady: parties.ready,
     destinationLooksWrong: destinations.anyLooksWrong,
+    expiry,
   });
 
   function submit(event: React.FormEvent) {
@@ -210,7 +212,9 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
       mintA: asset.mint,
       mintB: cash.mint,
       parties: parties.wire,
-      payerWalletId: payerWalletId.length > 0 ? payerWalletId : null,
+      // Nobody configures a fee payer: the project settlement wallet signs
+      // and pays fee + rent until create is Kora-sponsored.
+      payerWalletId: null,
       refString: refString.trim(),
       tokenProgramA: asset.token?.tokenProgram ?? null,
       tokenProgramB: cash.token?.tokenProgram ?? null,
@@ -238,12 +242,10 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     expiry,
     setExpiry: (next) => setField("expiry", next),
     setParty: (side, next) => setField(side === "a" ? "partyA" : "partyB", next),
-    setPayerWalletId: (next) => setField("payerWalletId", next),
     setRefString: (next) => setField("refString", next),
     submit,
     submitting,
     refString,
-    payerWalletId,
     destinations,
     ready,
     partiesReady: parties.ready,

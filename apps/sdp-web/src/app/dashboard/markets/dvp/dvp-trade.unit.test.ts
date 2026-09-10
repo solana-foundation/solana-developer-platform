@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OTHER_ADDRESS, OWN_ADDRESS, testLeg, testTrade } from "./dvp.fixtures";
+import { OTHER_ADDRESS, OWN_WALLET_ID, ownParty, testLeg, testTrade } from "./dvp.fixtures";
 import {
   canCancelDvpTrade,
   canSettleDvpTrade,
@@ -125,10 +125,10 @@ describe("warnings", () => {
   });
 });
 
-// Which sides the caller holds custody of is the API's per-leg `custodied`,
-// read through one helper so no surface writes its own `custodied ? "a" : "b"`
-// filter — the half-remembered version of that is how agent trades ended up
-// with a fund action on a leg nobody held.
+// Which sides the caller holds custody of is the API's per-leg `wallet`,
+// read through one helper so no surface writes its own
+// `wallet !== null ? "a" : "b"` filter — the half-remembered version of that
+// is how agent trades ended up with a fund action on a leg nobody held.
 describe("custodiedSidesOf", () => {
   it("is empty when neither party is custodied", () => {
     expect(custodiedSidesOf(trade())).toEqual([]);
@@ -137,7 +137,7 @@ describe("custodiedSidesOf", () => {
   it("names the custodied side on a principal trade", () => {
     const value = trade({
       legs: {
-        a: testLeg({ party: { address: OWN_ADDRESS, counterparty: null, custodied: true } }),
+        a: testLeg({ party: ownParty() }),
         b: testLeg(),
       },
     });
@@ -148,12 +148,25 @@ describe("custodiedSidesOf", () => {
   it("lists both sides, A first, on a bilateral trade", () => {
     const value = trade({
       legs: {
-        a: testLeg({ party: { address: OWN_ADDRESS, counterparty: null, custodied: true } }),
-        b: testLeg({ party: { address: OTHER_ADDRESS, counterparty: null, custodied: true } }),
+        a: testLeg({ party: ownParty() }),
+        b: testLeg({ party: ownParty({ address: OTHER_ADDRESS }) }),
       },
     });
 
     expect(custodiedSidesOf(value)).toEqual(["a", "b"]);
+  });
+
+  // A wallet with no display name is still the caller's custody: the name is
+  // display copy, the wallet's presence is the fact.
+  it("counts an unnamed wallet as custodied", () => {
+    const value = trade({
+      legs: {
+        a: testLeg({ party: ownParty({ wallet: { id: OWN_WALLET_ID, name: null } }) }),
+        b: testLeg(),
+      },
+    });
+
+    expect(custodiedSidesOf(value)).toEqual(["a"]);
   });
 });
 

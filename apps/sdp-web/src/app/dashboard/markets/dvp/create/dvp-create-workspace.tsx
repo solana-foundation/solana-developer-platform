@@ -1,14 +1,18 @@
 "use client";
 
 import type { SolanaCluster } from "@sdp/types";
-import { useState } from "react";
+import { ArrowDownLeftIcon, ArrowLeftRightIcon, ArrowUpRightIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { type ReactNode, useState } from "react";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { DatePicker } from "@/components/ui/date-picker";
-import { Select, SelectItem } from "@/components/ui/select";
+import { DateTimePicker } from "@/components/ui/date-picker";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { WizardFrame } from "@/components/wizard-frame";
-import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
 import {
@@ -16,286 +20,208 @@ import {
   Field,
   MintField,
   PartySlotPicker,
+  PayoutAddressPicker,
   ReferenceField,
 } from "./dvp-create-fields";
-import { DvpCreateSummary } from "./dvp-create-summary";
-import { PayoutChoice } from "./dvp-payout-choice";
 import { type DvpCreateForm, useDvpCreateForm } from "./use-dvp-create-form";
+import type { DvpLeg } from "./use-dvp-leg";
+import type { DvpPartyResolved } from "./use-dvp-parties";
 
 /**
- * Real devnet addresses, shown only as placeholders so the shape of what a
- * field wants is obvious. Not copy: base58 does not translate.
- */
-const PLACEHOLDER_ASSET_MINT = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1";
-const PLACEHOLDER_CASH_MINT = "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE";
-
-/**
- * Whose leg this card is.
+ * One side's fields: the party picker and mint as one row, then the amount.
+ * The parties are symmetric but the legs are not — side "a" delivers the
+ * asset, side "b" the cash — so each row is captioned and optioned per side.
  *
- * The parties are symmetric but the legs are not: party A delivers the asset
- * leg and party B the cash leg, so each card is captioned for its party.
+ * @param props - The row's wiring.
+ * @param props.context - The create context, for the party slot's choices.
+ * @param props.form - The create form.
+ * @param props.side - Which party's row this is.
+ * @returns The leg's fields.
  */
-function LegOwner({ owner }: { owner: "partyA" | "partyB" }) {
-  const t = useTranslations();
-  const key = (
-    owner === "partyA"
-      ? "DashboardMarkets.dvp.legPartyADelivers"
-      : "DashboardMarkets.dvp.legPartyBDelivers"
-  ) as MessageKey;
-
-  return <p className="font-medium text-[11px] uppercase tracking-wide text-tertiary">{t(key)}</p>;
-}
-
-/** The asset leg's card. Split out so each leg carries its own branching. */
-function AssetLegCard({
+function LegRow({
   context,
   form,
+  side,
 }: {
   context: DvpCreateContext;
-  form: ReturnType<typeof useDvpCreateForm>;
+  form: DvpCreateForm;
+  side: "a" | "b";
 }) {
   const t = useTranslations();
+  const a = side === "a";
+  const leg = a ? form.asset : form.cash;
   return (
-    <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-      <LegOwner owner="partyA" />
-      <MintField
-        choice={form.asset.choice}
-        custom={form.asset.custom}
-        emptyHint={t("DashboardMarkets.dvp.createEmptyTokens")}
-        hint={t("DashboardMarkets.dvp.fieldAssetMintHint")}
-        id="dvp-asset-mint"
-        label={t("DashboardMarkets.dvp.fieldAssetMint")}
-        onChoiceChange={form.asset.setChoice}
-        onCustomChange={form.asset.setCustom}
-        options={context.tokens}
-        placeholder={PLACEHOLDER_ASSET_MINT}
-      />
-      <AmountField
-        balance={form.assetBalance}
-        decimals={
-          form.asset.decimalsKnown
-            ? (form.asset.token?.decimals ?? form.asset.pasted.mint?.decimals ?? null)
-            : null
-        }
-        id="dvp-amount-a"
-        label={t("DashboardMarkets.dvp.fieldAmountA")}
-        onChange={form.asset.setAmount}
-        symbol={form.asset.symbol}
-        value={form.asset.amount}
-      />
-    </div>
-  );
-}
-
-/** The cash leg's card. Its options come from the form, not the token list. */
-function CashLegCard({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
-  const t = useTranslations();
-  return (
-    <div className="grid content-start gap-4 rounded-xl border border-border-subtle p-4">
-      <LegOwner owner="partyB" />
-      <MintField
-        choice={form.cash.choice}
-        custom={form.cash.custom}
-        hint={t("DashboardMarkets.dvp.fieldCashMintHint")}
-        id="dvp-cash-mint"
-        label={t("DashboardMarkets.dvp.fieldCashMint")}
-        onChoiceChange={form.cash.setChoice}
-        onCustomChange={form.cash.setCustom}
-        options={form.cashOptions}
-        placeholder={PLACEHOLDER_CASH_MINT}
-      />
-      <AmountField
-        balance={form.cashBalance}
-        decimals={
-          form.cash.decimalsKnown
-            ? (form.cash.token?.decimals ?? form.cash.pasted.mint?.decimals ?? null)
-            : null
-        }
-        id="dvp-amount-b"
-        label={t("DashboardMarkets.dvp.fieldAmountB")}
-        onChange={form.cash.setAmount}
-        symbol={form.cash.symbol}
-        value={form.cash.amount}
-      />
-    </div>
-  );
-}
-
-/** Both legs, asset first: that is the order the parties were named in. */
-function LegCards({
-  context,
-  form,
-}: {
-  context: DvpCreateContext;
-  form: ReturnType<typeof useDvpCreateForm>;
-}) {
-  return (
-    <>
-      <AssetLegCard context={context} form={form} />
-      <CashLegCard form={form} />
-    </>
-  );
-}
-
-/**
- * Where each side is paid, as a choice per party rather than a hidden box.
- *
- * Sits with the parties because that is what it is about: whose proceeds, and
- * to which account. Naming it by leg ("asset side is paid to") said which token
- * moved and never whose money it was.
- */
-function PayoutChoices({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
-  const t = useTranslations();
-
-  const labelA = t("DashboardMarkets.dvp.fieldPartyA");
-  const labelB = t("DashboardMarkets.dvp.fieldPartyB");
-  const addressA = form.resolved.a.address;
-  const addressB = form.resolved.b.address;
-
-  return (
-    <div className="grid gap-3">
-      <div>
-        <h3 className="font-medium text-primary text-sm">
-          {t("DashboardMarkets.dvp.groupPayouts")}
-        </h3>
-        <p className="mt-1 text-tertiary text-xs leading-relaxed">
-          {t("DashboardMarkets.dvp.groupPayoutsHint")}
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <PayoutChoice
-          id="dvp-payout-a"
-          party={addressA ?? ""}
-          partyLabel={labelA}
-          payout={form.destinations.a}
-        />
-        <PayoutChoice
-          id="dvp-payout-b"
-          party={addressB ?? ""}
-          partyLabel={labelB}
-          payout={form.destinations.b}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** The parties step: two symmetric slots plus where each is paid. */
-function PartiesStep({
-  context,
-  form,
-}: {
-  context: DvpCreateContext;
-  form: ReturnType<typeof useDvpCreateForm>;
-}) {
-  const t = useTranslations();
-  return (
-    <div className="grid gap-6">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4">
+      {/* items-start, not items-end: the party picker grows an error line
+          below itself, which must not drag the mint field down with it. */}
+      <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_180px]">
         <PartySlotPicker
           counterpartyAccounts={context.counterpartyAccounts}
-          hint={t("DashboardMarkets.dvp.partySlotHintA")}
-          id="dvp-party-a"
-          label={t("DashboardMarkets.dvp.fieldPartyA")}
-          onChange={(next) => form.setParty("a", next)}
-          slot={form.partyA}
-          wallets={context.wallets}
+          // The same-address correction sits under the buyer's slot — the one
+          // whose pick usually completes the collision.
+          error={!a && form.sameAddress ? t("DashboardMarkets.dvp.fieldPartiesAreSame") : null}
+          id={`dvp-party-${side}`}
+          label={t(
+            a ? "DashboardMarkets.dvp.partySlotLabelA" : "DashboardMarkets.dvp.partySlotLabelB"
+          )}
+          onChange={(next) => form.setParty(side, next)}
+          slot={a ? form.partyA : form.partyB}
         />
-        <PartySlotPicker
-          counterpartyAccounts={context.counterpartyAccounts}
-          hint={t("DashboardMarkets.dvp.partySlotHintB")}
-          id="dvp-party-b"
-          label={t("DashboardMarkets.dvp.fieldPartyB")}
-          onChange={(next) => form.setParty("b", next)}
-          slot={form.partyB}
-          wallets={context.wallets}
+        <MintField
+          choice={leg.choice}
+          custom={leg.custom}
+          id={a ? "dvp-asset-mint" : "dvp-cash-mint"}
+          label={t(
+            a ? "DashboardMarkets.dvp.fieldAssetMint" : "DashboardMarkets.dvp.fieldCashMint"
+          )}
+          onChoiceChange={leg.setChoice}
+          onCustomChange={leg.setCustom}
+          options={a ? context.tokens : form.cashOptions}
         />
       </div>
-
-      {form.sameAddress ? (
-        <Callout variant="danger">{t("DashboardMarkets.dvp.fieldPartiesAreSame")}</Callout>
-      ) : null}
-
-      <PayoutChoices form={form} />
+      <AmountField
+        decimals={leg.decimals}
+        disabled={leg.mint === ""}
+        id={`dvp-amount-${side}`}
+        label={t(a ? "DashboardMarkets.dvp.fieldAmountA" : "DashboardMarkets.dvp.fieldAmountB")}
+        onChange={leg.setAmount}
+        symbol={leg.symbol}
+        tokenName={leg.name}
+        value={leg.amount}
+      />
     </div>
   );
 }
 
-/** The two legs, and what each party puts up. */
-function LegsStep({
-  context,
-  form,
-}: {
-  context: DvpCreateContext;
-  form: ReturnType<typeof useDvpCreateForm>;
-}) {
+/**
+ * One leg of the exchange strip as a pill: the coin, the amount, the symbol.
+ * Unpicked and untyped values hold their slot — a dashed circle before a coin
+ * is chosen, a skeleton bar before an amount is typed — so the strip never
+ * reflows as the form fills.
+ *
+ * @param props - The leg's display values.
+ * @param props.amount - The typed amount, or "" before anything was typed.
+ * @param props.mint - The chosen mint, or "" before one is chosen.
+ * @param props.symbol - The mint's display symbol, possibly "" while unresolved.
+ * @returns The leg pill.
+ */
+function LegChip({ amount, mint, symbol }: { amount: string; mint: string; symbol: string }) {
   return (
-    <div className="grid gap-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <LegCards context={context} form={form} />
-      </div>
+    <span className="flex h-10 w-40 min-w-0 items-center gap-2.5 rounded-full border border-border-default bg-surface-raised px-4">
+      {mint === "" ? (
+        <span
+          aria-hidden
+          className="h-5 w-5 shrink-0 rounded-full border border-border-default border-dashed"
+        />
+      ) : (
+        <TokenMark className="shrink-0" mint={mint} size="xs" symbol={symbol} />
+      )}
+      {amount === "" ? (
+        <SkeletonBlock className="h-3.5 flex-1 [animation-duration:3s]" />
+      ) : (
+        <span className="animate-in fade-in zoom-in-95 truncate font-medium text-primary text-sm tabular-nums">
+          {amount}
+        </span>
+      )}
+      {symbol === "" ? null : (
+        <span className="animate-in fade-in zoom-in-95 text-secondary text-sm" key={symbol}>
+          {symbol}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The trade as an exchange between the two leg rows: asset pill, both-ways arrow, cash pill, divider lines out to both edges. */
+function ExchangeStrip({ form }: { form: DvpCreateForm }) {
+  return (
+    <div className="my-4 flex items-center gap-5">
+      <div className="flex-1 border-border-default border-t" />
+      <LegChip amount={form.asset.amount} mint={form.asset.mint} symbol={form.asset.symbol} />
+      <ArrowLeftRightIcon aria-hidden className="h-4 w-4 shrink-0 text-tertiary" />
+      <LegChip amount={form.cash.amount} mint={form.cash.mint} symbol={form.cash.symbol} />
+      <div className="flex-1 border-border-default border-t" />
     </div>
   );
 }
 
-/** How long the other side has, and your own reference for the trade. */
-function TermsStep({ form }: { form: ReturnType<typeof useDvpCreateForm> }) {
+/** Where each side is paid: two destination pickers on one row, shown only when the default is toggled off. */
+function PayoutChoices({ context, form }: { context: DvpCreateContext; form: DvpCreateForm }) {
   const t = useTranslations();
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Field
-        hint={t("DashboardMarkets.dvp.fieldExpiryHint")}
-        htmlFor="dvp-expiry"
-        label={t("DashboardMarkets.dvp.fieldExpiry")}
-      >
-        {/* An expiry in the past is refused on chain, so it is not offered. */}
-        <DatePicker disablePast id="dvp-expiry" onChange={form.setExpiry} value={form.expiry} />
-      </Field>
-      <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
+      <PayoutAddressPicker
+        counterpartyAccounts={context.counterpartyAccounts}
+        id="dvp-payout-a"
+        label={t("DashboardMarkets.dvp.payoutAddressA")}
+        payout={form.destinations.a}
+      />
+      <PayoutAddressPicker
+        counterpartyAccounts={context.counterpartyAccounts}
+        id="dvp-payout-b"
+        label={t("DashboardMarkets.dvp.payoutAddressB")}
+        payout={form.destinations.b}
+      />
     </div>
   );
 }
 
-/**
- * The sentinel the picker uses for the settlement-wallet default.
- *
- * The form models the default as the empty string (omitted from the request);
- * a Select cannot display an empty value in its trigger, so the picker maps
- * the sentinel to and from the form's empty string.
- */
-const DEFAULT_PAYER = "__settlement_wallet__";
-
-/** Which wallet signs the create and pays the fees and escrow rent. */
-function PayerPicker({
-  form,
-  wallets,
-}: {
-  form: ReturnType<typeof useDvpCreateForm>;
-  wallets: DvpCreateContext["wallets"];
-}) {
+/** The one configuring step: each side names its party and its leg, then where each is paid. */
+function PartiesStep({ context, form }: { context: DvpCreateContext; form: DvpCreateForm }) {
   const t = useTranslations();
+  // UI state, not form state: turning the toggle off only REVEALS the payout
+  // pickers; the modes change when somebody picks. Turning it back on resets
+  // both sides to the default so a hidden redirect can never ride along.
+  const [customPayouts, setCustomPayouts] = useState(
+    () => form.destinations.a.mode === "elsewhere" || form.destinations.b.mode === "elsewhere"
+  );
   return (
-    <Field
-      hint={t("DashboardMarkets.dvp.reviewPayerHint")}
-      label={t("DashboardMarkets.dvp.reviewPayer")}
-    >
-      <Select
-        ariaLabel={t("DashboardMarkets.dvp.reviewPayer")}
-        onValueChange={(next) => form.setPayerWalletId(next === DEFAULT_PAYER ? "" : (next ?? ""))}
-        value={form.payerWalletId === "" ? DEFAULT_PAYER : form.payerWalletId}
-      >
-        {/* The project settlement wallet: the default, stated, and what is
-            sent when nothing is picked. */}
-        <SelectItem key="default" value={DEFAULT_PAYER}>
-          {t("DashboardMarkets.dvp.payerDefault")}
-        </SelectItem>
-        {wallets.map((wallet) => (
-          <SelectItem key={wallet.id} value={wallet.id}>
-            {wallet.label ?? shortenAddress(wallet.address)}
-          </SelectItem>
-        ))}
-      </Select>
-    </Field>
+    <div className="grid gap-6">
+      <LegRow context={context} form={form} side="a" />
+      <ExchangeStrip form={form} />
+      <LegRow context={context} form={form} side="b" />
+
+      <div className="grid gap-4 rounded-xl border border-border-default bg-surface-raised p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-primary text-sm">
+              {t("DashboardMarkets.dvp.payoutDefaultToggle")}
+            </p>
+            <p className="mt-1 text-tertiary text-xs leading-relaxed">
+              {t("DashboardMarkets.dvp.payoutDefaultToggleHint")}
+            </p>
+          </div>
+          <ToggleSwitch
+            aria-label={t("DashboardMarkets.dvp.payoutDefaultToggle")}
+            checked={!customPayouts}
+            onChange={(next) => {
+              setCustomPayouts(!next);
+              form.destinations.a.setMode(next ? "party" : "elsewhere");
+              form.destinations.b.setMode(next ? "party" : "elsewhere");
+              if (next) {
+                // Toggling back on restores the original state: no custom
+                // address survives in form state to ride along later.
+                form.destinations.a.setAddress("");
+                form.destinations.b.setAddress("");
+              } else {
+                // Revealing the pickers seeds each side with the party it
+                // already names, so the default is visible and edited from,
+                // never a blank to re-derive.
+                const partyA = form.resolved.a.address;
+                const partyB = form.resolved.b.address;
+                if (partyA !== null) {
+                  form.destinations.a.setAddress(partyA);
+                }
+                if (partyB !== null) {
+                  form.destinations.b.setAddress(partyB);
+                }
+              }
+            }}
+          />
+        </div>
+        {customPayouts ? <PayoutChoices context={context} form={form} /> : null}
+      </div>
+    </div>
   );
 }
 
@@ -306,53 +232,152 @@ function PayerPicker({
  * edited afterwards: changing anything means a new trade at a new address, so
  * the recap is the only place a mistake is still cheap.
  */
-function ReviewStep({
-  context,
-  form,
+/** One fact row inside a party card: an optional direction icon and the term's name on the left, its value on the right. */
+function ReviewFact({
+  children,
+  icon,
+  label,
 }: {
-  context: DvpCreateContext;
-  form: ReturnType<typeof useDvpCreateForm>;
+  children: ReactNode;
+  icon: ReactNode | null;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="flex shrink-0 items-center gap-1.5 text-tertiary text-xs">
+        {icon}
+        {label}
+      </dt>
+      <dd className="min-w-0 text-right">{children}</dd>
+    </div>
+  );
+}
+
+/** A leg as a card value: the token's mark beside the amount and symbol. */
+function ReviewLeg({ leg }: { leg: DvpLeg }) {
+  return (
+    <span className="flex items-center justify-end gap-2">
+      <TokenMark className="shrink-0" mint={leg.mint} size="xs" symbol={leg.symbol} />
+      <span className="truncate font-medium text-primary text-sm tabular-nums">
+        {leg.amount} <span className="text-secondary">{leg.symbol}</span>
+      </span>
+    </span>
+  );
+}
+
+/**
+ * One side of the trade: who the party is, what it delivers, what it
+ * receives, and where its proceeds land. Both sides share one card, divided,
+ * so the whole trade reads in a single frame — what a last look before an
+ * immutable create is for.
+ *
+ * @param props - The side's facts.
+ * @param props.delivers - The leg this party funds.
+ * @param props.paidAt - The address this party's proceeds are delivered to.
+ * @param props.receives - The leg this party is owed.
+ * @param props.resolved - The party's resolved name and address.
+ * @param props.title - The side's role caption (seller or buyer).
+ * @returns The party side.
+ */
+function ReviewPartySide({
+  delivers,
+  paidAt,
+  receives,
+  resolved,
+  title,
+}: {
+  delivers: DvpLeg;
+  paidAt: string;
+  receives: DvpLeg;
+  resolved: DvpPartyResolved;
+  title: string;
 }) {
   const t = useTranslations();
+  return (
+    <div className="grid content-start gap-3 p-4">
+      <div>
+        <p className="text-tertiary text-xs">{title}</p>
+        <p className="mt-1 font-medium text-primary text-sm">
+          {resolved.label ?? shortenAddress(resolved.address ?? "")}
+        </p>
+        {resolved.address === null ? null : (
+          <p className="break-all text-tertiary text-xs">{resolved.address}</p>
+        )}
+      </div>
+      <dl className="grid gap-2.5 border-border-default border-t pt-3">
+        <ReviewFact
+          icon={<ArrowUpRightIcon aria-hidden className="h-3.5 w-3.5" />}
+          label={t("DashboardMarkets.dvp.reviewDelivers")}
+        >
+          <ReviewLeg leg={delivers} />
+        </ReviewFact>
+        <ReviewFact
+          icon={<ArrowDownLeftIcon aria-hidden className="h-3.5 w-3.5" />}
+          label={t("DashboardMarkets.dvp.reviewReceives")}
+        >
+          <ReviewLeg leg={receives} />
+        </ReviewFact>
+        <ReviewFact icon={null} label={t("DashboardMarkets.dvp.reviewPaidAt")}>
+          <span className="text-primary text-sm">{shortenAddress(paidAt)}</span>
+        </ReviewFact>
+      </dl>
+    </div>
+  );
+}
 
-  const partyLabel = (side: "a" | "b") =>
-    form.resolved[side].label ?? shortenAddress(form.resolved[side].address ?? "");
-
-  const rows: [string, string][] = [
-    [t("DashboardMarkets.dvp.fieldPartyA"), partyLabel("a")],
-    [t("DashboardMarkets.dvp.fieldPartyB"), partyLabel("b")],
-    [
-      t("DashboardMarkets.dvp.legA"),
-      `${form.asset.amount || "—"} ${form.asset.symbol || ""}`.trim(),
-    ],
-    [t("DashboardMarkets.dvp.legB"), `${form.cash.amount || "—"} ${form.cash.symbol || ""}`.trim()],
-    [t("DashboardMarkets.dvp.fieldExpiry"), form.expiry],
-    ...(form.refString.trim()
-      ? ([[t("DashboardMarkets.dvp.fieldRef"), form.refString.trim()]] as [string, string][])
-      : []),
-  ];
+function ReviewStep({ form }: { form: DvpCreateForm }) {
+  const t = useTranslations();
 
   return (
     <div className="grid gap-4">
-      <Callout variant="warning">{t("DashboardMarkets.dvp.reviewIntro")}</Callout>
+      <div className="grid items-start gap-4 sm:grid-cols-2">
+        <Field
+          hint={t("DashboardMarkets.dvp.fieldExpiryHint")}
+          htmlFor="dvp-expiry"
+          label={t("DashboardMarkets.dvp.fieldExpiry")}
+        >
+          {/* An expiry in the past is refused on chain, so it is not offered. */}
+          <DateTimePicker
+            disablePast
+            id="dvp-expiry"
+            onChange={form.setExpiry}
+            size="xl"
+            value={form.expiry}
+          />
+        </Field>
+        <ReferenceField id="dvp-ref" onChange={form.setRefString} value={form.refString} />
+      </div>
+
+      <div className="my-4 border-border-default border-t" />
 
       {form.destinations.anyRedirected ? (
         <Callout variant="warning">{t("DashboardMarkets.dvp.reviewRedirected")}</Callout>
       ) : null}
 
-      <dl className="grid gap-0 overflow-hidden rounded-xl border border-border-subtle">
-        {rows.map(([label, value]) => (
-          <div
-            className="flex items-start justify-between gap-4 border-border-subtle border-b px-4 py-3 last:border-b-0"
-            key={label}
-          >
-            <dt className="text-tertiary text-xs">{label}</dt>
-            <dd className="min-w-0 break-all text-right text-primary text-sm">{value || "—"}</dd>
-          </div>
-        ))}
-      </dl>
-
-      <PayerPicker form={form} wallets={context.wallets} />
+      <div className="grid divide-y divide-border-default rounded-xl border border-border-default bg-surface-raised sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <ReviewPartySide
+          delivers={form.asset}
+          paidAt={
+            form.destinations.a.resolved === ""
+              ? (form.resolved.a.address ?? "")
+              : form.destinations.a.resolved
+          }
+          receives={form.cash}
+          resolved={form.resolved.a}
+          title={t("DashboardMarkets.dvp.fieldPartyA")}
+        />
+        <ReviewPartySide
+          delivers={form.cash}
+          paidAt={
+            form.destinations.b.resolved === ""
+              ? (form.resolved.b.address ?? "")
+              : form.destinations.b.resolved
+          }
+          receives={form.asset}
+          resolved={form.resolved.b}
+          title={t("DashboardMarkets.dvp.fieldPartyB")}
+        />
+      </div>
     </div>
   );
 }
@@ -365,8 +390,6 @@ function useWizardSteps() {
       label: t("DashboardMarkets.dvp.stepParties"),
       title: t("DashboardMarkets.dvp.stepPartiesTitle"),
     },
-    { label: t("DashboardMarkets.dvp.stepLegs"), title: t("DashboardMarkets.dvp.stepLegsTitle") },
-    { label: t("DashboardMarkets.dvp.stepTerms"), title: t("DashboardMarkets.dvp.stepTermsTitle") },
     {
       label: t("DashboardMarkets.dvp.stepReview"),
       title: t("DashboardMarkets.dvp.stepReviewTitle"),
@@ -390,12 +413,7 @@ function stageAnswered(form: DvpCreateForm): boolean[] {
     Boolean(form.asset.mint && form.cash.mint) &&
     Boolean(form.asset.baseUnits && form.cash.baseUnits);
 
-  return [
-    form.partiesReady && !form.destinations.anyLooksWrong,
-    legsResolved,
-    Boolean(form.expiry),
-    form.ready,
-  ];
+  return [form.partiesReady && legsResolved && !form.destinations.anyLooksWrong, form.ready];
 }
 
 /** Back, plus either Continue or the one irreversible button. */
@@ -442,6 +460,7 @@ export function DvpCreateWorkspace({
   context: DvpCreateContext;
 }) {
   const t = useTranslations();
+  const router = useRouter();
   const form = useDvpCreateForm(cluster, context);
   const steps = useWizardSteps();
   const [step, setStep] = useState(0);
@@ -449,32 +468,22 @@ export function DvpCreateWorkspace({
   const last = steps.length - 1;
   const canContinue = stageAnswered(form)[step];
 
-  const summary = (
-    <DvpCreateSummary
-      amountA={form.asset.amount}
-      amountB={form.cash.amount}
-      assetMint={form.asset.token?.mint ?? null}
-      assetSymbol={form.asset.symbol}
-      cashMint={form.cash.token?.mint ?? null}
-      cashSymbol={form.cash.symbol}
-      partyALabel={form.resolved.a.label ?? shortenAddress(form.resolved.a.address ?? "")}
-      partyBLabel={form.resolved.b.label ?? shortenAddress(form.resolved.b.address ?? "")}
-      ready={form.ready}
-    />
-  );
-
   const body = [
     <PartiesStep context={context} form={form} key="parties" />,
-    <LegsStep context={context} form={form} key="legs" />,
-    <TermsStep form={form} key="terms" />,
-    <ReviewStep context={context} form={form} key="review" />,
+    <ReviewStep form={form} key="review" />,
   ][step];
 
   const footer = (
     <WizardFooter
       canContinue={canContinue}
       form={form}
-      onBack={() => setStep((current) => Math.max(0, current - 1))}
+      // On the first step there is no earlier step; Back leaves the wizard for
+      // the list it was entered from, so the button is never a silent no-op.
+      onBack={() =>
+        step === 0
+          ? router.push(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp)
+          : setStep((current) => current - 1)
+      }
       onContinue={() => setStep((current) => Math.min(last, current + 1))}
       onLastStep={step === last}
     />
@@ -482,20 +491,14 @@ export function DvpCreateWorkspace({
 
   return (
     <WizardFrame
-      aside={<aside className="hidden lg:block">{summary}</aside>}
       currentStep={step}
       description={t("DashboardMarkets.dvp.createDescription")}
       footer={footer}
-      // The frame defaults to max-w-3xl and then puts a 440px rail inside
-      // it, which leaves the content about 330px wide and crushes the leg
-      // cards. The other wizard that uses an aside sets the same width.
-      maxWidthClassName="max-w-6xl"
       progressLabel={t("DashboardMarkets.dvp.wizardProgress", {
         current: String(step + 1),
         total: String(steps.length),
       })}
       steps={steps}
-      summary={summary}
     >
       <div className="grid gap-5">
         {context.error ? <Callout variant="danger">{context.error}</Callout> : null}

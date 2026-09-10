@@ -65,7 +65,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     summary: "List DvP trades",
     operationId: "listDvpTrades",
     description:
-      "Lists DvP trades for the active project, newest first. A wallet-scoped API key sees only trades whose SDP leg is held by a wallet it is bound to.",
+      "Lists DvP trades for the active project, newest first, narrowed server-side by the optional status and q filters before the page is cut — a filter applied client-side over the capped page would make a matching trade older than the newest page unfindable. A wallet-scoped API key sees only trades whose SDP leg is held by a wallet it is bound to.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

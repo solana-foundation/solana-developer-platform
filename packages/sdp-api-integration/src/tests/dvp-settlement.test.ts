@@ -51,7 +51,7 @@ const DECIMALS = 6;
 type DvpParty = {
   address: string;
   counterparty: { id: string; label: string } | null;
-  custodied: boolean;
+  wallet: { id: string; name: string | null } | null;
 };
 
 type DvpLeg = {
@@ -189,10 +189,15 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
       expect(trade.legs.b.escrow).toBeDefined();
 
       // The created trade answers with the derived read model: one custodied
-      // leg, one external, so the caller stands as principal. Full-shape: a
-      // party field added without a matching assertion here would pass.
-      const custodiedParty = { address: wallet.publicKey, counterparty: null, custodied: true };
-      const externalParty = { address: signer.address, counterparty: null, custodied: false };
+      // leg — enriched with the caller's own wallet identity — one external,
+      // so the caller stands as principal. Full-shape: a party field added
+      // without a matching assertion here would pass.
+      const custodiedParty = {
+        address: wallet.publicKey,
+        counterparty: null,
+        wallet: { id: wallet.id, name: `dvp-leg-${side}` },
+      };
+      const externalParty = { address: signer.address, counterparty: null, wallet: null };
       expect(trade.legs.a.party).toEqual(side === "a" ? custodiedParty : externalParty);
       expect(trade.legs.b.party).toEqual(side === "a" ? externalParty : custodiedParty);
       expect(trade.kind).toBe("principal");

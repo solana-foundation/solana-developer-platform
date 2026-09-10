@@ -117,6 +117,19 @@ export interface DvpTradeScope {
   sdpWalletIds?: string[] | null;
 }
 
+/**
+ * Server-side list filters for a project's trades.
+ *
+ * `statuses` narrows to the given lifecycle states; `q` is a case-insensitive
+ * substring over id, swap_dvp, both parties, both escrows, both mints and both
+ * leg symbols. `null` means no filtering on that axis — explicit, never a
+ * defaulted parameter.
+ */
+export interface DvpTradeListFilters {
+  statuses: DvpTradeStatus[] | null;
+  q: string | null;
+}
+
 export interface DvpTradeObservationUpdate {
   id: string;
   /** The status the row must still hold for this write to apply. */
@@ -211,7 +224,22 @@ export interface DvpTradeRepository {
     status: "settled" | "cancelled",
     signature: Signature
   ): Promise<DvpTradeRow | null>;
-  listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
+  /**
+   * The project's trades, newest first, narrowed by the given filters.
+   *
+   * The filters run SERVER-SIDE because the list is capped with no cursor: a
+   * client-side filter over the newest page makes a matching trade older than
+   * the page unfindable, so the narrowing must happen before the LIMIT.
+   *
+   * @param scope - Tenant and wallet-scope the read is bounded by.
+   * @param filters - Status and search narrowing; `null` on an axis means unfiltered.
+   * @param limit - Page size, applied after the filters.
+   */
+  listByProject(
+    scope: DvpTradeScope,
+    filters: DvpTradeListFilters,
+    limit: number
+  ): Promise<DvpTradeRow[]>;
   /**
    * Open trades naming one of these addresses, created by somebody else.
    *

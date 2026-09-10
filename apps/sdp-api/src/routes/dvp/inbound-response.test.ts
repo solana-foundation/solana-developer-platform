@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
-import type { DvpInboundTrade } from "@/services/dvp/inbound";
+import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { toDvpInboundResponse } from "./inbound-response";
 
 const SECRET_REF = "internal-desk-ref-4417";
@@ -26,9 +26,9 @@ const USER_A = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 const USER_B = "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk";
 
 /** The caller's custody map: it holds side B's address, matching `side: "b"`. */
-const CALLER_ADDRESSES = new Map<string, string>([
-  [USER_B, "cwlt_the_viewer"],
-  ["9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY", "cwlt_another_of_theirs"],
+const CALLER_ADDRESSES = new Map<string, DvpCallerWallet>([
+  [USER_B, { id: "cwlt_the_viewer", name: "Viewer Desk" }],
+  ["9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY", { id: "cwlt_another_of_theirs", name: null }],
 ]);
 
 function inbound(): DvpInboundTrade {
@@ -105,20 +105,34 @@ describe("toDvpInboundResponse", () => {
   // The same party-object shape the creator's view uses — except attribution:
   // which registered counterparty a party is belongs to the creating
   // organization and never crosses to a party viewer, so it is null even
-  // though the property is present.
-  it("answers each leg's party as a derived object, custodied from the caller's own wallets", () => {
+  // though the property is present. `wallet` carries the CALLER's own custody
+  // wallet identity for their side, null for the other.
+  it("answers each leg's party as a derived object, wallet from the caller's own wallets", () => {
     const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
 
     expect(response.legs.a.party).toEqual({
       address: USER_A,
       counterparty: null,
-      custodied: false,
+      wallet: null,
     });
     expect(response.legs.b.party).toEqual({
       address: USER_B,
       counterparty: null,
-      custodied: true,
+      wallet: { id: "cwlt_the_viewer", name: "Viewer Desk" },
     });
+  });
+
+  // A wallet with no display name is still enriched — the id is the identity,
+  // and the name falling back to null is the caller's own fact, not a failure
+  // to resolve the wallet.
+  it("answers a wallet with a null name as null-named, not as unheld", () => {
+    const response = toDvpInboundResponse(
+      inbound(),
+      new Map<string, DvpCallerWallet>([[USER_B, { id: "cwlt_unnamed", name: null }]])
+    );
+
+    expect(response.legs.b.party.wallet).toEqual({ id: "cwlt_unnamed", name: null });
+    expect(response.yourSide).toBe("b");
   });
 
   /**

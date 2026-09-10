@@ -8,7 +8,13 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { DVP_TRADES_PAGE_SIZE, fetchDvpTrade, fetchDvpTrades, isNotFound } from "./dvp-trades.data";
+import {
+  DVP_TRADES_PAGE_SIZE,
+  fetchDvpTrade,
+  fetchDvpTrades,
+  isNotFound,
+  UNFILTERED_DVP_TRADES,
+} from "./dvp-trades.data";
 
 /**
  * The minimum a trade must carry to be renderable, which is what these
@@ -29,7 +35,10 @@ function fail(status: number, body: unknown = {}) {
 
 describe("fetchDvpTrades", () => {
   it("returns the trades the API sent", async () => {
-    const result = await fetchDvpTrades(ok({ data: { trades: [tradeFixture()] } }));
+    const result = await fetchDvpTrades(
+      ok({ data: { trades: [tradeFixture()] } }),
+      UNFILTERED_DVP_TRADES
+    );
 
     expect(result.error).toBeNull();
     expect(result.trades).toHaveLength(1);
@@ -40,13 +49,41 @@ describe("fetchDvpTrades", () => {
   it("asks for a bounded page", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request);
+    await fetchDvpTrades(request, UNFILTERED_DVP_TRADES);
+
+    expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
+  });
+
+  // The filters narrow SERVER-SIDE because of that cap: a client-side filter
+  // over the newest page makes an older matching trade unfindable.
+  it("carries the status and search filters on the query string", async () => {
+    const request = ok({ data: { trades: [] } });
+
+    await fetchDvpTrades(request, {
+      statuses: ["created", "funded"],
+      q: "USDC",
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=created%2Cfunded&q=USDC`
+    );
+  });
+
+  // Null filters are the ABSENCE of the params, not empty values: the clean
+  // URL is the unfiltered one.
+  it("omits the filter params when unfiltered", async () => {
+    const request = ok({ data: { trades: [] } });
+
+    await fetchDvpTrades(request, { statuses: null, q: null });
 
     expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
   });
 
   it("carries the API's message out on a failure", async () => {
-    const result = await fetchDvpTrades(fail(503, { error: { message: "Upstream down." } }));
+    const result = await fetchDvpTrades(
+      fail(503, { error: { message: "Upstream down." } }),
+      UNFILTERED_DVP_TRADES
+    );
 
     expect(result).toEqual({ trades: [], error: "Upstream down." });
   });
@@ -60,17 +97,23 @@ describe("fetchDvpTrades", () => {
       },
     }) as never;
 
-    expect((await fetchDvpTrades(request)).error).toContain("500");
+    expect((await fetchDvpTrades(request, UNFILTERED_DVP_TRADES)).error).toContain("500");
   });
 
   it("survives a transport failure rather than throwing at the page", async () => {
     const request = vi.fn().mockRejectedValue(new Error("socket hang up")) as never;
 
-    expect(await fetchDvpTrades(request)).toEqual({ trades: [], error: "socket hang up" });
+    expect(await fetchDvpTrades(request, UNFILTERED_DVP_TRADES)).toEqual({
+      trades: [],
+      error: "socket hang up",
+    });
   });
 
   it("treats a missing trades array as an empty list, not a failure", async () => {
-    expect(await fetchDvpTrades(ok({ data: {} }))).toEqual({ trades: [], error: null });
+    expect(await fetchDvpTrades(ok({ data: {} }), UNFILTERED_DVP_TRADES)).toEqual({
+      trades: [],
+      error: null,
+    });
   });
 });
 
@@ -154,7 +197,10 @@ describe("a malformed but successful response", () => {
   it("drops an unreadable row from the list and keeps the rest", async () => {
     const good = tradeFixture({ id: "dvp_ok" });
 
-    const result = await fetchDvpTrades(ok({ data: { trades: [{}, good] } }));
+    const result = await fetchDvpTrades(
+      ok({ data: { trades: [{}, good] } }),
+      UNFILTERED_DVP_TRADES
+    );
 
     expect(result.trades).toHaveLength(1);
     expect(result.trades[0]).toMatchObject({ id: "dvp_ok" });

@@ -2,6 +2,7 @@ import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
 import type {
   DvpTradeInsert,
+  DvpTradeListFilters,
   DvpTradeObservationUpdate,
   DvpTradeRepository,
   DvpTradeRow,
@@ -22,6 +23,11 @@ function assertString(value: unknown, field: string): string {
     throw new Error(`DvP trade ${field} is missing`);
   }
   return value;
+}
+
+/** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
@@ -342,17 +348,62 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async listByProject(scope: DvpTradeScope, limit: number) {
+    async listByProject(scope: DvpTradeScope, filters: DvpTradeListFilters, limit: number) {
       const wallets = walletScopeClause(scope.sdpWalletIds);
+      const clauses = ["organization_id = ?", "project_id = ?"];
+      const bindings: unknown[] = [scope.organizationId, scope.projectId];
+
+      // Composed with the scope predicates in the WHERE, before the LIMIT: the
+      // list is capped with no cursor, so narrowing after the page would make a
+      // matching trade older than the newest page unfindable.
+      if (filters.statuses !== null) {
+        const placeholders = filters.statuses.map(() => "?").join(", ");
+        clauses.push(`status IN (${placeholders})`);
+        bindings.push(...filters.statuses);
+      }
+
+      // Same semantics as the dashboard's `matchesAddressQuery`, as close as SQL
+      // allows: case-insensitive substring over id, the on-chain account, both
+      // parties, both escrows, both mints and both leg symbols. Wildcards in the
+      // query are literal, and an ellipsis split is NOT offered — see the
+      // divergence note in dvp-trade.repository.ts's sibling web module.
+      if (filters.q !== null) {
+        clauses.push(
+          `(id ILIKE ? ESCAPE '\\'
+             OR swap_dvp ILIKE ? ESCAPE '\\'
+             OR user_a ILIKE ? ESCAPE '\\'
+             OR user_b ILIKE ? ESCAPE '\\'
+             OR escrow_a ILIKE ? ESCAPE '\\'
+             OR escrow_b ILIKE ? ESCAPE '\\'
+             OR mint_a ILIKE ? ESCAPE '\\'
+             OR mint_b ILIKE ? ESCAPE '\\'
+             OR symbol_a ILIKE ? ESCAPE '\\'
+             OR symbol_b ILIKE ? ESCAPE '\\')`
+        );
+        const pattern = `%${escapeLikePattern(filters.q)}%`;
+        bindings.push(
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern
+        );
+      }
+
       const result = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ?${wallets.sql}
+            WHERE ${clauses.join(" AND ")}${wallets.sql}
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(scope.organizationId, scope.projectId, ...wallets.bindings, limit)
+        .bind(...bindings, ...wallets.bindings, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

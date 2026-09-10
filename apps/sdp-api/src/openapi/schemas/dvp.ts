@@ -29,7 +29,20 @@ export const createDvpTradeRequestSchema = withOpenApi(createDvpTradeSchemaBase,
     "Terms of the trade to create on chain. Creating a trade commits neither party: only the fee payer signs, and the trade is a proposal until an escrow is funded.",
 });
 
-export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase;
+export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase
+  .extend({
+    status: withOpenApi(listDvpTradesQuerySchemaBase.shape.status, {
+      description:
+        "Filter by trade status. Accepts a comma-separated list of the documented statuses.",
+      example: "created,funded",
+    }),
+    q: withOpenApi(listDvpTradesQuerySchemaBase.shape.q, {
+      description:
+        "Case-insensitive substring search over trade ID, the on-chain trade account, both party addresses, both escrow addresses, both mints and both leg symbols. Use at least 2 non-whitespace characters; a blank value is treated as no search filter.",
+      example: "USDC",
+    }),
+  })
+  .openapi({ description: "List DvP trades query parameters." });
 
 export const fundDvpTradeRequestSchema = withOpenApi(fundDvpTradeSchemaBase, {
   description:
@@ -41,6 +54,18 @@ const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
     "Last observed lifecycle state. The program emits no events and funding never invokes it, so this is a cache of a poll rather than an event log. `creating` means the create transaction was signed and recorded but its outcome is not yet known. `closed_unknown` means the on-chain account is gone but which terminal path closed it has not been determined.",
   example: "created",
 });
+
+const dvpCallerWalletSchema = z
+  .object({
+    id: z.string().openapi({
+      description: "The custody wallet record id holding this address.",
+    }),
+    name: z.string().nullable().openapi({
+      description: "The wallet's display name, or null when none was set.",
+    }),
+  })
+  .nullable()
+  .openapi({ description: "The custody wallet, or null." });
 
 export const dvpTradePartySchema = z
   .object({
@@ -62,9 +87,9 @@ export const dvpTradePartySchema = z
         description:
           "The creator's registered counterparty this party is, or null for an external address. Attribution is org-scoped: only callers in the CREATING organization see it — a viewer from another organization always gets null, even when the trade stores the link. An archived account also reads as null.",
       }),
-    custodied: z.boolean().openapi({
+    wallet: dvpCallerWalletSchema.openapi({
       description:
-        "Whether the CALLER holds an active custody wallet for this address. Derived per caller from the same custody map discovery and funding authorize against; never stored.",
+        "The caller's custody wallet holding this address, or null when the caller custodies nothing for it. Truthy = the caller custodies this party. Derived per caller from the same custody map discovery and funding authorize against; never stored.",
     }),
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });

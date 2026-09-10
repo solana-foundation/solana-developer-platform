@@ -2,7 +2,7 @@
  * The trade detail page.
  *
  * The load-bearing question is which legs are the caller's, answered by the
- * wire's per-leg `custodied` — funding is offered on every custodied side (both
+ * wire's per-leg `wallet` — funding is offered on every custodied side (both
  * on a bilateral trade), and on no other. The fund action points at the unified
  * endpoint with the side, so each card's button names its own leg.
  */
@@ -15,7 +15,7 @@ import {
   LEG_ESCROW_A,
   LEG_ESCROW_B,
   OTHER_ADDRESS,
-  OWN_ADDRESS,
+  ownParty,
   THIRD_ADDRESS,
   testLeg,
   testTrade,
@@ -63,7 +63,7 @@ describe("DvpTradeDetailWorkspace", () => {
         legs: {
           a: testLeg({
             escrow: LEG_ESCROW_A,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },
@@ -84,7 +84,7 @@ describe("DvpTradeDetailWorkspace", () => {
           a: testLeg({ escrow: LEG_ESCROW_A }),
           b: testLeg({
             escrow: LEG_ESCROW_B,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
         },
       })
@@ -102,11 +102,11 @@ describe("DvpTradeDetailWorkspace", () => {
         legs: {
           a: testLeg({
             escrow: LEG_ESCROW_A,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({
             escrow: LEG_ESCROW_B,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
         },
       })
@@ -180,7 +180,7 @@ describe("DvpTradeDetailWorkspace", () => {
           a: testLeg({ escrow: LEG_ESCROW_A }),
           b: testLeg({
             escrow: LEG_ESCROW_B,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
         },
       });
@@ -226,7 +226,7 @@ describe("DvpTradeDetailWorkspace", () => {
             b: testLeg({
               escrow: LEG_ESCROW_B,
               funding: FUNDED,
-              party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+              party: ownParty(),
             }),
           },
         })
@@ -245,12 +245,12 @@ describe("DvpTradeDetailWorkspace", () => {
             party: {
               address: OTHER_ADDRESS,
               counterparty: { id: "cpa_1", label: "Acme OTC" },
-              custodied: false,
+              wallet: null,
             },
           }),
           b: testLeg({
             escrow: LEG_ESCROW_B,
-            party: { address: THIRD_ADDRESS, counterparty: null, custodied: false },
+            party: { address: THIRD_ADDRESS, counterparty: null, wallet: null },
           }),
         },
       })
@@ -260,20 +260,23 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(html).toContain("/dashboard/payments/counterparty/cpa_1");
   });
 
-  it("marks a custodied party as yours on the page", () => {
+  // A custodied party is the caller's own wallet: a link to its page, labelled
+  // with its name — never plain text, per the referenced-entity house rule.
+  it("links a custodied party to its wallet's page under the wallet's name", () => {
     const html = renderDetail(
       trade({
         legs: {
           a: testLeg({
             escrow: LEG_ESCROW_A,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },
       })
     );
 
-    expect(html).toContain("Yours");
+    expect(html).toContain("/dashboard/wallets/cwlt_dvp_fixture_own");
+    expect(html).toContain("Fixture Desk");
   });
 
   // Funding again would over-fund the escrow, and settlement refunds a surplus,
@@ -285,7 +288,7 @@ describe("DvpTradeDetailWorkspace", () => {
           a: testLeg({
             escrow: LEG_ESCROW_A,
             funding: FUNDED,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },
@@ -305,7 +308,7 @@ describe("DvpTradeDetailWorkspace", () => {
           a: testLeg({
             escrow: LEG_ESCROW_A,
             funding: frozen,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },
@@ -324,7 +327,7 @@ describe("DvpTradeDetailWorkspace", () => {
           a: testLeg({
             escrow: LEG_ESCROW_A,
             funding: surplus,
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },
@@ -365,7 +368,7 @@ describe("DvpTradeDetailWorkspace", () => {
             escrow: LEG_ESCROW_A,
             fundingSignature:
               "2Ufq4fR5J8nYwxCzTuKw4GnxgJvjP9yWm7dQdZGpHjH6LqZ9mJf2dZrDvEg7NVpzcxKiY1T3sE5b7V9nA1C3",
-            party: { address: OWN_ADDRESS, counterparty: null, custodied: true },
+            party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },

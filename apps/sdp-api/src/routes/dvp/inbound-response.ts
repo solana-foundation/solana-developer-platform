@@ -7,20 +7,20 @@
  * Deliberately absent — `organizationId`/`projectId`, `refString`, `sdpWallet`,
  * counterparty attribution (a fact about the CREATING org, so always null),
  * funding claims (tenant-scoped, so null by construction), the derived `kind`
- * (`custodied` + `yourSide` convey standing), `idempotencyKey`, and
+ * (`wallet` + `yourSide` convey standing), `idempotencyKey`, and
  * `settlementReadiness`. `symbolA`/`symbolB` ARE included; they are read off
  * the mint on chain.
  */
 
-import type { DvpInboundTrade } from "@/services/dvp/inbound";
+import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 
 /** One party of the trade, as a party who is not the author may see it. */
 interface DvpInboundPartyResponse {
   address: string;
   /** Never attributed: it belongs to the creating org, which the viewer is not. */
   counterparty: null;
-  /** Whether the CALLER holds an active custody wallet for this address. */
-  custodied: boolean;
+  /** The caller's custody wallet holding this address, or null. Truthy = the caller custodies this party. */
+  wallet: DvpCallerWallet | null;
 }
 
 /** One leg, as a party who is not the author may see it. */
@@ -60,19 +60,31 @@ export interface DvpInboundTradeResponse {
 }
 
 /**
- * One leg's party as a party viewer sees it: address and `custodied`, never
+ * One leg's party as a party viewer sees it: address and `wallet`, never
  * attribution.
+ *
+ * @param address - The party address on the wire.
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @returns The party object the inbound response carries.
  */
 function inboundParty(
   address: string,
-  callerAddresses: ReadonlyMap<string, string>
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>
 ): DvpInboundPartyResponse {
-  return { address, counterparty: null, custodied: callerAddresses.has(address) };
+  const wallet = callerAddresses.get(address);
+  return { address, counterparty: null, wallet: wallet === undefined ? null : wallet };
 }
 
+/**
+ * Serializes one inbound trade for the party that is named on it.
+ *
+ * @param inbound - The trade, the caller's side on it, and their matching address.
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @returns The wire shape a party viewer receives.
+ */
 export function toDvpInboundResponse(
   inbound: DvpInboundTrade,
-  callerAddresses: ReadonlyMap<string, string>
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>
 ): DvpInboundTradeResponse {
   const { trade, side, party } = inbound;
 

@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -27,6 +28,7 @@ import {
 import { createDvpTrade } from "@/services/dvp/create";
 import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
+import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import {
@@ -73,8 +75,8 @@ interface PartyRef {
   address: string;
   /** The creator org's registered counterparty, or null (attribution never crosses orgs; a dead reference reads null). */
   counterparty: { id: string; label: string } | null;
-  /** Whether the CALLER holds an active custody wallet for this address. */
-  custodied: boolean;
+  /** The caller's custody wallet holding this address, or null. Truthy = the caller custodies this party. */
+  wallet: DvpCallerWallet | null;
 }
 
 /**
@@ -87,9 +89,14 @@ export type DvpTradeKind = "agent" | "principal" | "bilateral";
  * The caller's standing on a trade: agent (0 sides held), principal (1),
  * bilateral (2). Display copy only, derived from the same custody map that
  * decides what the caller can see and fund.
+ *
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @param userA - Side A's party address.
+ * @param userB - Side B's party address.
+ * @returns The standing kind.
  */
 export function deriveDvpTradeKind(
-  callerAddresses: ReadonlyMap<string, string>,
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
   userA: string,
   userB: string
 ): DvpTradeKind {
@@ -105,27 +112,34 @@ export function deriveDvpTradeKind(
 }
 
 /**
- * One leg's party object: `custodied` from the request's single custody map,
+ * One leg's party object: `wallet` from the request's single custody map,
  * never a per-row lookup.
+ *
+ * @param address - The party address on the wire.
+ * @param counterpartyAccountId - The creator's counterparty link stored on the row, or null.
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @param counterpartyLabels - Creator-org counterparty display names, keyed by account id.
+ * @returns The party object the response carries.
  */
 function resolveParty(
   address: string,
   counterpartyAccountId: string | null,
-  callerAddresses: ReadonlyMap<string, string>,
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
   counterpartyLabels: ReadonlyMap<string, string>
 ): PartyRef {
+  const wallet = callerAddresses.get(address);
   if (counterpartyAccountId === null) {
     return {
       address,
       counterparty: null,
-      custodied: callerAddresses.has(address),
+      wallet: wallet === undefined ? null : wallet,
     };
   }
   const label = counterpartyLabels.get(counterpartyAccountId);
   return {
     address,
     counterparty: label === undefined ? null : { id: counterpartyAccountId, label },
-    custodied: callerAddresses.has(address),
+    wallet: wallet === undefined ? null : wallet,
   };
 }
 
@@ -191,8 +205,8 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
 
 /** Everything a read derives for the caller, resolved ONCE per request. */
 interface TradeReadContext {
-  /** The caller's custody wallet addresses (address → wallet id). */
-  callerAddresses: ReadonlyMap<string, string>;
+  /** The caller's custody wallets (address → wallet identity). */
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>;
   /** Creator-org counterparty names; empty on cross-org party reads (attribution is the creator's fact). */
   counterpartyLabels: ReadonlyMap<string, string>;
   /** This trade's funding claims, keyed by side. RLS-scoped to the funding org. */
@@ -202,7 +216,7 @@ interface TradeReadContext {
 /**
  * Wire shape of a trade. The escrows are what a counterparty pays into;
  * every 64-bit value stays a string (a JSON number rounds above 2^53).
- * The caller's standing (`party.custodied`, `kind`) is derived from
+ * The caller's standing (`party.wallet`, `kind`) is derived from
  * {@link TradeReadContext} and never stored.
  */
 function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
@@ -545,9 +559,25 @@ export const listTrades = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const query = listDvpTradesQuerySchema.safeParse({ limit: c.req.query("limit") });
+  const query = listDvpTradesQuerySchema.safeParse({
+    limit: c.req.query("limit"),
+    status: c.req.query("status"),
+    q: c.req.query("q"),
+  });
   if (!query.success) {
-    throw badRequest("Invalid limit: expected an integer between 1 and 100");
+    const issue = query.error.issues[0];
+    // A bad status value names itself and the allowed set, the issuance
+    // transactions convention; every other failure is the limit's message.
+    if (issue.path[0] === "status") {
+      throw badRequest("Invalid status query parameter", {
+        allowedStatuses: DVP_TRADE_STATUSES,
+      });
+    }
+    throw badRequest(
+      issue.path[0] === "q"
+        ? "Invalid q query parameter: expected a search string of 2 to 100 characters"
+        : "Invalid limit: expected an integer between 1 and 100"
+    );
   }
 
   const trades = await createDvpTradeRepository(c.env).listByProject(
@@ -555,6 +585,10 @@ export const listTrades = async (c: AppContext) => {
       organizationId: auth.organizationId,
       projectId,
       sdpWalletIds: readableSdpWalletIds(c),
+    },
+    {
+      statuses: query.data.status === undefined ? null : query.data.status,
+      q: query.data.q === undefined || query.data.q === "" ? null : query.data.q,
     },
     query.data.limit
   );

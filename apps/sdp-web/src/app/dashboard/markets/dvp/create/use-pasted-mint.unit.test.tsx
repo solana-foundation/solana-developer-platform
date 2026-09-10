@@ -11,6 +11,7 @@
  * answered yet reads as null and loading rather than as the last answer.
  */
 
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePastedMint } from "./use-pasted-mint";
@@ -28,7 +29,7 @@ function mintBody(decimals: number) {
           decimals,
           name: null,
           symbol: null,
-          tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+          tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
           eligible: true,
           blockedBy: null,
         },
