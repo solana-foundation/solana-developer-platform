@@ -9,51 +9,15 @@
  * still owing a leg or the one waiting on someone else.
  *
  * Every line here is derived from the last on-chain reading, so it inherits
- * that reading's age. The program emits no events, which is why the panel says
- * what was observed rather than what is true.
+ * that reading's age. The program emits no events, which is why this says what
+ * was observed rather than what is true. Plain text, no box: it is the page's
+ * one sentence of prose, not a notice.
  */
 
-import { ClockIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
-import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { custodiedSidesOf, type DvpTrade, isDvpPartyView } from "./dvp-trade";
 
 type Tone = "info" | "waiting" | "attention";
-
-const TONE_STYLES: Record<Tone, { box: string; icon: string }> = {
-  info: { box: "border-border-default bg-surface-raised", icon: "text-tertiary" },
-  waiting: { box: "border-border-default bg-surface-raised", icon: "text-tertiary" },
-  attention: { box: "border-warning-border bg-warning-bg", icon: "text-warning" },
-};
-
-/**
- * One mark per meaning, and the same mark this page already uses for it.
- *
- * Waiting was an hourglass here and a clock on the leg card directly below —
- * two different marks for one idea, on one screen. The hourglass was also the
- * odd one optically: its glyph is drawn narrow inside the same 16px box the
- * circle and triangle fill, so it sat in a pocket of empty space and read as
- * misplaced rather than as small.
- */
-const TONE_ICONS: Record<Tone, typeof InfoIcon> = {
-  info: InfoIcon,
-  waiting: ClockIcon,
-  attention: TriangleAlertIcon,
-};
-
-function Panel({ children, tone, title }: { children: ReactNode; tone: Tone; title: string }) {
-  const Icon = TONE_ICONS[tone];
-  return (
-    <section className={cn("flex gap-3 rounded-2xl border p-4", TONE_STYLES[tone].box)}>
-      <Icon aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0", TONE_STYLES[tone].icon)} />
-      <div className="min-w-0">
-        <h2 className="font-medium text-primary text-sm">{title}</h2>
-        <p className="mt-1 text-secondary text-xs leading-relaxed">{children}</p>
-      </div>
-    </section>
-  );
-}
 
 /** Whether the caller's every custodied leg already holds its target. */
 function ownLegsFunded(trade: DvpTrade): boolean {
@@ -317,8 +281,9 @@ export function DvpNextStep({ trade }: { trade: DvpTrade }) {
     return null;
   }
   return (
-    <Panel title={step.title} tone={step.tone}>
-      {step.body}
-    </Panel>
+    <div>
+      <p className="text-base text-primary leading-relaxed">{step.title}</p>
+      <p className="mt-1 text-secondary text-sm leading-relaxed">{step.body}</p>
+    </div>
   );
 }

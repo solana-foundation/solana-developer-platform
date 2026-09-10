@@ -43,11 +43,13 @@ export function testLeg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
     tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     decimals: 6,
     symbol: "ATD",
+    imageUrl: null,
     amount: "1000000000",
     escrow: LEG_ESCROW_A,
     settlementDestination: OTHER_ADDRESS,
     funding: null,
     fundingSignature: null,
+    outcome: "awaiting",
     ...overrides,
   };
 }

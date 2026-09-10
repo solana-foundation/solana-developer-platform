@@ -31,6 +31,9 @@ const CALLER_ADDRESSES = new Map<string, DvpCallerWallet>([
   ["9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY", { id: "cwlt_another_of_theirs", name: null }],
 ]);
 
+/** No mint is issued by the viewer's organization, so every image resolves null. */
+const NO_MINT_IMAGES = new Map<string, string | null>();
+
 function inbound(): DvpInboundTrade {
   const trade = {
     id: "dvp_inbound_1",
@@ -55,6 +58,8 @@ function inbound(): DvpInboundTrade {
     escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
     escrowAAmount: "100000000",
     escrowBAmount: null,
+    escrowAPeakAmount: "100000000",
+    escrowBPeakAmount: "0",
     escrowAFrozen: false,
     escrowBFrozen: false,
     userASettlementDestination: USER_A,
@@ -76,7 +81,7 @@ function inbound(): DvpInboundTrade {
 
 describe("toDvpInboundResponse", () => {
   it("tells the party which leg is theirs and which address matched", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
 
     expect(response.yourSide).toBe("b");
     expect(response.yourParty).toBe(USER_B);
@@ -85,17 +90,61 @@ describe("toDvpInboundResponse", () => {
   // The escrow address is the entire integration for a party: without it there
   // is nothing they can act on and discovery is pointless.
   it("gives them the escrow to pay and the amount owed", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
 
     expect(response.legs.b.escrow).toBe("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y");
     expect(response.legs.b.amount).toBe("250000000");
     expect(response.legs.b.decimals).toBe(6);
   });
 
+  it("returns the full leg shape with its server-derived outcome", () => {
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+
+    expect(response.legs.b).toEqual({
+      party: {
+        address: USER_B,
+        counterparty: null,
+        wallet: { id: "cwlt_the_viewer", name: "Viewer Desk" },
+      },
+      mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+      tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      amount: "250000000",
+      decimals: 6,
+      symbol: "DUSD",
+      imageUrl: null,
+      escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+      settlementDestination: USER_B,
+      observedAmount: null,
+      frozen: false,
+      outcome: "awaiting",
+    });
+  });
+
+  // The image is the CALLER's organization's fact, resolved against its own
+  // issued tokens: a mint the viewer's organization issued resolves its URL,
+  // an unissued one reads null — never the creating org's artwork.
+  it("carries the image only for a mint the caller's own organization issued", () => {
+    const mintImages = new Map<string, string | null>([
+      ["AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE", "https://cdn.example.test/dusd.png"],
+      ["ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1", null],
+    ]);
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, mintImages);
+
+    expect(response.legs.b.imageUrl).toBe("https://cdn.example.test/dusd.png");
+    expect(response.legs.a.imageUrl).toBeNull();
+  });
+
+  it("reads an absent mint as null instead of inventing an image", () => {
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+
+    expect(response.legs.a.imageUrl).toBeNull();
+    expect(response.legs.b.imageUrl).toBeNull();
+  });
+
   // Everything above is on chain already. A party holding the PDA can decode
   // all of it, so withholding it would protect nothing and break the feature.
   it("passes through the terms, which are public on chain anyway", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
 
     expect(response.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
     expect(response.legs.a.mint).toBe("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1");
@@ -108,7 +157,7 @@ describe("toDvpInboundResponse", () => {
   // though the property is present. `wallet` carries the CALLER's own custody
   // wallet identity for their side, null for the other.
   it("answers each leg's party as a derived object, wallet from the caller's own wallets", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
 
     expect(response.legs.a.party).toEqual({
       address: USER_A,
@@ -128,7 +177,8 @@ describe("toDvpInboundResponse", () => {
   it("answers a wallet with a null name as null-named, not as unheld", () => {
     const response = toDvpInboundResponse(
       inbound(),
-      new Map<string, DvpCallerWallet>([[USER_B, { id: "cwlt_unnamed", name: null }]])
+      new Map<string, DvpCallerWallet>([[USER_B, { id: "cwlt_unnamed", name: null }]]),
+      NO_MINT_IMAGES
     );
 
     expect(response.legs.b.party.wallet).toEqual({ id: "cwlt_unnamed", name: null });
@@ -148,7 +198,7 @@ describe("toDvpInboundResponse", () => {
     ["the creating org's custody wallet", SECRET_WALLET],
     ["the idempotency key", SECRET_IDEMPOTENCY],
   ])("does not disclose %s", (_label, secret) => {
-    const json = JSON.stringify(toDvpInboundResponse(inbound(), CALLER_ADDRESSES));
+    const json = JSON.stringify(toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES));
 
     expect(json).not.toContain(secret);
   });

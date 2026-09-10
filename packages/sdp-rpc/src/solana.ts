@@ -639,8 +639,8 @@ export async function getSignatureStatuses(
 
 export interface ParsedInstruction {
   programId: string;
-  /** Ordered account addresses for non-parsed program instructions. */
-  accounts?: string[];
+  /** Ordered account addresses for non-parsed program instructions; empty when the RPC gave none. */
+  accounts: string[];
   /** Base58-encoded instruction data for non-parsed program instructions. */
   data?: string | null;
   /** Present only for instructions the RPC could decode (e.g. spl-token-2022). */

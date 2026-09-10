@@ -6,7 +6,12 @@
  * 2^53. Comparisons go through BigInt, never Number.
  */
 
-import { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types";
+import {
+  DVP_TRADE_SIDES,
+  type DvpLegOutcome,
+  type DvpTradeSide,
+  type DvpTradeStatus,
+} from "@sdp/types";
 
 export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
 
@@ -48,6 +53,8 @@ export interface DvpTradeLeg {
   decimals: number | null;
   /** The mint's symbol, or null when it carries no metadata. */
   symbol: string | null;
+  /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
+  imageUrl: string | null;
   party: DvpPartyRef;
   mint: string;
   tokenProgram: string;
@@ -58,6 +65,7 @@ export interface DvpTradeLeg {
   funding: DvpLegFunding | null;
   /** What moved this leg into escrow: the receipt, else the claim, else null. */
   fundingSignature: string | null;
+  outcome: DvpLegOutcome;
 }
 
 export interface DvpTrade {

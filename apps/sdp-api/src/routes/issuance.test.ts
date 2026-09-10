@@ -8912,6 +8912,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
               parsedType: "initializeMint2",
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,
@@ -9019,6 +9020,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
               parsedType: "initializeMint2",
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,
@@ -9094,6 +9096,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "11111111111111111111111111111111",
+              accounts: [],
               parsedType: "transfer",
               info: { destination: TEST_SOLANA_ADDRESSES.wallet2 },
             },
@@ -9167,6 +9170,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
               parsedType: "initializeMint2",
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,
@@ -9305,6 +9309,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
               parsedType: "initializeMint2",
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,
@@ -9404,6 +9409,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
               parsedType: "initializeMint2",
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,
@@ -9677,6 +9683,7 @@ describe("Issuance Routes", () => {
           instructions: [
             {
               programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
               parsedType: "initializeMint2",
               info: {
                 mint: TEST_SOLANA_ADDRESSES.mint,

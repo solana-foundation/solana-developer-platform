@@ -31,6 +31,7 @@ import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
+import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
 import {
   observeDvpTradeIfStale,
   observeDvpTradeNow,
@@ -39,6 +40,7 @@ import {
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
+import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
 import { type DvpCloseResolved, type DvpFundResolved, walletIdIfHoldsAddress } from "./policy";
@@ -67,7 +69,9 @@ interface LegInput {
   observedAmount: string | null;
   decimals: number | null;
   symbol: string | null;
+  imageUrl: string | null;
   frozen: boolean | null;
+  outcome: ReturnType<typeof deriveDvpLegOutcome>;
 }
 
 /** One party of a trade, as the caller may see it. */
@@ -194,9 +198,12 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     decimals: leg.decimals,
     /** The mint's symbol, or null when it carries no metadata. Never invented. */
     symbol: leg.symbol,
+    /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
+    imageUrl: leg.imageUrl,
     /** Pay this address to fund the leg. */
     escrow: leg.escrow,
     settlementDestination: leg.settlementDestination,
+    outcome: leg.outcome,
     funding,
     /** Which transaction funded this leg. @see {@link fundingSignatureFor} */
     fundingSignature,
@@ -211,6 +218,8 @@ interface TradeReadContext {
   counterpartyLabels: ReadonlyMap<string, string>;
   /** This trade's funding claims, keyed by side. RLS-scoped to the funding org. */
   fundingClaims: ReadonlyMap<DvpTradeSide, DvpLegFundingClaim>;
+  /** Issued-token image per mint for the requesting org/project; a mint it never issued is absent and reads as null. */
+  mintImages: ReadonlyMap<string, string | null>;
 }
 
 /**
@@ -220,6 +229,8 @@ interface TradeReadContext {
  * {@link TradeReadContext} and never stored.
  */
 function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
+  const mintAImage = context.mintImages.get(row.mintA);
+  const mintBImage = context.mintImages.get(row.mintB);
   return {
     id: row.id,
     status: row.status,
@@ -236,7 +247,9 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           observedAmount: row.escrowAAmount,
           decimals: row.decimalsA,
           symbol: row.symbolA,
+          imageUrl: mintAImage === undefined ? null : mintAImage,
           frozen: row.escrowAFrozen,
+          outcome: deriveDvpLegOutcome(row, "a"),
         },
         resolveParty(
           row.userA,
@@ -256,7 +269,9 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           observedAmount: row.escrowBAmount,
           decimals: row.decimalsB,
           symbol: row.symbolB,
+          imageUrl: mintBImage === undefined ? null : mintBImage,
           frozen: row.escrowBFrozen,
+          outcome: deriveDvpLegOutcome(row, "b"),
         },
         resolveParty(
           row.userB,
@@ -327,6 +342,33 @@ async function readFundingClaims(
 ): Promise<Map<DvpTradeSide, DvpLegFundingClaim>> {
   const claims = await createPostgresDvpLegFundingClaimRepository(getDb(env)).listForTrade(tradeId);
   return new Map(claims.map((claim) => [claim.side, claim]));
+}
+
+/**
+ * The issued-token image behind each mint on the page, in one query.
+ *
+ * Scoped to the requesting organization/project: a mint this organization
+ * never issued is absent, and the response builders read absence as null, so
+ * another organization's issued token never lends its artwork across the
+ * tenant boundary. Only the token record's own image column is consulted.
+ *
+ * @param env - The request environment (database access).
+ * @param organizationId - The requesting organization, scoping every lookup.
+ * @param projectId - The requesting project, scoping every lookup.
+ * @param mints - Every mint on the page; duplicates are harmless.
+ * @returns Mint to image URL for this tenant's issued tokens (null when the
+ *   token has no artwork); mints it never issued are absent.
+ */
+function readMintImages(
+  env: Env,
+  organizationId: string,
+  projectId: string,
+  mints: string[]
+): Promise<Map<string, string | null>> {
+  return new TokenService(
+    getDb(env),
+    createTenantScope({ organizationId, projectId })
+  ).listTokenImagesByMints(mints);
 }
 
 export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeSchema>) => {
@@ -403,9 +445,10 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   // The response derives everything from the caller's viewpoint: one custody
   // map and one labels batch per request. A just-created trade has no funding
   // claims — claims only appear when somebody funds it — so none are read.
-  const [callerAddresses, counterpartyLabels] = await Promise.all([
+  const [callerAddresses, counterpartyLabels, mintImages] = await Promise.all([
     callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
     readCounterpartyLabels(c.env, auth.organizationId, projectId, [trade]),
+    readMintImages(c.env, auth.organizationId, projectId, [trade.mintA, trade.mintB]),
   ]);
   return success(
     c,
@@ -414,6 +457,7 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
         callerAddresses,
         counterpartyLabels,
         fundingClaims: new Map<DvpTradeSide, DvpLegFundingClaim>(),
+        mintImages,
       }),
     },
     201
@@ -550,8 +594,20 @@ export const listInboundTrades = async (c: AppContext) => {
     auth,
   });
 
+  // Once for the page, scoped to the CALLER's organization like every other
+  // read here: the party sees its own issued tokens' artwork, never the
+  // creating org's.
+  const mintImages = await readMintImages(
+    c.env,
+    auth.organizationId,
+    projectId,
+    inbound.trades.flatMap((entry) => [entry.trade.mintA, entry.trade.mintB])
+  );
+
   return success(c, {
-    trades: inbound.trades.map((trade) => toDvpInboundResponse(trade, inbound.callerAddresses)),
+    trades: inbound.trades.map((trade) =>
+      toDvpInboundResponse(trade, inbound.callerAddresses, mintImages)
+    ),
   });
 };
 
@@ -594,17 +650,26 @@ export const listTrades = async (c: AppContext) => {
   );
 
   // Resolved once for the page; claims stay index-aligned with the trades.
-  const [callerAddresses, counterpartyLabels, fundingClaimsByTrade] = await Promise.all([
-    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
-    readCounterpartyLabels(c.env, auth.organizationId, projectId, trades),
-    Promise.all(trades.map((trade) => readFundingClaims(c.env, trade.id))),
-  ]);
+  const [callerAddresses, counterpartyLabels, fundingClaimsByTrade, mintImages] = await Promise.all(
+    [
+      callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+      readCounterpartyLabels(c.env, auth.organizationId, projectId, trades),
+      Promise.all(trades.map((trade) => readFundingClaims(c.env, trade.id))),
+      readMintImages(
+        c.env,
+        auth.organizationId,
+        projectId,
+        trades.flatMap((trade) => [trade.mintA, trade.mintB])
+      ),
+    ]
+  );
   return success(c, {
     trades: trades.map((trade, index) =>
       toTradeResponse(trade, {
         callerAddresses,
         counterpartyLabels,
         fundingClaims: fundingClaimsByTrade[index],
+        mintImages,
       })
     ),
   });
@@ -665,19 +730,26 @@ export const getTrade = async (c: AppContext) => {
     return respondWithPartyTrade(c, tradeId);
   }
 
-  // Re-read open trades whose stored reading aged out; closed ones cannot change.
+  // Re-read a trade whose stored reading aged out for its status: open trades
+  // every few seconds, closed ones once a minute for late deposits.
   const observed = await observeDvpTradeIfStale(c.env, trade);
 
-  const [callerAddresses, counterpartyLabels, fundingClaims, settlementReadiness] =
+  const [callerAddresses, counterpartyLabels, fundingClaims, settlementReadiness, mintImages] =
     await Promise.all([
       callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
       readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
       readFundingClaims(c.env, observed.id),
       readSettlementReadiness(c, observed),
+      readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
     ]);
   return success(c, {
     trade: {
-      ...toTradeResponse(observed, { callerAddresses, counterpartyLabels, fundingClaims }),
+      ...toTradeResponse(observed, {
+        callerAddresses,
+        counterpartyLabels,
+        fundingClaims,
+        mintImages,
+      }),
       settlementReadiness,
     },
   });
@@ -746,14 +818,17 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
 
   // Derived from the caller's OWN wallets, like any other view. Labels are
   // never resolved (attribution is the creator's fact); claims ARE read, and
-  // claim-row RLS scopes them to the funding org.
-  const [callerAddresses, fundingClaims] = await Promise.all([
+  // claim-row RLS scopes them to the funding org. The mint images resolve
+  // against the CALLER's organization too, so the creator's issued token never
+  // lends its artwork across the tenant boundary.
+  const [callerAddresses, fundingClaims, mintImages] = await Promise.all([
     callerPartyAddresses(c.env, {
       organizationId: auth.organizationId,
       projectId,
       auth,
     }),
     readFundingClaims(c.env, observed.id),
+    readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
   ]);
 
   return success(c, {
@@ -762,6 +837,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
         callerAddresses,
         counterpartyLabels: new Map<string, string>(),
         fundingClaims,
+        mintImages,
       }),
       // Theirs, not ours: a party gets the trade without the creator's fields.
       refString: null,

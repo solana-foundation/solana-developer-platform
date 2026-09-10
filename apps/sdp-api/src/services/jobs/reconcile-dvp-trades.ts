@@ -18,6 +18,7 @@ import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
+import { resolveDvpClose } from "@/services/dvp/closing-transaction";
 import { deriveDvpTradeState } from "@/services/dvp/observe";
 import { readDvpTradeObservation } from "@/services/dvp/read-chain";
 import type { Env } from "@/types/env";
@@ -171,6 +172,13 @@ async function reconcileTrade(
     },
     blockHeight
   );
+  // Two RPC reads per vanished trade, so only while the close is still unknown:
+  // once a close signature is on the row (ours or decoded) the answer is final,
+  // and closed trades stay in this sweep for a week to catch late deposits.
+  observation.closeResolution =
+    observation.tradeAccountExists || trade.closeSignature !== null
+      ? null
+      : await resolveDvpClose(rpc, trade.swapDvp);
 
   const derived = deriveDvpTradeState(observation, trade, Date.now());
 
@@ -185,6 +193,8 @@ async function reconcileTrade(
     escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
     escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
     observedAt: new Date().toISOString(),
+    closeSignature:
+      observation.closeResolution === null ? null : observation.closeResolution.signature,
   });
 
   if (!updated) {

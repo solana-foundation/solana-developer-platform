@@ -8,7 +8,7 @@
  * names an escrow address that does not exist.
  */
 
-import { DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_LEG_OUTCOMES, DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
 import {
   createDvpTradeSchema as createDvpTradeSchemaBase,
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
@@ -55,6 +55,11 @@ const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
   example: "created",
 });
 
+const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
+  description:
+    "Server-derived leg state: awaiting, partial, funded, overfunded, frozen, reclaimed, expired, delivered, refunded, recoverable after a late deposit, or closed without a recoverable balance.",
+});
+
 const dvpCallerWalletSchema = z
   .object({
     id: z.string().openapi({
@@ -98,6 +103,10 @@ const dvpTradeLegSchema = z
   .object({
     party: dvpTradePartySchema,
     mint: z.string().openapi({ description: "Mint delivered on this leg." }),
+    imageUrl: z.string().url().nullable().openapi({
+      description:
+        "Image of the leg's mint when it is a token this organization issued through SDP; null otherwise.",
+    }),
     tokenProgram: z.string().openapi({
       description:
         "Token program owning the mint. A single trade may legitimately mix legacy SPL and Token-2022.",
@@ -141,6 +150,7 @@ const dvpTradeLegSchema = z
       description:
         "The transaction that moved this leg into escrow: the funding receipt when one exists, else the live claim's signature while a funding is still in flight (so an in-flight funding links to the transaction it is waiting on), else null. Funding claims are tenant-scoped to the funding organization, so an organization that cannot read the claim row gets null — never a guess.",
     }),
+    outcome: dvpLegOutcomeSchema,
   })
   .openapi({ description: "One leg of the trade." });
 
@@ -213,6 +223,10 @@ const dvpInboundLegSchema = z
     symbol: z.string().nullable().openapi({
       description: "The mint's symbol, or null when it carries no metadata.",
     }),
+    imageUrl: z.string().url().nullable().openapi({
+      description:
+        "Image of the leg's mint when it is a token this organization issued through SDP; null otherwise.",
+    }),
     escrow: z.string().openapi({
       description:
         "Address to fund this leg. There is no funding instruction: a party funds by sending an ordinary TransferChecked of exactly `amount` to this address.",
@@ -229,6 +243,7 @@ const dvpInboundLegSchema = z
       description:
         "Whether the escrow account was last observed frozen. Null before the reconciler looked, which is not the same as thawed.",
     }),
+    outcome: dvpLegOutcomeSchema,
   })
   .openapi({ description: "One leg of an inbound trade." });
 

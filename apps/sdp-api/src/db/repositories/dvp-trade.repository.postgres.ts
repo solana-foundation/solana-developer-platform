@@ -89,6 +89,10 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
         : null,
     escrowAAmount: typeof row.escrow_a_amount === "string" ? row.escrow_a_amount : null,
     escrowBAmount: typeof row.escrow_b_amount === "string" ? row.escrow_b_amount : null,
+    escrowAPeakAmount:
+      typeof row.escrow_a_peak_amount === "string" ? row.escrow_a_peak_amount : null,
+    escrowBPeakAmount:
+      typeof row.escrow_b_peak_amount === "string" ? row.escrow_b_peak_amount : null,
     escrowAFrozen: typeof row.escrow_a_frozen === "boolean" ? row.escrow_a_frozen : null,
     escrowBFrozen: typeof row.escrow_b_frozen === "boolean" ? row.escrow_b_frozen : null,
     createdAt: assertString(row.created_at, "created_at"),
@@ -106,7 +110,8 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          status, observed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
-         escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
+         escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
+         escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
 /**
@@ -239,8 +244,11 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE status IN ('creating', 'created', 'partially_funded', 'funded')
-            ORDER BY observed_at ASC NULLS FIRST, created_at ASC, id ASC
+            WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+               OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                   AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+            ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
+                     observed_at ASC NULLS FIRST, created_at ASC, id ASC
             LIMIT ?`
         )
         .bind(limit)
@@ -257,6 +265,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   escrow_b_amount = ?,
                   escrow_a_frozen = ?,
                   escrow_b_frozen = ?,
+                  escrow_a_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
+                  escrow_b_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
+                  close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
+                  closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN sdp_iso_now() ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND status = ?
@@ -268,6 +280,14 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.escrowBAmount,
           input.escrowAFrozen,
           input.escrowBFrozen,
+          input.status,
+          input.escrowAAmount,
+          input.escrowAAmount,
+          input.status,
+          input.escrowBAmount,
+          input.escrowBAmount,
+          input.closeSignature,
+          input.status,
           input.observedAt,
           input.id,
           input.expectedStatus
@@ -338,7 +358,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET status = ?, close_signature = ?, updated_at = sdp_iso_now()
+              SET status = ?,
+                  close_signature = ?,
+                  closed_at = CASE WHEN closed_at IS NULL THEN sdp_iso_now() ELSE closed_at END,
+                  updated_at = sdp_iso_now()
             WHERE id = ?
               AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
             RETURNING ${SELECT_COLUMNS}`

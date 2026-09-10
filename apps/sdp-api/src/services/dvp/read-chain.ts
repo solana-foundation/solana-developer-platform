@@ -153,5 +153,6 @@ export async function readDvpTradeObservation(
     legA: readLeg(accounts[1], legs.a),
     legB: readLeg(accounts[2], legs.b),
     blockHeight,
+    closeResolution: null,
   };
 }

@@ -108,7 +108,7 @@ describe("DvpNextStep — principal", () => {
       trade({ status: "funded", custodied: "a", fundedA: true, fundedB: true })
     );
 
-    expect(html).toContain("Ready to settle");
+    expect(html).toContain("Settle when ready");
   });
 });
 
@@ -144,7 +144,7 @@ describe("DvpNextStep — bilateral", () => {
       })
     );
 
-    expect(html).toContain("Ready to settle");
+    expect(html).toContain("Settle when ready");
   });
 });
 
