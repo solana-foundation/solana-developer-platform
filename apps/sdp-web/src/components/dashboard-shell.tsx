@@ -77,6 +77,7 @@ import {
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -400,6 +401,7 @@ function DashboardSidebarContent({
   onClose,
   isCollapsed,
   variant,
+  showQuickStart,
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
@@ -412,6 +414,7 @@ function DashboardSidebarContent({
   onClose: () => void;
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
+  showQuickStart: boolean;
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
@@ -461,7 +464,8 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="shrink-0 px-3 pb-3">
+      <div className="shrink-0 space-y-3 px-3 pb-3">
+        {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
         <SidebarUserMenu
           collapsed={isCollapsed}
           canManageOrgSettings={canManageOrgSettings}
@@ -766,6 +770,7 @@ export function DashboardShell({
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
             variant="desktop"
+            showQuickStart={!isWorkspaceSwitching}
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
@@ -833,6 +838,7 @@ export function DashboardShell({
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
                 variant="mobile"
+                showQuickStart={!isWorkspaceSwitching}
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
@@ -845,7 +851,9 @@ export function DashboardShell({
         <section
           className={[
             "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
-            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
+            shouldLockViewportScroll
+              ? "flex min-h-0 flex-col overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+              : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
           <div
@@ -918,9 +926,7 @@ export function DashboardShell({
                 contentWidthClass,
                 // Clears the fixed mobile bottom bar so the last row of any page is
                 // still reachable; the bar is md:hidden, so the padding is too.
-                pathname === "/dashboard/issuance/create" || !shouldLockViewportScroll
-                  ? "pb-20 md:pb-0"
-                  : "",
+                !shouldLockViewportScroll ? "pb-20 md:pb-0" : "",
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",

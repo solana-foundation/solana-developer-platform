@@ -7,6 +7,9 @@ describe("public web routes", () => {
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/workspace-loading"))).toBe(
       true
     );
+    expect(
+      isPublicRoute(new NextRequest("https://dashboard.example.com/api/workspace-status"))
+    ).toBe(true);
   });
 
   it("keeps shareable payment checkout links unauthenticated", () => {

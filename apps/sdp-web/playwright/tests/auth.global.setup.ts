@@ -109,7 +109,11 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   }
 
   await target.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
-  await expect(target).toHaveURL(/\/dashboard/);
+  // Local suites seed the SDP organization in beforeAll, after this auth-only
+  // setup. A Clerk session without that mapping must stop at the sync gate.
+  await expect(target).toHaveURL(
+    env.useExternalApi ? /\/dashboard/ : /\/(dashboard|workspace-loading)(?:[/?]|$)/
+  );
   fs.mkdirSync(path.dirname(authStatePath), { recursive: true });
   await target.context().storageState({ path: authStatePath });
   await ticketContext?.close();
