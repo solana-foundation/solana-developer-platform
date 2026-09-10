@@ -49,6 +49,22 @@ describe("detectFigureAnomalies", () => {
     expect(anomaly?.ratio).toBeCloseTo(1 / 6, 12);
   });
 
+  it("flags both exact ratio boundaries without binary-float drift", () => {
+    const anomalies = detectFigureAnomalies(
+      [stored("up", "0.1"), stored("down", "0.3")],
+      [
+        { providerReference: "up", currentApy: "0.3" },
+        { providerReference: "down", currentApy: "0.1" },
+      ]
+    );
+
+    expect(anomalies).toEqual([
+      expect.objectContaining({ providerReference: "up", reason: "jump", ratio: 3 }),
+      expect.objectContaining({ providerReference: "down", reason: "jump" }),
+    ]);
+    expect(anomalies[1]?.ratio).toBeCloseTo(1 / 3, 9);
+  });
+
   it("ignores ordinary drift and sub-floor noise around zero", () => {
     expect(
       detectFigureAnomalies(

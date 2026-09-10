@@ -31,6 +31,12 @@
  * the numbers.
  */
 
+import {
+  compareDecimalAmounts,
+  decimalStringFromNumber,
+  subtractDecimalAmounts,
+  sumDecimalAmounts,
+} from "@sdp/payments/decimal";
 import type { SolanaCluster } from "@sdp/types";
 import { logEvent } from "@/runtime/money-path-events";
 
@@ -234,6 +240,64 @@ const NUMERIC_STRING = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
  * ratio is undefined, so the absolute floor decides on its own.
  */
 function judgeJump(
+  previous: number,
+  current: number,
+  bound: { ratio: number; minAbsoluteDelta: number }
+): { ratio: number | null } | null {
+  try {
+    return judgeJumpExactly(previous, current, bound);
+  } catch {
+    // Provider-controlled figures can be finite yet exceed the fixed-point
+    // helper's range. Telemetry must never block the catalogue write, so retain
+    // a float fallback for those implausible values; ordinary shelf figures use
+    // the exact path below.
+    return judgeJumpWithNumbers(previous, current, bound);
+  }
+}
+
+/**
+ * Decide the configured boundaries with the shared decimal helpers. Binary
+ * floats put both exact 3x boundaries on the wrong side (`0.3 / 0.1` is just
+ * under 3, and `0.1 / 0.3` just over one-third), silently missing both moves.
+ */
+function judgeJumpExactly(
+  previous: number,
+  current: number,
+  bound: { ratio: number; minAbsoluteDelta: number }
+): { ratio: number | null } | null {
+  const previousMagnitude = decimalStringFromNumber(Math.abs(previous));
+  const currentMagnitude = decimalStringFromNumber(Math.abs(current));
+  const absoluteDelta =
+    previous < 0 !== current < 0
+      ? sumDecimalAmounts([previousMagnitude, currentMagnitude])
+      : compareDecimalAmounts(previousMagnitude, currentMagnitude) >= 0
+        ? subtractDecimalAmounts(previousMagnitude, currentMagnitude)
+        : subtractDecimalAmounts(currentMagnitude, previousMagnitude);
+  if (compareDecimalAmounts(absoluteDelta, decimalStringFromNumber(bound.minAbsoluteDelta)) < 0) {
+    return null;
+  }
+  if (previous <= 0 || current <= 0) return { ratio: null };
+
+  const previousDecimal = decimalStringFromNumber(previous);
+  const currentDecimal = decimalStringFromNumber(current);
+  const previousTimesBound = sumDecimalAmounts(
+    Array.from({ length: bound.ratio }, () => previousDecimal)
+  );
+  const currentTimesBound = sumDecimalAmounts(
+    Array.from({ length: bound.ratio }, () => currentDecimal)
+  );
+  const upperComparison = compareDecimalAmounts(currentDecimal, previousTimesBound);
+  if (upperComparison >= 0) {
+    return { ratio: upperComparison === 0 ? bound.ratio : current / previous };
+  }
+  const lowerComparison = compareDecimalAmounts(previousDecimal, currentTimesBound);
+  if (lowerComparison >= 0) {
+    return { ratio: lowerComparison === 0 ? 1 / bound.ratio : current / previous };
+  }
+  return null;
+}
+
+function judgeJumpWithNumbers(
   previous: number,
   current: number,
   bound: { ratio: number; minAbsoluteDelta: number }
