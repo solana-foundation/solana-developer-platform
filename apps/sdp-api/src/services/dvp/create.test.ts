@@ -32,6 +32,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
+  signatureBytes,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -777,6 +778,33 @@ describe("createDvpTrade", () => {
     });
 
     await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/missing the sponsor/);
+    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // A filled slot is not a signature. Kora is trusted to sign, not to be
+  // infallible: bytes that fail Ed25519 against the sponsor's key must fail the
+  // claim here, not be persisted in flight for the RPC to reject later.
+  it("refuses a sponsor signature that does not verify", async () => {
+    prepareOwnedSubmission.mockImplementation(async (bytes: Uint8Array, lifecycle) => {
+      const transaction = getTransactionDecoder().decode(bytes);
+      const forged = {
+        ...transaction,
+        signatures: {
+          ...transaction.signatures,
+          [sponsor.address]: signatureBytes(new Uint8Array(64).fill(9)),
+        },
+      };
+      const submission = {
+        signedTransaction: new Uint8Array(getTransactionEncoder().encode(forged)),
+        signature: TEST_SIGNATURE,
+        releaseDefinitelyUnbroadcast,
+      };
+      await lifecycle.persistSigned(submission);
+      return submission;
+    });
+
+    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/invalid sponsor/);
     await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
     expect(sendTransaction).not.toHaveBeenCalled();
   });

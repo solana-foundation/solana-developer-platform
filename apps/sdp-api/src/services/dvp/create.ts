@@ -501,7 +501,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
       lastValidBlockHeight,
       store: {
         persistSigned: async ({ signature, signedTransaction, lastValidBlockHeight: height }) => {
-          assertSponsorSignedSameMessage({
+          await assertSponsorSignedSameMessage({
             unsignedOrPartiallySigned: compiled,
             sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
             sponsor,

@@ -304,7 +304,7 @@ export async function signVaultPlan(
     signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
       feePayment.signAsFeePayer(ownerSignedBytes)
     );
-    assertSponsorSignedSameMessage({
+    await assertSponsorSignedSameMessage({
       unsignedOrPartiallySigned: ownerSigned,
       sponsorSigned: signedBytes,
       sponsor: feePayer,
