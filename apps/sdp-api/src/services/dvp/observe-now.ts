@@ -58,8 +58,8 @@ export async function observeDvpTradeNow(
       rpc,
       trade.swapDvp,
       {
-        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA },
-        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB },
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
       },
       blockHeight
     );
@@ -130,8 +130,8 @@ export async function observeDvpTradeWithoutRecording(
       rpc,
       trade.swapDvp,
       {
-        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA },
-        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB },
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
       },
       blockHeight
     );

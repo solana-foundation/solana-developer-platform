@@ -530,7 +530,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${body.side} party address`
     );
   }
-  const { side } = resolved.funding;
+  const { side, approvedAmount } = resolved.funding;
   const partyAddress = side === "a" ? trade.userA : trade.userB;
 
   // PRE-BROADCAST RE-READ — the ticket's authorization invariant: re-derive
@@ -562,6 +562,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
     custodyWalletId: rereadWalletId,
     organizationId: auth.organizationId,
     projectId,
+    approvedAmount,
   });
 
   await observeDvpTradeNow(c.env, trade, result.signature);

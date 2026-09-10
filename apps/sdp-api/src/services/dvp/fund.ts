@@ -1,4 +1,6 @@
 /** Moving one side of a trade into escrow, from the custody wallet that owns that side's party address. */
+
+import { decodeSwapDvpChecked, SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,
@@ -20,11 +22,12 @@ import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { badRequest, conflict } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import { readMintDecimals } from "./mints";
-import { readEscrowState } from "./read-chain";
+import { readDvpAccounts, readEscrowState } from "./read-chain";
 
 /** Statuses from which a leg can still be funded. */
 const FUNDABLE: ReadonlySet<DvpTradeStatus> = new Set(["created", "partially_funded"]);
@@ -70,8 +73,17 @@ export async function readDvpLegShortfall(
   side: DvpTradeSide
 ): Promise<bigint> {
   const leg = legOfSide(trade, side);
-  const state = await readEscrowState(solanaRpc.createRpc(env), leg.escrow, leg.tokenProgram);
-  const held = state?.amount ?? 0n;
+  const state = await readEscrowState(
+    solanaRpc.createRpc(env),
+    leg.escrow,
+    leg.tokenProgram,
+    leg.mint,
+    trade.swapDvp
+  );
+  if (state === null) {
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+  }
+  const held = state.amount;
   return held >= leg.amount ? 0n : leg.amount - held;
 }
 
@@ -82,6 +94,8 @@ export async function readDvpLegShortfall(
  */
 export interface DvpFundingPlan {
   leg: DvpSdpLeg;
+  /** Maximum shortfall authorized by policy for this execution. */
+  approvedAmount: bigint;
   /** Whose wallet signs and pays. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
   /** Takes the lock on this leg. False when somebody else already holds it. */
@@ -101,11 +115,13 @@ export function fundingPlan(
   env: Env,
   trade: DvpTradeRow,
   side: DvpTradeSide,
+  approvedAmount: bigint,
   signer: { organizationId: string; projectId: string; custodyWalletId: string }
 ): DvpFundingPlan {
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   return {
     leg: legOfSide(trade, side),
+    approvedAmount,
     signer,
     claim: (signature, expiryHeight) =>
       claims.claim({
@@ -135,12 +151,13 @@ export async function fundDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
+    approvedAmount: bigint;
   }
 ): Promise<DvpFundResult> {
   return executeDvpFunding(
     c,
     trade,
-    fundingPlan(c.env, trade, params.side, {
+    fundingPlan(c.env, trade, params.side, params.approvedAmount, {
       organizationId: params.organizationId,
       projectId: params.projectId,
       custodyWalletId: params.custodyWalletId,
@@ -171,9 +188,81 @@ export async function executeDvpFunding(
   // Read the escrow NOW rather than trusting the reconciler's last sweep. The
   // sweep runs once a minute, so acting on it would let two funding requests a
   // few seconds apart both believe the escrow was empty.
-  const escrowState = await readEscrowState(rpc, escrow, tokenProgram);
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
+    a: {
+      escrow: trade.escrowA,
+      tokenProgram: trade.tokenProgramA,
+      mint: trade.mintA,
+    },
+    b: {
+      escrow: trade.escrowB,
+      tokenProgram: trade.tokenProgramB,
+      mint: trade.mintB,
+    },
+  });
 
-  if (escrowState?.frozen) {
+  try {
+    await verifySwapDvpAccount(snapshot.trade);
+  } catch (error) {
+    if (error instanceof SwapDvpVerificationError) {
+      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`);
+    }
+    throw error;
+  }
+
+  const onChain = decodeSwapDvpChecked(snapshot.trade).data;
+  const recorded = {
+    userA: trade.userA,
+    userB: trade.userB,
+    mintA: trade.mintA,
+    mintB: trade.mintB,
+    amountA: BigInt(trade.amountA),
+    amountB: BigInt(trade.amountB),
+    expiryTimestamp: BigInt(trade.expiryTimestamp),
+    userASettlementDestination: trade.userASettlementDestination,
+    userBSettlementDestination: trade.userBSettlementDestination,
+    settlementAuthority: trade.settlementAuthority,
+  };
+  const live = {
+    userA: onChain.userA,
+    userB: onChain.userB,
+    mintA: onChain.mintA,
+    mintB: onChain.mintB,
+    amountA: onChain.amountA,
+    amountB: onChain.amountB,
+    expiryTimestamp: onChain.expiryTimestamp,
+    userASettlementDestination: onChain.userASettlementDestination,
+    userBSettlementDestination: onChain.userBSettlementDestination,
+    settlementAuthority: onChain.settlementAuthority,
+  };
+  const termsMatch =
+    live.userA === recorded.userA &&
+    live.userB === recorded.userB &&
+    live.mintA === recorded.mintA &&
+    live.mintB === recorded.mintB &&
+    live.amountA === recorded.amountA &&
+    live.amountB === recorded.amountB &&
+    live.expiryTimestamp === recorded.expiryTimestamp &&
+    live.userASettlementDestination === recorded.userASettlementDestination &&
+    live.userBSettlementDestination === recorded.userBSettlementDestination &&
+    live.settlementAuthority === recorded.settlementAuthority;
+  if (!termsMatch) {
+    getLogger().warn(
+      { tradeId: trade.id, swapDvp: trade.swapDvp, recorded, onChain: live },
+      "dvp funding: on-chain trade does not match recorded terms"
+    );
+    throw conflict(
+      `DvP trade ${trade.id}: the on-chain trade does not match the recorded terms; nothing was sent`
+    );
+  }
+
+  const legObservation = side === "a" ? snapshot.legA : snapshot.legB;
+  if (!legObservation.exists) {
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+  }
+  const escrowState = { amount: legObservation.amount, frozen: legObservation.frozen };
+
+  if (escrowState.frozen) {
     // The transfer would bounce. Saying so costs nothing; learning it from a
     // failed broadcast costs a signature and leaves an unexplained failure.
     throw badRequest(
@@ -181,7 +270,7 @@ export async function executeDvpFunding(
     );
   }
 
-  const held = escrowState?.amount ?? 0n;
+  const held = escrowState.amount;
   if (held >= amount) {
     throw conflict(
       `DvP trade ${trade.id}: this leg already holds ${held} of ${amount}, so there is nothing left to fund.`
@@ -194,6 +283,11 @@ export async function executeDvpFunding(
   // revert the whole settlement. Funding a partly funded leg has to top it up
   // exactly.
   const outstanding = amount - held;
+  if (outstanding > plan.approvedAmount) {
+    throw conflict(
+      `DvP trade ${trade.id}: the shortfall grew to ${outstanding} after approval for ${plan.approvedAmount}; re-authorize`
+    );
+  }
 
   const signer = await createOrgSignerForCustodyWallet(
     env,
@@ -252,8 +346,11 @@ export async function executeDvpFunding(
   // deposit capped at the target, which is a program change, not an API one.
   // Aborting is the safe half of the trade-off: a refused top-up is retryable,
   // an over-funded escrow depends on the surplus-refund path working.
-  const recheck = await readEscrowState(rpc, escrow, tokenProgram);
-  if ((recheck?.amount ?? 0n) !== held) {
+  const recheck = await readEscrowState(rpc, escrow, tokenProgram, mint, trade.swapDvp);
+  if (recheck === null) {
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+  }
+  if (recheck.amount !== held) {
     throw conflict(
       `DvP trade ${trade.id}: the escrow balance changed while this funding was being prepared, so ${outstanding} is no longer the amount owed. Nothing was sent — retry to fund the current shortfall.`
     );

@@ -310,9 +310,29 @@ describe("extractDvpFundPolicyCandidate", () => {
     getWalletOperationById.mockResolvedValue({ amount: "600" });
     readDvpLegShortfall.mockResolvedValue(400n);
 
-    const { candidate } = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
+    const { candidate, resolved } = await extractDvpFundPolicyCandidate(
+      extractContext({ side: "a" })
+    );
 
     expect(candidate?.amount).toBe("600");
+    expect(resolved).toEqual({
+      trade: expect.objectContaining({ id: "dvp_policy_test" }),
+      funding: { side: "a", custodyWalletId: "cwlt_a", approvedAmount: 600n },
+    });
+    expect(readDvpLegShortfall).not.toHaveBeenCalled();
+  });
+
+  it("carries the approved amount as the execution ceiling when the live shortfall grew", async () => {
+    approvedWalletOperationId.mockReturnValue("wop_1");
+    getWalletOperationById.mockResolvedValue({ amount: "600" });
+    readDvpLegShortfall.mockResolvedValue(900n);
+
+    const { resolved } = await extractDvpFundPolicyCandidate(extractContext({ side: "a" }));
+
+    expect(resolved).toEqual({
+      trade: expect.objectContaining({ id: "dvp_policy_test" }),
+      funding: { side: "a", custodyWalletId: "cwlt_a", approvedAmount: 600n },
+    });
     expect(readDvpLegShortfall).not.toHaveBeenCalled();
   });
 
@@ -379,7 +399,7 @@ describe("extractDvpFundPolicyCandidate", () => {
     expect(candidate?.custodyWalletId).toBe("cwlt_named");
     expect(resolved).toEqual({
       trade: expect.anything(),
-      funding: { side: "a", custodyWalletId: "cwlt_named" },
+      funding: { side: "a", custodyWalletId: "cwlt_named", approvedAmount: 600n },
     });
   });
 

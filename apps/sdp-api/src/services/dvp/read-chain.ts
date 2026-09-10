@@ -28,6 +28,7 @@ const TOKEN_ACCOUNT_MIN_SIZE = 165;
 export interface DvpLegAddress {
   escrow: Address;
   tokenProgram: Address;
+  mint: Address;
 }
 
 const MISSING: DvpLegObservation = { exists: false, amount: 0n, frozen: false };
@@ -42,7 +43,8 @@ const MISSING: DvpLegObservation = { exists: false, amount: 0n, frozen: false };
  */
 function readLeg(
   account: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number],
-  leg: DvpLegAddress
+  leg: DvpLegAddress,
+  swapDvp: Address
 ): DvpLegObservation {
   if (!account.exists) {
     return MISSING;
@@ -63,6 +65,19 @@ function readLeg(
   }
 
   const token = getTokenDecoder().decode(account.data);
+  if (token.mint !== leg.mint || token.owner !== swapDvp) {
+    getLogger().warn(
+      {
+        escrow: account.address,
+        mint: token.mint,
+        expectedMint: leg.mint,
+        owner: token.owner,
+        expectedOwner: swapDvp,
+      },
+      "dvp reconcile: escrow token account does not match its trade leg"
+    );
+    return MISSING;
+  }
   return {
     exists: true,
     // The raw u64. Scaling extensions change only the derived UI amount, never
@@ -83,11 +98,39 @@ function readLeg(
 export async function readEscrowState(
   rpc: SolanaRpc,
   escrow: Address,
-  tokenProgram: Address
+  tokenProgram: Address,
+  mint: Address,
+  swapDvp: Address
 ): Promise<{ amount: bigint; frozen: boolean } | null> {
   const [account] = await fetchEncodedAccounts(rpc, [escrow]);
-  const leg = readLeg(account, { escrow, tokenProgram });
+  const leg = readLeg(account, { escrow, tokenProgram, mint }, swapDvp);
   return leg.exists ? { amount: leg.amount, frozen: leg.frozen } : null;
+}
+
+/**
+ * Fetches a trade and both escrows at one slot for callers that must verify
+ * terms before acting.
+ *
+ * @param rpc - Solana RPC for the trade's cluster.
+ * @param swapDvp - The trade account address.
+ * @param legs - Expected escrow identity for each leg.
+ * @returns The encoded trade account and decoded escrow observations.
+ */
+export async function readDvpAccounts(
+  rpc: SolanaRpc,
+  swapDvp: Address,
+  legs: { a: DvpLegAddress; b: DvpLegAddress }
+): Promise<{
+  trade: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number];
+  legA: DvpLegObservation;
+  legB: DvpLegObservation;
+}> {
+  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
+  return {
+    trade: accounts[0],
+    legA: readLeg(accounts[1], legs.a, swapDvp),
+    legB: readLeg(accounts[2], legs.b, swapDvp),
+  };
 }
 
 /**
@@ -146,12 +189,12 @@ export async function readDvpTradeObservation(
   // reads them at different slots, and a settle landing between the two calls
   // would show a closed trade beside still-funded escrows: a half-settled state
   // this program cannot actually produce.
-  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
+  const accounts = await readDvpAccounts(rpc, swapDvp, legs);
 
   return {
-    tradeAccountExists: await readTradeAccountExists(accounts[0]),
-    legA: readLeg(accounts[1], legs.a),
-    legB: readLeg(accounts[2], legs.b),
+    tradeAccountExists: await readTradeAccountExists(accounts.trade),
+    legA: accounts.legA,
+    legB: accounts.legB,
     blockHeight,
     closeResolution: null,
   };

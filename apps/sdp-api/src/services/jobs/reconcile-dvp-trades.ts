@@ -12,7 +12,7 @@
  */
 
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
-import { type Address, assertIsSignature } from "@solana/kit";
+import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
@@ -165,10 +165,18 @@ async function reconcileTrade(
 ): Promise<void> {
   const observation = await readDvpTradeObservation(
     rpc,
-    trade.swapDvp as Address,
+    trade.swapDvp,
     {
-      a: { escrow: trade.escrowA as Address, tokenProgram: trade.tokenProgramA as Address },
-      b: { escrow: trade.escrowB as Address, tokenProgram: trade.tokenProgramB as Address },
+      a: {
+        escrow: trade.escrowA,
+        tokenProgram: trade.tokenProgramA,
+        mint: trade.mintA,
+      },
+      b: {
+        escrow: trade.escrowB,
+        tokenProgram: trade.tokenProgramB,
+        mint: trade.mintB,
+      },
     },
     blockHeight
   );
