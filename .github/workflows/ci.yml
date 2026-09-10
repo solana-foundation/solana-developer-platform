@@ -1074,13 +1074,20 @@ jobs:
     needs: [unit_test_scope, browser_e2e]
     if: always() && needs.unit_test_scope.outputs.e2e == 'true'
     timeout-minutes: 5
+    permissions:
+      actions: read
     steps:
-      - name: Report browser e2e results
+      - name: Require all five issuance groups green
         env:
-          E2E_RESULT: ${{ needs.browser_e2e.result }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${E2E_RESULT}" != "success" ]; then
-            echo "One or more browser e2e jobs finished with ${E2E_RESULT}." >&2
+          set -euo pipefail
+          conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist)\\)$")) | .conclusion]')
+          count=$(jq 'length' <<<"${conclusions}")
+          green=$(jq '[.[] | select(. == "success")] | length' <<<"${conclusions}")
+          if [ "${count}" -ne 5 ] || [ "${green}" -ne 5 ]; then
+            echo "Expected 5 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
             exit 1
           fi
-          echo "All browser e2e jobs passed."
+          echo "All 5 issuance e2e groups passed."
