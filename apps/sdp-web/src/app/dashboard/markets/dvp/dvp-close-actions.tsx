@@ -38,39 +38,47 @@ export function DvpCloseActions({
   const canSettle = canSettleDvpTrade(trade);
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <Button
-            className="self-start"
-            disabled={!canSettle || pending !== null}
-            onClick={() => onAct("settle")}
-            type="button"
-          >
+    <div className="flex flex-col gap-3">
+      <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-medium text-primary text-sm">
             {t("DashboardMarkets.dvp.actionSettle")}
-          </Button>
-          <p className="text-secondary text-xs leading-relaxed">
+          </h3>
+          <p className="mt-0.5 text-secondary text-xs leading-relaxed">
             {t("DashboardMarkets.dvp.settleHint")}
+            {canSettle ? null : (
+              <span className="text-tertiary"> {t("DashboardMarkets.dvp.settleBlocked")}</span>
+            )}
           </p>
-          {canSettle ? null : (
-            <p className="text-tertiary text-xs">{t("DashboardMarkets.dvp.settleBlocked")}</p>
-          )}
         </div>
-        <div className="flex flex-col gap-2">
-          <Button
-            className="self-start"
-            disabled={pending !== null}
-            onClick={() => setConfirmingCancel(true)}
-            type="button"
-            variant="destructive"
-          >
+        <Button
+          className="shrink-0"
+          disabled={!canSettle || pending !== null}
+          onClick={() => onAct("settle")}
+          type="button"
+        >
+          {t("DashboardMarkets.dvp.actionSettle")}
+        </Button>
+      </section>
+      <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-medium text-primary text-sm">
             {t("DashboardMarkets.dvp.actionCancel")}
-          </Button>
-          <p className="text-secondary text-xs leading-relaxed">
+          </h3>
+          <p className="mt-0.5 text-secondary text-xs leading-relaxed">
             {t("DashboardMarkets.dvp.cancelHint")}
           </p>
         </div>
-      </div>
+        <Button
+          className="shrink-0 text-destructive"
+          disabled={pending !== null}
+          onClick={() => setConfirmingCancel(true)}
+          type="button"
+          variant="outline"
+        >
+          {t("DashboardMarkets.dvp.actionCancel")}
+        </Button>
+      </section>
 
       <Modal
         ariaLabel={t("DashboardMarkets.dvp.cancelConfirmTitle")}
@@ -108,6 +116,6 @@ export function DvpCloseActions({
           </div>
         </div>
       </Modal>
-    </section>
+    </div>
   );
 }

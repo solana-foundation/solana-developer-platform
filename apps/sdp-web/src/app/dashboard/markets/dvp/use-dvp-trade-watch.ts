@@ -8,7 +8,7 @@
  * events, so the only way to learn about a deposit is to look. Until this, the
  * page looked exactly once — when it was rendered — and then sat there. The
  * deposit landed, the reconciler recorded it a minute later, and the screen went
- * on saying "Waiting on funds" until somebody reloaded by hand.
+ * on saying "Awaiting deposit" until somebody reloaded by hand.
  *
  * That is the thing this product is for. A page that cannot show it arriving is
  * a page you have to distrust and refresh, which is worse than no page.

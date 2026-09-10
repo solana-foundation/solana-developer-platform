@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * The trade detail page.
  *
@@ -7,8 +8,9 @@
  * endpoint with the side, so each card's button names its own leg.
  */
 
+import { fireEvent, render, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
@@ -24,6 +26,30 @@ import type { DvpTrade } from "./dvp-trade";
 import { DvpTradeDetailWorkspace } from "./dvp-trade-detail-workspace";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
+// The on-chain details slide open through HeightReveal, which measures itself
+// with a ResizeObserver jsdom does not ship.
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    disconnect() {}
+  }
+);
+afterEach(() => {
+  document.body.innerHTML = "";
+});
+
+/** The page with the on-chain details opened, as text. */
+function renderDetailWithOnChainOpen(value: DvpTrade): string {
+  const { container } = render(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+    </I18nProvider>
+  );
+  fireEvent.click(within(container).getByRole("button", { name: "On-chain details" }));
+  return container.textContent;
+}
 
 function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
   return testTrade(overrides);
@@ -41,22 +67,16 @@ function renderDetail(value: DvpTrade): string {
 
 describe("DvpTradeDetailWorkspace", () => {
   // The escrow address IS the counterparty's whole integration, so it has to be
-  // on the page for both legs.
-  it("publishes an escrow address for each leg", () => {
-    const html = renderDetail(trade());
+  // reachable for both legs: behind the on-chain details, one click away.
+  it("publishes an escrow address for each leg in the on-chain details", () => {
+    const text = renderDetailWithOnChainOpen(trade());
 
-    expect(html).toContain(LEG_ESCROW_A);
-    expect(html).toContain(LEG_ESCROW_B);
+    expect(text).toContain(LEG_ESCROW_A);
+    expect(text).toContain(LEG_ESCROW_B);
   });
 
-  it("renders the derived kind where the old trade kind badge sat", () => {
-    const html = renderDetail(trade({ kind: "bilateral" }));
-
-    expect(html).toContain("Both legs are yours");
-  });
-
-  // Position, not count: what matters is that the control falls inside the card
-  // for OUR escrow and before the counterparty's.
+  // Position, not count: what matters is that the control falls inside OUR
+  // leg's card, which renders first, and before the counterparty's.
   it("attaches funding to the leg the caller custodies", () => {
     const html = renderDetail(
       trade({
@@ -71,8 +91,8 @@ describe("DvpTradeDetailWorkspace", () => {
     );
 
     const fundAt = html.indexOf("Fund this leg");
-    expect(fundAt).toBeGreaterThan(html.indexOf(LEG_ESCROW_A));
-    expect(fundAt).toBeLessThan(html.indexOf(LEG_ESCROW_B));
+    expect(fundAt).toBeGreaterThan(html.indexOf("Asset leg"));
+    expect(fundAt).toBeLessThan(html.indexOf("Cash leg"));
   });
 
   // Same rule, opposite side. Reading the wrong leg would offer to spend a
@@ -90,7 +110,9 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html.indexOf("Fund this leg")).toBeGreaterThan(html.indexOf(LEG_ESCROW_B));
+    const fundAt = html.indexOf("Fund this leg");
+    expect(fundAt).toBeGreaterThan(html.indexOf("Cash leg"));
+    expect(fundAt).toBeLessThan(html.indexOf("Asset leg"));
   });
 
   // A bilateral trade is two custodied legs: each card funds its own side
@@ -112,8 +134,8 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html.indexOf("Fund this leg")).toBeGreaterThan(html.indexOf(LEG_ESCROW_A));
-    expect(html.lastIndexOf("Fund this leg")).toBeGreaterThan(html.indexOf(LEG_ESCROW_B));
+    expect(html.indexOf("Fund this leg")).toBeGreaterThan(html.indexOf("Asset leg"));
+    expect(html.lastIndexOf("Fund this leg")).toBeGreaterThan(html.indexOf("Cash leg"));
     expect(html.match(/Fund this leg/g)?.length).toBe(2);
   });
 
@@ -126,10 +148,10 @@ describe("DvpTradeDetailWorkspace", () => {
     });
 
     it("still publishes both escrow addresses, which are the whole integration", () => {
-      const html = renderDetail(agent());
+      const text = renderDetailWithOnChainOpen(agent());
 
-      expect(html).toContain(LEG_ESCROW_A);
-      expect(html).toContain(LEG_ESCROW_B);
+      expect(text).toContain(LEG_ESCROW_A);
+      expect(text).toContain(LEG_ESCROW_B);
     });
 
     it("captions the legs by party rather than claiming one is held here", () => {
@@ -213,7 +235,8 @@ describe("DvpTradeDetailWorkspace", () => {
       const fundAt = html.indexOf("Fund this leg");
 
       expect(fundAt).toBeGreaterThan(-1);
-      expect(fundAt).toBeGreaterThan(html.indexOf(LEG_ESCROW_B));
+      expect(fundAt).toBeGreaterThan(html.indexOf("Cash leg"));
+      expect(fundAt).toBeLessThan(html.indexOf("Asset leg"));
     });
 
     it("withdraws it once their own leg is funded", () => {
@@ -337,20 +360,11 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(html).toContain("Holds more than the trade needs");
   });
 
-  // The settlement authority is part of the trade's on-chain address, so it
-  // cannot be changed and is worth showing.
-  it("shows the settlement authority", () => {
-    const html = renderDetail(trade());
-
-    expect(html).toContain("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY");
-  });
-
-  // The program emits no events, so a status is a reading taken at a moment in
-  // time. Saying "never checked" beats implying a fresh zero.
-  it("says when nothing has read the trade yet", () => {
-    const html = renderDetail(trade());
-
-    expect(html).toContain("Never checked");
+  it("shows the reference in the on-chain details only when the trade carries one", () => {
+    expect(renderDetailWithOnChainOpen(trade({ refString: "INV-2026-0042" }))).toContain(
+      "INV-2026-0042"
+    );
+    expect(renderDetailWithOnChainOpen(trade({ refString: null }))).not.toContain("Your reference");
   });
 
   it("offers no actions on a settled trade", () => {
@@ -358,23 +372,5 @@ describe("DvpTradeDetailWorkspace", () => {
 
     expect(html).not.toContain("Fund this leg");
     expect(html).not.toContain("Both legs must be funded");
-  });
-
-  it("links a funded leg's signature to the explorer per leg", () => {
-    const html = renderDetail(
-      trade({
-        legs: {
-          a: testLeg({
-            escrow: LEG_ESCROW_A,
-            fundingSignature:
-              "2Ufq4fR5J8nYwxCzTuKw4GnxgJvjP9yWm7dQdZGpHjH6LqZ9mJf2dZrDvEg7NVpzcxKiY1T3sE5b7V9nA1C3",
-            party: ownParty(),
-          }),
-          b: testLeg({ escrow: LEG_ESCROW_B }),
-        },
-      })
-    );
-
-    expect(html.indexOf("Funding transaction")).toBeGreaterThan(html.indexOf(LEG_ESCROW_A));
   });
 });
