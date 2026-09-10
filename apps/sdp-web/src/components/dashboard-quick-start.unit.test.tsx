@@ -35,7 +35,7 @@ const ui = (docked = false) => (
 
 const renderGuide = () => {
   const view = render(ui());
-  const launcher = view.queryByRole("button", { name: /Quick start \d\/3/ });
+  const launcher = view.queryByRole("button", { name: /SDP quick start · \d\/3/ });
   if (launcher) fireEvent.click(launcher);
   return view;
 };
@@ -59,8 +59,8 @@ describe("dashboard quick start", () => {
   it("opens as a modal and can be minimized left without losing progress", () => {
     const view = render(ui());
     expect(view.getByRole("dialog")).toBeTruthy();
-    expect(view.getByRole("heading", { name: "Create an API key" })).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Do this later" }));
+    expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Continue later" }));
     expect(view.queryByRole("heading")).toBeNull();
     expect(view.getByRole("complementary").className).toContain("left-4");
     expect(readQuickStart(key())).toBe("api-key");
@@ -69,14 +69,14 @@ describe("dashboard quick start", () => {
 
   it("links to API-key creation without prematurely completing the step", () => {
     const view = renderGuide();
-    expect(view.getByRole("link", { name: "Create an API key" }).getAttribute("href")).toBe(
+    expect(view.getByRole("link", { name: "Create API key" }).getAttribute("href")).toBe(
       "/dashboard/api-keys/new"
     );
     expect(view.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1");
     expect(readQuickStart(key())).toBe("api-key");
     act(() => completeQuickStartStep(key(), "api-key"));
     expect(view.getByText("Step 2 of 3 · Optional")).toBeTruthy();
-    expect(view.getByRole("link", { name: "Create a wallet" }).getAttribute("href")).toBe(
+    expect(view.getByRole("link", { name: "Create wallet" }).getAttribute("href")).toBe(
       "/dashboard/wallets/setup"
     );
     act(() => completeQuickStartStep(key(), "wallet"));
@@ -88,10 +88,10 @@ describe("dashboard quick start", () => {
   it("lets an existing API-key holder skip the optional wallet", () => {
     const view = renderGuide();
     fireEvent.click(view.getByRole("button", { name: "I already have an API key" }));
-    fireEvent.click(view.getByRole("button", { name: "Skip this step" }));
+    fireEvent.click(view.getByRole("button", { name: "Skip wallet setup" }));
     expect(view.getByRole("heading", { name: "Get test USDC" })).toBeTruthy();
-    expect(view.getByText(/Test funds have no monetary value/)).toBeTruthy();
-    const faucet = view.getByRole("link", { name: "Open USDC faucet" });
+    expect(view.getByText(/Test USDC has no monetary value/)).toBeTruthy();
+    const faucet = view.getByRole("link", { name: "Open Circle faucet" });
     expect(faucet.getAttribute("href")).toBe("https://faucet.circle.com/");
     expect(faucet.getAttribute("target")).toBe("_blank");
     expect(readQuickStart(key())).toBe("faucet");
@@ -101,7 +101,7 @@ describe("dashboard quick start", () => {
 
   it("remembers dismissal and does not reopen after unrelated creation", () => {
     const view = render(ui());
-    fireEvent.click(view.getByRole("button", { name: "Skip quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     expect(window.localStorage.getItem(key())).toBe("done");
     act(() => completeQuickStartStep(key(), "api-key"));
     expect(readQuickStart(key())).toBe("done");
@@ -120,7 +120,7 @@ describe("dashboard quick start", () => {
     workspace.dashboardCacheScope.orgId = "another_org";
     view.rerender(ui());
     expect(view.getByRole("dialog")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Skip quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     workspace.dashboardCacheScope.userId = "another_user";
     view.rerender(ui());
     expect(view.getByRole("dialog")).toBeTruthy();
@@ -147,13 +147,13 @@ describe("dashboard quick start", () => {
 
   it("follows the action on the right after navigation, without advancing on click", () => {
     const view = renderGuide();
-    fireEvent.click(view.getByRole("link", { name: "Create an API key" }));
+    fireEvent.click(view.getByRole("link", { name: "Create API key" }));
     workspace.pathname = "/dashboard/api-keys/new";
     view.rerender(ui());
     expect(view.queryByRole("dialog")).toBeNull();
     expect(view.getByRole("complementary").className).toContain("right-4");
     expect(readQuickStart(key())).toBe("api-key");
-    fireEvent.click(view.getByRole("button", { name: "Minimize quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
     expect(view.queryByRole("heading")).toBeNull();
     view.unmount();
     expect(render(ui()).getByRole("complementary").className).toContain("right-4");
@@ -167,10 +167,10 @@ describe("dashboard quick start", () => {
     expect(dock.className).not.toContain("fixed");
     expect(dock.className).toContain("shrink-0");
     expect(view.queryByRole("dialog")).toBeNull();
-    const launcher = view.getByRole("button", { name: /Quick start 1\/3/ });
+    const launcher = view.getByRole("button", { name: /SDP quick start · 1\/3/ });
     fireEvent.click(launcher);
     expect(view.getByRole("dialog")).toBeTruthy();
-    expect(view.queryByRole("link", { name: "Create an API key" })).toBeNull();
+    expect(view.queryByRole("link", { name: "Create API key" })).toBeNull();
     fireEvent.click(view.getByRole("button", { name: "Back to form" }));
     expect(view.queryByRole("dialog")).toBeNull();
     expect(view.getByRole("complementary").className).not.toContain("fixed");
@@ -181,9 +181,9 @@ describe("dashboard quick start", () => {
     workspace.flags.custody = false;
     setQuickStart(key(), "wallet");
     const view = renderGuide();
-    expect(view.queryByRole("link", { name: "Create a wallet" })).toBeNull();
-    fireEvent.click(view.getByRole("button", { name: "Skip this step" }));
-    expect(view.getByRole("link", { name: "Open USDC faucet" })).toBeTruthy();
+    expect(view.queryByRole("link", { name: "Create wallet" })).toBeNull();
+    fireEvent.click(view.getByRole("button", { name: "Skip wallet setup" }));
+    expect(view.getByRole("link", { name: "Open Circle faucet" })).toBeTruthy();
   });
 
   it("works when browser storage writes fail", () => {
@@ -192,8 +192,8 @@ describe("dashboard quick start", () => {
     });
     const view = renderGuide();
     fireEvent.click(view.getByRole("button", { name: "I already have an API key" }));
-    expect(view.getByRole("heading", { name: "Create a wallet" })).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Skip quick start" }));
+    expect(view.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     expect(view.queryByRole("complementary")).toBeNull();
   });
 

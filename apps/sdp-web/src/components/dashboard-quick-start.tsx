@@ -25,7 +25,7 @@ const stepCopy = {
     number: 1,
     next: "wallet",
     href: "/dashboard/api-keys/new",
-    action: "Shared.quickStart.apiKeyTitle",
+    action: "Shared.quickStart.apiKeyAction",
     skip: "Shared.quickStart.haveApiKey",
     title: "Shared.quickStart.apiKeyTitle",
     description: "Shared.quickStart.apiKeyDescription",
@@ -34,7 +34,7 @@ const stepCopy = {
     number: 2,
     next: "faucet",
     href: "/dashboard/wallets/setup",
-    action: "Shared.quickStart.walletTitle",
+    action: "Shared.quickStart.walletAction",
     skip: "Shared.quickStart.skipWallet",
     title: "Shared.quickStart.walletTitle",
     description: "Shared.quickStart.walletDescription",
@@ -153,13 +153,15 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
         onClick={() => setExpandedKey(storageKey)}
         className="flex min-h-9 items-center gap-2 rounded-full px-3 text-sm hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        {t("Shared.quickStart.title")} <span className="text-xs text-tertiary">{stepNumber}/3</span>
+        {t("Shared.quickStart.title")}{" "}
+        <span className="text-xs text-tertiary">· {stepNumber}/3</span>
         <ChevronUp className="size-4 text-tertiary" aria-hidden />
       </button>
       <button
         type="button"
         onClick={() => setQuickStart(storageKey, "done")}
         aria-label={t("Shared.quickStart.skip")}
+        title={t("Shared.quickStart.skip")}
         className="flex size-9 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         <X className="size-4" aria-hidden />
@@ -174,15 +176,19 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
   const content = (
     <>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-tertiary">
-          {t("Shared.quickStart.progress", { current: stepNumber, total: 3 })}
-          {step === "wallet" ? ` · ${t("Shared.quickStart.optional")}` : null}
-        </p>
+        <div className="min-w-0 space-y-1">
+          <p className="text-xs font-medium text-secondary">{t("Shared.quickStart.title")}</p>
+          <p className="text-xs text-tertiary">
+            {t("Shared.quickStart.progress", { current: stepNumber, total: 3 })}
+            {step === "wallet" ? ` · ${t("Shared.quickStart.optional")}` : null}
+          </p>
+        </div>
         <div className="flex items-center">
           <button
             type="button"
             aria-expanded={true}
             aria-label={t("Shared.quickStart.minimize")}
+            title={t("Shared.quickStart.minimize")}
             onClick={minimize}
             className="-mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
           >
@@ -192,6 +198,7 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
             type="button"
             onClick={() => setQuickStart(storageKey, "done")}
             aria-label={t("Shared.quickStart.skip")}
+            title={t("Shared.quickStart.skip")}
             className="-mr-2 -mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <X className="size-4" aria-hidden />

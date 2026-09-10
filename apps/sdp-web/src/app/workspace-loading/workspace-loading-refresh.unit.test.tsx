@@ -28,17 +28,17 @@ describe("workspace preparation", () => {
       json: async () => ({ state: "pending", reason: "sync" }),
     });
     const view = render(ui());
-    expect(view.getByRole("status").textContent).toContain("Preparing your workspace");
+    expect(view.getByRole("status").textContent).toContain("Preparing your SDP workspace");
     expect(view.container.querySelector('[data-loading-layout="home"]')).toBeTruthy();
-    expect(view.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(30_000));
-    expect(view.getByRole("status").textContent).toContain("Setup is taking a little longer");
+    expect(view.getByRole("status").textContent).toContain("Your workspace is still being set up");
     const count = fetchMock.mock.calls.length;
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(fetchMock).toHaveBeenCalledTimes(count);
-    fireEvent.click(view.getByRole("button", { name: "Retry" }));
+    fireEvent.click(view.getByRole("button", { name: "Try again" }));
     expect(fetchMock).toHaveBeenCalledTimes(count + 1);
-    expect(view.getByRole("status").textContent).toContain("Preparing your workspace");
+    expect(view.getByRole("status").textContent).toContain("Preparing your SDP workspace");
   });
   it("keeps permission problems distinct from slow sync", async () => {
     fetchMock.mockResolvedValue({
@@ -47,13 +47,13 @@ describe("workspace preparation", () => {
     });
     const view = render(ui());
     await act(() => vi.advanceTimersByTimeAsync(30_000));
-    expect(view.getByRole("status").textContent).toContain("ask your organization admin");
+    expect(view.getByRole("status").textContent).toContain("contact your organization admin");
   });
   it("bounds even a request that never resolves", async () => {
     fetchMock.mockReturnValue(new Promise(() => {}));
     const view = render(ui());
     await act(() => vi.advanceTimersByTimeAsync(30_000));
-    expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
   });
 });
