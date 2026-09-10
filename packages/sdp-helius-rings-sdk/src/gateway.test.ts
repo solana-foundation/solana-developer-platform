@@ -1,6 +1,7 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { describe, expect, it } from "vitest";
 import { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
+import { TEST_OWNER, testMaterialSource } from "./test/shielded-identity-fixtures.js";
 
 const CONFIG: RingsGatewayConfig = {
   solanaRpcUrl: "http://127.0.0.1:1/rpc",
@@ -9,6 +10,7 @@ const CONFIG: RingsGatewayConfig = {
   organizationId: "org_1",
   projectId: "proj_1",
   signTransaction: async (unsigned) => unsigned,
+  signMessage: async (message) => message,
   submitTransaction: async () => "sig",
   allowInsecureHttp: true,
   healthTimeoutMs: 50,
@@ -72,21 +74,6 @@ describe("createRingsGateway", () => {
     });
   });
 
-  it("refuses ring bring-up when the message signer is not configured", async () => {
-    const error = await createRingsGateway({ ...CONFIG, ringRpcUrl: "https://ring-rpc.example" })
-      .provisionRing({ ringProgramId: RING_PROGRAM })
-      .then(
-        () => null,
-        (thrown: unknown) => thrown
-      );
-
-    expect(error).toBeInstanceOf(HeliusRingsError);
-    expect(error).toMatchObject({
-      code: "config_error",
-      message: "ring bring-up needs a custody message signer",
-    });
-  });
-
   it("refuses a plain-http ring RPC unless insecure http is explicitly allowed", async () => {
     const error = await createRingsGateway({
       ...CONFIG,
@@ -128,10 +115,10 @@ describe("createRingsGateway", () => {
   });
 
   it("refuses unsupported operation types at build time", async () => {
-    const error = await createRingsGateway(CONFIG)
+    const error = await createRingsGateway({ ...CONFIG, material: testMaterialSource() })
       .buildOperation({
         operation: { opType: "zone_create", walletId: "hrw_1", input: {} } as never,
-        owner: "11111111111111111111111111111111",
+        owner: TEST_OWNER,
       })
       .then(
         () => null,

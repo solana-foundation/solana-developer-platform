@@ -32,6 +32,8 @@ export interface DvpLeg {
   setChoice: (next: string) => void;
   setCustom: (next: string) => void;
   symbol: string;
+  /** The token's human name ("USD Coin"), or null when no metadata names it. */
+  name: string | null;
   token: DvpCreateOption | null;
   /**
    * What was read off a pasted mint, for the field to report. Idle for a leg
@@ -39,11 +41,10 @@ export interface DvpLeg {
    */
   pasted: PastedMintState;
   /**
-   * Whether the amount is a decimal amount rather than base units. False only
-   * while a pasted mint has not resolved, which is the one case where nothing
-   * knows the scale.
+   * The mint's scale, or null while nothing knows it — an unselected mint, or
+   * a pasted one whose lookup has not resolved.
    */
-  decimalsKnown: boolean;
+  decimals: number | null;
   /**
    * A lookup is in flight for the address currently typed, so the scale of this
    * leg is not yet known and no reading of the amount is trustworthy.
@@ -56,8 +57,22 @@ export interface DvpLeg {
   pendingLookup: boolean;
 }
 
-export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
-  const [choice, setChoice] = useState(options[0]?.mint ?? CUSTOM);
+/**
+ * One leg's mint and amount state.
+ *
+ * @param options - The listed mints this leg can pick from.
+ * @param preselectFirst - Whether the leg starts on the first listed mint or
+ *   unselected. With no options either way starts on the paste field, the only
+ *   thing left to offer.
+ * @returns The leg's state and setters.
+ */
+export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): DvpLeg {
+  const [choice, setChoice] = useState(() => {
+    if (options.length === 0) {
+      return CUSTOM;
+    }
+    return preselectFirst ? options[0].mint : "";
+  });
   const [custom, setCustom] = useState("");
   const [amount, setAmount] = useState("");
 
@@ -97,7 +112,7 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
     baseUnits,
     choice,
     custom,
-    decimalsKnown: decimals != null,
+    decimals,
     pendingLookup,
     mint: token?.mint ?? custom.trim(),
     pasted,
@@ -107,6 +122,7 @@ export function useDvpLeg(options: DvpCreateOption[]): DvpLeg {
     // A pasted mint's own metadata beats the raw address, so a resolved paste
     // reads as its symbol everywhere the summary names the leg.
     symbol: token?.label ?? pastedMint?.symbol ?? pastedMint?.name ?? "",
+    name: token?.name ?? pastedMint?.name ?? null,
     token,
   };
 }

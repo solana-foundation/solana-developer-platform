@@ -2,6 +2,7 @@ import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
 import type {
   DvpTradeInsert,
+  DvpTradeListFilters,
   DvpTradeObservationUpdate,
   DvpTradeRepository,
   DvpTradeRow,
@@ -22,6 +23,11 @@ function assertString(value: unknown, field: string): string {
     throw new Error(`DvP trade ${field} is missing`);
   }
   return value;
+}
+
+/** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
@@ -83,6 +89,10 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
         : null,
     escrowAAmount: typeof row.escrow_a_amount === "string" ? row.escrow_a_amount : null,
     escrowBAmount: typeof row.escrow_b_amount === "string" ? row.escrow_b_amount : null,
+    escrowAPeakAmount:
+      typeof row.escrow_a_peak_amount === "string" ? row.escrow_a_peak_amount : null,
+    escrowBPeakAmount:
+      typeof row.escrow_b_peak_amount === "string" ? row.escrow_b_peak_amount : null,
     escrowAFrozen: typeof row.escrow_a_frozen === "boolean" ? row.escrow_a_frozen : null,
     escrowBFrozen: typeof row.escrow_b_frozen === "boolean" ? row.escrow_b_frozen : null,
     createdAt: assertString(row.created_at, "created_at"),
@@ -100,7 +110,8 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          status, observed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
-         escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
+         escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
+         escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
 /**
@@ -233,8 +244,11 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE status IN ('creating', 'created', 'partially_funded', 'funded')
-            ORDER BY observed_at ASC NULLS FIRST, created_at ASC, id ASC
+            WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+               OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                   AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+            ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
+                     observed_at ASC NULLS FIRST, created_at ASC, id ASC
             LIMIT ?`
         )
         .bind(limit)
@@ -251,6 +265,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   escrow_b_amount = ?,
                   escrow_a_frozen = ?,
                   escrow_b_frozen = ?,
+                  escrow_a_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
+                  escrow_b_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
+                  close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
+                  closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN sdp_iso_now() ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND status = ?
@@ -262,6 +280,14 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.escrowBAmount,
           input.escrowAFrozen,
           input.escrowBFrozen,
+          input.status,
+          input.escrowAAmount,
+          input.escrowAAmount,
+          input.status,
+          input.escrowBAmount,
+          input.escrowBAmount,
+          input.closeSignature,
+          input.status,
           input.observedAt,
           input.id,
           input.expectedStatus
@@ -332,7 +358,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET status = ?, close_signature = ?, updated_at = sdp_iso_now()
+              SET status = ?,
+                  close_signature = ?,
+                  closed_at = CASE WHEN closed_at IS NULL THEN sdp_iso_now() ELSE closed_at END,
+                  updated_at = sdp_iso_now()
             WHERE id = ?
               AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
             RETURNING ${SELECT_COLUMNS}`
@@ -342,17 +371,62 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async listByProject(scope: DvpTradeScope, limit: number) {
+    async listByProject(scope: DvpTradeScope, filters: DvpTradeListFilters, limit: number) {
       const wallets = walletScopeClause(scope.sdpWalletIds);
+      const clauses = ["organization_id = ?", "project_id = ?"];
+      const bindings: unknown[] = [scope.organizationId, scope.projectId];
+
+      // Composed with the scope predicates in the WHERE, before the LIMIT: the
+      // list is capped with no cursor, so narrowing after the page would make a
+      // matching trade older than the newest page unfindable.
+      if (filters.statuses !== null) {
+        const placeholders = filters.statuses.map(() => "?").join(", ");
+        clauses.push(`status IN (${placeholders})`);
+        bindings.push(...filters.statuses);
+      }
+
+      // Same semantics as the dashboard's `matchesAddressQuery`, as close as SQL
+      // allows: case-insensitive substring over id, the on-chain account, both
+      // parties, both escrows, both mints and both leg symbols. Wildcards in the
+      // query are literal, and an ellipsis split is NOT offered — see the
+      // divergence note in dvp-trade.repository.ts's sibling web module.
+      if (filters.q !== null) {
+        clauses.push(
+          `(id ILIKE ? ESCAPE '\\'
+             OR swap_dvp ILIKE ? ESCAPE '\\'
+             OR user_a ILIKE ? ESCAPE '\\'
+             OR user_b ILIKE ? ESCAPE '\\'
+             OR escrow_a ILIKE ? ESCAPE '\\'
+             OR escrow_b ILIKE ? ESCAPE '\\'
+             OR mint_a ILIKE ? ESCAPE '\\'
+             OR mint_b ILIKE ? ESCAPE '\\'
+             OR symbol_a ILIKE ? ESCAPE '\\'
+             OR symbol_b ILIKE ? ESCAPE '\\')`
+        );
+        const pattern = `%${escapeLikePattern(filters.q)}%`;
+        bindings.push(
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern
+        );
+      }
+
       const result = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ?${wallets.sql}
+            WHERE ${clauses.join(" AND ")}${wallets.sql}
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(scope.organizationId, scope.projectId, ...wallets.bindings, limit)
+        .bind(...bindings, ...wallets.bindings, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

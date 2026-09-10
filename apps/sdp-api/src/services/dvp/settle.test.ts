@@ -88,6 +88,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     closeSignature: null,
     escrowAAmount: "1000",
     escrowBAmount: "2000",
+    escrowAPeakAmount: "1000",
+    escrowBPeakAmount: "2000",
     escrowAFrozen: false,
     escrowBFrozen: false,
     createdAt: "2026-09-03T00:00:00.000Z",

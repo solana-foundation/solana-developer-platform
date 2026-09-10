@@ -10,6 +10,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select, SelectItem } from "@/components/ui/select";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -22,7 +23,6 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import { SegmentedControl } from "../../../create/segmented-control";
 import { getPageCount, getPageSummary } from "../../../pagination.utils";
 import { formatDateTime } from "../../token-management-workspace.utils";
 import { fetchAssetAuditHistory } from "../asset-audit.data";

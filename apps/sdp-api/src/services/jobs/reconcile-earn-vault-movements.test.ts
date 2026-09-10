@@ -358,6 +358,74 @@ describe("reconcileEarnVaultMovements", () => {
     });
   });
 
+  describe("expiring a SUBMITTED movement takes two unknown-signature observations (PRO-1904)", () => {
+    async function seedSubmitted(lastValidBlockHeight = "100") {
+      const seeded = await seedMovement(lastValidBlockHeight);
+      await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+        movementId: seeded.movement.id,
+        organizationId: ORG,
+        toStatus: "submitted",
+      });
+      return seeded;
+    }
+
+    it("parks the row on the first observation and expires it on the second", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+
+      await reconcileEarnVaultMovements(env);
+
+      // One null answer past the window is evidence, not proof: the row stays
+      // submitted, remembers the observation, and is not rebroadcast (the
+      // blockhash is gone) nor failed.
+      const parked = await ledgerRow(seeded.movement.id);
+      expect(parked).toMatchObject({ status: "submitted", failure_reason: null });
+      expect(parked?.unknown_signature_observed_at).toEqual(expect.any(String));
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+
+      await reconcileEarnVaultMovements(env);
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "failed",
+        failure_reason: "Transaction blockhash expired before confirmation",
+      });
+    });
+
+    it("never fails a submitted movement whose signature was unknown once and then lands", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
+
+      // RPC history catches up: the transaction had landed all along.
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+      ]);
+      await reconcileEarnVaultMovements(env);
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+        amount_settled: "1",
+      });
+    });
+
+    it("leaves a parked row alone when the corroborating height read is unavailable", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      await reconcileEarnVaultMovements(env);
+
+      // Exit safety (ADR 0002): an unavailable read is not a second observation.
+      getBlockHeight.mockRejectedValue(new Error("rpc down"));
+      await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
+    });
+  });
+
   it("rebroadcasts the exact recorded bytes while the blockhash is valid", async () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);

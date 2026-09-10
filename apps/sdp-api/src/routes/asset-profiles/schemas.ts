@@ -11,29 +11,85 @@ const jsonObjectSchema = z.record(z.string(), z.unknown());
 // active-content link on every consumer that renders it (HOO-1013).
 const LINK_KEY_PATTERN = /^(?:website|homepage)$|(?:url|uri|link|logo|image|icon)$/i;
 
-const isHttpUrl = (value: string): boolean => {
+const MAX_LINK_LENGTH = 2048;
+
+// Schemes that execute or inline content when a consumer renders them. These
+// are refused wherever they appear in the namespace, not only under a key whose
+// NAME looked like a link — `banner`, `avatar` and anything nested are rendered
+// the same way.
+const ACTIVE_CONTENT_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "blob:", "file:"]);
+
+const parseUri = (value: string): URL | null => {
   try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    return new URL(value.trim());
   } catch {
-    return false;
+    return null;
   }
 };
 
-// The namespace stays open, but any key that names a link must hold a bounded
-// http(s) URL — hostile schemes and non-string values fail closed.
-const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
-  for (const [key, value] of Object.entries(record)) {
-    if (value == null || !LINK_KEY_PATTERN.test(key)) {
-      continue;
-    }
-    if (typeof value !== "string" || value.length > 2048 || !isHttpUrl(value)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [key],
-        message: `asset.${key} must be an http(s) URL of at most 2048 characters`,
+const isHttpUrl = (value: string): boolean => {
+  const url = parseUri(value);
+  return url !== null && (url.protocol === "http:" || url.protocol === "https:");
+};
+
+const isActiveContentUri = (value: string): boolean => {
+  const protocol = parseUri(value)?.protocol;
+  return protocol !== undefined && ACTIVE_CONTENT_SCHEMES.has(protocol.toLowerCase());
+};
+
+function collectActiveContentIssues(
+  value: unknown,
+  path: Array<string | number>,
+  issues: Array<{ path: Array<string | number>; message: string }>
+): void {
+  if (typeof value === "string") {
+    if (isActiveContentUri(value)) {
+      issues.push({
+        path,
+        message: `asset.${path.join(".")} must not be an active-content URI`,
       });
     }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const [index, entry] of value.entries()) {
+      collectActiveContentIssues(entry, [...path, index], issues);
+    }
+    return;
+  }
+
+  if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      collectActiveContentIssues(entry, [...path, key], issues);
+    }
+  }
+}
+
+// The namespace stays open. A key that names a link must hold a bounded http(s)
+// URL, as before; everywhere else only active-content URIs are refused, so
+// `urn:`/`mailto:` values and free text keep working.
+const assetMetadataSchema = jsonObjectSchema.superRefine((record, ctx) => {
+  const issues: Array<{ path: Array<string | number>; message: string }> = [];
+
+  for (const [key, value] of Object.entries(record)) {
+    if (value == null) {
+      continue;
+    }
+    if (LINK_KEY_PATTERN.test(key)) {
+      if (typeof value !== "string" || value.length > MAX_LINK_LENGTH || !isHttpUrl(value)) {
+        issues.push({
+          path: [key],
+          message: `asset.${key} must be an http(s) URL of at most ${MAX_LINK_LENGTH} characters`,
+        });
+      }
+      continue;
+    }
+    collectActiveContentIssues(value, [key], issues);
+  }
+
+  for (const issue of issues) {
+    ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
   }
 });
 

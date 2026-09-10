@@ -1,4 +1,4 @@
-import type { AssetProfile, IssuanceMetadata, Token } from "@sdp/types";
+import type { AssetProfile, IssuanceMetadata, PaymentsDashboardWallet, Token } from "@sdp/types";
 import { getTokenAccessControlMode } from "../../access-control.utils";
 import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {
@@ -55,7 +55,8 @@ export interface UpdateAssetProfileActionInput {
   // the freshly fetched profile server-side before the PATCH.
   rebuiltMetadata: IssuanceMetadata;
   tokenPatch: {
-    signingWalletId?: string;
+    // Per-action metadata signer, never the profile's historical deployment wallet.
+    signingCustodyWalletId?: string;
     name: string;
     description: string | null;
     uri: string | null;
@@ -152,7 +153,7 @@ function readCustomFields(customer: Record<string, unknown>): CustomFieldRow[] {
  * Hydrate the creation-flow form model from an existing profile + token.
  *
  * The token row wins for the fields it duplicates (name, symbol, decimals,
- * description, imageUrl, uri, signingWalletId): it is what deploy and the rest
+ * description, imageUrl, uri, signingCustodyWalletId): it is what deploy and the rest
  * of the dashboard read, and the profile's copies can lag behind token-only
  * updates made from the old management UI. Saving re-converges both.
  */
@@ -207,7 +208,7 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     accessControl: readAccessControl(compliance.accessControl) || getTokenAccessControlMode(token),
     capacities: coerceCapacities(compliance.capacities),
     advancedSettings: readAdvancedSettings(metadata.settings),
-    signingWalletId: token.signingWalletId ?? "",
+    signingWalletId: token.signingCustodyWalletId ?? "",
     authorityWalletIds: isRecord(customer.authorityWalletIds)
       ? Object.fromEntries(
           Object.entries(customer.authorityWalletIds).filter(
@@ -218,6 +219,27 @@ export function profileToDraftState(profile: AssetProfile, token: Token): DraftS
     metadataUri: token.uri ?? "",
     customFields: readCustomFields(customer),
     publicFields,
+  };
+}
+
+export type DraftAuthorityWallet = Pick<PaymentsDashboardWallet, "id" | "walletId">;
+
+/** Legacy assignments are normalized for editing only; persistence stays behind Save. */
+export function normalizeDraftWalletAssignments(
+  draft: DraftState,
+  wallets: readonly DraftAuthorityWallet[]
+): DraftState {
+  if (!draft.authorityWalletIds) return draft;
+  return {
+    ...draft,
+    authorityWalletIds: Object.fromEntries(
+      Object.entries(draft.authorityWalletIds).map(([role, id]) => {
+        if (wallets.some((wallet) => wallet.id === id)) return [role, id];
+        const matches = wallets.filter((wallet) => wallet.walletId === id);
+        // Keep unresolved evidence so validation requires an explicit selection.
+        return [role, matches.length === 1 ? matches[0].id : id];
+      })
+    ),
   };
 }
 

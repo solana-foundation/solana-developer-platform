@@ -26,7 +26,7 @@ function leg(escrow: string, overrides: Partial<DvpInboundLeg> = {}): DvpInbound
     party: {
       address: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
       counterparty: null,
-      custodied: false,
+      wallet: null,
     },
     mint: "BgW9X4dThuRTWCAz9kkq51Xrth6TcwfwKmxzvLH3VeBK",
     amount: "250000000",
@@ -51,7 +51,7 @@ function trade(overrides: Partial<DvpInboundTrade> = {}): DvpInboundTrade {
         party: {
           address: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
           counterparty: null,
-          custodied: true,
+          wallet: { id: "cwlt_dvp_inbound", name: null },
         },
       }),
     },

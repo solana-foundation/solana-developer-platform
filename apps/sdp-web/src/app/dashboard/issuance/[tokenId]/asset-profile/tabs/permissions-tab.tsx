@@ -56,38 +56,45 @@ export function PermissionsTab({
         </div>
       ) : ops.canDeployToken ? (
         <div className="w-full space-y-4">
-          {ops.permissionRows.map((row) => (
-            <div
-              key={row.id}
-              className="grid items-center gap-3 border-b border-border-subtle py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)]"
-            >
-              <p className="text-sm font-medium text-primary">{copy[row.id][0]}</p>
-              <Select
-                ariaLabel={copy[row.id][0]}
-                placeholder={t("DashboardIssuance.signer.select")}
-                value={
-                  form.draft.authorityWalletIds?.[row.id] ||
-                  form.draft.signingWalletId ||
-                  ops.authorityWallets[0]?.walletId ||
-                  ""
-                }
-                disabled={!canManageTokenAdmin || form.saving || !ops.authorityWallets.length}
-                onValueChange={(value) => {
-                  if (value)
-                    form.updateDraft({
-                      ...(row.id === "mint-authority" ? { signingWalletId: value } : {}),
-                      authorityWalletIds: { ...form.draft.authorityWalletIds, [row.id]: value },
-                    });
-                }}
+          {form.errors.authorityWalletIds ? (
+            <p role="alert" className="text-sm text-error">
+              {form.errors.authorityWalletIds}
+            </p>
+          ) : null}
+          {ops.permissionRows.map((row) => {
+            const assignedId =
+              form.draft.authorityWalletIds?.[row.id] ?? form.draft.signingWalletId;
+            const selectedId = ops.authorityWallets.some((wallet) => wallet.id === assignedId)
+              ? assignedId
+              : "";
+            return (
+              <div
+                key={row.id}
+                className="grid items-center gap-3 border-b border-border-subtle py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)]"
               >
-                {ops.authorityWallets.map((wallet) => (
-                  <SelectItem key={wallet.walletId} value={wallet.walletId}>
-                    {getSignerWalletOptionLabel(wallet, t)}
-                  </SelectItem>
-                ))}
-              </Select>
-            </div>
-          ))}
+                <p className="text-sm font-medium text-primary">{copy[row.id][0]}</p>
+                <Select
+                  ariaLabel={copy[row.id][0]}
+                  placeholder={t("DashboardIssuance.signer.select")}
+                  value={selectedId}
+                  disabled={!canManageTokenAdmin || form.saving || !ops.authorityWallets.length}
+                  onValueChange={(value) => {
+                    if (value)
+                      form.updateDraft({
+                        ...(row.id === "mint-authority" ? { signingWalletId: value } : {}),
+                        authorityWalletIds: { ...form.draft.authorityWalletIds, [row.id]: value },
+                      });
+                  }}
+                >
+                  {ops.authorityWallets.map((wallet) => (
+                    <SelectItem key={wallet.id} value={wallet.id}>
+                      {getSignerWalletOptionLabel(wallet, t)}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="divide-y divide-border-subtle">

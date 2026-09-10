@@ -93,7 +93,7 @@ export function buildDraftPayload(input: DraftState): Record<string, unknown> {
   };
 
   if (input.maxSupply.trim()) payload.maxSupply = input.maxSupply.trim();
-  payload.signingWalletId = input.authorities["mint-authority"];
+  payload.signingCustodyWalletId = input.authorities["mint-authority"];
 
   return payload;
 }

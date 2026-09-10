@@ -195,12 +195,24 @@ What to know when sponsoring:
 
 The Treasury surface uses SDP's configured paymaster when Earn sponsorship is enabled for the cluster. Otherwise the organization custody wallet pays its own fee and rent. This is separate from the partner-controlled `feePayer` on Embedded Yield builds.
 
+### Protect the sponsor key
+
+The sponsor is a hot key on your backend by design: it has to co-sign inside the blockhash window, so it cannot sit behind a manual approval. That makes it a target. Nothing SDP does limits what a stolen or abused sponsor key can spend, because the key never touches SDP; the controls are yours. Treat the following as the minimum before you sponsor on mainnet.
+
+- **Dedicated signer.** Use a keypair whose only job is co-signing SDP builds. Never reuse a treasury, deployer, or hot-wallet key: a compromise of the sponsor must cost you at most the sponsor's float.
+- **Programmatic co-sign only, and only of SDP builds.** Your co-signing code should sign transactions your own backend just received from `deposit-transactions`, `withdrawal-transactions`, or a split swap, for a customer session you authenticated, and nothing else. Do not expose a "sign this" endpoint that accepts arbitrary bytes, and do not let the key sign from a client. Verify the fee payer and the program IDs in the decoded message match what you asked SDP to build before signing.
+- **Bound the float.** Keep only what a day or two of expected sponsorship costs in the sponsor wallet, and top it up from a cold or multisig-controlled source on a schedule. A drained sponsor stops new deposits for a while; a drained treasury does not come back.
+- **Monitor spend and alert on it.** Track the sponsor's SOL balance and outflow per hour. Alert on the balance crossing your refill threshold, on outflow above your expected per-hour ceiling, and on any transfer from the sponsor that is not a fee or rent payment. Fee and rent griefing shows up first as a spend curve that does not match your deposit volume, so compare the two.
+- **Rate-limit sponsorship per customer.** A build costs you nothing until you co-sign, so decide per customer and per session how many sponsored transactions you will sign in a window, and refuse to co-sign past it. SDP will not do this for you: it does not know which of your customers a wallet belongs to.
+- **Plan rotation.** Keep the sponsor address in configuration, not code, so you can swap to a fresh keypair without a deploy. Rotate on any suspected exposure and on a fixed schedule. Rent refunds go to the funder recorded at deposit time, so a position sponsored by a retired key still refunds to that key on exit; keep retired sponsor keys retrievable until their positions are closed.
+- **Store the key like a secret.** A secrets manager or KMS-backed signer, never an environment variable in a repository or a file in an image. Log the sponsor's public key freely and its secret never.
+
 ## 4. Show balances and activity
 
 - `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns balance and total earned per deposit token. `earned` is stated only when exact; otherwise it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
 - `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`.
 - `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. If live RPC hydration fails, `shares`, `withdrawableShares`, and `tokenValue` are absent, never zero. Show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
-- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token.
+- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token. By default each strategy total carries `ownerAddresses`, the full list of your customers' wallet addresses, which makes any `earn:read` key that can call it a holder of personal data. A key that only needs totals should pass `includeOwnerAddresses=false`, which omits the list and leaves `walletCount`. An interactive surface can pass `includePositions=true` to receive the already hydrated position details inside each strategy total instead of making one live request per owner; this detailed shape requires owner addresses.
 
 ## 5. Withdraw
 
@@ -237,7 +249,7 @@ Pass `sourceTokenMint` (USDC, USDG, PYUSD or USDT on your cluster) to accept a s
 
 If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
 
-Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP does record that it handed the swap out, and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. Demonstrating split-swap recovery in sandbox is part of the production certification checklist.
+Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP does record that it handed the swap out, and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. Demonstrating split-swap recovery in sandbox is part of the [production checklist](#before-production).
 
 ## Idempotency, in one place
 
@@ -247,5 +259,15 @@ Recovery across that split is yours: persist the swap signature and the `followU
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
 
 A `400` means the request or current vault state must change before retrying. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
+
+## Before production
+
+Work through this in sandbox before you go live. Each item is something SDP cannot check for you.
+
+- Your submit path retries an uncertain response with the same signed bytes and the same `Idempotency-Key`, and treats a `409` as "already consumed".
+- Your UI polls past `confirmed` and only treats `finalized` and `failed` as terminal.
+- Absent fields render as absent (a dash, never `$0`), and you handle every status in the vocabulary rather than collapsing unknown ones.
+- If you accept swap-funded deposits, you have demonstrated split-swap recovery in sandbox: a swap broadcast, a simulated crash, and the follow-up deposit rebuilt from persisted state.
+- If you sponsor fees, the sponsor key meets every point in [Protect the sponsor key](#protect-the-sponsor-key), and the spend alerts have fired at least once in a drill.
 
 Full request and response shapes: [Earn API reference](/docs/reference/api/earn).

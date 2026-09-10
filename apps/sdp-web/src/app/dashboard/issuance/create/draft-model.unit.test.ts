@@ -33,7 +33,7 @@ describe("draft creation contract", () => {
       decimals: 6,
       requiresAllowlist: false,
       isFreezable: true,
-      signingWalletId: "wallet-a",
+      signingCustodyWalletId: "wallet-a",
       issuanceMetadata: { custom: { customer: { authorityWalletIds: draft.authorities } } },
     });
     expect(buildDraftPayload(draft)).not.toHaveProperty("mintAddress");

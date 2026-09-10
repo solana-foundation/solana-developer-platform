@@ -74,6 +74,15 @@ On a verification failure:
 
 If Redis contains a pending witness after a failed commit or promotion, preserve it with the database snapshot and verifier output. A writer automatically finalizes only an exact pending `next` match to the valid committed head; every other pending state requires comparing both `previous` and `next` with the transaction outcome and independently retained operations record before approved recovery. If Redis is missing—even when PostgreSQL contains only sequence one—the state is ambiguous and requires the incident procedure above. Never rewind or reseed a checkpoint from PostgreSQL alone.
 
-If `unresolvedCriticalIntents` is nonzero, first reconcile the target transaction from the intent's nested `target` metadata against the issuance transaction record and Solana signature state. Append the missing outcome only after the result is proven. Do not repeat an irreversible operation merely because its outcome record is missing.
+For unresolved issuance intents reported in `unresolvedCriticalIntents`, first reconcile the target transaction from the intent's nested `target` metadata against the issuance transaction record and Solana signature state. Append the missing outcome only after the result is proven. Do not repeat an irreversible operation merely because its outcome record is missing.
 
 Do not repair hashes in place. Recomputing them would destroy the evidence this control exists to preserve.
+
+### Credential lifecycle intents after an unknown COMMIT
+
+For credential rotation, rollback, and cancellation, HTTP `200` reports the observed state, not who committed the transition. If the transaction callback completed but COMMIT confirmation failed, and the intended state is visible, the request leaves its durable intent unresolved instead of recording an attributed success. An ordinary replay that did not apply the transition closes its intent as before. The verifier reports unresolved critical intents after 15 minutes.
+
+1. Find the `sdp_api_credential_lifecycle_audit_unresolved` warning with `reason: commit_outcome_unknown`. Locate the intent using `organization_id` and `audit_intent_id`; correlate `request_id`, `project_id`, `operation`, and `provider_credential_id` with its nested `target`. For rollback, the credential ID identifies the restored version.
+2. Compare request logs, database transaction evidence, and other audit outcomes for the same transition. The current credential status alone cannot prove which request committed it.
+3. Preserve the evidence in the incident record. Append an outcome only after both the transaction result and its attribution are proven; otherwise leave the intent unresolved and escalate to the security/on-call team.
+4. Do not repeat a credential transition just to close its audit intent. Do not rewrite append-only audit rows or PostgreSQL/Redis checkpoints.

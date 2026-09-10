@@ -5,7 +5,7 @@
  * "Partially funded" is the same string whether you owe a leg or are waiting on
  * someone else, and telling an operator to fund a leg they already funded is
  * how you get an over-funded escrow. The parties' standing comes from the
- * derived `kind` and each leg's `custodied`, never re-derived client-side.
+ * derived `kind` and each leg's `wallet`, never re-derived client-side.
  *
  * Asserts on the rendered English rather than translation keys, so a key that
  * exists in the component but not in the catalogue fails here.
@@ -15,7 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { OTHER_ADDRESS, OWN_ADDRESS, testLeg, testTrade } from "./dvp.fixtures";
+import { OTHER_ADDRESS, ownParty, testLeg, testTrade } from "./dvp.fixtures";
 import { DvpNextStep } from "./dvp-next-step";
 import type { DvpTradeStatus } from "./dvp-trade";
 
@@ -47,19 +47,17 @@ function trade({
     yourSide,
     legs: {
       a: testLeg({
-        party: {
-          address: custodied === "a" || custodied === "both" ? OWN_ADDRESS : OTHER_ADDRESS,
-          counterparty: null,
-          custodied: custodied === "a" || custodied === "both",
-        },
+        party:
+          custodied === "a" || custodied === "both"
+            ? ownParty()
+            : { address: OTHER_ADDRESS, counterparty: null, wallet: null },
         funding: fundingFor(fundedA),
       }),
       b: testLeg({
-        party: {
-          address: custodied === "b" || custodied === "both" ? OWN_ADDRESS : OTHER_ADDRESS,
-          counterparty: null,
-          custodied: custodied === "b" || custodied === "both",
-        },
+        party:
+          custodied === "b" || custodied === "both"
+            ? ownParty()
+            : { address: OTHER_ADDRESS, counterparty: null, wallet: null },
         funding: fundingFor(fundedB),
       }),
     },
@@ -110,7 +108,7 @@ describe("DvpNextStep — principal", () => {
       trade({ status: "funded", custodied: "a", fundedA: true, fundedB: true })
     );
 
-    expect(html).toContain("Ready to settle");
+    expect(html).toContain("Settle when ready");
   });
 });
 
@@ -146,7 +144,7 @@ describe("DvpNextStep — bilateral", () => {
       })
     );
 
-    expect(html).toContain("Ready to settle");
+    expect(html).toContain("Settle when ready");
   });
 });
 

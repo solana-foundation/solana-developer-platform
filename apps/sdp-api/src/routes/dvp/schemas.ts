@@ -1,4 +1,4 @@
-import { DVP_TRADE_SIDES } from "@sdp/types";
+import { DVP_TRADE_SIDES, DVP_TRADE_STATUSES, type DvpTradeStatus } from "@sdp/types";
 import { address } from "@solana/kit";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
@@ -103,8 +103,41 @@ export const createDvpTradeSchema = z.object({
   ...dvpTradeTermsShape,
 });
 
+/**
+ * A comma-separated list of real trade statuses, parsed to a validated array.
+ *
+ * Follows the multi-value convention `listTransfersQuerySchema` set for
+ * `status`/`type` (payments/schemas.ts): one query param, split on commas,
+ * piped into a non-empty array of the canonical enum. An unknown value fails
+ * the parse and the handler names it in the 400.
+ */
+const dvpTradeStatusListSchema = z
+  .string()
+  .min(1)
+  .transform((value) => value.split(","))
+  .pipe(
+    z
+      .array(z.enum(DVP_TRADE_STATUSES))
+      .min(1)
+      .transform((statuses): DvpTradeStatus[] => Array.from(new Set(statuses)))
+  );
+
 export const listDvpTradesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
+  /** Comma-separated trade statuses to filter to; absent means unfiltered. */
+  status: dvpTradeStatusListSchema.optional(),
+  /**
+   * Case-insensitive substring search over id, swap_dvp, both parties, both
+   * escrows, both mints and both leg symbols. Absent means unfiltered.
+   */
+  q: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value.length === 0 || value.length >= 2, {
+      message: "Search must be blank or contain at least 2 characters",
+    })
+    .optional(),
 });
 
 /**

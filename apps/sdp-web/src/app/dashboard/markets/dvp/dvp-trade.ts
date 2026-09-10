@@ -6,7 +6,12 @@
  * 2^53. Comparisons go through BigInt, never Number.
  */
 
-import { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types";
+import {
+  DVP_TRADE_SIDES,
+  type DvpLegOutcome,
+  type DvpTradeSide,
+  type DvpTradeStatus,
+} from "@sdp/types";
 
 export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
 
@@ -19,6 +24,15 @@ export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
  */
 export type DvpTradeKind = "principal" | "agent" | "bilateral";
 
+/**
+ * The caller's custody wallet behind a party address, as the API resolves it.
+ * `name` is the wallet's display name, or null when none was set.
+ */
+export interface DvpCallerWallet {
+  id: string;
+  name: string | null;
+}
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;
@@ -27,8 +41,11 @@ export interface DvpPartyRef {
    * external address. Never populated on a party read of another org's trade.
    */
   counterparty: { id: string; label: string } | null;
-  /** Whether the CALLER holds an active custody wallet for this address. */
-  custodied: boolean;
+  /**
+   * The caller's custody wallet holding this address, or null. Truthy = the
+   * caller custodies this party; the id is the wallet page's identifier.
+   */
+  wallet: DvpCallerWallet | null;
 }
 
 export interface DvpTradeLeg {
@@ -36,6 +53,8 @@ export interface DvpTradeLeg {
   decimals: number | null;
   /** The mint's symbol, or null when it carries no metadata. */
   symbol: string | null;
+  /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
+  imageUrl: string | null;
   party: DvpPartyRef;
   mint: string;
   tokenProgram: string;
@@ -46,6 +65,7 @@ export interface DvpTradeLeg {
   funding: DvpLegFunding | null;
   /** What moved this leg into escrow: the receipt, else the claim, else null. */
   fundingSignature: string | null;
+  outcome: DvpLegOutcome;
 }
 
 export interface DvpTrade {
@@ -80,7 +100,7 @@ export interface DvpTrade {
    * Set only when the caller is a PARTY to a trade somebody else created.
    *
    * Absent on every trade this organization created. The API derives it from
-   * the same custody lookup that sets each leg's `custodied`; `custodied`
+   * the same custody lookup that sets each leg's `wallet`; `wallet`
    * itself stays the source for per-leg rendering.
    */
   yourSide?: DvpTradeSide;
@@ -123,11 +143,11 @@ export function isDvpPartyView(trade: { yourSide?: DvpTradeSide }): boolean {
 /**
  * The sides of a trade the CALLER holds a custody wallet for, A first.
  *
- * The one place the dashboard is allowed to read `party.custodied` into a
+ * The one place the dashboard is allowed to read `party.wallet` into a
  * side list: fund actions render per custodied side, bilateral included.
  */
 export function custodiedSidesOf(trade: Pick<DvpTrade, "legs">): DvpTradeSide[] {
-  return DVP_TRADE_SIDES.filter((side) => trade.legs[side].party.custodied);
+  return DVP_TRADE_SIDES.filter((side) => trade.legs[side].party.wallet !== null);
 }
 
 /** Statuses a trade can still be settled or cancelled from. */

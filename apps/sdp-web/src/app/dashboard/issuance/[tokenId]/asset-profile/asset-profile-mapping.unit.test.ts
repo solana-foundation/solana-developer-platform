@@ -37,6 +37,10 @@ function makeToken(overrides: Partial<Token> = {}): Token {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
+    signingCustodyWalletId:
+      overrides.signingCustodyWalletId === undefined
+        ? "cwlt_test"
+        : overrides.signingCustodyWalletId,
   };
 }
 
@@ -124,7 +128,7 @@ describe("profileToDraftState", () => {
     expect(draft.description).toBe("Token-side description");
     expect(draft.imageUrl).toBe("https://example.com/logo.png");
     expect(draft.metadataUri).toBe("https://example.com/metadata.json");
-    expect(draft.signingWalletId).toBe("wal_test");
+    expect(draft.signingWalletId).toBe("cwlt_test");
 
     // Profile-only fields come from the metadata.
     expect(draft.assetCategory).toBe("stablecoin");

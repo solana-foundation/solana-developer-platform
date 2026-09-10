@@ -208,7 +208,7 @@ interface CreateDraftOptions {
   name: string;
   symbol: string;
   decimals: string;
-  treasuryWalletId: string;
+  treasuryCustodyWalletId: string;
   custodySignerWalletCount: number;
 }
 
@@ -241,7 +241,7 @@ async function createTokenDraft(page: Page, options: CreateDraftOptions): Promis
     "Who can update token information?",
     "Who can recover or destroy balances?",
   ]) {
-    await page.getByLabel(permission).selectOption(options.treasuryWalletId);
+    await page.getByLabel(permission).selectOption(options.treasuryCustodyWalletId);
   }
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await Promise.all([
@@ -289,7 +289,7 @@ test.describe
         name: draftName,
         symbol: draftSymbol,
         decimals: "7",
-        treasuryWalletId: fixtures.wallets.treasury.walletId,
+        treasuryCustodyWalletId: fixtures.wallets.treasury.id,
         custodySignerWalletCount: fixtures.wallets.custodySignerWalletCount,
       });
 

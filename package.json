@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.74.0",
+  "version": "0.75.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -53,6 +53,7 @@
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
     "dev:docs": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-docs --env-mode=loose",
     "dev:docs:bare": "turbo run dev --filter=sdp-docs",
+    "dev:example:embedded-yield": "pnpm -C examples/embedded-yield-bank dev",
     "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api --env-mode=loose",
     "dev:api:local": "scripts/doppler/run-with-config.sh turbo run dev:local --filter=@sdp/api --env-mode=loose",
     "build": "turbo run build",

@@ -29,6 +29,11 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+// Artwork for the seeded trades' two mints, when the reader's organization has
+// issued them: mint A carries an image, mint B is issued without one.
+const ISSUED_IMAGE_A = "https://cdn.example.test/atd.png";
+const ISSUED_IMAGE_B = "https://cdn.example.test/dusd.png";
+
 // The cross-org party that reads a trade it did not create. Its whole reason
 // to exist is that attribution and funding claims do NOT cross to it.
 const PARTY_ORG = { id: "org_dvp_party", name: "DvP Party Org", slug: "dvp-party-org" };
@@ -379,6 +384,37 @@ async function seedCounterpartyForParty(
   return { counterpartyId: counterparty.id, accountId: account.id };
 }
 
+/**
+ * An issued-token row behind a mint, so the leg projection can resolve its
+ * image. `imageUrl` null seeds an issued token without artwork.
+ */
+async function seedIssuedTokenMint(params: {
+  mintAddress: string;
+  organizationId: string;
+  projectId: string;
+  imageUrl: string | null;
+}): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issued_tokens
+        (id, organization_id, project_id, mint_address, name, symbol, decimals, status, created_by, image_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      `tok_dvp_${crypto.randomUUID()}`,
+      params.organizationId,
+      params.projectId,
+      params.mintAddress,
+      "Issued DvP Token",
+      "IDT",
+      6,
+      "active",
+      TEST_USER.id,
+      params.imageUrl
+    )
+    .run();
+}
+
 /** The seeded row's own timestamps, so a full-shape assertion stays exact. */
 async function readTradeTimestamps(
   tradeId: string
@@ -423,14 +459,14 @@ describe("deriveDvpTradeKind", () => {
   });
 
   it("derives principal when one side is the caller's", () => {
-    const caller = new Map([[PARTY_A_ADDRESS, BOUND_WALLET.id]]);
+    const caller = new Map([[PARTY_A_ADDRESS, { id: BOUND_WALLET.id, name: null }]]);
     expect(deriveDvpTradeKind(caller, PARTY_A_ADDRESS, PARTY_B_EXTERNAL)).toBe("principal");
   });
 
   it("derives bilateral when both sides are the caller's", () => {
     const caller = new Map([
-      [PARTY_A_ADDRESS, BOUND_WALLET.id],
-      [PARTY_B_EXTERNAL, UNBOUND_WALLET.id],
+      [PARTY_A_ADDRESS, { id: BOUND_WALLET.id, name: null }],
+      [PARTY_B_EXTERNAL, { id: UNBOUND_WALLET.id, name: null }],
     ]);
     expect(deriveDvpTradeKind(caller, PARTY_A_ADDRESS, PARTY_B_EXTERNAL)).toBe("bilateral");
   });
@@ -840,6 +876,20 @@ describe("DvP routes", () => {
 
     it("answers the creator's view: custodied side, counterparty label, live-claim signature", async () => {
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
+      // Mint A is this org's issued token WITH artwork; mint B is this org's
+      // issued token WITHOUT artwork — both must resolve from the token record.
+      await seedIssuedTokenMint({
+        mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_A,
+      });
+      await seedIssuedTokenMint({
+        mintAddress: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: null,
+      });
       await seedTradeFor({
         tradeId: "dvp_full",
         counterpartyAccountIdA: accountId,
@@ -862,13 +912,14 @@ describe("DvP routes", () => {
             party: {
               address: PARTY_A_ADDRESS,
               counterparty: { id: accountId, label: "Acme Desk" },
-              custodied: true,
+              wallet: { id: BOUND_WALLET.id, name: null },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
             amount: "1000",
             decimals: null,
             symbol: null,
+            imageUrl: ISSUED_IMAGE_A,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
             funding: {
@@ -878,22 +929,25 @@ describe("DvP routes", () => {
               frozen: false,
             },
             fundingSignature: "sig_live_claim",
+            outcome: "funded",
           },
           b: {
             party: {
               address: PARTY_B_EXTERNAL,
               counterparty: null,
-              custodied: false,
+              wallet: null,
             },
             mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
             amount: "2000",
             decimals: null,
             symbol: null,
+            imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
             funding: null,
             fundingSignature: null,
+            outcome: "awaiting",
           },
         },
         kind: "principal",
@@ -919,6 +973,15 @@ describe("DvP routes", () => {
       // of cross-org claim HIDING would bake the bypass artifact in. The
       // boundary itself is covered by db-level policy tests.
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
+      // The creator org ISSUED mint A with artwork. The party org must still
+      // see null: images resolve against the READER's organization, so another
+      // org's issued token never lends its artwork across the tenant boundary.
+      await seedIssuedTokenMint({
+        mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_A,
+      });
       await seedTradeFor({ tradeId: "dvp_party_view", counterpartyAccountIdA: accountId });
       await seedPartyOrg();
       const { createdAt, updatedAt } = await readTradeTimestamps("dvp_party_view");
@@ -941,33 +1004,37 @@ describe("DvP routes", () => {
             party: {
               address: PARTY_A_ADDRESS,
               counterparty: null,
-              custodied: true,
+              wallet: { id: "cwlt_dvp_party", name: null },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
             amount: "1000",
             decimals: null,
             symbol: null,
+            imageUrl: null,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
             funding: null,
             fundingSignature: null,
+            outcome: "awaiting",
           },
           b: {
             party: {
               address: PARTY_B_EXTERNAL,
               counterparty: null,
-              custodied: false,
+              wallet: null,
             },
             mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
             amount: "2000",
             decimals: null,
             symbol: null,
+            imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
             funding: null,
             fundingSignature: null,
+            outcome: "awaiting",
           },
         },
         kind: "principal",
@@ -987,6 +1054,14 @@ describe("DvP routes", () => {
 
     it("lists the same derived shapes, one page at a time", async () => {
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
+      // One issued mint with artwork named by BOTH pages' trades: the image
+      // resolves once per distinct mint and serves every row that names it.
+      await seedIssuedTokenMint({
+        mintAddress: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_A,
+      });
       await seedTradeFor({
         tradeId: "dvp_list_1",
         swapDvp: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
@@ -1003,8 +1078,11 @@ describe("DvP routes", () => {
             id: string;
             kind: string;
             legs: {
-              a: { party: { custodied: boolean; counterparty: unknown } };
-              b: { party: { custodied: boolean } };
+              a: {
+                party: { wallet: { id: string } | null; counterparty: unknown };
+                imageUrl: string | null;
+              };
+              b: { party: { wallet: { id: string } | null }; imageUrl: string | null };
             };
           }[];
         };
@@ -1015,15 +1093,139 @@ describe("DvP routes", () => {
         throw new Error("seeded list trades missing from the response");
       }
       expect(first.kind).toBe("principal");
-      expect(first.legs.a.party.custodied).toBe(true);
+      expect(first.legs.a.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
       expect(first.legs.a.party.counterparty).toEqual({
         id: accountId,
         label: "Acme Desk",
       });
+      expect(first.legs.a).toEqual({
+        party: {
+          address: PARTY_A_ADDRESS,
+          counterparty: { id: accountId, label: "Acme Desk" },
+          wallet: { id: BOUND_WALLET.id, name: null },
+        },
+        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        amount: "1000",
+        decimals: null,
+        symbol: null,
+        imageUrl: ISSUED_IMAGE_A,
+        escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+        settlementDestination: PARTY_A_ADDRESS,
+        funding: null,
+        fundingSignature: null,
+        outcome: "awaiting",
+      });
       // Both sides held by the creator's wallets: bilateral.
       expect(second.kind).toBe("bilateral");
-      expect(second.legs.a.party.custodied).toBe(true);
-      expect(second.legs.b.party.custodied).toBe(true);
+      expect(second.legs.a.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
+      expect(second.legs.b.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
+      // The second row names the same mint, and serves the same image from the
+      // page-level resolution — one lookup per distinct mint, not per row.
+      expect(second.legs.a.imageUrl).toBe(ISSUED_IMAGE_A);
+      expect(second.legs.b.imageUrl).toBeNull();
+    });
+
+    // The list is capped with no cursor, so the filters must narrow SERVER-SIDE:
+    // a client-side filter over the newest page makes an older matching trade
+    // unfindable, which is the bug this endpoint family exists without.
+    describe("server-side list filters", () => {
+      beforeEach(async () => {
+        await seedTradeFor({
+          tradeId: "dvp_filter_open",
+          swapDvp: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+        });
+      });
+
+      /** A second trade, advanced to a closed status the open one is not in. */
+      async function seedClosedTrade(): Promise<void> {
+        await seedTradeFor({ tradeId: "dvp_filter_settled" });
+        await getDb(env)
+          .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
+          .bind("dvp_filter_settled")
+          .run();
+      }
+
+      it("narrows by a comma-separated status list", async () => {
+        await seedClosedTrade();
+
+        const open = await app.request(
+          "/v1/dvp/trades?status=created,partially_funded",
+          { headers: authHeaders() },
+          env
+        );
+        const openBody = (await open.json()) as { data: { trades: { id: string }[] } };
+        expect(openBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_open"]);
+
+        const closed = await app.request(
+          "/v1/dvp/trades?status=settled",
+          {
+            headers: authHeaders(),
+          },
+          env
+        );
+        const closedBody = (await closed.json()) as { data: { trades: { id: string }[] } };
+        expect(closedBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_settled"]);
+      });
+
+      it("rejects an unknown status naming the allowed set", async () => {
+        const res = await app.request(
+          "/v1/dvp/trades?status=banana",
+          {
+            headers: authHeaders(),
+          },
+          env
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as {
+          error?: { message?: string; details?: { allowedStatuses?: string[] } };
+        };
+        expect(body.error?.message).toContain("status");
+        expect(body.error?.details?.allowedStatuses).toContain("created");
+      });
+
+      it("matches q against the trade id and a party address, case-insensitively", async () => {
+        await seedClosedTrade();
+
+        const byId = await app.request(
+          "/v1/dvp/trades?q=dvp_filter_open",
+          {
+            headers: authHeaders(),
+          },
+          env
+        );
+        const byIdBody = (await byId.json()) as { data: { trades: { id: string }[] } };
+        expect(byIdBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_open"]);
+
+        const byParty = await app.request(
+          `/v1/dvp/trades?q=${PARTY_A_ADDRESS.toLowerCase()}`,
+          { headers: authHeaders() },
+          env
+        );
+        const byPartyBody = (await byParty.json()) as { data: { trades: { id: string }[] } };
+        // Both seeded trades name PARTY_A_ADDRESS as side A.
+        expect(byPartyBody.data.trades.map((trade) => trade.id).sort()).toEqual([
+          "dvp_filter_open",
+          "dvp_filter_settled",
+        ]);
+      });
+
+      it("rejects a search shorter than two characters after trim", async () => {
+        const res = await app.request("/v1/dvp/trades?q=a", { headers: authHeaders() }, env);
+        expect(res.status).toBe(400);
+      });
+
+      it("composes status and q", async () => {
+        await seedClosedTrade();
+
+        const res = await app.request(
+          `/v1/dvp/trades?status=settled&q=${encodeURIComponent(PARTY_A_ADDRESS)}`,
+          { headers: authHeaders() },
+          env
+        );
+        const body = (await res.json()) as { data: { trades: { id: string }[] } };
+        expect(body.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_settled"]);
+      });
     });
   });
 
@@ -1035,6 +1237,15 @@ describe("DvP routes", () => {
     it("tells the party which leg is theirs, with derived party objects and no attribution", async () => {
       await seedTradeFor({ tradeId: "dvp_inbound_seen" });
       await seedPartyOrg();
+      // The party org ITSELF issued mint B with artwork: the inbound view
+      // resolves images against the reader's organization, so its own token
+      // shows — while the creator's unissued mint A stays null.
+      await seedIssuedTokenMint({
+        mintAddress: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        organizationId: PARTY_ORG.id,
+        projectId: PARTY_PROJECT.id,
+        imageUrl: ISSUED_IMAGE_B,
+      });
 
       const res = await app.request("/v1/dvp/trades/inbound", { headers: partyAuthHeaders() }, env);
       expect(res.status).toBe(200);
@@ -1047,10 +1258,10 @@ describe("DvP routes", () => {
             kind?: unknown;
             legs: {
               a: {
-                party: { address: string; counterparty: unknown; custodied: boolean };
+                party: { address: string; counterparty: unknown; wallet: unknown };
                 fundingSignature?: unknown;
               };
-              b: { party: { address: string; counterparty: unknown; custodied: boolean } };
+              b: { party: { address: string; counterparty: unknown; wallet: unknown } };
             };
           }[];
         };
@@ -1062,15 +1273,41 @@ describe("DvP routes", () => {
       }
       expect(trade.id).toBe("dvp_inbound_seen");
       expect(trade.yourSide).toBe("a");
-      expect(trade.legs.a.party).toEqual({
-        address: PARTY_A_ADDRESS,
-        counterparty: null,
-        custodied: true,
+      expect(trade.legs.a).toEqual({
+        party: {
+          address: PARTY_A_ADDRESS,
+          counterparty: null,
+          wallet: { id: "cwlt_dvp_party", name: null },
+        },
+        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        amount: "1000",
+        decimals: null,
+        symbol: null,
+        imageUrl: null,
+        escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+        settlementDestination: PARTY_A_ADDRESS,
+        observedAmount: null,
+        frozen: null,
+        outcome: "awaiting",
       });
-      expect(trade.legs.b.party).toEqual({
-        address: PARTY_B_EXTERNAL,
-        counterparty: null,
-        custodied: false,
+      expect(trade.legs.b).toEqual({
+        party: {
+          address: PARTY_B_EXTERNAL,
+          counterparty: null,
+          wallet: null,
+        },
+        mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        amount: "2000",
+        decimals: null,
+        symbol: null,
+        imageUrl: ISSUED_IMAGE_B,
+        escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+        settlementDestination: PARTY_B_EXTERNAL,
+        observedAmount: null,
+        frozen: null,
+        outcome: "awaiting",
       });
       // The inbound shape carries neither the creator's derived kind nor the
       // funding claims — both belong to organizations that can read the row.

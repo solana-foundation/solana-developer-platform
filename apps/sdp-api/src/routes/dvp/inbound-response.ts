@@ -7,20 +7,22 @@
  * Deliberately absent — `organizationId`/`projectId`, `refString`, `sdpWallet`,
  * counterparty attribution (a fact about the CREATING org, so always null),
  * funding claims (tenant-scoped, so null by construction), the derived `kind`
- * (`custodied` + `yourSide` convey standing), `idempotencyKey`, and
+ * (`wallet` + `yourSide` convey standing), `idempotencyKey`, and
  * `settlementReadiness`. `symbolA`/`symbolB` ARE included; they are read off
  * the mint on chain.
  */
 
-import type { DvpInboundTrade } from "@/services/dvp/inbound";
+import type { DvpLegOutcome } from "@sdp/types";
+import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
+import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
 
 /** One party of the trade, as a party who is not the author may see it. */
 interface DvpInboundPartyResponse {
   address: string;
   /** Never attributed: it belongs to the creating org, which the viewer is not. */
   counterparty: null;
-  /** Whether the CALLER holds an active custody wallet for this address. */
-  custodied: boolean;
+  /** The caller's custody wallet holding this address, or null. Truthy = the caller custodies this party. */
+  wallet: DvpCallerWallet | null;
 }
 
 /** One leg, as a party who is not the author may see it. */
@@ -31,6 +33,8 @@ interface DvpInboundLegResponse {
   amount: string;
   decimals: number | null;
   symbol: string | null;
+  /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
+  imageUrl: string | null;
   /** The address to pay. The whole of this party's integration. */
   escrow: string;
   /** Where this leg's proceeds land. On chain, and worth checking before paying. */
@@ -39,6 +43,7 @@ interface DvpInboundLegResponse {
   observedAmount: string | null;
   /** Null when the reconciler has not looked yet, which is not the same as thawed. */
   frozen: boolean | null;
+  outcome: DvpLegOutcome;
 }
 
 export interface DvpInboundTradeResponse {
@@ -60,21 +65,38 @@ export interface DvpInboundTradeResponse {
 }
 
 /**
- * One leg's party as a party viewer sees it: address and `custodied`, never
+ * One leg's party as a party viewer sees it: address and `wallet`, never
  * attribution.
+ *
+ * @param address - The party address on the wire.
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @returns The party object the inbound response carries.
  */
 function inboundParty(
   address: string,
-  callerAddresses: ReadonlyMap<string, string>
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>
 ): DvpInboundPartyResponse {
-  return { address, counterparty: null, custodied: callerAddresses.has(address) };
+  const wallet = callerAddresses.get(address);
+  return { address, counterparty: null, wallet: wallet === undefined ? null : wallet };
 }
 
+/**
+ * Serializes one inbound trade for the party that is named on it.
+ *
+ * @param inbound - The trade, the caller's side on it, and their matching address.
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @param mintImages - Each mint's issued-token image resolved for the CALLER's
+ *   organization, so the creator's issued token never lends it artwork.
+ * @returns The wire shape a party viewer receives.
+ */
 export function toDvpInboundResponse(
   inbound: DvpInboundTrade,
-  callerAddresses: ReadonlyMap<string, string>
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
+  mintImages: ReadonlyMap<string, string | null>
 ): DvpInboundTradeResponse {
   const { trade, side, party } = inbound;
+  const mintAImage = mintImages.get(trade.mintA);
+  const mintBImage = mintImages.get(trade.mintB);
 
   return {
     id: trade.id,
@@ -91,10 +113,12 @@ export function toDvpInboundResponse(
         amount: trade.amountA,
         decimals: trade.decimalsA,
         symbol: trade.symbolA,
+        imageUrl: mintAImage === undefined ? null : mintAImage,
         escrow: trade.escrowA,
         settlementDestination: trade.userASettlementDestination,
         observedAmount: trade.escrowAAmount,
         frozen: trade.escrowAFrozen,
+        outcome: deriveDvpLegOutcome(trade, "a"),
       },
       b: {
         party: inboundParty(trade.userB, callerAddresses),
@@ -103,10 +127,12 @@ export function toDvpInboundResponse(
         amount: trade.amountB,
         decimals: trade.decimalsB,
         symbol: trade.symbolB,
+        imageUrl: mintBImage === undefined ? null : mintBImage,
         escrow: trade.escrowB,
         settlementDestination: trade.userBSettlementDestination,
         observedAmount: trade.escrowBAmount,
         frozen: trade.escrowBFrozen,
+        outcome: deriveDvpLegOutcome(trade, "b"),
       },
     },
     expiryTimestamp: trade.expiryTimestamp,

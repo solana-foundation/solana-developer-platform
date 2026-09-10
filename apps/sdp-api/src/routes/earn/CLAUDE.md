@@ -98,6 +98,19 @@ balance with a live one.
   integration guide is derived from the strategy catalogue and persists
   nothing.
 
+- **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
+  model EARN-027). `registerPublicEarnPaths` decides what partners see, and
+  the public/preview split is a PUBLICATION boundary only: every `/v1/earn`
+  route accepts every auth mode at runtime, and both surfaces are the same
+  Hono router under the same `/v1/*` tracing and rate-limit middleware. So
+  moving a route into the public document changes the partner-facing scope
+  without changing any enforcement, which is why it needs a human gate. The
+  pinned operation list in `../../openapi/spec.test.ts` ("publishes the
+  caller-signed money routes") is that gate: growing it requires a security
+  sign-off named in the PR (who reviewed, and the threat-model row the route
+  lands under), and the threat model's revisit trigger fires. Never widen the
+  list just to make the test pass.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
@@ -814,6 +827,30 @@ Pinned by the "sweep telemetry" describe in
 `../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
 `runWithCronRunEvent` test composes the real wrapper.
 
+**Expiring a `submitted` movement takes TWO unknown-signature observations**
+(PRO-1904, migration 0092). The evidence bar differs by status because the
+statuses carry different facts:
+
+- `requested` is unbroadcast. Past its blockhash it cannot land, so one null
+  status past the window expires it on that tick (the pre-existing rule).
+- `confirmed` demonstrably landed. A null status is RPC history forgetting, so
+  it is never expired (PRO-1716).
+- `submitted` was broadcast and MAY have landed. RPC history is not complete
+  (the `confirmed` rule exists for exactly that reason), so one null answer is
+  evidence, not proof, and a false `failed` is terminal with the shares still
+  in the vault. The first null observation past the window writes
+  `unknown_signature_observed_at` and returns `unchanged`; only a LATER tick
+  that sees the signature unknown again fails the row. A tick that finds the
+  signature in between advances it normally and the mark becomes inert.
+
+The mark is written only by the sweep (the interactive read-through passes no
+block height and can neither park nor expire), only on a `submitted` row, and
+only once (COALESCE), so a burst of ticks cannot count as two observations. An
+unavailable block-height read is not an observation either: the row is left for
+the next tick (ADR 0002 exit safety). Cost: a genuinely dead submitted
+movement fails one tick later than before. Pinned by the "expiring a SUBMITTED
+movement" describe in the same test file.
+
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
@@ -1001,6 +1038,17 @@ owner-signed row can never satisfy
 (`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
 three).
 
+`GET /external-wallet/positions/summary` is the one read on this surface that
+is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresses`
+is the project's entire end-user address book (threat model EARN-028): any
+`earn:read` key becomes PII-bearing by calling it. `?includeOwnerAddresses=false`
+omits the list (omitted, never emptied, so "not requested" cannot read as "no
+owners") and keeps `walletCount`. Interactive surfaces can pass
+`includePositions=true` to receive each strategy's already hydrated positions
+in that same request; it requires owner addresses and replaces the
+dashboard's old N-per-owner read fanout. Partner docs steer analytics keys to
+the address-free opt-out shape and detailed surfaces to the explicit opt-in.
+
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
 literal segment (`positions/summary`) can collide with a path parameter, and
@@ -1093,8 +1141,12 @@ whose second test exhausts both counters and asserts the payout still lands.
 
 Every earn money write also lands a hash-chained `audit_logs` event: action
 `deposit`/`withdraw`, resourceType `earn_movement`, resourceId the movement id,
-actor identical to the movement's `created_by`/`initiated_by_key_id` (passed
-explicitly, so the two records cannot disagree). Helpers live in
+actor matching the movement's `created_by`/`initiated_by_key_id`. The actor is
+sourced by direction: withdrawals read it off the movement row (post-effect,
+the row exists); deposits are admitted before any row exists, so their intent
+carries the request's own auth, the same values the service writes into the
+row. Passed explicitly in both cases so `log()` never falls back to a context
+naming someone else. Helpers live in
 `handlers/movement-audit.ts`; the five seams are the two custody vault routes,
 the two external-wallet submits, and the program withdrawal.
 
@@ -1200,6 +1252,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   (`src/cron/earn-metrics-refresh.ts`) runs every 5 minutes and is UPDATE-only,
   so it can never admit a row. Cadence and failure behaviour:
   `packages/sdp-earn/README.md` → "Catalogue data".
+- **Provider-reported figures are diffed, never trusted silently** (PRO-1867,
+  EARN-010). Both passes read the stored shelf first and emit
+  `sdp_api_earn_catalogue_figure_anomaly` for an APY/TVL move past
+  `EARN_FIGURE_BOUNDS`, and `sdp_api_earn_catalogue_shelf_disappeared` when a
+  lane that held rows reliably lists none (`services/earn/catalogue-anomaly.ts`).
+  Events only: the check never blocks a write, and a failed figures read costs
+  the pass its diff, not its write. Do not "fix" an anomaly by clamping the
+  write; the alert exists so a human looks at the provider.
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** Ground is the

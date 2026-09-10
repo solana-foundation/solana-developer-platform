@@ -44,6 +44,7 @@ import type { BackgroundRunner } from "@/runtime/background";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
+import { reportFigureAnomalies } from "@/services/earn/catalogue-anomaly";
 import type { Env } from "@/types/env";
 
 export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
@@ -193,6 +194,38 @@ async function refreshProviderMetrics(
     return;
   }
 
+  // Figure anomaly check (PRO-1867) against the stored shelf BEFORE the
+  // writes. Read-only and never fatal; entries for references the catalogue
+  // does not hold are skipped exactly as the update below no-ops on them.
+  let anomalies = 0;
+  try {
+    const stored = await repo.listStrategyFigures({
+      provider: client.provider,
+      environment: ctx.environment,
+    });
+    anomalies = reportFigureAnomalies({
+      source: "metrics_refresh",
+      provider: client.provider,
+      environment: ctx.environment,
+      stored: stored.map((row) => ({
+        providerReference: row.provider_reference,
+        hostCluster: row.host_cluster,
+        currentApy: row.current_apy,
+        tvlUsd: row.tvl_usd,
+      })),
+      incoming: metrics.map((entry) => ({
+        providerReference: entry.providerReference,
+        currentApy: entry.currentApy ?? null,
+        tvlUsd: entry.riskMetadata?.tvlUsd,
+      })),
+    });
+  } catch (err) {
+    getLogger().warn(
+      { ...logContext, error: err instanceof Error ? err.message : String(err) },
+      "refreshEarnStrategyMetrics: skipped figure anomaly check, stored figures unreadable"
+    );
+  }
+
   let updated = 0;
   let failed = 0;
   for (const entry of metrics) {
@@ -227,7 +260,7 @@ async function refreshProviderMetrics(
   // hands over its whole shelf and the catalogue holds only the part that
   // cleared the admission gates.
   getLogger().info(
-    { ...logContext, reported: metrics.length, updated, failed },
+    { ...logContext, reported: metrics.length, updated, failed, anomalies },
     "refreshEarnStrategyMetrics: refreshed provider metrics"
   );
 }

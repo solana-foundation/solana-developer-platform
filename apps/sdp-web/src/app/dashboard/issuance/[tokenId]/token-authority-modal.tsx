@@ -14,6 +14,7 @@ import {
   getSignerWalletOptionLabel,
   SOLANA_ADDRESS_PATTERN,
 } from "./token-management-workspace.utils";
+import { TokenSignerSelect } from "./token-signer-select";
 
 const NONE_AUTHORITY_VALUE = "__none_authority__";
 
@@ -23,9 +24,12 @@ interface TokenAuthorityModalProps {
   newAuthority: string;
   authorityWallets: PaymentsDashboardWallet[];
   authorityWalletsError: string | null;
+  signerWallets: PaymentsDashboardWallet[];
+  signerWalletId: string;
   signerUnavailableReason: string | null;
   isPending: boolean;
   onNewAuthorityChange: (value: string) => void;
+  onSignerWalletIdChange: (value: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -36,9 +40,12 @@ export function TokenAuthorityModal({
   newAuthority,
   authorityWallets,
   authorityWalletsError,
+  signerWallets,
+  signerWalletId,
   signerUnavailableReason,
   isPending,
   onNewAuthorityChange,
+  onSignerWalletIdChange,
   onCancel,
   onConfirm,
 }: TokenAuthorityModalProps) {
@@ -69,7 +76,9 @@ export function TokenAuthorityModal({
   const isConfirmingNone = noneConfirmationRowId === row.id && isSettingNone;
   const noneConfirmationCopy = getNoneConfirmationCopy(row, t);
   const currentAuthorityWallet =
-    availableWallets.find((wallet) => wallet.publicKey === currentAuthorityValue) ?? null;
+    signerWallets.find((wallet) => wallet.id === signerWalletId) ??
+    (signerWallets.length === 1 ? signerWallets[0] : null);
+  const signerChoiceRequired = signerWallets.length > 1 && !signerWalletId;
 
   return (
     <Modal
@@ -116,6 +125,16 @@ export function TokenAuthorityModal({
               currentAuthorityWallet={currentAuthorityWallet}
             />
 
+            {signerWallets.length > 1 ? (
+              <TokenSignerSelect
+                signerWallets={signerWallets}
+                signerWalletId={signerWalletId}
+                signerUnavailableReason={signerUnavailableReason}
+                onSignerWalletIdChange={onSignerWalletIdChange}
+                showSelectionSummary={Boolean(signerWalletId)}
+              />
+            ) : null}
+
             <AuthorityTargetSection
               authorityWalletsError={authorityWalletsError}
               availableWallets={availableWallets}
@@ -149,6 +168,7 @@ export function TokenAuthorityModal({
                 type="submit"
                 disabled={
                   isPending ||
+                  signerChoiceRequired ||
                   Boolean(signerUnavailableReason) ||
                   (isSettingNone && Boolean(row.removalDisabledReason))
                 }

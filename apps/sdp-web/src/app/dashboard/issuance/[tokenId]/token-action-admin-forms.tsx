@@ -178,6 +178,7 @@ export function TokenActionAdminForms({
           removeEntry: <Trash2 />,
         }
       : {};
+  const exactSignerChoiceRequired = signerWallets.length > 1;
   return (
     <>
       {activeAction === "seize" ? (
@@ -270,7 +271,10 @@ export function TokenActionAdminForms({
                 type="submit"
                 iconLeft={icon.seize}
                 disabled={
-                  isPending || Boolean(signerUnavailableReason) || Boolean(seizeValidationReason)
+                  isPending ||
+                  Boolean(signerUnavailableReason) ||
+                  (exactSignerChoiceRequired && !seizeForm.signingWalletId) ||
+                  Boolean(seizeValidationReason)
                 }
               >
                 {t("DashboardIssuance.compliance.forceTransfer")}
@@ -355,6 +359,7 @@ export function TokenActionAdminForms({
                 disabled={
                   isPending ||
                   Boolean(signerUnavailableReason) ||
+                  (exactSignerChoiceRequired && !forceBurnForm.signingWalletId) ||
                   Boolean(forceBurnValidationReason)
                 }
               >
@@ -442,12 +447,6 @@ export function TokenActionAdminForms({
           description={t("DashboardIssuance.forms.pauseControlsDescription")}
         >
           <div className="space-y-4">
-            <TokenSignerSelect
-              signerWallets={signerWallets}
-              signerWalletId={defaultSignerWalletId} // Always single locked wallet
-              signerUnavailableReason={signerUnavailableReason}
-              onSignerWalletIdChange={onSignerWalletIdChange}
-            />
             <div
               className={[
                 "flex flex-wrap gap-2",
@@ -557,7 +556,11 @@ export function TokenActionAdminForms({
                 variant="outline"
                 value="freeze"
                 iconLeft={icon.freeze}
-                disabled={isPending || Boolean(signerUnavailableReason)}
+                disabled={
+                  isPending ||
+                  Boolean(signerUnavailableReason) ||
+                  (exactSignerChoiceRequired && !freezeForm.signingWalletId)
+                }
               >
                 {t("DashboardIssuance.management.freezeAccount")}
               </Button>
@@ -565,7 +568,11 @@ export function TokenActionAdminForms({
                 type="submit"
                 value="unfreeze"
                 iconLeft={icon.unfreeze}
-                disabled={isPending || Boolean(signerUnavailableReason)}
+                disabled={
+                  isPending ||
+                  Boolean(signerUnavailableReason) ||
+                  (exactSignerChoiceRequired && !freezeForm.signingWalletId)
+                }
               >
                 {t("DashboardIssuance.management.unfreezeAccount")}
               </Button>

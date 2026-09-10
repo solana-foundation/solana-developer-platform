@@ -12,6 +12,7 @@ const token: Token = {
   projectId: "prj_review",
   organizationId: "org_review",
   signingWalletId: null,
+  signingCustodyWalletId: null,
   mintAddress: "58NU6ZxKq3aVv2q1s9bJcYtvHkbEwLmPqRs4TuVwVjVu",
   mintAuthority: "wallet-address",
   freezeAuthority: "wallet-address",

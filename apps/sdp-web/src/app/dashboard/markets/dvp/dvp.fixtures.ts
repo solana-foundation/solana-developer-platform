@@ -14,11 +14,24 @@ export const OWN_ADDRESS = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 export const OTHER_ADDRESS = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 export const THIRD_ADDRESS = "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk";
 
+/** The caller's custody wallet id behind `OWN_ADDRESS` in these fixtures. */
+export const OWN_WALLET_ID = "cwlt_dvp_fixture_own";
+
+/** The caller's custody wallet behind `OWN_ADDRESS`, as the API would resolve it. */
+export function ownParty(overrides: Partial<DvpPartyRef> = {}): DvpPartyRef {
+  return {
+    address: OWN_ADDRESS,
+    counterparty: null,
+    wallet: { id: OWN_WALLET_ID, name: "Fixture Desk" },
+    ...overrides,
+  };
+}
+
 export function testParty(overrides: Partial<DvpPartyRef> = {}): DvpPartyRef {
   return {
     address: OTHER_ADDRESS,
     counterparty: null,
-    custodied: false,
+    wallet: null,
     ...overrides,
   };
 }
@@ -30,11 +43,13 @@ export function testLeg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
     tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     decimals: 6,
     symbol: "ATD",
+    imageUrl: null,
     amount: "1000000000",
     escrow: LEG_ESCROW_A,
     settlementDestination: OTHER_ADDRESS,
     funding: null,
     fundingSignature: null,
+    outcome: "awaiting",
     ...overrides,
   };
 }

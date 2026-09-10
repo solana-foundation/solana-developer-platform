@@ -13,6 +13,8 @@ export interface DvpCreateOption {
   /** The mint address, which is what the API actually takes. */
   mint: string;
   label: string;
+  /** The token's human name ("USD Coin"), or null when the metadata has none. */
+  name: string | null;
   /**
    * Lets the form take a human amount and convert it. Null when unknown, in
    * which case the field falls back to base units rather than guessing a scale
@@ -253,6 +255,7 @@ function toTokenOption(token: TokenRow) {
         {
           mint: token.mintAddress,
           label: token.symbol || token.name || token.mintAddress,
+          name: token.name ? token.name : null,
           decimals: typeof token.decimals === "number" ? token.decimals : null,
           // Every SDP-issued asset is minted under Token-2022.
           tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],

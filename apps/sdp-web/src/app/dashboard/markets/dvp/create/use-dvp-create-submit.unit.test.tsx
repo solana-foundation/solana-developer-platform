@@ -11,6 +11,7 @@
  * "Idempotency key already used with different request payload".
  */
 
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +32,7 @@ function withI18n({ children }: { children: ReactNode }) {
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
-const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const T22 = SPL_TOKEN_PROGRAMS["token-2022"];
 const LEGACY = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const WALLET_A = "cwlt_a";
 const ADDRESS_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
@@ -46,7 +47,7 @@ function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
     payerWalletId: null,
     amountA: "1000",
     amountB: "2000",
-    expiry: "2027-01-01",
+    expiry: "2027-01-01T23:59",
     mintA: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
     mintB: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
     refString: "",
@@ -190,7 +191,7 @@ describe("useDvpCreateSubmit idempotency key", () => {
     it.each([
       ["the asset amount", { amountA: "1001" }],
       ["the cash amount", { amountB: "2001" }],
-      ["the expiry", { expiry: "2027-01-02" }],
+      ["the expiry", { expiry: "2027-01-02T23:59" }],
     ])("%s", async (_label, overrides) => {
       expect((await requestFor(overrides)).idempotencyKey).not.toBe(
         (await requestFor()).idempotencyKey

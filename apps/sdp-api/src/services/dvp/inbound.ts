@@ -23,6 +23,17 @@ import type { Env } from "@/types/env";
 /** How many inbound trades a single read returns. */
 export const DVP_INBOUND_LIMIT = 50;
 
+/**
+ * The caller's custody wallet behind a party address: identity, not just
+ * presence. `id` is the custody wallet record id (`custody_wallets.id`) the
+ * dashboard's wallet pages accept; `name` is its display name, or null when
+ * none was set.
+ */
+export interface DvpCallerWallet {
+  id: string;
+  name: string | null;
+}
+
 export interface DvpInboundRequest {
   organizationId: string;
   projectId: string;
@@ -40,7 +51,8 @@ export interface DvpInboundTrade {
 
 /**
  * The caller's own custody wallet addresses, mapped to the wallet that holds
- * each one.
+ * each one: its record id and display name, so a party can be labelled as an
+ * SDP wallet rather than only flagged as custodied.
  *
  * Exported because funding (PRO-1854) must answer the same question discovery
  * answers: which party addresses are this caller's. One function so the rule
@@ -52,11 +64,15 @@ export interface DvpInboundTrade {
  * of wallets discovers trades for that subset and no more. Without it a
  * narrowly bound key would learn about trades naming wallets it has no rights
  * over, which is the same disclosure the binding exists to prevent.
+ *
+ * @param env - The request environment, for the database and runtime targets.
+ * @param request - Org, project and auth the addresses are resolved for.
+ * @returns Address → the custody wallet holding it.
  */
 export async function callerPartyAddresses(
   env: Env,
   request: DvpInboundRequest
-): Promise<Map<string, string>> {
+): Promise<Map<string, DvpCallerWallet>> {
   const allowedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(request.auth, [
     "wallets:read",
   ]);
@@ -81,18 +97,18 @@ export async function callerPartyAddresses(
   return new Map(
     visible
       .filter((wallet) => typeof wallet.publicKey === "string" && wallet.publicKey.length > 0)
-      .map((wallet) => [wallet.publicKey as string, wallet.id])
+      .map((wallet) => [wallet.publicKey as string, { id: wallet.id, name: wallet.label }])
   );
 }
 
 /**
  * The inbound trades plus the address map that decided membership, which the
- * serializer derives each leg's `custodied` from.
+ * serializer derives each leg's `wallet` from.
  */
 export interface DvpInboundResult {
   trades: DvpInboundTrade[];
-  /** The caller's custody wallet addresses (address → wallet id). */
-  callerAddresses: Map<string, string>;
+  /** The caller's custody wallets (address → wallet identity). */
+  callerAddresses: Map<string, DvpCallerWallet>;
 }
 
 /**

@@ -76,6 +76,10 @@ export interface DvpTradeRow {
   // Last observed escrow state. Null until the reconciler has looked.
   escrowAAmount: string | null;
   escrowBAmount: string | null;
+  /** Highest observed escrow balance while the trade was open. */
+  escrowAPeakAmount: string | null;
+  /** Highest observed escrow balance while the trade was open. */
+  escrowBPeakAmount: string | null;
   escrowAFrozen: boolean | null;
   escrowBFrozen: boolean | null;
   createdAt: string;
@@ -98,6 +102,8 @@ export type DvpTradeInsert = Omit<
   | "updatedAt"
   | "escrowAAmount"
   | "escrowBAmount"
+  | "escrowAPeakAmount"
+  | "escrowBPeakAmount"
   | "escrowAFrozen"
   | "escrowBFrozen"
 >;
@@ -117,6 +123,19 @@ export interface DvpTradeScope {
   sdpWalletIds?: string[] | null;
 }
 
+/**
+ * Server-side list filters for a project's trades.
+ *
+ * `statuses` narrows to the given lifecycle states; `q` is a case-insensitive
+ * substring over id, swap_dvp, both parties, both escrows, both mints and both
+ * leg symbols. `null` means no filtering on that axis — explicit, never a
+ * defaulted parameter.
+ */
+export interface DvpTradeListFilters {
+  statuses: DvpTradeStatus[] | null;
+  q: string | null;
+}
+
 export interface DvpTradeObservationUpdate {
   id: string;
   /** The status the row must still hold for this write to apply. */
@@ -126,6 +145,7 @@ export interface DvpTradeObservationUpdate {
   escrowBAmount: string | null;
   escrowAFrozen: boolean | null;
   escrowBFrozen: boolean | null;
+  closeSignature: Signature | null;
   observedAt: string;
 }
 
@@ -153,7 +173,9 @@ export interface DvpTradeRepository {
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: Address): Promise<DvpTradeRow | null>;
   /**
-   * Open trades across every project, stalest observation first.
+   * Open trades and recently closed trades across every project, stalest
+   * observation first. Closed trades remain eligible for seven days from the
+   * first time their closed status was recorded.
    *
    * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
    * for a caller — it is a background sweep, and scoping it to a project would
@@ -165,7 +187,9 @@ export interface DvpTradeRepository {
    *
    * Compare-and-swap on the status the derivation was computed FROM, so a sweep
    * working from a stale read cannot overwrite a newer one. Returns null when it
-   * lost that race, which is the same answer a vanished row gives.
+   * lost that race, which is the same answer a vanished row gives. The first
+   * closed observation starts the late-deposit sweep window and later
+   * observations never move it.
    */
   recordObservation(input: DvpTradeObservationUpdate): Promise<DvpTradeRow | null>;
   /**
@@ -211,7 +235,22 @@ export interface DvpTradeRepository {
     status: "settled" | "cancelled",
     signature: Signature
   ): Promise<DvpTradeRow | null>;
-  listByProject(scope: DvpTradeScope, limit: number): Promise<DvpTradeRow[]>;
+  /**
+   * The project's trades, newest first, narrowed by the given filters.
+   *
+   * The filters run SERVER-SIDE because the list is capped with no cursor: a
+   * client-side filter over the newest page makes a matching trade older than
+   * the page unfindable, so the narrowing must happen before the LIMIT.
+   *
+   * @param scope - Tenant and wallet-scope the read is bounded by.
+   * @param filters - Status and search narrowing; `null` on an axis means unfiltered.
+   * @param limit - Page size, applied after the filters.
+   */
+  listByProject(
+    scope: DvpTradeScope,
+    filters: DvpTradeListFilters,
+    limit: number
+  ): Promise<DvpTradeRow[]>;
   /**
    * Open trades naming one of these addresses, created by somebody else.
    *

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -261,6 +261,21 @@ async function useRuntimeCredential(): Promise<void> {
     )
     .bind(CREDENTIAL_ID)
     .run();
+}
+
+async function seedCreatingCredential(
+  db: DatabaseExecutor = getDb(env),
+  predecessorId: string | null = null
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO provider_credentials (
+       id, organization_id, project_id, provider, label, scope, source,
+       storage_backend, secret_ref, status, rotated_from_provider_credential_id, credential_version, created_by
+     ) VALUES ('pcred_creating_submission', ?, ?, 'privy', 'Creating', 'project',
+       'stored', 'gcp_secret_manager', 'projects/p/secrets/sdp-provider-credentials-creating',
+       'creating', ?, ?, ?)`,
+    [ORGANIZATION_ID, PROJECT_ID, predecessorId, predecessorId ? 2 : 1, USER_ID]
+  );
 }
 
 async function seedActiveFingerprintConnection(
@@ -935,6 +950,119 @@ describe("exact Custody Connection installation routes", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
     expect(secretFactory).not.toHaveBeenCalled();
+  });
+
+  it("blocks a failed runtime retry while a stored GCP submission is still creating", async () => {
+    await useRuntimeCredential();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(privyJson({ error: "invalid" }, 401)));
+    const { app, token } = buildApp();
+    expect((await installationRequest(app, token, "complete")).status).toBe(200);
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+    await seedCreatingCredential();
+    const providerFetch = successfulPrivyFetch();
+    const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+    const installation = await getInstallation(app, token);
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "CONFLICT", details: { reason: "unfinished_installation_exists" } },
+    });
+    expect(installation.status).toBe(200);
+    expect(await installation.json()).toMatchObject({
+      data: { connection: { canComplete: false } },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(secretFactory).not.toHaveBeenCalled();
+    expect(await getState()).toMatchObject({
+      credential_status: "failed_validation",
+      connection_status: "failed",
+      last_check_status: "failed",
+    });
+  });
+
+  it("rechecks the creating submission slot after a runtime retry waits for the project lock", async () => {
+    await useRuntimeCredential();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(privyJson({ error: "invalid" }, 401)));
+    const { app, token } = buildApp();
+    expect((await installationRequest(app, token, "complete")).status).toBe(200);
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+    let markReady: (() => void) | undefined;
+    let releaseCreation: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      markReady = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseCreation = resolve;
+    });
+    const creation = getDb(env).transaction(async (tx) => {
+      await tx.queryOne("SELECT id FROM projects WHERE id = ? FOR UPDATE", [PROJECT_ID]);
+      await seedCreatingCredential(tx);
+      markReady?.();
+      await gate;
+    });
+    await ready;
+    const providerFetch = successfulPrivyFetch();
+    const retry = installationRequest(app, token, "complete");
+    try {
+      const deadline = Date.now() + 5_000;
+      while (true) {
+        const waiting = await getDb(env).queryOne<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'
+               AND query LIKE '%FROM projects%' AND query LIKE '%FOR UPDATE%'
+           ) AS waiting`
+        );
+        if (waiting?.waiting) break;
+        if (Date.now() >= deadline) throw new Error("Runtime retry did not reach the project lock");
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+    } finally {
+      releaseCreation?.();
+      await Promise.all([creation, retry]);
+    }
+    const response = await retry;
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "CONFLICT", details: { reason: "unfinished_installation_exists" } },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getState()).toMatchObject({
+      credential_status: "failed_validation",
+      connection_status: "failed",
+    });
+  });
+
+  it("does not let an unrelated creating rotation occupy the runtime installation retry slot", async () => {
+    await useRuntimeCredential();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(privyJson({ error: "invalid" }, 401)));
+    const { app, token } = buildApp();
+    expect((await installationRequest(app, token, "complete")).status).toBe(200);
+    await seedActiveFingerprintConnection({
+      credentialId: "pcred_rotation_predecessor",
+      connectionId: "cconn_rotation_predecessor",
+      fingerprint: `sha256:${"b".repeat(64)}`,
+    });
+    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
+    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+    await seedCreatingCredential(getDb(env), "pcred_rotation_predecessor");
+    const providerFetch = successfulPrivyFetch();
+
+    expect(await (await getInstallation(app, token)).json()).toMatchObject({
+      data: { connection: { canComplete: true } },
+    });
+    const response = await installationRequest(app, token, "complete");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        providerCredential: { id: CREDENTIAL_ID, status: "active" },
+        completion: { status: "success" },
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(3);
   });
 
   it("cancels a runtime installation flag-off without modifying deployment credentials", async () => {

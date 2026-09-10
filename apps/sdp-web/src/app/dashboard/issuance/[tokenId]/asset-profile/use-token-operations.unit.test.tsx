@@ -20,7 +20,7 @@ vi.mock("../use-token-action-runner", () => ({
 }));
 vi.mock("./use-token-operation-data", () => ({
   useTokenOperationData: () => ({
-    authorityWallets: [{ id: "wal_test", walletId: "wal_test", publicKey: source }],
+    authorityWallets: [{ id: "cwlt_test", walletId: "wal_test", publicKey: source }],
     authorityWalletsLoading: false,
     authorityWalletsError: null,
     allowlistEntries: [],
@@ -34,6 +34,7 @@ const token: Token = {
   id: "tok_test",
   projectId: "prj_test",
   organizationId: "org_test",
+  signingCustodyWalletId: "cwlt_test",
   signingWalletId: "wal_test",
   mintAddress: destination,
   mintAuthority: source,

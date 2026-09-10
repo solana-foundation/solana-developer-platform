@@ -34,11 +34,8 @@ function nextAttemptIso(now: Date, attemptCount: number): string {
   return new Date(now.getTime() + minutes * 60 * 1000).toISOString();
 }
 
-function isAlreadyDestroyed(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.message.includes("FAILED_PRECONDITION") || error.message.includes("NOT_FOUND"))
-  );
+function isMissingVersion(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("NOT_FOUND");
 }
 
 function isKnownBackend(value: string): value is CredentialSecretStorageBackend {
@@ -124,11 +121,10 @@ export async function retireOrphanedActionSecrets(
       await repo.deleteRetirement(row.id);
       result.retired += 1;
     } catch (error) {
-      // A version that is already gone is the outcome this row wanted. Secret Manager
-      // answers FAILED_PRECONDITION for destroying one twice, which is exactly what a row
-      // left behind by a successful request-time destroy looks like — clearing it beats
-      // retrying it to the backoff cap forever.
-      if (isAlreadyDestroyed(error)) {
+      // Predicted versions can remain absent when their write never happened.
+      // An already-destroyed version is confirmed by the store, not by a
+      // FAILED_PRECONDITION message, which can have other causes.
+      if (isMissingVersion(error)) {
         await repo.deleteRetirement(row.id);
         result.retired += 1;
         continue;

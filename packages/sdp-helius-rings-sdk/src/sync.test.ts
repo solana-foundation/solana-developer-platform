@@ -16,14 +16,13 @@ vi.mock("@heliuslabs/zolana", async (importOriginal) => ({
   },
 }));
 
-const { createDeterministicMaterialSource } = await import("./deterministic-ka/index.js");
-const { deriveMaterial } = await import("./deterministic-ka/derivation.js");
 const { HeliusRingsError } = await import("@sdp/helius-rings");
-const { canonicalShieldedIdentity } = await import("./material.js");
 const { syncRingsWallet } = await import("./sync.js");
+const { derivedIdentity, TEST_OWNER, testMaterialSource } = await import(
+  "./test/shielded-identity-fixtures.js"
+);
 
-const SEED = new Uint8Array(32).fill(3);
-const OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const OWNER = TEST_OWNER;
 const PROTOCOL_SOL = "11111111111111111111111111111111";
 const SDP_SOL = "So11111111111111111111111111111111111111112";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -35,7 +34,7 @@ const SOL_LABEL = { mint: SDP_SOL, symbol: "SOL", decimals: 9 };
 
 const DEPS = {
   client: {} as never,
-  material: createDeterministicMaterialSource({ seed: SEED }),
+  material: testMaterialSource(),
   organizationId: "org_1",
   projectId: "proj_1",
 };
@@ -269,14 +268,12 @@ describe("syncRingsWallet", () => {
   });
 
   it("proceeds when the persisted identity is the one the material derives", async () => {
-    const material = await deriveMaterial(SEED, {
+    const expected = await derivedIdentity({
       organizationId: "org_1",
       projectId: "proj_1",
       walletId: "hrw_1",
       owner: OWNER,
     });
-    const expected = canonicalShieldedIdentity(material.shieldedAddress);
-    material.destroy();
 
     await syncRingsWallet(DEPS, {
       walletId: "hrw_1",

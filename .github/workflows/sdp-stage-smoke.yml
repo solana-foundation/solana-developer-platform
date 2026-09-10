@@ -19,13 +19,14 @@ jobs:
     timeout-minutes: 20
     if: github.repository == 'solana-foundation/solana-developer-platform'
     env:
-      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,E2E_CLERK_TICKET_AUTH,PLAYWRIGHT_USE_EXTERNAL_API,PLAYWRIGHT_USE_NEXT_START,PLAYWRIGHT_NEXT_DIST_DIR,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,CUSTODY_ENABLED,ISSUANCE_ENABLED,POLICIES_ENABLED,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
+      DOPPLER_PRESERVE_ENV: PLAYWRIGHT_API_URL,PLAYWRIGHT_BASE_URL,E2E_CLERK_TICKET_AUTH,PLAYWRIGHT_USE_EXTERNAL_API,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,NEXT_PUBLIC_SENTRY_DSN,NODE_ENV,SENTRY_AUTH_TOKEN,VERCEL_ENV,SDP_FLAG_HOMEPAGE_OPEN_SIGNUP,CUSTODY_ENABLED,ISSUANCE_ENABLED,POLICIES_ENABLED,SDP_FLAG_PRIVY_BYOK,SDP_FLAG_ASSET_PROFILES,PRIVATE_CHANNELS_ENABLED,HELIUS_RINGS_ENABLED,PAYMENTS_ENABLED,MARKETS_ENABLED,EARN_ENABLED
       SMOKE_TARGET: stage
       E2E_CLERK_TICKET_AUTH: "1"
       PLAYWRIGHT_API_URL: https://api-preview.solana.com
+      # The deployed stage dashboard (same solana.com domain as the production Clerk cookie).
+      # A locally started dashboard on localhost can never finish the pk_live sign-in.
+      PLAYWRIGHT_BASE_URL: https://app-preview.solana.com
       PLAYWRIGHT_USE_EXTERNAL_API: "1"
-      PLAYWRIGHT_USE_NEXT_START: "1"
-      PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
       NEXT_PUBLIC_DISABLE_SENTRY: "1"
       NEXT_PUBLIC_SENTRY_DSN: ""
       PLAYWRIGHT_DISABLE_SENTRY: "1"
@@ -78,13 +79,12 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install chromium
 
-      - name: Build web app against the target API
-        env:
-          DOPPLER_CONFIG: stg_ci
-          SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
-          NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
-          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
-        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
+      - name: Probe dashboard readiness
+        run: |
+          set -euo pipefail
+          STATUS=$(curl -sS -o /dev/null -m 15 -w '%{http_code}' "${PLAYWRIGHT_BASE_URL}/sign-in")
+          echo "GET ${PLAYWRIGHT_BASE_URL}/sign-in -> ${STATUS}"
+          [ "$STATUS" = "200" ]
 
       - name: Run GCP read-only smoke
         id: smoke
