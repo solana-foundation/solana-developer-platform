@@ -6,11 +6,16 @@
  *
  * Two things about `CreateDvp` shape this whole function.
  *
- * Only the PAYER signs. `user_a`, `user_b` and `settlement_authority` are plain
- * accounts on the instruction, so the counterparty signs nothing here and needs
- * no integration with us. Verified on devnet by creating a trade with addresses
+ * Only the PAYER signs, and that payer is Kora's sponsor. `user_a`, `user_b`
+ * and `settlement_authority` are plain accounts on the instruction, so the
+ * counterparty signs nothing here and needs no integration with us. Verified on devnet by creating a trade with addresses
  * we hold no keys for. It also means the instruction creates no obligation: a
  * SwapDvp is a proposal until someone funds it.
+ *
+ * The row is claimed before signing because sponsorship budget is consumed at
+ * sign time. Claim, sign, attach, send makes the idempotency race finish before
+ * either request can spend budget, while preserving the signed transaction as
+ * the durable marker before broadcast.
  *
  * And because it is permissionless, a created trade is NOT proof of agreement.
  * Anyone can create one naming anyone, and the economic terms are not part of
@@ -26,19 +31,17 @@ import {
   type Address,
   address,
   appendTransactionMessageInstructions,
+  compileTransaction,
+  createNoopSigner,
   createTransactionMessage,
-  getSignatureFromTransaction,
+  getBase64Encoder,
   getTransactionEncoder,
-  isSolanaError,
   none,
   pipe,
-  type Signature,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-  setTransactionMessageFeePayerSigner,
+  setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   some,
 } from "@solana/kit";
-import { signTransactionMessageWithSigners } from "@solana/signers";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import {
@@ -50,13 +53,21 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import {
+  assertSponsorSignedSameMessage,
+  createProjectSponsorshipFeePayment,
+} from "@/services/sponsorship.service";
+import {
+  isDefiniteSubmissionError,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { dvpCreateFingerprint, type ResolvedParty } from "./fingerprint";
 import { describeDvpDestinationProblem, findDvpDestinationProblem } from "./inspect-destination";
 import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
+import { observeDvpTradeNow } from "./observe-now";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
 
@@ -76,8 +87,6 @@ export type CreateDvpTradeInput = {
   /** The two parties, each as the caller described them. */
   partyA: DvpPartyInput;
   partyB: DvpPartyInput;
-  /** Signs and pays fee + rent; null means the settlement wallet. NOT a term of the trade. */
-  payerWalletId: string | null;
   /** Asset leg mint and its token program. */
   mintA: Address;
   tokenProgramA: Address;
@@ -126,12 +135,13 @@ function assertOwnReplay(trade: DvpTradeRow, fingerprint: string | null): DvpTra
  */
 async function insertOrReplay(
   repository: ReturnType<typeof createDvpTradeRepository>,
+  failedRowId: string | null,
   idempotencyKey: string | null,
   fingerprint: string | null,
   row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0]
 ): Promise<DvpTradeRow> {
   try {
-    return await repository.create(row);
+    return await repository.claimWithKeyRelease(failedRowId, row);
   } catch (error) {
     if (!idempotencyKey) {
       throw error;
@@ -280,22 +290,13 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   const fingerprint = input.idempotencyKey
     ? dvpCreateFingerprint({ input, resolvedA, resolvedB })
     : null;
+  let failedRowId: string | null = null;
   if (input.idempotencyKey) {
     const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
     if (replayed) {
-      // A create that definitively failed left the request unmade, so its key
-      // has nothing to stand for. Replaying it would hand back a dead trade
-      // forever — and to a caller whose key is DERIVED from the payload, as
-      // the dashboard's is, "forever" is literal: there is no other key it can
-      // send for this trade, so one preflight rejection would retire those
-      // terms permanently. Freeing the key turns that into an ordinary retry.
-      //
-      // Only `create_failed`. `creating` may still land, and every other status
-      // means it already did; replaying those is the entire point of the key.
-      const freed =
-        replayed.status === "create_failed" &&
-        (await repository.releaseIdempotencyKey(replayed.id));
-      if (!freed) {
+      if (replayed.status === "create_failed") {
+        failedRowId = replayed.id;
+      } else {
         return assertOwnReplay(replayed, fingerprint);
       }
     }
@@ -339,20 +340,6 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     projectId: input.projectId,
   });
   const settlementAuthority = settlement.address;
-
-  // The payer signs and pays fee + rent: explicit `payerWalletId`, else the
-  // settlement wallet already provisioned above (one provisioning call serves
-  // both roles). It is legal as payer for both trade shapes — the program
-  // refuses only `settlement_authority == user_a || user_b` — and rent refunds
-  // land on the wallet that closes, which is this same one.
-  const payerWalletId =
-    input.payerWalletId === null ? settlement.custodyWalletId : input.payerWalletId;
-  const signer = await createOrgSignerForCustodyWallet(
-    env,
-    input.organizationId,
-    input.projectId,
-    payerWalletId
-  );
 
   const userA = resolvedA.address;
   const userB = resolvedB.address;
@@ -410,119 +397,147 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     findAssociatedTokenPda({ owner: swapDvp, mint: mintB, tokenProgram: tokenProgramB }),
   ]);
 
-  const instruction = getCreateDvpInstruction({
-    payer: signer,
-    swapDvp,
-    nonceTombstone,
-    settlementAuthority,
-    userA,
-    userB,
-    mintA,
-    mintB,
-    dvpAtaA: escrowA,
-    dvpAtaB: escrowB,
-    tokenProgramA,
-    tokenProgramB,
-    amountA: input.amountA,
-    amountB: input.amountB,
-    expiryTimestamp: input.expiryTimestamp,
-    nonce,
-    refString: input.refString,
-    // Null when the caller named none, which the program records as the party's
-    // own address — the default every flow in PRO-1830 wants. An execution desk
-    // settling into an account other than the one it funded from passes them.
-    userASettlementDestination: input.userASettlementDestination,
-    userBSettlementDestination: input.userBSettlementDestination,
-    earliestSettlementTimestamp:
-      input.earliestSettlementTimestamp === null ? none() : some(input.earliestSettlementTimestamp),
-  });
-
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(signer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m)
+  const id = `dvp_${crypto.randomUUID().replace(/-/g, "")}`;
+  const recorded = await insertOrReplay(
+    repository,
+    failedRowId,
+    input.idempotencyKey,
+    fingerprint,
+    {
+      id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      swapDvp,
+      settlementAuthority,
+      userA,
+      userB,
+      mintA: input.mintA,
+      mintB: input.mintB,
+      nonce: nonce.toString(),
+      tokenProgramA: input.tokenProgramA,
+      tokenProgramB: input.tokenProgramB,
+      decimalsA: inspectedA?.decimals ?? null,
+      decimalsB: inspectedB?.decimals ?? null,
+      symbolA: inspectedA?.symbol ?? wellKnownSymbol(input.mintA),
+      symbolB: inspectedB?.symbol ?? wellKnownSymbol(input.mintB),
+      amountA: input.amountA.toString(),
+      amountB: input.amountB.toString(),
+      expiryTimestamp: input.expiryTimestamp.toString(),
+      earliestSettlementTimestamp: input.earliestSettlementTimestamp?.toString() ?? null,
+      userASettlementDestination: destinationA,
+      userBSettlementDestination: destinationB,
+      refString: input.refString,
+      escrowA,
+      escrowB,
+      counterpartyAccountIdA: resolvedA.counterpartyAccountId,
+      counterpartyAccountIdB: resolvedB.counterpartyAccountId,
+      idempotencyKey: input.idempotencyKey,
+      idempotencyFingerprint: fingerprint,
+      createSignature: null,
+      createLastValidBlockHeight: null,
+    }
   );
-  const signed = await signTransactionMessageWithSigners(message);
-  // Known from the signed bytes, so the row can carry it before anything is sent.
-  const signature: Signature = getSignatureFromTransaction(signed);
 
-  // Recorded BEFORE broadcast, at status `creating`. The six seed values are the
-  // only durable copy of what RecoverDvp needs to rescue a deposit that lands
-  // once a trade has closed, and a retry cannot stand in for them: it draws a
-  // fresh nonce and derives a different address. So a crash between send and
-  // insert would strand a real on-chain trade permanently. Same safety order as
-  // the Earn vault services — build, sign, record, send.
-  const recorded = await insertOrReplay(repository, input.idempotencyKey, fingerprint, {
-    id: `dvp_${crypto.randomUUID().replace(/-/g, "")}`,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    swapDvp,
-    settlementAuthority,
-    userA,
-    userB,
-    mintA: input.mintA,
-    mintB: input.mintB,
-    nonce: nonce.toString(),
-    tokenProgramA: input.tokenProgramA,
-    tokenProgramB: input.tokenProgramB,
-    decimalsA: inspectedA?.decimals ?? null,
-    decimalsB: inspectedB?.decimals ?? null,
-    // Metadata first, catalogue second. A Token-2022 mint carries its own name;
-    // USDC does not — it is legacy SPL with no metadata extension — so reading
-    // only the mint left the cash leg as a bare number on a screen showing two
-    // different tokens.
-    symbolA: inspectedA?.symbol ?? wellKnownSymbol(input.mintA),
-    symbolB: inspectedB?.symbol ?? wellKnownSymbol(input.mintB),
-    amountA: input.amountA.toString(),
-    amountB: input.amountB.toString(),
-    expiryTimestamp: input.expiryTimestamp.toString(),
-    earliestSettlementTimestamp: input.earliestSettlementTimestamp?.toString() ?? null,
-    // The program stores an omitted destination as the party's own address, so
-    // mirror that rather than storing null and having to branch on read.
-    userASettlementDestination: destinationA,
-    userBSettlementDestination: destinationB,
-    refString: input.refString,
-    escrowA,
-    escrowB,
-    // Org-scoped attribution; null for external addresses and wallets (fundability re-derives).
-    counterpartyAccountIdA: resolvedA.counterpartyAccountId,
-    counterpartyAccountIdB: resolvedB.counterpartyAccountId,
-    idempotencyKey: input.idempotencyKey,
-    idempotencyFingerprint: fingerprint,
-    createSignature: signature,
-    // Stored so the reconciler can tell a create that is still in flight from
-    // one that can never land, rather than inferring it from elapsed time.
-    createLastValidBlockHeight: lastValidBlockHeight.toString(),
-  });
-
-  // A concurrent keyed request won the insert, so the row we got back is theirs
-  // and their transaction is the one on the network. Broadcasting ours too
-  // would create the second trade this key exists to prevent.
-  if (recorded.createSignature !== signature) {
+  if (recorded.id !== id) {
     return recorded;
   }
 
+  // Kora pays the fee and trade-account rent. Resolve sponsorship only after
+  // validation and after the durable claim has won the idempotency race.
+  let signed = false;
   try {
-    await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+    const feePayment = await createProjectSponsorshipFeePayment(env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: settlement.custodyWalletId },
+    });
+    const sponsor = await feePayment.getFeePayer();
+
+    const instruction = getCreateDvpInstruction({
+      payer: createNoopSigner(sponsor),
+      swapDvp,
+      nonceTombstone,
+      settlementAuthority,
+      userA,
+      userB,
+      mintA,
+      mintB,
+      dvpAtaA: escrowA,
+      dvpAtaB: escrowB,
+      tokenProgramA,
+      tokenProgramB,
+      amountA: input.amountA,
+      amountB: input.amountB,
+      expiryTimestamp: input.expiryTimestamp,
+      nonce,
+      refString: input.refString,
+      // Null when the caller named none, which the program records as the party's
+      // own address — the default every flow in PRO-1830 wants. An execution desk
+      // settling into an account other than the one it funded from passes them.
+      userASettlementDestination: input.userASettlementDestination,
+      userBSettlementDestination: input.userBSettlementDestination,
+      earliestSettlementTimestamp:
+        input.earliestSettlementTimestamp === null
+          ? none()
+          : some(input.earliestSettlementTimestamp),
+    });
+
+    const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
+      rpc,
+      "confirmed"
+    );
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(sponsor, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions([instruction], m)
+    );
+    const compiled = compileTransaction(message);
+    const bytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+    await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: bytes,
+      lastValidBlockHeight,
+      store: {
+        persistSigned: async ({ signature, signedTransaction, lastValidBlockHeight: height }) => {
+          await assertSponsorSignedSameMessage({
+            unsignedOrPartiallySigned: compiled,
+            sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
+            sponsor,
+          });
+          const attached = await repository.attachCreateSignature(id, signature, height);
+          if (attached === null) {
+            throw new Error("claim was resolved before its signature could be attached");
+          }
+          signed = true;
+        },
+        // The attached signature is DvP's durable in-flight marker: the sweep
+        // treats `creating` + signature + height as possibly landed until the
+        // height expires. There is no second transition to record here.
+        markStarted: async () => {},
+        hasStarted: async () => {
+          const current = await repository.getById(
+            { organizationId: input.organizationId, projectId: input.projectId },
+            id
+          );
+          return current !== null && current.createSignature !== null;
+        },
+      },
+    });
   } catch (error) {
-    // A preflight failure is the one send error that is definitively terminal:
-    // the RPC rejected the bytes in simulation and never forwarded them, so
-    // nothing landed and nothing will. Every other failure — a timeout, a
-    // dropped socket — is ambiguous, and the transaction may still be in flight.
-    // Those rows stay `creating` for the chain to settle rather than being
-    // marked failed on a guess.
-    if (
-      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
-    ) {
-      await repository.resolveCreate(recorded.id, "create_failed");
+    if (!signed || isDefiniteSubmissionError(error)) {
+      await repository.resolveCreate(id, "create_failed");
     }
     throw error;
   }
-
-  // The RPC accepted it. `created` here means "broadcast accepted", not
-  // "confirmed" — confirmation is the reconciler's job, and until it runs the
-  // status is still only ever a cache of what we last observed.
-  return (await repository.resolveCreate(recorded.id, "created")) ?? recorded;
+  const claimed = await repository.getById(
+    { organizationId: input.organizationId, projectId: input.projectId },
+    id
+  );
+  if (claimed === null) {
+    throw new Error("DvP claim disappeared after sponsored submission");
+  }
+  const observed = await observeDvpTradeNow(env, claimed);
+  return observed === null ? claimed : observed;
 }

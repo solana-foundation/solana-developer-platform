@@ -1,5 +1,6 @@
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import type {
   DvpTradeInsert,
   DvpTradeListFilters,
@@ -140,11 +141,17 @@ function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
 }
 
 export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository {
-  return {
-    async create(row: DvpTradeInsert) {
-      const inserted = await db
-        .prepare(
-          `INSERT INTO dvp_trades (
+  /**
+   * Inserts a DvP claim through either the client or its transaction executor.
+   *
+   * @param executor - Database executor owning the statement.
+   * @param row - Claim to insert.
+   * @returns The inserted claim.
+   */
+  async function insert(executor: DatabaseExecutor, row: DvpTradeInsert): Promise<DvpTradeRow> {
+    const inserted = await executor
+      .prepare(
+        `INSERT INTO dvp_trades (
               id, organization_id, project_id, swap_dvp,
               settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
               token_program_a, token_program_b,
@@ -166,45 +173,85 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
+      )
+      .bind(
+        row.id,
+        row.organizationId,
+        row.projectId,
+        row.swapDvp,
+        row.settlementAuthority,
+        row.userA,
+        row.userB,
+        row.mintA,
+        row.mintB,
+        row.nonce,
+        row.tokenProgramA,
+        row.tokenProgramB,
+        row.decimalsA,
+        row.decimalsB,
+        row.symbolA,
+        row.symbolB,
+        row.amountA,
+        row.amountB,
+        row.expiryTimestamp,
+        row.earliestSettlementTimestamp,
+        row.userASettlementDestination,
+        row.userBSettlementDestination,
+        row.refString,
+        row.escrowA,
+        row.escrowB,
+        row.counterpartyAccountIdA,
+        row.counterpartyAccountIdB,
+        row.idempotencyKey,
+        row.idempotencyFingerprint,
+        row.createSignature,
+        row.createLastValidBlockHeight
+      )
+      .first<Record<string, unknown>>();
+    if (!inserted) {
+      throw new Error("DvP trade insert returned no row");
+    }
+    return mapDvpTradeRow(inserted);
+  }
+
+  return {
+    async create(row: DvpTradeInsert) {
+      return insert(db, row);
+    },
+
+    async claimWithKeyRelease(failedRowId: string | null, row: DvpTradeInsert) {
+      return db.transaction(async (executor) => {
+        if (failedRowId !== null) {
+          await executor
+            .prepare(
+              `UPDATE dvp_trades
+                  SET idempotency_key = NULL, updated_at = sdp_iso_now()
+                WHERE id = ? AND status = 'create_failed' AND idempotency_key IS NOT NULL`
+            )
+            .bind(failedRowId)
+            .run();
+        }
+        return insert(executor, row);
+      });
+    },
+
+    async attachCreateSignature(
+      id: string,
+      createSignature: Signature,
+      lastValidBlockHeight: string
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET create_signature = ?,
+                  create_last_valid_block_height = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND status = 'creating' AND create_signature IS NULL
+            RETURNING ${SELECT_COLUMNS}`
         )
-        .bind(
-          row.id,
-          row.organizationId,
-          row.projectId,
-          row.swapDvp,
-          row.settlementAuthority,
-          row.userA,
-          row.userB,
-          row.mintA,
-          row.mintB,
-          row.nonce,
-          row.tokenProgramA,
-          row.tokenProgramB,
-          row.decimalsA,
-          row.decimalsB,
-          row.symbolA,
-          row.symbolB,
-          row.amountA,
-          row.amountB,
-          row.expiryTimestamp,
-          row.earliestSettlementTimestamp,
-          row.userASettlementDestination,
-          row.userBSettlementDestination,
-          row.refString,
-          row.escrowA,
-          row.escrowB,
-          row.counterpartyAccountIdA,
-          row.counterpartyAccountIdB,
-          row.idempotencyKey,
-          row.idempotencyFingerprint,
-          row.createSignature,
-          row.createLastValidBlockHeight
-        )
+        .bind(createSignature, lastValidBlockHeight, id)
         .first<Record<string, unknown>>();
-      if (!inserted) {
-        throw new Error("DvP trade insert returned no row");
-      }
-      return mapDvpTradeRow(inserted);
+      return row ? mapDvpTradeRow(row) : null;
     },
 
     async resolveCreate(id: string, status: "created" | "create_failed") {

@@ -26,7 +26,7 @@ export const dvpTradeIdParamsSchema = dvpTradeIdParamsSchemaBase;
 
 export const createDvpTradeRequestSchema = withOpenApi(createDvpTradeSchemaBase, {
   description:
-    "Terms of the trade to create on chain. Creating a trade commits neither party: only the fee payer signs, and the trade is a proposal until an escrow is funded.",
+    "Terms of the trade to create on chain. Creating a trade commits neither party: only SDP's sponsored fee payer signs, and the trade is a proposal until an escrow is funded.",
 });
 
 export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase

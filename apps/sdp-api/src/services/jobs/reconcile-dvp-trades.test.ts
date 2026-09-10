@@ -59,7 +59,16 @@ function swapDvpFor(id: string): string {
   return getBase58Decoder().decode(bytes);
 }
 
-async function seedTrade(id: string, status: string, overrides: Record<string, string> = {}) {
+async function seedTrade(
+  id: string,
+  status: string,
+  overrides: {
+    expiryTimestamp?: string;
+    createLastValidBlockHeight?: string | null;
+    createSignature?: string | null;
+    createdAt?: string;
+  } = {}
+) {
   await getDb(env)
     .prepare(
       `INSERT INTO dvp_trades (
@@ -69,7 +78,7 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
          amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
          escrow_a, escrow_b, status,
-         create_last_valid_block_height
+         create_signature, create_last_valid_block_height
        ) VALUES (
          ?, ?, ?, ?,
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
@@ -85,7 +94,7 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
          '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         ?, ?
+         ?, ?, ?
        )`
     )
     .bind(
@@ -95,9 +104,18 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
       swapDvpFor(id),
       overrides.expiryTimestamp ?? String(Math.floor(Date.now() / 1000) + 3600),
       status,
-      overrides.createLastValidBlockHeight ?? "1500"
+      Object.hasOwn(overrides, "createSignature") ? overrides.createSignature : SIG,
+      Object.hasOwn(overrides, "createLastValidBlockHeight")
+        ? overrides.createLastValidBlockHeight
+        : "1500"
     )
     .run();
+  if (overrides.createdAt !== undefined) {
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET created_at = ? WHERE id = ?")
+      .bind(overrides.createdAt, id)
+      .run();
+  }
 }
 
 async function statusOf(id: string): Promise<Record<string, unknown> | null> {
@@ -208,6 +226,47 @@ describe("reconcileDvpTrades", () => {
     await reconcileDvpTrades(env);
 
     await expect(statusOf("dvp_live_create")).resolves.toMatchObject({ status: "creating" });
+  });
+
+  it("leaves an unsigned claim creating while it is younger than the grace period", async () => {
+    await seedTrade("dvp_young_claim", "creating", {
+      createSignature: null,
+      createLastValidBlockHeight: null,
+      createdAt: new Date(Date.now() - 14 * 60 * 1_000).toISOString(),
+    });
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+
+    await reconcileDvpTrades(env);
+
+    await expect(statusOf("dvp_young_claim")).resolves.toMatchObject({ status: "creating" });
+  });
+
+  it("fails an unsigned claim once it is older than the grace period", async () => {
+    await seedTrade("dvp_orphaned_claim", "creating", {
+      createSignature: null,
+      createLastValidBlockHeight: null,
+      createdAt: new Date(Date.now() - 16 * 60 * 1_000).toISOString(),
+    });
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+
+    await reconcileDvpTrades(env);
+
+    await expect(statusOf("dvp_orphaned_claim")).resolves.toMatchObject({
+      status: "create_failed",
+    });
+  });
+
+  it("uses block height rather than claim age after a signature is attached", async () => {
+    await seedTrade("dvp_signed_old_claim", "creating", {
+      createSignature: SIG,
+      createLastValidBlockHeight: "2000",
+      createdAt: new Date(Date.now() - 16 * 60 * 1_000).toISOString(),
+    });
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+
+    await reconcileDvpTrades(env);
+
+    await expect(statusOf("dvp_signed_old_claim")).resolves.toMatchObject({ status: "creating" });
   });
 
   it("records a frozen escrow, which balance alone cannot distinguish from unpaid", async () => {

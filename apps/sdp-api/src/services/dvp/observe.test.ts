@@ -26,6 +26,9 @@ function trade(overrides: Partial<DvpTradeExpectation> = {}): DvpTradeExpectatio
     amountB: "2000",
     expiryTimestamp: String(NOW_SECONDS + 3600),
     createLastValidBlockHeight: "1500",
+    createSignature:
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+    createdAt: new Date(NOW_MS - 1_000).toISOString(),
     ...overrides,
   };
 }
