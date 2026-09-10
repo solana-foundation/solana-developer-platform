@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   error: undefined as Error | undefined,
   isInitialLoading: false,
   fetchPositions: vi.fn<() => Promise<EarnExternalWalletPosition[]>>(),
+  summaryOptions: vi.fn<(options?: { detailsVisible?: boolean }) => void>(),
 }));
 
 vi.mock("@/lib/use-solana-cluster", () => ({
@@ -23,11 +24,14 @@ vi.mock("@/lib/use-solana-cluster", () => ({
 
 vi.mock("./earn-program-data", () => ({
   fetchEarnExternalWalletPositions: mocks.fetchPositions,
-  useEarnExternalWalletPositionSummary: () => ({
-    summary: mocks.summary,
-    error: mocks.error,
-    isInitialLoading: mocks.isInitialLoading,
-  }),
+  useEarnExternalWalletPositionSummary: (options?: { detailsVisible?: boolean }) => {
+    mocks.summaryOptions(options);
+    return {
+      summary: mocks.summary,
+      error: mocks.error,
+      isInitialLoading: mocks.isInitialLoading,
+    };
+  },
 }));
 
 function renderWithEnglish(children: ReactNode) {
@@ -45,6 +49,7 @@ afterEach(() => {
   mocks.error = undefined;
   mocks.isInitialLoading = false;
   mocks.fetchPositions.mockReset();
+  mocks.summaryOptions.mockReset();
   vi.useRealTimers();
 });
 
@@ -205,11 +210,24 @@ describe("EmbeddedYieldDashboard", () => {
     expect(screen.queryByText("Customer portfolio unavailable")).toBeNull();
   });
 
-  it("refreshes an open strategy wallet drawer without replacing settled content", async () => {
-    vi.useFakeTimers();
+  it("renders more wallets than the chain-read quota from one summary request", () => {
+    const positions: EarnExternalWalletPosition[] = Array.from({ length: 31 }, (_, index) => ({
+      id: `position_${index + 1}`,
+      ownerAddress: `customer_wallet_${String(index + 1).padStart(2, "0")}`,
+      provider: "kamino",
+      providerReference: "vault_1",
+      label: "USDC Core Yield",
+      tokenMint: USDC,
+      shareMint: "share_mint",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      closedAt: null,
+      shares: "1",
+      withdrawableShares: "1",
+      tokenValue: "1",
+    }));
     mocks.summary = {
-      walletCount: 1,
-      positionCount: 1,
+      walletCount: positions.length,
+      positionCount: positions.length,
       unavailablePositionCount: 0,
       totalsByToken: [],
       totalsByStrategy: [
@@ -217,52 +235,33 @@ describe("EmbeddedYieldDashboard", () => {
           provider: "kamino",
           providerReference: "vault_1",
           label: "USDC Core Yield",
-          ownerAddresses: ["11111111111111111111111111111111"],
-          walletCount: 1,
-          positionCount: 1,
+          ownerAddresses: positions.map((position) => position.ownerAddress),
+          positions,
+          walletCount: positions.length,
+          positionCount: positions.length,
           totalsByToken: [
             {
               tokenMint: USDC,
-              walletCount: 1,
-              positionCount: 1,
+              walletCount: positions.length,
+              positionCount: positions.length,
               unavailablePositionCount: 0,
-              tokenValue: "5.9",
+              tokenValue: String(positions.length),
             },
           ],
         },
       ],
     };
-    mocks.fetchPositions.mockResolvedValue([
-      {
-        id: "position_1",
-        ownerAddress: "11111111111111111111111111111111",
-        provider: "kamino",
-        providerReference: "vault_1",
-        label: "USDC Core Yield",
-        tokenMint: USDC,
-        shareMint: "share_mint",
-        createdAt: "2026-09-02T00:00:00.000Z",
-        closedAt: null,
-        shares: "5.9",
-        withdrawableShares: "5.9",
-        tokenValue: "5.9",
-      },
-    ]);
-
     renderWithEnglish(
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
+    expect(mocks.summaryOptions).toHaveBeenLastCalledWith({ detailsVisible: false });
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for USDC Core Yield" }));
-    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.summaryOptions).toHaveBeenLastCalledWith({ detailsVisible: true });
 
-    expect(mocks.fetchPositions).toHaveBeenCalledTimes(1);
     const drawer = screen.getByRole("dialog", { name: "USDC Core Yield" });
-    expect(within(drawer).getByText("5.9 USDC")).toBeTruthy();
-
-    await vi.advanceTimersByTimeAsync(15_000);
-
-    expect(mocks.fetchPositions).toHaveBeenCalledTimes(2);
-    expect(within(drawer).getByText("5.9 USDC")).toBeTruthy();
+    expect(within(drawer).getByText("Customer wallet 31")).toBeTruthy();
+    expect(within(drawer).getAllByText("1 USDC")).toHaveLength(positions.length);
+    expect(mocks.fetchPositions).not.toHaveBeenCalled();
   });
 
   it("opens wallet addresses on the active project cluster", async () => {
@@ -278,6 +277,22 @@ describe("EmbeddedYieldDashboard", () => {
           providerReference: "vault_1",
           label: "USDC Core Yield",
           ownerAddresses: ["11111111111111111111111111111111"],
+          positions: [
+            {
+              id: "position_1",
+              ownerAddress: "11111111111111111111111111111111",
+              provider: "kamino",
+              providerReference: "vault_1",
+              label: "USDC Core Yield",
+              tokenMint: USDC,
+              shareMint: "share_mint",
+              createdAt: "2026-09-02T00:00:00.000Z",
+              closedAt: null,
+              shares: "5.9",
+              withdrawableShares: "5.9",
+              tokenValue: "5.9",
+            },
+          ],
           walletCount: 1,
           positionCount: 1,
           totalsByToken: [

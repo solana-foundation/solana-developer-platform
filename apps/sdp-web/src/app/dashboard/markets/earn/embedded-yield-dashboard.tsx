@@ -13,12 +13,11 @@ import {
   ExternalLinkIcon,
   InfoIcon,
   Layers3Icon,
-  LoaderCircleIcon,
   WalletIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
@@ -40,12 +39,7 @@ import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
-import {
-  fetchEarnExternalWalletPositions,
-  useEarnExternalWalletPositionSummary,
-} from "./earn-program-data";
-
-const STRATEGY_WALLET_REFRESH_INTERVAL_MS = process.env.NODE_ENV === "development" ? 3_000 : 15_000;
+import { useEarnExternalWalletPositionSummary } from "./earn-program-data";
 
 function PortfolioInfoTip({ label }: { label: string }) {
   return (
@@ -120,50 +114,11 @@ function StrategyWalletDrawer({
 }) {
   const locale = useLocale();
   const t = useTranslations();
-  const [positions, setPositions] = useState<EarnExternalWalletPosition[] | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!open || !strategy) return;
-    const currentStrategy = strategy;
-    let active = true;
-    let refreshing = false;
-    setPositions(null);
-    setError(false);
-
-    async function refresh() {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const pages = await Promise.all(
-          (currentStrategy.ownerAddresses ?? []).map(fetchEarnExternalWalletPositions)
-        );
-        if (!active) return;
-        setPositions(
-          pages
-            .flat()
-            .filter(
-              (position) =>
-                position.provider === currentStrategy.provider &&
-                position.providerReference === currentStrategy.providerReference
-            )
-            .sort((left, right) => left.ownerAddress.localeCompare(right.ownerAddress))
-        );
-        setError(false);
-      } catch {
-        if (active) setError(true);
-      } finally {
-        refreshing = false;
-      }
-    }
-
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), STRATEGY_WALLET_REFRESH_INTERVAL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [open, strategy]);
+  const positions: EarnExternalWalletPosition[] | null = strategy
+    ? [...(strategy.positions ?? [])].sort((left, right) =>
+        left.ownerAddress.localeCompare(right.ownerAddress)
+      )
+    : null;
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="right">
@@ -200,16 +155,7 @@ function StrategyWalletDrawer({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          {!positions && !error ? (
-            <div className="flex min-h-48 items-center justify-center text-secondary">
-              <LoaderCircleIcon aria-hidden="true" className="size-5 animate-spin" />
-              <span className="ml-2 text-sm">
-                {t("DashboardMarkets.earnProgram.walletValuesLoading")}
-              </span>
-            </div>
-          ) : null}
-
-          {error ? (
+          {strategy && !strategy.positions ? (
             <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
               {t("DashboardMarkets.earnProgram.walletRefreshError")}
             </div>
@@ -403,10 +349,14 @@ function PortfolioByStrategy({
 export function EmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
-  const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary();
-  const [selectedStrategy, setSelectedStrategy] = useState<EarnExternalWalletStrategyTotal | null>(
-    null
-  );
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
+  const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
+    detailsVisible: selectedStrategyId !== null,
+  });
+  const selectedStrategy =
+    summary?.totalsByStrategy.find(
+      (strategy) => `${strategy.provider}:${strategy.providerReference}` === selectedStrategyId
+    ) ?? null;
 
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
@@ -490,7 +440,12 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
             {summary.positionCount === 0 ? (
               <PortfolioOnboarding configureHref={configureHref} />
             ) : (
-              <PortfolioByStrategy summary={summary} onStrategySelect={setSelectedStrategy} />
+              <PortfolioByStrategy
+                summary={summary}
+                onStrategySelect={(strategy) =>
+                  setSelectedStrategyId(`${strategy.provider}:${strategy.providerReference}`)
+                }
+              />
             )}
           </>
         )}
@@ -500,7 +455,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
         open={selectedStrategy !== null}
         strategy={selectedStrategy}
         onOpenChange={(open) => {
-          if (!open) setSelectedStrategy(null);
+          if (!open) setSelectedStrategyId(null);
         }}
       />
     </DashboardWorkspaceOverviewPanel>

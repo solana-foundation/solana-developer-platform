@@ -363,6 +363,12 @@ export interface EarnExternalWalletStrategyTotal {
    * analytics consumer that only needs totals should opt out and never hold it.
    */
   ownerAddresses?: string[];
+  /**
+   * Complete live positions contributing to this strategy total. Present only
+   * when the caller passes `includePositions=true`; absent from totals-only
+   * responses so analytics consumers do not receive per-customer details.
+   */
+  positions?: EarnExternalWalletPosition[];
   walletCount: number;
   positionCount: number;
   totalsByToken: EarnExternalWalletTokenTotal[];

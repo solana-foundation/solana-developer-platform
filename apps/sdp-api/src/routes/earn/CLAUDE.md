@@ -1043,9 +1043,11 @@ is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresse
 is the project's entire end-user address book (threat model EARN-028): any
 `earn:read` key becomes PII-bearing by calling it. `?includeOwnerAddresses=false`
 omits the list (omitted, never emptied, so "not requested" cannot read as "no
-owners") and keeps `walletCount`; the default stays address-bearing because the
-dashboard drives its per-owner reads off that list (PRO-1873). Partner docs
-steer analytics keys to the opt-out.
+owners") and keeps `walletCount`. Interactive surfaces can pass
+`includePositions=true` to receive each strategy's already hydrated positions
+in that same request; it requires owner addresses and replaces the
+dashboard's old N-per-owner read fanout. Partner docs steer analytics keys to
+the address-free opt-out shape and detailed surfaces to the explicit opt-in.
 
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
