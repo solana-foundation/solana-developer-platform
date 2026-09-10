@@ -1,12 +1,18 @@
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
+import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
+import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
+import type { TokenService } from "@/services/token.service";
 import { createOrgSigner } from "@/services/solana";
 import {
   assertTokenAllowsOperation,
@@ -22,6 +28,7 @@ import {
 } from "../helpers";
 import type { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -231,10 +238,27 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   });
 };
 
-export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) => {
+type BurnBody = z.output<typeof burnSchema>;
+
+interface BurnPolicyResolved {
+  tokenId: string;
+  auth: ApiKeyContext;
+  projectId: string;
+  tokenService: TokenService;
+  tokenSymbol: string;
+  supplyBaselineUpdatedAt: string | null;
+  signingWalletId: string | null;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  source: ReturnType<typeof assertValidAddress>;
+  amountBaseUnits: bigint;
+  mosaicAmount: number;
+}
+
+export async function extractBurnPolicyCandidate(
+  c: ValidatedBodyContext<typeof burnSchema>
+): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-
   const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
@@ -243,7 +267,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     organizationId: orgId,
     projectId,
   });
-
   if (!token) {
     throw notFound("Token");
   }
@@ -262,6 +285,67 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     body.burn.amount,
     token.decimals
   );
+  const policyWallet =
+    signingWalletId === null ? null : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
+
+  return {
+    candidate:
+      signingWalletId === null
+        ? null
+        : buildIssuancePolicyCandidate({
+            auth,
+            token,
+            custodyWalletId: policyWallet === null ? null : policyWallet.id,
+            walletId: signingWalletId,
+            operationType: "issuance_burn_execute",
+            amount: body.burn.amount,
+            destination: null,
+          }),
+    legs: [],
+    body,
+    resolved: {
+      tokenId,
+      auth,
+      projectId,
+      tokenService,
+      tokenSymbol: token.symbol,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
+      signingWalletId,
+      mintAddress,
+      source,
+      amountBaseUnits,
+      mosaicAmount,
+    } satisfies BurnPolicyResolved,
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "burn",
+      source: body.burn.source,
+      amount: body.burn.amount,
+    },
+    idempotencyKey: null,
+  };
+}
+
+export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) => {
+  const {
+    body,
+    resolved: {
+      tokenId,
+      auth,
+      projectId,
+      tokenService,
+      tokenSymbol,
+      supplyBaselineUpdatedAt,
+      signingWalletId,
+      mintAddress,
+      source,
+      amountBaseUnits,
+      mosaicAmount,
+    },
+  } = getPolicyGateContext<BurnBody, BurnPolicyResolved, WalletOperationPolicyEnforcement | null>(
+    c
+  );
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -279,7 +363,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       source: body.burn.source,
       amount: body.burn.amount,
       memo: body.burn.memo,
-      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
+      supplyBaselineUpdatedAt,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -325,7 +409,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       source,
       mintAddress,
       amountBaseUnits,
-      token.symbol
+      tokenSymbol
     );
 
     // Execute burn on Solana
@@ -361,7 +445,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
 
     emitTokenOperationCompleted(c, {
-      organizationId: orgId,
+      organizationId: auth.organizationId,
       projectId,
       tokenId,
       operation: "burn",

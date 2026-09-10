@@ -19,7 +19,7 @@ import {
   extractUpdateAuthorityPolicyCandidate,
   prepareUpdateAuthority,
 } from "./handlers/authority";
-import { executeBurn, prepareBurn } from "./handlers/burn";
+import { executeBurn, extractBurnPolicyCandidate, prepareBurn } from "./handlers/burn";
 import {
   confirmDeploy,
   deployToken,
@@ -177,6 +177,7 @@ issuance.post(
   "/tokens/:tokenId/burn",
   requirePermissions("tokens:write"),
   validateBody(burnSchema),
+  policyGate({ extract: extractBurnPolicyCandidate }),
   executeBurn
 );
 
