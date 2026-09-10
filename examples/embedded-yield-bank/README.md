@@ -4,6 +4,12 @@ Northstar is a small full-stack bank demo built with Vite, React, Hono, and shad
 
 This is a real sandbox integration, not a fixture UI. The balances come from the managed wallet on Solana devnet. Strategies, positions, earnings, and activity come from the local SDP API. Deposits and withdrawals create and submit real devnet transactions, then appear in both Northstar and the SDP Embedded Yield dashboard.
 
+## Screenshots
+
+| Partner experience | SDP project portfolio |
+| --- | --- |
+| ![Northstar customer dashboard](./screenshots/northstar-dashboard.jpg) | ![SDP Embedded Yield dashboard](./screenshots/sdp-embedded-yield-dashboard.jpg) |
+
 ## What the example demonstrates
 
 - Keep the SDP API key and wallet private key on the Hono server.
