@@ -136,10 +136,27 @@ Two behaviours follow from sealing being write-once:
 - A wallet that has already published an identity is served **read-only**. If its
   stored material is missing, the request fails with `config_error` instead of
   sealing fresh keys that could not derive the published identity.
-- Re-keying discards the stored material first (`rotateKeyAuthorityMaterial`),
-  because a re-key that merely asked for material would read the old blobs back
-  and republish the identity it was trying to abandon. Under `deterministic` there
-  is nothing to rotate, so re-keying such a wallet republishes the same identity.
+- Re-keying replaces the stored material *before* the gateway publishes
+  (`beginKeyAuthorityRotation`), because a re-key that merely asked for material
+  would read the old blobs back and republish the identity it was trying to
+  abandon, and because the identity published is derived from the new bytes. Under
+  `deterministic` there is nothing to rotate, so re-keying such a wallet
+  republishes the same identity.
+
+That ordering is why rotation is staged rather than destructive. The replaced blob
+is kept in the row's `previous_ciphertext` slot until the outcome is known:
+
+- The gateway publishes → the rotation is **committed** and the slot is cleared.
+  It is cleared even if the row then fails to record the new address, because the
+  staged keys are now the only ones deriving a published identity and
+  `reconcileRotatedIdentity` needs them. A re-key prompted by a key compromise
+  also must not leave the old bytes recoverable.
+- The gateway fails → the rotation is **rolled back** and the wallet derives the
+  identity it still advertises. It is stale, not broken.
+
+A row with a non-null `previous_ciphertext` is mid-rotation. Staging over one is
+refused, since the slot holds a single blob and overwriting it would discard the
+only material that still matches the published identity.
 
 ## State machine
 

@@ -32,6 +32,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
+  createHeliusRingsKeyRefRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
 } from "@/db/repositories";
@@ -811,6 +812,61 @@ describe("HeliusRingsService", () => {
         )
       ).rejects.toMatchObject({ code: "conflict" });
       expect(rekeyIdentity).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Puts a wallet on the stored-key authority with known sealed material, so a
+     * rotation has something real to replace and put back.
+     */
+    async function pinToDatabaseAuthority() {
+      await getDb(env)
+        .prepare(`UPDATE helius_rings_wallets SET key_authority = 'database' WHERE id = ?`)
+        .bind(walletId)
+        .run();
+      const keyRefs = createHeliusRingsKeyRefRepository(env);
+      for (const kind of ["viewing", "nullifier"] as const) {
+        await keyRefs.createKeyRef({
+          walletId,
+          kind,
+          ciphertext: `sealed-${kind}`,
+          keyVersion: "sdp-rings-key-encryption-v1",
+          materialTag: "live",
+        });
+      }
+      return keyRefs;
+    }
+
+    it("puts back the material it staged when the rotation never reaches the chain", async () => {
+      await pause();
+      const keyRefs = await pinToDatabaseAuthority();
+      const gateway = foreignGateway();
+      vi.spyOn(gateway, "rekeyIdentity").mockRejectedValue(new Error("rpc down"));
+
+      await expect(rekey(gateway, "Treasury")).rejects.toThrow(/rpc down/);
+
+      // Nothing was published, so the wallet still owns the identity it
+      // advertises and has to keep the only material that derives it. Discarding
+      // it here would leave the row pointing at an identity nothing can reach.
+      for (const kind of ["viewing", "nullifier"] as const) {
+        const row = await keyRefs.getKeyRef({ walletId, kind });
+        expect(row?.ciphertext).toBe(`sealed-${kind}`);
+        expect(row?.previous_ciphertext).toBeNull();
+      }
+    });
+
+    it("keeps the new material and drops the replaced blob once the identity is published", async () => {
+      await pause();
+      const keyRefs = await pinToDatabaseAuthority();
+
+      await rekey(foreignGateway(), "Treasury");
+
+      for (const kind of ["viewing", "nullifier"] as const) {
+        const row = await keyRefs.getKeyRef({ walletId, kind });
+        expect(row?.ciphertext).not.toBe(`sealed-${kind}`);
+        // Cleared even though the re-key succeeded: a rotation prompted by a
+        // compromised key must not leave those bytes recoverable.
+        expect(row?.previous_ciphertext).toBeNull();
+      }
     });
 
     it("serializes two genuinely concurrent re-keys into one rotation", async () => {

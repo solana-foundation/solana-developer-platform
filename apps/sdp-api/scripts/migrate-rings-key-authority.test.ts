@@ -254,6 +254,69 @@ describe("migrateWallet", () => {
     expect(store.get(wallet.id)?.key_authority).toBe("deterministic");
   });
 
+  describe("dry run", () => {
+    it("predicts a migration without writing anything", async () => {
+      const wallet = walletRow({ shielded_address: await seedIdentity(walletRow()) });
+      store.set(wallet.id, wallet);
+
+      const outcome = await migrateWallet(wallet, { ...deps, dryRun: true });
+
+      expect(outcome).toEqual({ kind: "migrated", shieldedAddress: wallet.shielded_address });
+      expect(keyRefs.rows.size).toBe(0);
+      expect(store.get(wallet.id)?.key_authority).toBe("deterministic");
+    });
+
+    it("predicts the same skip the real run reaches, rather than counting candidates", async () => {
+      // The finding this exists for: a preview that skipped the checks reported
+      // every seed-pinned wallet as migratable, including ones the real run refuses.
+      const wallet = walletRow({ shielded_address: "published-by-something-else" });
+      store.set(wallet.id, wallet);
+
+      const previewed = await migrateWallet(wallet, { ...deps, dryRun: true });
+      const real = await migrate(wallet);
+
+      expect(previewed.kind).toBe("skipped");
+      expect(real.kind).toBe("skipped");
+    });
+
+    it("predicts a skip for a provisioned wallet with no owner to verify against", async () => {
+      const wallet = walletRow({ shielded_address: "published", owner_address: null });
+      store.set(wallet.id, wallet);
+
+      expect(await migrateWallet(wallet, { ...deps, dryRun: true })).toMatchObject({
+        kind: "skipped",
+      });
+    });
+
+    it("predicts a skip when existing material would not match the derivation", async () => {
+      const wallet = walletRow({ shielded_address: await seedIdentity(walletRow()) });
+      store.set(wallet.id, wallet);
+      await keyRefs.createKeyRef({
+        walletId: wallet.id,
+        kind: "viewing",
+        ciphertext: `sealed(${ORG}):${Buffer.from(new Uint8Array(32).fill(7)).toString("base64")}`,
+        keyVersion: "sdp-rings-key-encryption-v1",
+        materialTag: "live",
+      });
+
+      // Sealing is write-once, so the real run would keep this blob and skip.
+      // A preview that only derived would have reported a clean migration.
+      expect(await migrateWallet(wallet, { ...deps, dryRun: true })).toMatchObject({
+        kind: "skipped",
+      });
+    });
+
+    it("predicts a re-pin for an unprovisioned wallet without touching it", async () => {
+      const wallet = walletRow({ status: "pending", shielded_address: null });
+      store.set(wallet.id, wallet);
+
+      expect(await migrateWallet(wallet, { ...deps, dryRun: true })).toEqual({
+        kind: "repinned-unprovisioned",
+      });
+      expect(store.get(wallet.id)?.key_authority).toBe("deterministic");
+    });
+  });
+
   it("leaves the pin alone when another writer moved the wallet first", async () => {
     const wallet = walletRow({ shielded_address: await seedIdentity(walletRow()) });
     // The row the caller read says deterministic; the store has already moved on.

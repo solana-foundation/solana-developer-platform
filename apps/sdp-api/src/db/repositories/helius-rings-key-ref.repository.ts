@@ -19,6 +19,13 @@ export interface HeliusRingsKeyRefRow {
   /** Cipher key generation that sealed this blob, for rotation. */
   key_version: string;
   material_tag: MaterialTag;
+  /**
+   * Material this row replaced during an in-flight re-key. Non-null means a
+   * rotation is staged: the wallet's published identity still derives from this
+   * blob, not from `ciphertext`, until the new identity reaches the chain.
+   */
+  previous_ciphertext: string | null;
+  previous_key_version: string | null;
   created_at: string;
 }
 
@@ -44,13 +51,35 @@ export interface HeliusRingsKeyRefRepository {
   getKeyRef(input: { walletId: string; kind: KeyKind }): Promise<HeliusRingsKeyRefRow | null>;
   listKeyRefsByWallet(input: { walletId: string }): Promise<HeliusRingsKeyRefRow[]>;
   /**
-   * Discards every key a wallet holds, so the next seal starts cold.
+   * Stages new material for a re-key, moving the blob it replaces into the row's
+   * previous slot. Returns null when the wallet holds no key of that kind, which
+   * means there is nothing to rotate and the caller should seal instead.
    *
-   * The one caller is a re-key, which has already decided to abandon whatever
-   * the published keys hold. Nothing else may call this: because `createKeyRef`
-   * is write-once, these blobs are the only copy of the material the wallet's
-   * identity derives from, and deleting them outside a rotation makes the wallet
-   * unreadable rather than merely stale.
+   * The write-once rule in `createKeyRef` is what makes this a separate method:
+   * rotation is the one operation allowed to change sealed material, and it is
+   * only safe because the replaced blob stays reachable until
+   * {@link commitKeyRefRotation}.
    */
-  deleteKeyRefsByWallet(input: { walletId: string }): Promise<number>;
+  rotateKeyRef(input: RotateHeliusRingsKeyRefInput): Promise<HeliusRingsKeyRefRow | null>;
+  /**
+   * Puts back the material a staged rotation replaced, for a re-key that never
+   * reached the chain. Returns null when nothing is staged, so a repeated
+   * rollback cannot walk the row further backwards.
+   */
+  restoreKeyRef(input: { walletId: string; kind: KeyKind }): Promise<HeliusRingsKeyRefRow | null>;
+  /**
+   * Drops the staged material for a wallet once its new identity is published.
+   *
+   * Not merely tidiness: a re-key prompted by a compromised key must not leave
+   * those bytes recoverable, and a row that keeps its previous slot reads as
+   * mid-rotation forever.
+   */
+  commitKeyRefRotation(input: { walletId: string }): Promise<number>;
+}
+
+export interface RotateHeliusRingsKeyRefInput {
+  walletId: string;
+  kind: KeyKind;
+  ciphertext: string;
+  keyVersion: string;
 }

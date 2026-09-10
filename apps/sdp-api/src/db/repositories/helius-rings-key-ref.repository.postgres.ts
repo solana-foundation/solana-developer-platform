@@ -5,6 +5,7 @@ import {
   generateHeliusRingsKeyRefId,
   type HeliusRingsKeyRefRepository,
   type HeliusRingsKeyRefRow,
+  type RotateHeliusRingsKeyRefInput,
 } from "./helius-rings-key-ref.repository";
 
 function mapRow(row: Record<string, unknown>): HeliusRingsKeyRefRow {
@@ -15,6 +16,8 @@ function mapRow(row: Record<string, unknown>): HeliusRingsKeyRefRow {
     ciphertext: row.ciphertext as string,
     key_version: row.key_version as string,
     material_tag: row.material_tag as HeliusRingsKeyRefRow["material_tag"],
+    previous_ciphertext: (row.previous_ciphertext as string | null) ?? null,
+    previous_key_version: (row.previous_key_version as string | null) ?? null,
     created_at: row.created_at as string,
   };
 }
@@ -62,9 +65,55 @@ export function createPostgresHeliusRingsKeyRefRepository(db: AppDb): HeliusRing
       return result.results.map(mapRow);
     },
 
-    async deleteKeyRefsByWallet(input: { walletId: string }) {
+    async rotateKeyRef(input: RotateHeliusRingsKeyRefInput) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_key_refs
+              SET ciphertext = ?,
+                  key_version = ?,
+                  previous_ciphertext = ciphertext,
+                  previous_key_version = key_version
+            WHERE wallet_id = ?
+              AND kind = ?
+              -- Refuse to stage over a staged rotation: the slot holds one blob,
+              -- and overwriting it would discard the only material that still
+              -- derives the published identity.
+              AND previous_ciphertext IS NULL
+          RETURNING *`
+        )
+        .bind(input.ciphertext, input.keyVersion, input.walletId, input.kind)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async restoreKeyRef(input: { walletId: string; kind: KeyKind }) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_key_refs
+              SET ciphertext = previous_ciphertext,
+                  key_version = COALESCE(previous_key_version, key_version),
+                  previous_ciphertext = NULL,
+                  previous_key_version = NULL
+            WHERE wallet_id = ?
+              AND kind = ?
+              AND previous_ciphertext IS NOT NULL
+          RETURNING *`
+        )
+        .bind(input.walletId, input.kind)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async commitKeyRefRotation(input: { walletId: string }) {
       const result = await db
-        .prepare(`DELETE FROM helius_rings_key_refs WHERE wallet_id = ? RETURNING id`)
+        .prepare(
+          `UPDATE helius_rings_key_refs
+              SET previous_ciphertext = NULL,
+                  previous_key_version = NULL
+            WHERE wallet_id = ?
+              AND previous_ciphertext IS NOT NULL
+          RETURNING id`
+        )
         .bind(input.walletId)
         .all<Record<string, unknown>>();
       return result.results.length;

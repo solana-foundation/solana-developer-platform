@@ -67,7 +67,11 @@ import {
   UnconfiguredRingsGateway,
   validateRingsOuterTransaction,
 } from "./gateway";
-import { resolveDefaultKeyAuthority, rotateKeyAuthorityMaterial } from "./key-authority";
+import {
+  beginKeyAuthorityRotation,
+  type KeyAuthorityRotation,
+  resolveDefaultKeyAuthority,
+} from "./key-authority";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "./signer-adapter";
@@ -485,11 +489,11 @@ export class HeliusRingsService {
         },
         async () => {
           // Before the gateway republishes anything: the authority holding this
-          // wallet's keys has to discard them, or a stored-key authority would
+          // wallet's keys has to replace them, or a stored-key authority would
           // read the old material back and republish the identity this re-key
           // exists to abandon. Safe here and nowhere else — the claim above took
           // an exclusive lock and the operator confirmed the loss by name.
-          await rotateKeyAuthorityMaterial({
+          const rotation = await beginKeyAuthorityRotation({
             env: this.env,
             organizationId: this.tenant.organizationId,
             keyRefs: createHeliusRingsKeyRefRepository(this.env),
@@ -497,10 +501,7 @@ export class HeliusRingsService {
             keyAuthority: wallet.key_authority,
           });
 
-          const rotated = await (await this.resolveGateway()).rekeyIdentity({
-            walletId: wallet.id,
-            owner,
-          });
+          const rotated = await this.publishRotatedIdentity(rotation, wallet.id, owner);
 
           const adopted = await this.wallets.rekeyWallet({
             ...this.tenant,
@@ -553,6 +554,53 @@ export class HeliusRingsService {
       throw new AppError("INTERNAL_ERROR", "rings re-key completed without adopting an identity");
     }
     return rekeyed;
+  }
+
+  /**
+   * Publishes a rotated identity, deciding which ending the staged material gets.
+   *
+   * The chain write is the point of no return, so it is the only thing this
+   * guards. Committing as soon as it succeeds — rather than after the row catches
+   * up — is deliberate: from that moment the staged keys are the only ones that
+   * derive the published identity, so a later persistence failure has to leave
+   * them in place for `reconcileRotatedIdentity` to adopt. Rolling back a
+   * published rotation would be the very outage this staging exists to prevent.
+   */
+  private async publishRotatedIdentity(
+    rotation: KeyAuthorityRotation,
+    walletId: string,
+    owner: string
+  ) {
+    const gateway = await this.resolveGateway();
+    const rotated = await gateway
+      .rekeyIdentity({ walletId, owner })
+      .catch(async (error: unknown) => {
+        // Nothing was published, so the wallet still owns the identity it
+        // advertises. Putting the old material back leaves it stale rather than
+        // holding keys that derive an identity nobody has.
+        await this.restoreRotationMaterial(rotation, walletId);
+        throw error;
+      });
+    await rotation.commit();
+    return rotated;
+  }
+
+  /**
+   * Undoes staged material, without letting that failure replace the one that
+   * caused it — the publish error is what explains why the re-key stopped.
+   */
+  private async restoreRotationMaterial(
+    rotation: KeyAuthorityRotation,
+    walletId: string
+  ): Promise<void> {
+    try {
+      await rotation.rollback();
+    } catch (rollbackError) {
+      getLogger().error(
+        { walletId, err: rollbackError },
+        "rings re-key could not restore the material it staged; this wallet cannot derive its published identity until the rotation is finished or rolled back by hand"
+      );
+    }
   }
 
   /**

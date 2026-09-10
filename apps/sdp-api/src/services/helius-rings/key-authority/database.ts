@@ -169,20 +169,92 @@ export interface RotateDbMaterialInput extends KeyStore {
 }
 
 /**
- * Replaces a wallet's sealed material with freshly generated keys.
+ * Stages freshly generated keys for one kind, keeping the blob they replace in
+ * the row's previous slot. Falls back to sealing when the wallet holds no key of
+ * that kind, which is a re-key of a wallet that never provisioned.
+ */
+async function stage(store: KeyStore, walletId: string, kind: KeyKind): Promise<void> {
+  const ciphertext = await store.cipher.encrypt(
+    store.organizationId,
+    Buffer.from(generateKeyBytes(kind)).toString("base64")
+  );
+  const staged = await store.keyRefs.rotateKeyRef({
+    walletId,
+    kind,
+    ciphertext,
+    keyVersion: keyVersionOf(ciphertext),
+  });
+  if (staged) return;
+
+  if (await store.keyRefs.getKeyRef({ walletId, kind })) {
+    // A row exists but would not stage, so its previous slot is already full.
+    // Staging over it would discard the only material that still derives the
+    // published identity.
+    throw new HeliusRingsError(
+      "conflict",
+      `this Rings wallet already has a rotation staged for its ${kind} key; finish or roll that back first`
+    );
+  }
+
+  await seal(store, walletId, kind);
+}
+
+/**
+ * Begins replacing a wallet's sealed material, and returns the two ways the
+ * rotation can end.
  *
  * Rotation cannot go through `withMaterial`: sealing is write-once, so a re-key
  * that merely asked for material would read the old blobs back and republish the
- * identity it was trying to abandon — succeeding while rotating nothing. Clearing
- * first is what makes the next read cold.
+ * identity it was trying to abandon — succeeding while rotating nothing. It also
+ * has to happen *before* the gateway publishes, because the identity published is
+ * derived from the new bytes.
  *
- * Whatever the old keys held becomes unspendable. The caller is expected to have
- * established that already, which is why this is unreachable from the material
- * source and has exactly one caller.
+ * That ordering used to make the gateway call unrecoverable: the old keys were
+ * deleted, so a failed signature or submission left the wallet advertising an
+ * identity nothing could derive. Staging moves the point of no return to the
+ * chain write, where it belongs — {@link DbMaterialRotation.rollback} puts the
+ * old material back if nothing was published, and
+ * {@link DbMaterialRotation.commit} discards it once something was.
  */
-export async function rotateDbMaterial(input: RotateDbMaterialInput): Promise<void> {
+export interface DbMaterialRotation {
+  /**
+   * Accepts the new material and drops the replaced blob. Call this once the new
+   * identity is on chain, whether or not the row caught up: from that moment the
+   * old material derives an identity the wallet no longer owns, and keeping it is
+   * exactly what a re-key after a key compromise must not do.
+   */
+  commit(): Promise<void>;
+  /**
+   * Puts the replaced material back, for a rotation that never published. The
+   * wallet derives its recorded identity again, so it is stale rather than
+   * broken. Idempotent, because the restore only fires on a staged row.
+   */
+  rollback(): Promise<void>;
+}
+
+export async function beginDbMaterialRotation(
+  input: RotateDbMaterialInput
+): Promise<DbMaterialRotation> {
   const { walletId, ...store } = input;
-  await store.keyRefs.deleteKeyRefsByWallet({ walletId });
-  await seal(store, walletId, "viewing");
-  await seal(store, walletId, "nullifier");
+  const rotation: DbMaterialRotation = {
+    async commit() {
+      await store.keyRefs.commitKeyRefRotation({ walletId });
+    },
+    async rollback() {
+      await store.keyRefs.restoreKeyRef({ walletId, kind: "viewing" });
+      await store.keyRefs.restoreKeyRef({ walletId, kind: "nullifier" });
+    },
+  };
+
+  await stage(store, walletId, "viewing");
+  try {
+    await stage(store, walletId, "nullifier");
+  } catch (error) {
+    // Half a rotation is worse than none: the two kinds would come from
+    // different generations and derive an identity nobody published.
+    await rotation.rollback();
+    throw error;
+  }
+
+  return rotation;
 }

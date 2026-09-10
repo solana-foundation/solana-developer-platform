@@ -32,6 +32,7 @@ import {
   canonicalShieldedIdentity,
   createShieldedMaterial,
   DETERMINISTIC_KA_SEED,
+  type DerivedKeyBytes,
   deriveKeyBytes,
 } from "@sdp/helius-rings-sdk";
 import { closeDatabasePools, getDb, runWithSystemDatabaseIdentity } from "../src/db";
@@ -64,6 +65,12 @@ export interface MigrateWalletDeps {
   readonly cipher: CustodyCipher;
   /** Compare-and-swap from `deterministic` to `database`; false when it loses. */
   readonly repin: (wallet: HeliusRingsWalletRow) => Promise<boolean>;
+  /**
+   * Run every check but no write, returning the outcome the real run would reach.
+   * A preview that skipped the checks would report wallets as migratable that the
+   * real run refuses, which is worse than no preview.
+   */
+  readonly dryRun?: boolean;
   /** Overridable so tests do not depend on the shipped seed's value. */
   readonly seed?: Uint8Array;
 }
@@ -107,6 +114,41 @@ async function sealKey(
   );
 }
 
+/**
+ * What sealing would find, without writing anything.
+ *
+ * Existing material is what separates a preview from a guess: `createKeyRef`
+ * preserves the blob already there, so a wallet holding keys that differ from the
+ * verified derivation is one the real run will skip rather than migrate.
+ */
+async function previewSeal(
+  deps: MigrateWalletDeps,
+  wallet: HeliusRingsWalletRow,
+  shieldedAddress: string,
+  derived: DerivedKeyBytes
+): Promise<MigrationOutcome> {
+  const kinds = [
+    ["viewing", derived.viewingKeyBytes],
+    ["nullifier", derived.nullifierKeyBytes],
+  ] as const;
+
+  for (const [kind, expected] of kinds) {
+    const row = await deps.keyRefs.getKeyRef({ walletId: wallet.id, kind });
+    if (!row) continue;
+    const stored = new Uint8Array(
+      Buffer.from(await deps.cipher.decrypt(wallet.organization_id, row.ciphertext), "base64")
+    );
+    if (!sameBytes(stored, expected)) {
+      return {
+        kind: "skipped",
+        reason: `an existing ${kind} key does not match the verified derivation; left pinned unchanged`,
+      };
+    }
+  }
+
+  return { kind: "migrated", shieldedAddress };
+}
+
 export async function migrateWallet(
   wallet: HeliusRingsWalletRow,
   deps: MigrateWalletDeps
@@ -119,6 +161,7 @@ export async function migrateWallet(
   }
 
   if (wallet.shielded_address === null) {
+    if (deps.dryRun) return { kind: "repinned-unprovisioned" };
     return (await deps.repin(wallet))
       ? { kind: "repinned-unprovisioned" }
       : { kind: "skipped", reason: "the wallet changed authority concurrently" };
@@ -159,6 +202,10 @@ export async function migrateWallet(
       kind: "skipped",
       reason: `the seed derives ${derivedIdentity}, not the published ${wallet.shielded_address}`,
     };
+  }
+
+  if (deps.dryRun) {
+    return await previewSeal(deps, wallet, wallet.shielded_address, derived);
   }
 
   const storedViewing = await sealKey(deps, wallet, "viewing", derived.viewingKeyBytes);
@@ -218,22 +265,30 @@ async function* seedPinnedWallets(env: Env): AsyncGenerator<HeliusRingsWalletRow
   }
 }
 
-function record(counters: Counters, wallet: HeliusRingsWalletRow, outcome: MigrationOutcome): void {
+function record(
+  counters: Counters,
+  wallet: HeliusRingsWalletRow,
+  outcome: MigrationOutcome,
+  dryRun: boolean
+): void {
+  const prefix = dryRun ? "dry-run " : "";
   switch (outcome.kind) {
     case "migrated":
       counters.migrated += 1;
-      console.info(`[migrated] ${wallet.id} keeps identity ${outcome.shieldedAddress}`);
+      console.info(`[${prefix}migrated] ${wallet.id} keeps identity ${outcome.shieldedAddress}`);
       return;
     case "repinned-unprovisioned":
       counters.repinned += 1;
-      console.info(`[repinned] ${wallet.id} was never provisioned; it will generate fresh keys`);
+      console.info(
+        `[${prefix}repinned] ${wallet.id} was never provisioned; it will generate fresh keys`
+      );
       return;
     case "already-migrated":
       counters.alreadyMigrated += 1;
       return;
     case "skipped":
       counters.skipped += 1;
-      console.warn(`[skipped] ${wallet.id}: ${outcome.reason}`);
+      console.warn(`[${prefix}skipped] ${wallet.id}: ${outcome.reason}`);
       return;
   }
 }
@@ -253,7 +308,11 @@ async function main(): Promise<void> {
   const deps: MigrateWalletDeps = {
     keyRefs: createHeliusRingsKeyRefRepository(env),
     cipher: createRingsKeyCipher(env),
+    dryRun,
     repin: async (wallet) => {
+      // Unreachable in a preview, and loud rather than silent if that ever stops
+      // being true: a dry run that writes is the one thing it must not do.
+      if (dryRun) throw new Error("a dry run must not re-pin a wallet");
       const row = await db
         .prepare(
           `UPDATE helius_rings_wallets
@@ -277,33 +336,34 @@ async function main(): Promise<void> {
   };
 
   try {
+    // A preview walks the same code, so what it counts is what the real run will
+    // do rather than how many candidates the scan found.
     for await (const wallet of seedPinnedWallets(env)) {
-      if (dryRun) {
-        console.info(
-          `[dry-run] would migrate ${wallet.id} (${wallet.shielded_address ?? "unprovisioned"})`
-        );
-        counters.migrated += 1;
-        continue;
-      }
-
       try {
-        record(counters, wallet, await migrateWallet(wallet, deps));
+        record(counters, wallet, await migrateWallet(wallet, deps), dryRun);
       } catch (error: unknown) {
         counters.failed += 1;
         console.error(
-          `[failed] ${wallet.id}: ${error instanceof Error ? error.message : String(error)}`
+          `[${dryRun ? "dry-run " : ""}failed] ${wallet.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
         );
       }
     }
 
     console.info(
-      `Done. migrated=${counters.migrated} repinned=${counters.repinned} ` +
-        `already=${counters.alreadyMigrated} skipped=${counters.skipped} failed=${counters.failed}`
+      `${dryRun ? "Preview" : "Done"}. migrated=${counters.migrated} ` +
+        `repinned=${counters.repinned} already=${counters.alreadyMigrated} ` +
+        `skipped=${counters.skipped} failed=${counters.failed}`
     );
     // Skips and failures leave wallets on the public seed, which is the condition
     // this migration exists to end, so they must not read as success.
     if (counters.skipped > 0 || counters.failed > 0) {
-      console.error("Some wallets are still on the seed authority. Resolve the reasons and rerun.");
+      console.error(
+        dryRun
+          ? "Some wallets would not migrate. Resolve the reasons above before running for real."
+          : "Some wallets are still on the seed authority. Resolve the reasons and rerun."
+      );
       process.exitCode = 1;
     }
   } finally {

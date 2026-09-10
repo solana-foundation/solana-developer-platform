@@ -18,7 +18,7 @@ import type {
 import { createRingsKeyCipher } from "@/lib/rings-key-crypto";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
-import { createDbMaterialSource, rotateDbMaterial } from "./database";
+import { beginDbMaterialRotation, createDbMaterialSource } from "./database";
 
 /**
  * What an authority needs to serve one request. `mayCreate` is per-call rather
@@ -76,7 +76,22 @@ const authorityFactories = {
     }),
 } satisfies Record<RingsKeyAuthority, AuthorityFactory>;
 
-type MaterialRotator = (context: RotationContext) => Promise<void>;
+type MaterialRotator = (context: RotationContext) => Promise<KeyAuthorityRotation>;
+
+/**
+ * A rotation that has staged new material but not yet accepted it. The caller
+ * publishes between the two, so which one it calls says whether the chain moved.
+ */
+export interface KeyAuthorityRotation {
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
+/** For authorities with nothing to stage, so both endings stay callable. */
+const NO_ROTATION: KeyAuthorityRotation = {
+  async commit() {},
+  async rollback() {},
+};
 
 export interface RotationContext {
   readonly env: Env;
@@ -95,11 +110,11 @@ export interface RotationContext {
  */
 const materialRotators = {
   // Material is a pure function of the seed and the wallet's path, so there is
-  // nothing to rotate. Re-keying such a wallet republishes the same identity;
-  // that was already true before authorities were selectable.
-  deterministic: async () => undefined,
+  // nothing to rotate or to put back. Re-keying such a wallet republishes the
+  // same identity; that was already true before authorities were selectable.
+  deterministic: async () => NO_ROTATION,
   database: async ({ env, organizationId, keyRefs, walletId }) =>
-    await rotateDbMaterial({
+    await beginDbMaterialRotation({
       keyRefs,
       cipher: createRingsKeyCipher(env),
       organizationId,
@@ -123,16 +138,19 @@ function requireKnownAuthority(authority: string): RingsKeyAuthority {
 }
 
 /**
- * Discards a wallet's current key material so the next read generates fresh
- * keys, dispatching on the authority the wallet is pinned to.
+ * Stages fresh key material for a wallet, dispatching on the authority it is
+ * pinned to, and hands back the two ways the rotation can end.
  *
- * Must run before the gateway republishes the identity, and only from the re-key
- * path, which has taken an exclusive lock and had the operator confirm the loss.
+ * Must run before the gateway republishes the identity, because the identity is
+ * derived from the new bytes, and only from the re-key path, which has taken an
+ * exclusive lock and had the operator confirm the loss. The caller owes the
+ * rotation exactly one ending: `commit` once the chain has the new identity,
+ * `rollback` if it never got there.
  */
-export async function rotateKeyAuthorityMaterial(
+export async function beginKeyAuthorityRotation(
   context: RotationContext & { readonly keyAuthority: string }
-): Promise<void> {
-  await materialRotators[requireKnownAuthority(context.keyAuthority)](context);
+): Promise<KeyAuthorityRotation> {
+  return await materialRotators[requireKnownAuthority(context.keyAuthority)](context);
 }
 
 /**
