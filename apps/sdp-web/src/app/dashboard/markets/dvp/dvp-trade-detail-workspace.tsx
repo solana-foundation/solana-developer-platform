@@ -1,6 +1,6 @@
 "use client";
 
-import type { DvpTradeSide, SolanaCluster } from "@sdp/types";
+import type { DvpTradeSide, DvpTradeStatus, SolanaCluster } from "@sdp/types";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -122,6 +122,41 @@ function TransactionLink({ signature, cluster }: { signature: string; cluster: S
 }
 
 /**
+ * How a closed trade ended for its legs.
+ *
+ * `closed` alone was forcing every finished leg to read as delivered, which
+ * is a false statement about a cancelled or rejected trade: those refunded each
+ * leg to whoever deposited it. Only `settled` delivered anything. An expired
+ * trade is neither: its escrows still hold whatever was deposited until a
+ * cancel returns it, so the leg keeps its real amount and stops taking deposits.
+ */
+type LegOutcome = "open" | "expired" | "settled" | "refunded" | "closed";
+
+function legOutcome(status: DvpTradeStatus): LegOutcome {
+  switch (status) {
+    case "settled":
+      return "settled";
+    case "cancelled":
+    case "rejected":
+      return "refunded";
+    case "closed_unknown":
+    case "create_failed":
+      return "closed";
+    case "expired":
+      return "expired";
+    case "creating":
+    case "created":
+    case "partially_funded":
+    case "funded":
+      return "open";
+    default: {
+      const unreachable: never = status;
+      throw new Error(`Unhandled DvP trade status ${String(unreachable)}`);
+    }
+  }
+}
+
+/**
  * The one thing true of this leg right now, as an icon and a label.
  *
  * Derived from the condition that actually fired rather than from a single
@@ -131,15 +166,39 @@ function TransactionLink({ signature, cluster }: { signature: string; cluster: S
  */
 function legStatus(
   leg: DvpTradeLeg,
-  closed: boolean
+  outcome: LegOutcome
 ): { Icon: LucideIcon; tone: string; bar: string; key: MessageKey } {
-  if (closed) {
-    return {
-      Icon: CircleCheckIcon,
-      tone: "text-success",
-      bar: "bg-success",
-      key: "DashboardMarkets.dvp.legDelivered",
-    };
+  switch (outcome) {
+    case "settled":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-success",
+        bar: "bg-success",
+        key: "DashboardMarkets.dvp.legDelivered",
+      };
+    case "refunded":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-tertiary",
+        bar: "bg-fill-strong",
+        key: "DashboardMarkets.dvp.legRefunded",
+      };
+    case "closed":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-tertiary",
+        bar: "bg-fill-strong",
+        key: "DashboardMarkets.dvp.legClosed",
+      };
+    case "expired":
+      return {
+        Icon: ClockIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legExpired",
+      };
+    case "open":
+      break;
   }
   if (leg.funding?.frozen) {
     return {
@@ -185,20 +244,21 @@ function holderLabel(t: ReturnType<typeof useTranslations>, side: DvpTradeSide):
 /**
  * Which words the exchange summary uses for each side.
  *
- * Past tense once the trade is closed. A bilateral trade is two of the caller's
+ * Past tense once the trade settled; a cancelled trade delivered nothing. A
+ * bilateral trade is two of the caller's
  * own legs going the other way, so "you deliver" / "you receive" has no single
  * referent — the party words are the honest ones there, and for an agent too.
  */
 function exchangeLabelKeys(
   kind: DvpTradeKind,
-  closed: boolean
+  settled: boolean
 ): { given: MessageKey; taken: MessageKey } {
   if (kind === "principal") {
-    return closed
+    return settled
       ? { given: "DashboardMarkets.dvp.youDelivered", taken: "DashboardMarkets.dvp.youReceived" }
       : { given: "DashboardMarkets.dvp.youDeliver", taken: "DashboardMarkets.dvp.youReceive" };
   }
-  return closed
+  return settled
     ? {
         given: "DashboardMarkets.dvp.summaryPartyADelivered",
         taken: "DashboardMarkets.dvp.summaryPartyBDelivered",
@@ -210,9 +270,9 @@ function exchangeLabelKeys(
 }
 
 /** "You deliver 100 UDVP · you receive 100 USDC", from the caller's side. */
-function ExchangeSummary({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
+function ExchangeSummary({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  const labels = exchangeLabelKeys(trade.kind, closed);
+  const labels = exchangeLabelKeys(trade.kind, trade.status === "settled");
   // On a principal trade the caller's leg is "given"; the party words are
   // fixed to A then B and need no swap.
   const [given, taken] =
@@ -240,6 +300,26 @@ function TokenMark({ symbol }: { symbol: string }) {
   );
 }
 
+/** The line under the amount: progress while open, the outcome once closed. */
+function legProgressCaption(
+  t: ReturnType<typeof useTranslations>,
+  outcome: LegOutcome,
+  held: string,
+  target: string
+): string {
+  switch (outcome) {
+    case "settled":
+      return t("DashboardMarkets.dvp.deliveredLabel");
+    case "refunded":
+      return t("DashboardMarkets.dvp.refundedLabel");
+    case "closed":
+      return t("DashboardMarkets.dvp.closedLabel");
+    case "open":
+    case "expired":
+      return `${held} / ${target}`;
+  }
+}
+
 /**
  * One leg as a fund manager reads it: what it is, who holds it, whether it has
  * arrived, and the transaction that brought it. No addresses; those live in the
@@ -247,21 +327,25 @@ function TokenMark({ symbol }: { symbol: string }) {
  */
 function LegCard({
   action,
-  closed,
+  outcome,
   cluster,
   leg,
   side,
 }: {
   action: ReactNode | undefined;
-  /** The trade is over and the escrow is closed, so the bar reads as delivered. */
-  closed: boolean;
+  outcome: LegOutcome;
   cluster: SolanaCluster;
   leg: DvpTradeLeg;
   side: DvpTradeSide;
 }) {
   const t = useTranslations();
-  const status = legStatus(leg, closed);
-  const ratio = closed ? 1 : legFundingRatio(leg);
+  const status = legStatus(leg, outcome);
+  const ratio =
+    outcome === "settled"
+      ? 1
+      : outcome === "open" || outcome === "expired"
+        ? legFundingRatio(leg)
+        : 0;
   const percent = ratio === null ? 0 : Math.round(Math.min(ratio, 1) * 100);
   const target = formatLegAmount(leg.amount, leg.decimals);
   const held = leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0";
@@ -290,10 +374,10 @@ function LegCard({
         </span>
       </div>
       {/* Where this party pays in, directly under who they are. Only while the
-          escrow can still receive: once the leg is funded or the trade is
-          closed, an address here is an invitation to send tokens somewhere
-          they are not wanted. */}
-      {closed || leg.funding?.funded ? null : (
+          escrow can still receive: once the leg is funded, frozen, or the trade
+          is closed, an address here is an invitation to send tokens somewhere
+          they will bounce or are not wanted. */}
+      {outcome !== "open" || leg.funding?.funded || leg.funding?.frozen ? null : (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-fill-subtle px-3 py-2">
           <span className="text-[11px] text-tertiary">{t("DashboardMarkets.dvp.escrowLabel")}</span>
           <CopyableAddress
@@ -315,7 +399,7 @@ function LegCard({
       </div>
 
       <div className="mt-5 flex items-center justify-between text-secondary text-xs tabular-nums">
-        <span>{closed ? t("DashboardMarkets.dvp.deliveredLabel") : `${held} / ${target}`}</span>
+        <span>{legProgressCaption(t, outcome, held, target)}</span>
         <span>{percent}%</span>
       </div>
       <div
@@ -668,6 +752,7 @@ export function DvpTradeDetailWorkspace({
   cluster: SolanaCluster;
 }) {
   const tradeClosed = isDvpTradeClosed(trade);
+  const outcome = legOutcome(trade.status);
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
   const partyView = isDvpPartyView(trade);
@@ -736,15 +821,15 @@ export function DvpTradeDetailWorkspace({
               {t("DashboardMarkets.dvp.legsHeading")}
             </h2>
             <span aria-hidden className="hidden h-px flex-1 bg-border-subtle sm:block" />
-            <ExchangeSummary closed={tradeClosed} trade={trade} />
+            <ExchangeSummary trade={trade} />
           </div>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             {sides.map((side) => (
               <LegCard
                 action={fundActionFor(side)}
-                closed={tradeClosed}
                 cluster={cluster}
                 key={side}
+                outcome={outcome}
                 leg={trade.legs[side]}
                 side={side}
               />

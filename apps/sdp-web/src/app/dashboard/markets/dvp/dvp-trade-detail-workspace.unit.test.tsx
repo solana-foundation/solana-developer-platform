@@ -367,6 +367,70 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(renderDetailWithOnChainOpen(trade({ refString: null }))).not.toContain("Your reference");
   });
 
+  // A cancelled trade refunded its deposits; showing "Delivered" with a full
+  // bar would misstate the financial outcome of a trade that delivered nothing.
+  it("shows refunds, not delivery, on a cancelled trade", () => {
+    const html = renderDetail(
+      trade({
+        status: "cancelled",
+        legs: {
+          a: testLeg({ escrow: LEG_ESCROW_A, funding: FUNDED, party: ownParty() }),
+          b: testLeg({ escrow: LEG_ESCROW_B }),
+        },
+      })
+    );
+
+    expect(html).toContain("Refunded to depositor");
+    expect(html).toContain("Deposits returned");
+    expect(html).not.toContain("Delivered");
+    expect(html).not.toContain("Fund this address");
+  });
+
+  // Expired is not closed: the escrow still holds the deposit until a cancel
+  // returns it, so the leg shows what it holds, says why it is waiting, and
+  // stops offering the pay-in address.
+  it("shows held deposits awaiting refund on an expired trade", () => {
+    const html = renderDetail(
+      trade({
+        status: "expired",
+        legs: {
+          a: testLeg({ escrow: LEG_ESCROW_A, funding: FUNDED, party: ownParty() }),
+          b: testLeg({ escrow: LEG_ESCROW_B }),
+        },
+      })
+    );
+
+    expect(html).toContain("Expired, deposits await refund");
+    expect(html).not.toContain("Delivered");
+    expect(html).not.toContain("Fund this address");
+  });
+
+  it("shows delivery only on a settled trade", () => {
+    const html = renderDetail(trade({ status: "settled" }));
+
+    expect(html).toContain("Delivered in full");
+    expect(html).not.toContain("Refunded");
+  });
+
+  // A frozen escrow bounces incoming transfers, so the pay-in address must not
+  // be offered even though the leg is not yet funded.
+  it("withdraws the deposit address while the escrow is frozen", () => {
+    const frozen = { observedAmount: "0", funded: false, surplus: null, frozen: true };
+    const html = renderDetail(
+      trade({
+        legs: {
+          a: testLeg({ escrow: LEG_ESCROW_A, funding: frozen }),
+          b: testLeg({ escrow: LEG_ESCROW_B }),
+        },
+      })
+    );
+
+    // The details table is collapsed, so an escrow address on the page can only
+    // come from a leg card's deposit strip: B's is offered, frozen A's is not.
+    expect(html).not.toContain(LEG_ESCROW_A);
+    expect(html).toContain(LEG_ESCROW_B);
+  });
+
   it("offers no actions on a settled trade", () => {
     const html = renderDetail(trade({ status: "settled" }));
 
