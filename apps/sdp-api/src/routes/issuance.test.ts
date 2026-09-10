@@ -1121,12 +1121,107 @@ describe("Issuance Routes", () => {
     });
   });
 
+  describe("burn selector validation", () => {
+    it.each(["burn", "burn/prepare"])(
+      "rejects %s without a signing wallet before creating a transaction or signing",
+      async (operation) => {
+        const token = await seedIssuedToken({ id: "tok_burn_without_selector" });
+        const headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        };
+        const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signer.mockClear();
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/${operation}`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              burn: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(400);
+        expect((await response.json()).error.message).toContain("signingCustodyWalletId");
+        expect(signer).not.toHaveBeenCalled();
+        const history = await app.request(
+          `/v1/issuance/tokens/${token.id}/transactions`,
+          { headers },
+          env
+        );
+        expect(await history.json()).toMatchObject({ data: [], meta: { total: 0 } });
+      }
+    );
+  });
+
   describe("direct issuance idempotency replay", () => {
     const headers = (idempotencyKey: string) => ({
       "Content-Type": "application/json",
       Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       "Idempotency-Key": idempotencyKey,
     });
+
+    it.each([undefined, DEFAULT_ISSUANCE_CUSTODY_WALLET_ID])(
+      "rejects a legacy replay with a missing exact wallet pin (selector: %s)",
+      async (signingCustodyWalletId) => {
+        const token = await seedIssuedToken({ id: "tok_legacy_pause_replay" });
+        const idempotencyKey = "legacy-pause-replay";
+        // A matching current fingerprint isolates the absent wallet pin as the conflict.
+        const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+          tokenId: token.id,
+          operation: "pause",
+          mode: "execute",
+          params: { signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID },
+        });
+        await seedIssuanceTransaction({
+          id: "ttx_legacy_pause_replay",
+          tokenId: token.id,
+          type: "pause",
+          status: "finalized",
+          custodyWalletId: null,
+          idempotencyKey,
+          idempotencyFingerprint: idempotency.idempotencyFingerprint,
+          signature: "sig_legacy_pause_replay",
+          slot: 10,
+          params: {},
+        });
+        const requestHeaders = headers(idempotencyKey);
+        const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signer.mockClear();
+
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/pause`,
+          {
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify({ signingCustodyWalletId }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+        expect(signer).not.toHaveBeenCalled();
+        const history = await app.request(
+          `/v1/issuance/tokens/${token.id}/transactions`,
+          { headers: requestHeaders },
+          env
+        );
+        expect(await history.json()).toMatchObject({
+          data: [
+            {
+              id: "ttx_legacy_pause_replay",
+              status: "finalized",
+              signature: "sig_legacy_pause_replay",
+            },
+          ],
+          meta: { total: 1 },
+        });
+      }
+    );
 
     it("replays burn before runtime checks and rejects a different exact wallet", async () => {
       const token = await seedIssuedToken({
@@ -3259,25 +3354,44 @@ describe("Issuance Routes", () => {
       expect(row).toEqual({ signing_wallet_id: null, signing_custody_wallet_id: null });
     });
 
-    it("does not change deployment attribution when a metadata signer is supplied after deploy", async () => {
-      await getDb(env)
-        .prepare("UPDATE issued_tokens SET status = 'active', mint_address = ? WHERE id = ?")
-        .bind(TEST_SOLANA_ADDRESSES.wallet2, tokenId)
-        .run();
+    it("rejects a selector-only patch after deploy without changing deployment attribution", async () => {
+      const deploymentWallet = await seedIssuanceActivityWallet("wal_selector_only_deployment");
+      const metadataWallet = await seedIssuanceActivityWallet(
+        "wal_selector_only_patch",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      const token = await seedIssuedToken({
+        id: "tok_selector_only_patch",
+        signingCustodyWalletId: deploymentWallet.custodyWalletId,
+      });
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      };
+      const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signer.mockClear();
       const response = await app.request(
-        `/v1/issuance/tokens/${tokenId}`,
+        `/v1/issuance/tokens/${token.id}`,
         {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID }),
+          headers,
+          body: JSON.stringify({ signingCustodyWalletId: metadataWallet.custodyWalletId }),
         },
         env
       );
-      expect(response.status).toBe(200);
-      expect((await response.json()).data.token.signingCustodyWalletId).toBeNull();
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          message: "Provide token changes when selecting a signing wallet after deployment",
+        },
+      });
+      expect(signer).not.toHaveBeenCalled();
+      const stored = await app.request(`/v1/issuance/tokens/${token.id}`, { headers }, env);
+      expect((await stored.json()).data.token).toMatchObject({
+        name: token.name,
+        signingCustodyWalletId: deploymentWallet.custodyWalletId,
+      });
     });
 
     it("updates token details", async () => {

@@ -887,7 +887,7 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
     signingCustodyWalletId: withOpenApi(updateTokenSchemaBase.shape.signingCustodyWalletId, {
       description:
-        "Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. Must control the current metadata authority; omission requires exactly one matching in-scope custody record, otherwise returns 409.",
+        "Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope custody record, otherwise returns 409.",
       example: "cwlt_example",
     }),
     name: withOpenApi(updateTokenSchemaBase.shape.name, {

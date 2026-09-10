@@ -320,6 +320,14 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     throw conflict("Token deployment is in progress; retry after it completes");
   }
 
+  if (
+    signingCustodyWalletId &&
+    Object.keys(body).length === 0 &&
+    (existing.mintAddress || existing.status !== "pending")
+  ) {
+    throw badRequest("Provide token changes when selecting a signing wallet after deployment");
+  }
+
   let draftWallet: ResolvedIssuanceWallet | null = null;
   if (signingCustodyWalletId && !existing.mintAddress && existing.status === "pending") {
     draftWallet = await resolveIssuanceWallet({
