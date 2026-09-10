@@ -27,9 +27,9 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 const key = () => quickStartKey(workspace.dashboardCacheScope);
-const ui = (docked = false) => (
+const ui = (collapsed = false) => (
   <I18nProvider locale="en" messages={getMessages("en")}>
-    <DashboardQuickStart docked={docked} />
+    <DashboardQuickStart collapsed={collapsed} />
   </I18nProvider>
 );
 
@@ -56,15 +56,19 @@ afterEach(() => {
 });
 
 describe("dashboard quick start", () => {
-  it("opens as a modal and can be minimized left without losing progress", () => {
+  it("starts as a sidebar card and opens the guide only when requested", async () => {
     const view = render(ui());
-    expect(view.getByRole("dialog")).toBeTruthy();
+    expect(view.queryByRole("dialog")).toBeNull();
+    const card = view.getByRole("complementary");
+    expect(card.hasAttribute("data-quick-start-sidebar")).toBe(true);
+    expect(card.className).not.toContain("fixed");
+    const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
+    fireEvent.click(launcher);
     expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
     fireEvent.click(view.getByRole("button", { name: "Continue later" }));
-    expect(view.queryByRole("heading")).toBeNull();
-    expect(view.getByRole("complementary").className).toContain("left-4");
-    expect(readQuickStart(key())).toBe("api-key");
     expect(view.queryByRole("dialog")).toBeNull();
+    expect(readQuickStart(key())).toBe("api-key");
+    await waitFor(() => expect(document.activeElement).toBe(launcher));
   });
 
   it("links to API-key creation without prematurely completing the step", () => {
@@ -119,11 +123,11 @@ describe("dashboard quick start", () => {
     expect(view.queryByRole("complementary")).toBeNull();
     workspace.dashboardCacheScope.orgId = "another_org";
     view.rerender(ui());
-    expect(view.getByRole("dialog")).toBeTruthy();
+    expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     workspace.dashboardCacheScope.userId = "another_user";
     view.rerender(ui());
-    expect(view.getByRole("dialog")).toBeTruthy();
+    expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
   });
 
   it("hides in production and for users who cannot create API keys", () => {
@@ -145,36 +149,49 @@ describe("dashboard quick start", () => {
     expect(view.queryByRole("dialog")).toBeNull();
   });
 
-  it("follows the action on the right after navigation, without advancing on click", () => {
+  it("keeps the sidebar card after navigation without advancing on click", () => {
     const view = renderGuide();
     fireEvent.click(view.getByRole("link", { name: "Create API key" }));
     workspace.pathname = "/dashboard/api-keys/new";
     view.rerender(ui());
     expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.getByRole("complementary").className).toContain("right-4");
+    expect(view.getByRole("complementary").hasAttribute("data-quick-start-sidebar")).toBe(true);
     expect(readQuickStart(key())).toBe("api-key");
-    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
-    expect(view.queryByRole("heading")).toBeNull();
     view.unmount();
-    expect(render(ui()).getByRole("complementary").className).toContain("right-4");
+    const restored = render(ui());
+    expect(restored.queryByRole("dialog")).toBeNull();
+    expect(restored.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
   });
 
-  it("reserves space on form pages and returns focus without restarting the form", async () => {
+  it("returns focus to the sidebar without resetting an in-progress form", async () => {
     workspace.pathname = "/dashboard/api-keys/new";
-    const view = render(ui(true));
-    const dock = view.getByRole("complementary");
-    expect(dock.hasAttribute("data-quick-start-docked")).toBe(true);
-    expect(dock.className).not.toContain("fixed");
-    expect(dock.className).toContain("shrink-0");
-    expect(view.queryByRole("dialog")).toBeNull();
-    const launcher = view.getByRole("button", { name: /SDP quick start · 1\/3/ });
+    const view = render(
+      <>
+        <input aria-label="Key name" defaultValue="My integration" />
+        {ui()}
+      </>
+    );
+    const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
     fireEvent.click(launcher);
     expect(view.getByRole("dialog")).toBeTruthy();
     expect(view.queryByRole("link", { name: "Create API key" })).toBeNull();
     fireEvent.click(view.getByRole("button", { name: "Back to form" }));
     expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.getByRole("complementary").className).not.toContain("fixed");
+    expect(view.getByRole("textbox", { name: "Key name" }).getAttribute("value")).toBe(
+      "My integration"
+    );
     await waitFor(() => expect(document.activeElement).toBe(launcher));
+  });
+
+  it("keeps a compact launcher in the collapsed sidebar with dismissal in the guide", () => {
+    const view = render(ui(true));
+    const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
+    expect(launcher.getAttribute("title")).toBe("SDP quick start · 1/3");
+    fireEvent.click(launcher);
+    expect(view.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(view.queryByRole("complementary")).toBeNull();
   });
 
   it("keeps the optional step skippable when custody is unavailable", () => {

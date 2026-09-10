@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, ChevronDown, ChevronUp, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "radix-ui";
@@ -10,11 +10,8 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   quickStartKey,
-  quickStartLayout,
   readQuickStart,
-  readQuickStartPlacement,
   setQuickStart,
-  setQuickStartPlacement,
   subscribeQuickStart,
 } from "@/lib/dashboard-quick-start";
 import styles from "./dashboard-quick-start.module.css";
@@ -98,12 +95,11 @@ function isQuickStartEligible(workspace: ReturnType<typeof useDashboardWorkspace
   );
 }
 
-export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
+export function DashboardQuickStart({ collapsed = false }: { collapsed?: boolean }) {
   const t = useTranslations();
   const workspace = useDashboardWorkspace();
   const { dashboardCacheScope, dashboardAccess, flags, initialQuickStartStep } = workspace;
   const eligible = isQuickStartEligible(workspace);
-  const pathname = usePathname();
   const storageKey = quickStartKey(dashboardCacheScope);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
@@ -112,66 +108,71 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
     () => readQuickStart(storageKey, initialQuickStartStep),
     serverSnapshot
   );
-  const placement = useSyncExternalStore(
-    subscribeQuickStart,
-    () => readQuickStartPlacement(storageKey),
-    serverSnapshot
-  );
   if (!eligible || !step || step === "done") return null;
 
   const current = stepCopy[step];
   const stepNumber = current.number;
-  const { isModal, isRight, isCollapsed } = quickStartLayout(
-    placement,
-    pathname,
-    docked,
-    expandedKey === storageKey
-  );
-  const position = isRight ? "right-4" : "left-4";
-  const minimize = () => {
-    setQuickStartPlacement(storageKey, isRight ? "right-collapsed" : "left");
-    setExpandedKey(null);
-  };
-  const followAction = () => {
-    setQuickStartPlacement(storageKey, "right");
-    setExpandedKey(null);
-  };
-  const launcher = (
-    <aside
-      aria-label={t("Shared.quickStart.title")}
-      data-quick-start-docked={docked || undefined}
-      className={
-        docked
-          ? "flex shrink-0 justify-end border-t border-border-subtle px-4 py-2 md:px-6"
-          : `${styles.enter} ${position} fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] z-30 flex max-w-[calc(100vw-2rem)] items-center rounded-full border border-border-default bg-surface-raised p-1 text-primary shadow-sm md:bottom-4`
-      }
-    >
-      <button
-        type="button"
-        aria-expanded={isModal}
-        ref={launcherRef}
-        onClick={() => setExpandedKey(storageKey)}
-        className="flex min-h-9 items-center gap-2 rounded-full px-3 text-sm hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
-      >
-        {t("Shared.quickStart.title")}{" "}
-        <span className="text-xs text-tertiary">· {stepNumber}/3</span>
-        <ChevronUp className="size-4 text-tertiary" aria-hidden />
-      </button>
-      <button
-        type="button"
-        onClick={() => setQuickStart(storageKey, "done")}
-        aria-label={t("Shared.quickStart.skip")}
-        title={t("Shared.quickStart.skip")}
-        className="flex size-9 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-      >
-        <X className="size-4" aria-hidden />
-      </button>
-    </aside>
-  );
-  if (!isModal && (docked || isCollapsed)) return launcher;
+  const isModal = expandedKey === storageKey;
+  const minimize = () => setExpandedKey(null);
   const canCreateWallet = flags.custody && dashboardAccess.capabilities.canManageCustody;
   const title = t(current.title);
   const description = t(current.description);
+  const launcherLabel = `${t("Shared.quickStart.title")} · ${stepNumber}/3`;
+  const launcher = (
+    <aside
+      aria-label={t("Shared.quickStart.title")}
+      data-quick-start-sidebar
+      className="relative shrink-0 rounded-xl border border-border-default bg-fill-subtle text-primary"
+    >
+      <button
+        type="button"
+        aria-label={launcherLabel}
+        aria-haspopup="dialog"
+        aria-expanded={isModal}
+        title={collapsed ? launcherLabel : undefined}
+        ref={launcherRef}
+        onClick={() => setExpandedKey(storageKey)}
+        className={
+          collapsed
+            ? "flex h-10 w-full items-center justify-center rounded-xl hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
+            : "block w-full rounded-xl p-3 text-left hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
+        }
+      >
+        {collapsed ? (
+          <ListChecks className="size-4 text-secondary" aria-hidden />
+        ) : (
+          <>
+            <span className="block pr-6 text-sm font-medium">{t("Shared.quickStart.title")}</span>
+            <span className="mt-3 flex items-center justify-between gap-3 text-xs text-secondary">
+              <span className="truncate">{title}</span>
+              <span className="shrink-0 text-tertiary">{stepNumber}/3</span>
+            </span>
+            <span
+              className="mt-2 block h-1 overflow-hidden rounded-full bg-fill-strong"
+              aria-hidden
+            >
+              <span
+                className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
+                style={{ width: `${(stepNumber / 3) * 100}%` }}
+              />
+            </span>
+          </>
+        )}
+      </button>
+      {collapsed ? null : (
+        <button
+          type="button"
+          onClick={() => setQuickStart(storageKey, "done")}
+          aria-label={t("Shared.quickStart.skip")}
+          title={t("Shared.quickStart.skip")}
+          className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      )}
+    </aside>
+  );
+  if (!isModal) return launcher;
 
   const content = (
     <>
@@ -226,7 +227,7 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
       <div className="mt-4">
         <StepAction
           step={step}
-          onFollow={followAction}
+          onFollow={minimize}
           onBack={minimize}
           canCreateWallet={canCreateWallet}
         />
@@ -238,49 +239,37 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
           {t(current.skip)}
         </button>
       </div>
-      {isModal ? (
-        <Button variant="ghost" className="mt-2 w-full" onClick={minimize}>
-          {t("Shared.quickStart.later")}
-        </Button>
-      ) : null}
+      <Button variant="ghost" className="mt-2 w-full" onClick={minimize}>
+        {t("Shared.quickStart.later")}
+      </Button>
     </>
   );
-  if (isModal) {
-    return (
-      <>
-        {docked ? launcher : null}
-        <Dialog.Root
-          open
-          onOpenChange={(open) => {
-            if (!open) minimize();
-          }}
-        >
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-            <Dialog.Content
-              onCloseAutoFocus={(event) => {
-                if (launcherRef.current) {
-                  event.preventDefault();
-                  launcherRef.current.focus();
-                }
-              }}
-              aria-describedby={undefined}
-              className={`${styles.enter} fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[420px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-6 text-primary shadow-xl`}
-            >
-              <Dialog.Title className="sr-only">{t("Shared.quickStart.title")}</Dialog.Title>
-              {content}
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-      </>
-    );
-  }
   return (
-    <aside
-      aria-label={t("Shared.quickStart.title")}
-      className={`${styles.enter} ${position} fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] z-30 max-h-[70dvh] w-[320px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-5 text-primary shadow-xl md:bottom-4`}
-    >
-      {content}
-    </aside>
+    <>
+      {launcher}
+      <Dialog.Root
+        open
+        onOpenChange={(open) => {
+          if (!open) minimize();
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Content
+            onCloseAutoFocus={(event) => {
+              if (launcherRef.current) {
+                event.preventDefault();
+                launcherRef.current.focus();
+              }
+            }}
+            aria-describedby={undefined}
+            className={`${styles.enter} fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[420px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-6 text-primary shadow-xl`}
+          >
+            <Dialog.Title className="sr-only">{t("Shared.quickStart.title")}</Dialog.Title>
+            {content}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
   );
 }

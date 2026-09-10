@@ -401,6 +401,7 @@ function DashboardSidebarContent({
   onClose,
   isCollapsed,
   variant,
+  showQuickStart,
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
@@ -413,6 +414,7 @@ function DashboardSidebarContent({
   onClose: () => void;
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
+  showQuickStart: boolean;
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
@@ -462,7 +464,8 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="shrink-0 px-3 pb-3">
+      <div className="shrink-0 space-y-3 px-3 pb-3">
+        {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
         <SidebarUserMenu
           collapsed={isCollapsed}
           canManageOrgSettings={canManageOrgSettings}
@@ -767,6 +770,7 @@ export function DashboardShell({
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
             variant="desktop"
+            showQuickStart={!isWorkspaceSwitching}
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
@@ -834,6 +838,7 @@ export function DashboardShell({
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
                 variant="mobile"
+                showQuickStart={!isWorkspaceSwitching}
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
@@ -943,9 +948,6 @@ export function DashboardShell({
               )}
             </div>
           </div>
-          {!isWorkspaceSwitching && !isMobileSidebarOpen && !isMoreSheetOpen ? (
-            <DashboardQuickStart docked={shouldLockViewportScroll} />
-          ) : null}
         </section>
       </div>
     </main>

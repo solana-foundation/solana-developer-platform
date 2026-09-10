@@ -4,47 +4,10 @@ const QUICK_START_STEPS = ["api-key", "wallet", "faucet", "done"] as const;
 export type QuickStartStep = (typeof QUICK_START_STEPS)[number];
 const CHANGE_EVENT = "sdp:quick-start-updated";
 const memory = new Map<string, QuickStartStep>();
-export type QuickStartPlacement = "modal" | "left" | "right" | "right-collapsed";
-const placements = new Map<string, QuickStartPlacement>();
 
 function advanceQuickStartProgress(...steps: unknown[]): QuickStartStep {
   const ranks: readonly unknown[] = QUICK_START_STEPS;
   return QUICK_START_STEPS[Math.max(0, ...steps.map((step) => ranks.indexOf(step)))];
-}
-
-export function quickStartLayout(
-  placement: QuickStartPlacement | null,
-  pathname: string,
-  docked: boolean,
-  expanded: boolean
-) {
-  const isModal = (placement === "modal" && pathname === "/dashboard") || (docked && expanded);
-  const isRight =
-    docked ||
-    placement === "right" ||
-    placement === "right-collapsed" ||
-    (placement === "modal" && !isModal);
-  const isCollapsed = (placement === "left" || placement === "right-collapsed") && !expanded;
-  return { isModal, isRight, isCollapsed };
-}
-
-export function readQuickStartPlacement(key: string): QuickStartPlacement {
-  try {
-    const value = placements.get(key) ?? window.localStorage.getItem(`${key}:placement`);
-    return value === "left" || value === "right" || value === "right-collapsed" ? value : "modal";
-  } catch {
-    return placements.get(key) ?? "modal";
-  }
-}
-
-export function setQuickStartPlacement(key: string, placement: QuickStartPlacement) {
-  placements.set(key, placement);
-  try {
-    window.localStorage.setItem(`${key}:placement`, placement);
-  } catch {
-    /* Session fallback. */
-  }
-  window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
 export function quickStartKey(scope: DashboardCacheScope): string {
@@ -84,7 +47,6 @@ export function subscribeQuickStart(onChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
     if (event.key) memory.delete(event.key);
     else memory.clear();
-    placements.clear();
     onChange();
   };
   window.addEventListener(CHANGE_EVENT, onChange);

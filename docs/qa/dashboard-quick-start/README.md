@@ -1,6 +1,18 @@
 # Dashboard quick start QA
 
-Local Zen walkthrough on September 9, 2026, using the branch web server on port 3103 and API on port 8791.
+The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress, opens the guide on click, and supports dismissal. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
+
+## Sidebar card verification — September 10
+
+- Rendered the actual quick-start component with the application's CSS in an isolated local fixture.
+- Visually checked the expanded sidebar at 1280 × 720, the collapsed sidebar, and a narrow sidebar at 390 × 600. The card remains above the account menu without covering the form footer.
+- Opened the guide from the card and returned to the form, verifying keyboard focus returns to the launcher.
+- 26 focused tests passed, covering the sidebar launcher, collapsed mode, navigation, dismissal, browser persistence, home state, and shell loading states. Web typecheck, scoped Biome checks, and module boundaries passed.
+- Fixture workspace and account data were synthetic; no live API key, wallet, or transaction was created.
+
+## Earlier walkthrough
+
+Local Zen walkthrough on September 9, 2026, using the branch web server on port 3103 and API on port 8791. The screenshot below records the former form-footer placement and is retained as historical QA evidence.
 
 ## Browser checks
 
