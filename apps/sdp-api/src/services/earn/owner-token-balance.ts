@@ -1,9 +1,7 @@
-import { createRpc } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
 import { z } from "zod";
-import { scopeEnvToCluster } from "@/lib/cluster-env";
-import { earnClusterFor } from "@/services/earn/execution-registry";
+import { createProvenClusterRpc, earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 /**
@@ -61,7 +59,7 @@ export async function readOwnerMintBalance(
   mint: string
 ): Promise<OwnerMintBalance> {
   const cluster = earnClusterFor(environment);
-  const response = await createRpc(scopeEnvToCluster(env, cluster))
+  const response = await (await createProvenClusterRpc(env, cluster))
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },

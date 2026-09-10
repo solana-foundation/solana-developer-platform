@@ -1,12 +1,10 @@
-import { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { success } from "@/lib/response";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
-import { earnClusterFor } from "@/services/earn/execution-registry";
+import { createProvenClusterRpc, earnClusterFor } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
 import type { AppContext } from "../context";
@@ -66,7 +64,7 @@ export async function getEarnVaultShareReconciliation(c: AppContext) {
     getEarnRepository(c).listShareMintedStrategies({ environment, hostCluster: cluster }),
   ]);
 
-  const rpc = createRpc(scopeEnvToCluster(c.env, cluster));
+  const rpc = await createProvenClusterRpc(c.env, cluster);
 
   const report = await reconcileVaultShareHoldings({
     wallets: [...walletsById.values()],

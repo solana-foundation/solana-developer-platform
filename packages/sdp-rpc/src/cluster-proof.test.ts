@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
-  assertClusterRpcUrl,
+  assertClusterEndpoint,
   CLUSTER_ENDPOINT_PROOF_TTL_MS,
   createRpc,
   resetClusterEndpointProofs,
@@ -111,21 +111,19 @@ test("devnet skips genesis proof", async () => {
   assert.deepEqual(state.methods, ["getSlot"]);
 });
 
-test("assertClusterRpcUrl proves a bare mainnet URL and skips devnet", async () => {
-  const state = installRpcFetch(() => GENESIS_HASH_BY_CLUSTER.devnet);
-
-  await assertClusterRpcUrl(
-    { SOLANA_NETWORK: "devnet" } as RpcEnv,
-    "https://devnet.example.invalid"
-  );
-  assert.deepEqual(state.methods, []);
+test("assertClusterEndpoint proves any cluster, devnet included, and memoises per URL", async () => {
+  const state = installRpcFetch(() => GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
+  const devnetEnv = { SOLANA_NETWORK: "devnet" } as RpcEnv;
+  const url = "https://really-mainnet.example.invalid";
+  const devnetClient = createRpc(devnetEnv, { rpcUrl: url });
 
   await assert.rejects(
-    assertClusterRpcUrl(
-      { SOLANA_NETWORK: "mainnet-beta" } as RpcEnv,
-      "https://wrong.example.invalid"
-    ),
-    /reports genesis/
+    assertClusterEndpoint(devnetEnv, url, devnetClient),
+    /reports genesis .* not .*Set SOLANA_DEVNET_RPC_URL/
   );
+  await assert.rejects(assertClusterEndpoint(devnetEnv, url, devnetClient), /reports genesis/);
   assert.deepEqual(state.methods, ["getGenesisHash"]);
+
+  const mainnetEnv = { SOLANA_NETWORK: "mainnet-beta" } as RpcEnv;
+  await assertClusterEndpoint(mainnetEnv, url, createRpc(mainnetEnv, { rpcUrl: url }));
 });

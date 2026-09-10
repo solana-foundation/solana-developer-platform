@@ -1,4 +1,4 @@
-import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
+import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import {
   EARN_TERMINAL_MOVEMENT_STATUSES,
   type SdpEnvironment,
@@ -13,7 +13,11 @@ import {
 import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { earnClusterFor, resolveClusterRpcUrl } from "@/services/earn/execution-registry";
+import {
+  createProvenClusterRpc,
+  earnClusterFor,
+  resolveClusterRpcUrl,
+} from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import { describeVaultSimulationError } from "@/services/earn/vault-simulation-error";
@@ -110,7 +114,7 @@ async function observeEarnVaultMovement(
   const cluster = earnClusterFor(movement.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const scopedEnv = scopeEnvToCluster(env, cluster);
-  const rpc = createRpc(scopedEnv, { rpcUrl, requestTimeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
+  const rpc = await createProvenClusterRpc(env, cluster, INTERACTIVE_RPC_TIMEOUT_MS);
 
   const [status] = await getSignatureStatuses(rpc, [movement.signature as Signature], {
     searchTransactionHistory: true,
@@ -221,7 +225,7 @@ async function reconcileEnvironment(
   const cluster = earnClusterFor(environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const scopedEnv = scopeEnvToCluster(env, cluster);
-  const rpc = createRpc(scopedEnv, { rpcUrl });
+  const rpc = await createProvenClusterRpc(env, cluster);
   let statuses: Array<SignatureStatusInfo | null>;
   try {
     statuses = await getSignatureStatuses(

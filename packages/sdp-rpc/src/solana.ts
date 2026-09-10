@@ -5,7 +5,7 @@
  * using the modern @solana/kit.
  */
 
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
   airdropFactory,
@@ -176,16 +176,18 @@ async function observeGenesisHash(transport: RpcTransport): Promise<string> {
   return response.result;
 }
 
-async function proveMainnetEndpoint(transport: RpcTransport, url: string): Promise<void> {
-  const cluster = "mainnet-beta";
-  const key = `${cluster}\n${url}`;
+async function proveClusterEndpoint(
+  key: string,
+  cluster: SolanaCluster,
+  observe: () => Promise<string>
+): Promise<void> {
   let proof = clusterEndpointProofs.get(key);
   if (proof !== undefined && proof.expiresAt !== null && proof.expiresAt <= Date.now()) {
     clusterEndpointProofs.delete(key);
     proof = undefined;
   }
   if (proof === undefined) {
-    proof = { promise: observeGenesisHash(transport), expiresAt: null };
+    proof = { promise: observe(), expiresAt: null };
     clusterEndpointProofs.set(key, proof);
   }
 
@@ -207,32 +209,45 @@ async function proveMainnetEndpoint(transport: RpcTransport, url: string): Promi
   const expected = GENESIS_HASH_BY_CLUSTER[cluster];
   if (observed !== expected) {
     throw solanaRpcError(
-      `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. Set SOLANA_MAINNET_RPC_URL to a ${cluster} endpoint.`
+      `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. Set SOLANA_${
+        cluster === "devnet" ? "DEVNET" : "MAINNET"
+      }_RPC_URL to a ${cluster} endpoint.`
     );
   }
 }
 
 function withMainnetEndpointProof(transport: RpcTransport, url: string): RpcTransport {
   return async <TResponse>(request: Parameters<RpcTransport>[0]): Promise<TResponse> => {
-    await proveMainnetEndpoint(transport, url);
+    await proveClusterEndpoint(`mainnet-beta\n${url}`, "mainnet-beta", () =>
+      observeGenesisHash(transport)
+    );
     return await transport<TResponse>(request);
   };
 }
 
 /**
- * Prove that `rpcUrl` serves the cluster `env` names before handing the bare URL
- * to a client that builds its own transport (the Earn provider SDKs), where the
- * proof inside `createRpc` cannot run. Mainnet only, like `createRpc`.
+ * Prove that `rpc`, bound to `rpcUrl`, serves the cluster `env` names — for ANY
+ * cluster, before a caller relies on it. Two callers need this beyond the
+ * mainnet-only transport proof in `createRpc`: code that hands the bare URL to a
+ * client with its own transport (the Earn provider SDKs), and Earn generally,
+ * whose provider program ids resolve on either chain with no error, so a devnet
+ * endpoint that is really mainnet fails as "vault does not exist" instead of
+ * loudly. Memoised per cluster and URL like the transport proof. The caller
+ * supplies the client so the probe goes through its own `createRpc` seam.
  *
  * @param env - Cluster-scoped RPC environment naming the cluster the URL must serve.
- * @param rpcUrl - Endpoint about to be handed to a foreign client.
+ * @param rpcUrl - Endpoint the client is bound to; the memo key.
+ * @param rpc - Client bound to `rpcUrl`, used for the genesis probe.
  * @returns Resolves once the endpoint has proved its genesis; rejects on mismatch.
  */
-export async function assertClusterRpcUrl(env: RpcEnv, rpcUrl: string): Promise<void> {
-  if (resolveDefaultCluster(env) !== "mainnet-beta") return;
-  await proveMainnetEndpoint(
-    withRequestTimeout(createDefaultRpcTransport({ url: rpcUrl }), DEFAULT_RPC_REQUEST_TIMEOUT_MS),
-    rpcUrl
+export async function assertClusterEndpoint(
+  env: RpcEnv,
+  rpcUrl: string,
+  rpc: SolanaRpc
+): Promise<void> {
+  const cluster = resolveDefaultCluster(env);
+  await proveClusterEndpoint(`assert\n${cluster}\n${rpcUrl}`, cluster, async () =>
+    String(await rpc.getGenesisHash().send())
   );
 }
 
@@ -309,7 +324,9 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
       transport = createDefaultRpcTransport({ url });
     }
     const timedTransport = withRequestTimeout(transport, timeoutMs);
-    // ponytail: genesis proof guards the funds-bearing cluster only — devnet envs include surfpool/localnet whose genesis differs. Add a devnet proof if sandbox ever carries value.
+    // ponytail: the transport proof guards mainnet only — CI and local surfpool
+    // run a mainnet fork under SOLANA_NETWORK=devnet, so a devnet proof here
+    // would refuse them. Callers that need devnet identity use assertClusterEndpoint.
     return network === "mainnet-beta"
       ? withMainnetEndpointProof(timedTransport, url)
       : timedTransport;

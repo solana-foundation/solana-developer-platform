@@ -1,4 +1,3 @@
-import { createRpc } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
@@ -8,9 +7,8 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
-import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { earnClusterFor } from "@/services/earn/execution-registry";
+import { createProvenClusterRpc, earnClusterFor } from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
@@ -134,7 +132,7 @@ export async function detectOrphanedEarnSplitSwaps(
     let blockHeight: bigint | null = null;
     try {
       const cluster = earnClusterFor(environment);
-      blockHeight = await createRpc(scopeEnvToCluster(env, cluster))
+      blockHeight = await (await createProvenClusterRpc(env, cluster))
         .getBlockHeight({ commitment: "confirmed" })
         .send();
     } catch (error) {

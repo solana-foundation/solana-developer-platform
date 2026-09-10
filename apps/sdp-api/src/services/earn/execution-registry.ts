@@ -11,7 +11,7 @@ import {
 } from "@sdp/jupiter-lend";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import { getSolanaConfig } from "@sdp/rpc";
-import { assertClusterRpcUrl } from "@sdp/rpc/solana";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
@@ -66,8 +66,34 @@ export async function resolveProvenClusterRpcUrl(
   cluster: SolanaCluster
 ): Promise<string> {
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterRpcUrl(scopeEnvToCluster(env, cluster), rpcUrl);
+  const scoped = scopeEnvToCluster(env, cluster);
+  await solanaRpc.assertClusterEndpoint(scoped, rpcUrl, solanaRpc.createRpc(scoped, { rpcUrl }));
   return rpcUrl;
+}
+
+/**
+ * Earn's RPC client for `cluster`: pinned to the cluster URL and proven to serve
+ * that cluster on every cluster, not just mainnet, because Earn provider program
+ * ids resolve on either chain without error.
+ *
+ * @param env - Deployment environment.
+ * @param cluster - Cluster the client must serve.
+ * @param requestTimeoutMs - Optional per-request transport deadline.
+ * @returns A proven, cluster-pinned RPC client.
+ */
+export async function createProvenClusterRpc(
+  env: Env,
+  cluster: SolanaCluster,
+  requestTimeoutMs?: number
+): Promise<solanaRpc.SolanaRpc> {
+  const scoped = scopeEnvToCluster(env, cluster);
+  const rpcUrl = getSolanaConfig(scoped).rpcUrl;
+  const rpc = solanaRpc.createRpc(
+    scoped,
+    requestTimeoutMs === undefined ? { rpcUrl } : { rpcUrl, requestTimeoutMs }
+  );
+  await solanaRpc.assertClusterEndpoint(scoped, rpcUrl, rpc);
+  return rpc;
 }
 
 export function earnClusterFor(environment: SdpEnvironment): SolanaCluster {

@@ -163,6 +163,29 @@ function assertExpectedPlan(
  * simulated. A fetch failure is therefore a retryable error, never a silent
  * fallback.
  */
+/**
+ * The cluster-pinned RPC client for one vault operation, proven to serve
+ * `input.cluster` first: provider program ids resolve on either chain silently.
+ *
+ * @param env - Deployment environment.
+ * @param input - Cluster, deadline and the URL the operation was planned against.
+ * @param input.cluster - Cluster the plan targets.
+ * @param input.deadline - Operation deadline the proof runs under.
+ * @param input.rpcUrl - Endpoint the plan was resolved against.
+ * @returns A proven RPC client pinned to `input.rpcUrl`.
+ */
+async function provenVaultRpc(
+  env: Env,
+  input: Pick<VaultExecutionScope, "cluster" | "deadline"> & { rpcUrl: string }
+): Promise<solanaRpc.SolanaRpc> {
+  const scoped = scopeEnvToCluster(env, input.cluster);
+  const rpc = solanaRpc.createRpc(scoped, { rpcUrl: input.rpcUrl });
+  await input.deadline.run(`Verifying the ${input.cluster} RPC endpoint`, () =>
+    solanaRpc.assertClusterEndpoint(scoped, input.rpcUrl, rpc)
+  );
+  return rpc;
+}
+
 async function resolveLookupTables(
   env: Env,
   input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; rpcUrl: string }
@@ -262,9 +285,7 @@ export async function signVaultPlan(
     throw new Error("Vault execution preparation belongs to a different plan");
   }
   if (!prepared) {
-    const rpc = solanaRpc.createRpc(scopeEnvToCluster(env, input.cluster), {
-      rpcUrl: input.rpcUrl,
-    });
+    const rpc = await provenVaultRpc(env, input);
     const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
       resolveLookupTables(env, input),
       input.deadline.run("Fetching the vault transaction blockhash", () =>
@@ -459,9 +480,7 @@ export async function broadcastVaultTransaction(
   env: Env,
   input: VaultExecutionScope & { bytes: Uint8Array; rpcUrl: string }
 ): Promise<void> {
-  const rpc = solanaRpc.createRpc(scopeEnvToCluster(env, input.cluster), {
-    rpcUrl: input.rpcUrl,
-  });
+  const rpc = await provenVaultRpc(env, input);
   await input.deadline.run("Broadcasting the vault transaction", () =>
     solanaRpc.sendTransaction(rpc, input.bytes)
   );
@@ -528,9 +547,7 @@ export async function simulateVaultPlan(
     };
   }
 
-  const rpc = solanaRpc.createRpc(scopeEnvToCluster(env, input.cluster), {
-    rpcUrl: input.rpcUrl,
-  });
+  const rpc = await provenVaultRpc(env, input);
   // Lookup-table transport failures are infrastructure failures, not a
   // program simulation verdict. Let them reject so callers preserve their
   // idempotency key and return a retryable 5xx instead of a caller-fault 400.
