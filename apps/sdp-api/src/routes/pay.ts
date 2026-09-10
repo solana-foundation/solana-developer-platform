@@ -114,6 +114,7 @@ pay.post(
       throw rateLimited("Payment request has exhausted its sponsored transaction attempts");
     }
 
+    let signingAttempted = false;
     try {
       const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
         ...instruction,
@@ -166,13 +167,18 @@ pay.post(
         (m) => appendTransactionMessageInstructions(instructions, m)
       );
       const txBytes = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+      // Past this line a signature may exist even when the call throws: a Kora
+      // timeout is recorded as charged_unknown, so the slot stays spent.
+      signingAttempted = true;
       const sponsored = await feePayment.signAsFeePayer(txBytes);
       return c.json({
         transaction: getBase64Decoder().decode(sponsored),
         message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
       });
     } catch (error) {
-      await repository.releaseSponsoredSignature(request.id);
+      if (!signingAttempted) {
+        await repository.releaseSponsoredSignature(request.id);
+      }
       throw error;
     }
   }

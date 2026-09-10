@@ -134,7 +134,28 @@ describe("Public payment request routes", () => {
       expect(sponsorship).toHaveBeenCalledTimes(5);
     });
 
-    it("returns the counter slot when no sponsored signature was produced", async () => {
+    it("keeps the slot spent when signing may have produced a signature", async () => {
+      const request = await createAwaitingPaymentRequest();
+      vi.spyOn(sponsorshipService, "createProjectSponsorshipFeePayment").mockImplementation(
+        async () => ({
+          providerId: "test",
+          getFeePayer: async () => address(TEST_KORA_FEE_PAYER),
+          signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
+          signAndSend: () => Promise.reject(new Error("not used")),
+          prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+        })
+      );
+
+      expect((await postTransaction(request.public_token)).status).toBe(500);
+
+      stubSponsorship();
+      for (let i = 0; i < 4; i++) {
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+      }
+      expect((await postTransaction(request.public_token)).status).toBe(429);
+    });
+
+    it("returns the counter slot when the request fails before signing", async () => {
       const sponsorship = stubSponsorship();
       sponsorship.mockRejectedValueOnce(new Error("provider down"));
       const request = await createAwaitingPaymentRequest();
