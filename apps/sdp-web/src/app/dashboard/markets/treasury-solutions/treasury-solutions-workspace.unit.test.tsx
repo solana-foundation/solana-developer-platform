@@ -1324,6 +1324,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
+    expect(within(row).getByText("Sandbox only")).toBeTruthy();
     expect(within(row).getByText("$12,345,678.90")).toBeTruthy();
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
@@ -1494,6 +1495,7 @@ describe("TreasurySolutionsWorkspace — catalogue cluster toggle (PRO-1742)", (
     expect(cells.getByText("$32,000,000.00")).toBeTruthy();
     const deposit = cells.getByRole("button", { name: "Deposit" });
     expect(deposit.hasAttribute("disabled")).toBe(true);
+    expect(cells.getByText("Mainnet only")).toBeTruthy();
   });
 
   it("renders no cluster toggle in production — there is no other shelf to offer", () => {

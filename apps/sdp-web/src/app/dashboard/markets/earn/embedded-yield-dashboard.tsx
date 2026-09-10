@@ -67,13 +67,20 @@ interface PortfolioChartValue {
   value: number;
 }
 
-interface PortfolioGrowthPoint {
-  id: string;
+type PortfolioAgeBucket = "week" | "month" | "quarter" | "older";
+
+interface PortfolioAgePoint {
+  id: PortfolioAgeBucket;
   value: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const PORTFOLIO_GROWTH_POINTS = 12;
+const PORTFOLIO_AGE_BUCKETS = [
+  { id: "week", maxDays: 7 },
+  { id: "month", maxDays: 30 },
+  { id: "quarter", maxDays: 90 },
+  { id: "older", maxDays: Number.POSITIVE_INFINITY },
+] as const satisfies ReadonlyArray<{ id: PortfolioAgeBucket; maxDays: number }>;
 const PORTFOLIO_CHART_COLORS = [
   "var(--sdp-series-1)",
   "var(--sdp-series-2)",
@@ -84,130 +91,134 @@ const PORTFOLIO_CHART_COLORS = [
 function portfolioPositions(summary: EarnExternalWalletPositionSummary) {
   const byId = new Map<string, EarnExternalWalletPosition>();
   for (const strategy of summary.totalsByStrategy) {
-    for (const position of strategy.positions ?? []) byId.set(position.id, position);
+    for (const position of strategy.positions ?? []) {
+      if (position.closedAt === null) byId.set(position.id, position);
+    }
   }
   return [...byId.values()];
 }
 
-function buildGrowthSeries(
+function buildAgeDistribution(
   positions: EarnExternalWalletPosition[],
-  kind: "positions" | "wallets"
-): PortfolioGrowthPoint[] {
-  const datedPositions: Array<{ position: EarnExternalWalletPosition; createdAt: number }> = [];
+  kind: "positions" | "wallets",
+  now = Date.now()
+): PortfolioAgePoint[] {
+  const createdAtByWallet = new Map<string, number>();
+  const positionCreatedAt: number[] = [];
+
   for (const position of positions) {
     const createdAt = Date.parse(position.createdAt);
-    if (Number.isFinite(createdAt)) datedPositions.push({ position, createdAt });
-  }
-  datedPositions.sort((left, right) => left.createdAt - right.createdAt);
-
-  if (datedPositions.length === 0) {
-    return Array.from({ length: PORTFOLIO_GROWTH_POINTS }, (_, index) => ({
-      id: `empty-${index}`,
-      value: 0,
-    }));
+    if (!Number.isFinite(createdAt)) continue;
+    positionCreatedAt.push(createdAt);
+    const walletCreatedAt = createdAtByWallet.get(position.ownerAddress);
+    if (walletCreatedAt === undefined || createdAt < walletCreatedAt) {
+      createdAtByWallet.set(position.ownerAddress, createdAt);
+    }
   }
 
-  const firstCreatedAt = datedPositions[0]?.createdAt ?? Date.now();
-  const lastCreatedAt = datedPositions.at(-1)?.createdAt ?? firstCreatedAt;
-  const end = Math.max(Date.now(), lastCreatedAt);
-  const start = Math.min(firstCreatedAt - DAY_MS, end - 6 * DAY_MS);
-  const interval = (end - start) / (PORTFOLIO_GROWTH_POINTS - 1);
+  const timestamps = kind === "positions" ? positionCreatedAt : [...createdAtByWallet.values()];
+  const counts = new Map<PortfolioAgeBucket, number>(
+    PORTFOLIO_AGE_BUCKETS.map(({ id }) => [id, 0])
+  );
+  for (const createdAt of timestamps) {
+    const ageDays = Math.max(0, Math.floor((now - createdAt) / DAY_MS));
+    const bucket = PORTFOLIO_AGE_BUCKETS.find(({ maxDays }) => ageDays <= maxDays);
+    if (bucket) counts.set(bucket.id, (counts.get(bucket.id) ?? 0) + 1);
+  }
 
-  return Array.from({ length: PORTFOLIO_GROWTH_POINTS }, (_, index) => {
-    const boundary = start + interval * index;
-    const visible = datedPositions.filter(({ createdAt }) => createdAt <= boundary);
-    return {
-      id: `${kind}-${index}`,
-      value:
-        kind === "positions"
-          ? visible.length
-          : new Set(visible.map(({ position }) => position.ownerAddress)).size,
-    };
-  });
+  return PORTFOLIO_AGE_BUCKETS.map(({ id }) => ({ id, value: counts.get(id) ?? 0 }));
 }
 
-function GrowthAreaChart({
+function AgeDistributionChart({
   kind,
+  label,
   points,
 }: {
   kind: "positions" | "wallets";
-  points: PortfolioGrowthPoint[];
+  label: string;
+  points: PortfolioAgePoint[];
 }) {
   const reduceMotion = useReducedMotion();
+  const t = useTranslations();
   const width = 260;
-  const height = 82;
-  const baseline = 78;
+  const height = 62;
+  const baseline = 58;
   const maxValue = Math.max(...points.map(({ value }) => value), 1);
-  const coordinates = points.map(({ value }, index) => ({
-    x: (index / Math.max(points.length - 1, 1)) * width,
-    y: baseline - (value / maxValue) * 62,
-  }));
-  const linePath = coordinates
-    .map(({ x, y }, index) => `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`)
-    .join(" ");
-  const areaPath = `${linePath} L${width} ${height} L0 ${height} Z`;
   const color = kind === "wallets" ? "var(--sdp-series-4)" : "var(--sdp-series-3)";
-  const gradientId = `portfolio-${kind}-fill`;
+  const bucketLabels: Record<PortfolioAgeBucket, string> = {
+    week: t("DashboardMarkets.earnProgram.ageUnderWeek"),
+    month: t("DashboardMarkets.earnProgram.ageUnderMonth"),
+    quarter: t("DashboardMarkets.earnProgram.ageUnderQuarter"),
+    older: t("DashboardMarkets.earnProgram.ageOlder"),
+  };
+  const accessibleLabel = `${label}: ${points
+    .map(({ id, value }) => `${bucketLabels[id]} ${value}`)
+    .join(", ")}`;
 
   return (
-    <m.svg
-      aria-hidden="true"
-      className="h-[5.25rem] w-full overflow-visible"
-      data-portfolio-chart={kind}
-      initial={reduceMotion ? false : { opacity: 0, y: 5 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: "easeOut" }}
-      preserveAspectRatio="none"
-      viewBox={`0 0 ${width} ${height}`}
-    >
-      <defs>
-        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      <path d={`M0 ${baseline} H${width}`} stroke="currentColor" strokeOpacity="0.1" />
-      <m.path
-        d={areaPath}
-        fill={`url(#${gradientId})`}
-        initial={reduceMotion ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={reduceMotion ? { duration: 0 } : { duration: 0.4 }}
-      />
-      <m.path
-        d={linePath}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2.5"
-        initial={reduceMotion ? false : { pathLength: 0 }}
-        animate={{ pathLength: 1 }}
-        transition={reduceMotion ? { duration: 0 } : { duration: 0.65, ease: "easeOut" }}
-      />
-      {coordinates.map(({ x, y }, index) =>
-        index === coordinates.length - 1 ? (
-          <m.circle
-            animate={{ opacity: 1, scale: 1 }}
-            cx={x}
-            cy={y}
-            fill={color}
-            initial={reduceMotion ? false : { opacity: 0, scale: 0.4 }}
-            key={points[index]?.id}
-            r="3.5"
-            transition={reduceMotion ? { duration: 0 } : { delay: 0.5, duration: 0.2 }}
-          />
-        ) : null
-      )}
-    </m.svg>
+    <div>
+      <p className="mb-1 text-[11px] leading-4 text-tertiary">{label}</p>
+      <m.svg
+        aria-label={accessibleLabel}
+        className="h-[3.875rem] w-full overflow-visible"
+        data-portfolio-chart={kind}
+        initial={reduceMotion ? false : { opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: "easeOut" }}
+        preserveAspectRatio="none"
+        role="img"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        <path d={`M0 ${baseline} H${width}`} stroke="currentColor" strokeOpacity="0.1" />
+        {points.map(({ id, value }, index) => {
+          const slotWidth = width / points.length;
+          const barHeight = (value / maxValue) * 44;
+          return (
+            <m.rect
+              animate={{ height: barHeight, opacity: 0.78, y: baseline - barHeight }}
+              fill={color}
+              initial={reduceMotion ? false : { height: 0, opacity: 0, y: baseline }}
+              key={id}
+              rx="4"
+              transition={reduceMotion ? { duration: 0 } : { delay: index * 0.06, duration: 0.35 }}
+              width={slotWidth * 0.58}
+              x={index * slotWidth + slotWidth * 0.21}
+            />
+          );
+        })}
+      </m.svg>
+      <div className="grid grid-cols-4 gap-1 text-center text-[9px] leading-3 text-tertiary">
+        {points.map(({ id }) => (
+          <span key={id}>{bucketLabels[id]}</span>
+        ))}
+      </div>
+    </div>
   );
 }
 
 function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
   const reduceMotion = useReducedMotion();
+  const t = useTranslations();
   const positiveValues = values.filter(({ value }) => value > 0);
+  const displayedValues =
+    positiveValues.length <= PORTFOLIO_CHART_COLORS.length
+      ? positiveValues
+      : (() => {
+          const sorted = [...positiveValues].sort((left, right) => right.value - left.value);
+          const visible = sorted.slice(0, PORTFOLIO_CHART_COLORS.length - 1);
+          return [
+            ...visible,
+            {
+              id: "portfolio-other-assets",
+              label: t("DashboardMarkets.earnProgram.otherAssets"),
+              value: sorted
+                .slice(PORTFOLIO_CHART_COLORS.length - 1)
+                .reduce((sum, { value }) => sum + value, 0),
+            },
+          ];
+        })();
   const chartValues =
-    positiveValues.length > 0 ? positiveValues : [{ id: "empty", label: "", value: 1 }];
+    displayedValues.length > 0 ? displayedValues : [{ id: "empty", label: "", value: 1 }];
   const total = chartValues.reduce((sum, { value }) => sum + value, 0);
   const radius = 23;
   const circumference = 2 * Math.PI * radius;
@@ -259,7 +270,7 @@ function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
         })}
       </m.svg>
       <div className="min-w-0 flex-1 space-y-2">
-        {positiveValues.slice(0, 4).map(({ id, label, value }, index) => (
+        {displayedValues.map(({ id, label, value }, index) => (
           <div className="flex items-center justify-between gap-3 text-xs" key={id}>
             <span className="flex min-w-0 items-center gap-2 text-secondary">
               <span
@@ -282,14 +293,16 @@ function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
 type PortfolioMetricKind = "assets" | "positions" | "wallets";
 
 function PortfolioMetric({
+  ageLabel,
+  agePoints,
   chartValues,
-  growthPoints,
   kind,
   label,
   value,
 }: {
-  chartValues: PortfolioChartValue[];
-  growthPoints?: PortfolioGrowthPoint[];
+  ageLabel?: string;
+  agePoints?: PortfolioAgePoint[];
+  chartValues?: PortfolioChartValue[];
   kind: PortfolioMetricKind;
   label: string;
   value: number;
@@ -306,13 +319,13 @@ function PortfolioMetric({
         </dd>
       </div>
       <div className="mt-auto pt-4">
-        {kind === "wallets" && growthPoints ? (
-          <GrowthAreaChart kind="wallets" points={growthPoints} />
+        {kind === "wallets" && ageLabel && agePoints ? (
+          <AgeDistributionChart kind="wallets" label={ageLabel} points={agePoints} />
         ) : null}
-        {kind === "positions" && growthPoints ? (
-          <GrowthAreaChart kind="positions" points={growthPoints} />
+        {kind === "positions" && ageLabel && agePoints ? (
+          <AgeDistributionChart kind="positions" label={ageLabel} points={agePoints} />
         ) : null}
-        {kind === "assets" ? <AssetMixChart values={chartValues} /> : null}
+        {kind === "assets" ? <AssetMixChart values={chartValues ?? []} /> : null}
       </div>
     </Card>
   );
@@ -520,7 +533,8 @@ function PortfolioByStrategy({
             <TableBody>
               {summary.totalsByStrategy.map((strategy) => {
                 const strategyId = `${strategy.provider}:${strategy.providerReference}`;
-                const detailsId = `strategy-details-${strategyId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                const safeStrategyId = strategyId.replace(/[^a-zA-Z0-9_-]/g, "-");
+                const detailsId = safeStrategyId;
                 const isOpen = selectedStrategyId === strategyId;
                 const strategyDefinition = strategiesByReference.get(
                   strategyReferenceKey(strategy.provider, strategy.providerReference)
@@ -655,8 +669,8 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
     detailsVisible: selectedStrategyId !== null,
   });
   const positions = summary ? portfolioPositions(summary) : [];
-  const walletGrowth = buildGrowthSeries(positions, "wallets");
-  const positionGrowth = buildGrowthSeries(positions, "positions");
+  const walletAges = buildAgeDistribution(positions, "wallets");
+  const positionAges = buildAgeDistribution(positions, "positions");
 
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
@@ -695,23 +709,15 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
             <>
               <dl className="grid gap-2 sm:grid-cols-3">
                 <PortfolioMetric
-                  chartValues={summary.totalsByStrategy.map((strategy) => ({
-                    id: `${strategy.provider}:${strategy.providerReference}`,
-                    label: strategy.label,
-                    value: strategy.walletCount,
-                  }))}
-                  growthPoints={walletGrowth}
+                  ageLabel={t("DashboardMarkets.earnProgram.customerWalletAgeDistribution")}
+                  agePoints={walletAges}
                   kind="wallets"
                   label={t("DashboardMarkets.earnProgram.customerWallets")}
                   value={summary.walletCount}
                 />
                 <PortfolioMetric
-                  chartValues={summary.totalsByStrategy.map((strategy) => ({
-                    id: `${strategy.provider}:${strategy.providerReference}`,
-                    label: strategy.label,
-                    value: strategy.positionCount,
-                  }))}
-                  growthPoints={positionGrowth}
+                  ageLabel={t("DashboardMarkets.earnProgram.livePositionAgeDistribution")}
+                  agePoints={positionAges}
                   kind="positions"
                   label={t("DashboardMarkets.earnProgram.livePositions")}
                   value={summary.positionCount}

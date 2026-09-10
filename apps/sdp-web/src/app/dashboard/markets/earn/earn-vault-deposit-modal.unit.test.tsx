@@ -52,6 +52,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.flowReview": "Review",
   "DashboardEarn.deposit.flowProcessing": "Processing",
   "DashboardEarn.deposit.flowComplete": "Complete",
+  "DashboardEarn.deposit.progressLabel": "Progress",
   "DashboardEarn.deposit.progressReview": "Review",
   "DashboardEarn.deposit.walletsLoadError": "Wallets could not be loaded.",
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",

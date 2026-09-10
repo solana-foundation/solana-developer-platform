@@ -45,6 +45,7 @@ import {
   useDashboardWorkspace,
   useOptionalDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
@@ -54,6 +55,7 @@ import {
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { earnProviderLabel, formatUsd } from "../earn/earn-format";
 import {
+  EarnDepositAvailabilityBadge,
   earnMintAsset,
   earnStrategyAsset,
   earnStrategyReferenceKey,
@@ -76,6 +78,7 @@ import {
 } from "../earn/earn-program-data";
 import {
   type EarnProviderAccess,
+  type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
@@ -121,6 +124,15 @@ type TrackedVaultActivity =
   | { kind: "withdrawal"; movement: TrackedVaultWithdrawal };
 
 const MAX_VISIBLE_VAULT_ACTIVITY = 50;
+
+const TREASURY_AVAILABILITY_LABELS = {
+  available: "DashboardMarkets.treasury.depositAvailable",
+  cluster_unavailable: "DashboardMarkets.treasury.clusterUnavailable",
+  strategy_unavailable: "DashboardMarkets.treasury.depositUnavailable",
+  environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
+  access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
+  provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
+} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
 type NumericSortDirection = "ascending" | "descending";
 
@@ -582,7 +594,12 @@ function StrategyTable({
                   {formatUsd(tvlUsd, locale, 2)}
                 </TableCell>
                 <TableCell align="right">
-                  <div className="flex justify-end gap-2">
+                  <div className="flex flex-col items-end gap-2">
+                    <EarnDepositAvailabilityBadge
+                      availability={availability}
+                      labels={TREASURY_AVAILABILITY_LABELS}
+                      strategy={strategy}
+                    />
                     <Button
                       disabled={!canDeposit}
                       iconLeft={<ArrowDownLeftIcon />}

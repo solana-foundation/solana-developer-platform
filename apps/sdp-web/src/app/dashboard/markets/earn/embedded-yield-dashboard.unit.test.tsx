@@ -63,6 +63,26 @@ function strategyFixture(overrides: Partial<EarnStrategy> = {}): EarnStrategy {
   };
 }
 
+function positionFixture(
+  overrides: Partial<EarnExternalWalletPosition> = {}
+): EarnExternalWalletPosition {
+  return {
+    id: "position_1",
+    ownerAddress: "11111111111111111111111111111111",
+    provider: "kamino",
+    providerReference: "vault_1",
+    label: "USDC Core Yield",
+    tokenMint: USDC,
+    shareMint: "share_mint",
+    createdAt: "2026-09-05T00:00:00.000Z",
+    closedAt: null,
+    shares: "5.9",
+    withdrawableShares: "5.9",
+    tokenValue: "5.9",
+    ...overrides,
+  };
+}
+
 function renderWithEnglish(children: ReactNode) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -247,6 +267,89 @@ describe("EmbeddedYieldDashboard", () => {
     expect(document.querySelector("[data-portfolio-chart='wallets']")).toBeTruthy();
     expect(document.querySelector("[data-portfolio-chart='positions']")).toBeTruthy();
     expect(document.querySelector("[data-portfolio-chart='assets']")).toBeTruthy();
+    expect(screen.getByText("Wallets by oldest live position")).toBeTruthy();
+    expect(screen.getByText("Live positions by age")).toBeTruthy();
+  });
+
+  it("groups additional asset segments into one labeled remainder", () => {
+    mocks.summary = {
+      walletCount: 5,
+      positionCount: 15,
+      unavailablePositionCount: 0,
+      totalsByToken: [
+        { tokenMint: "TOKEN_A", walletCount: 1, positionCount: 5, unavailablePositionCount: 0 },
+        { tokenMint: "TOKEN_B", walletCount: 1, positionCount: 4, unavailablePositionCount: 0 },
+        { tokenMint: "TOKEN_C", walletCount: 1, positionCount: 3, unavailablePositionCount: 0 },
+        { tokenMint: "TOKEN_D", walletCount: 1, positionCount: 2, unavailablePositionCount: 0 },
+        { tokenMint: "TOKEN_E", walletCount: 1, positionCount: 1, unavailablePositionCount: 0 },
+      ],
+      totalsByStrategy: [],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+
+    const chart = document.querySelector("[data-portfolio-chart='assets']");
+    if (!(chart instanceof HTMLElement)) throw new Error("Expected asset portfolio chart");
+    expect(within(chart).getByText("TOKEN_A")).toBeTruthy();
+    expect(within(chart).getByText("TOKEN_B")).toBeTruthy();
+    expect(within(chart).getByText("TOKEN_C")).toBeTruthy();
+    expect(within(chart).getByText("Other assets")).toBeTruthy();
+    expect(within(chart).getAllByText("3")).toHaveLength(2);
+    expect(within(chart).queryByText("TOKEN_D")).toBeNull();
+    expect(within(chart).queryByText("TOKEN_E")).toBeNull();
+  });
+
+  it("charts the age of live positions without presenting reconstructed history", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-10T00:00:00.000Z"));
+    mocks.summary = {
+      walletCount: 2,
+      positionCount: 2,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [
+        {
+          provider: "kamino",
+          providerReference: "vault_1",
+          label: "USDC Core Yield",
+          ownerAddresses: ["11111111111111111111111111111111", "22222222222222222222222222222222"],
+          positions: [
+            positionFixture(),
+            positionFixture({
+              id: "position_2",
+              ownerAddress: "22222222222222222222222222222222",
+              createdAt: "2026-08-01T00:00:00.000Z",
+            }),
+            positionFixture({
+              id: "closed_position",
+              ownerAddress: "33333333333333333333333333333333",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              closedAt: "2026-02-01T00:00:00.000Z",
+            }),
+          ],
+          walletCount: 2,
+          positionCount: 2,
+          totalsByToken: [],
+        },
+      ],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+
+    expect(
+      screen.getByRole("img", {
+        name: "Wallets by oldest live position: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 0",
+      })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("img", {
+        name: "Live positions by age: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 0",
+      })
+    ).toBeTruthy();
   });
 
   it("keeps the refresh status region mounted before an error occurs", () => {

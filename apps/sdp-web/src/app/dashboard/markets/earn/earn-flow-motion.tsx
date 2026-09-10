@@ -3,6 +3,7 @@
 import { CheckIcon, Clock3Icon, ShieldCheckIcon } from "lucide-react";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 const stepTransition = { duration: 0.18, ease: "easeOut" } as const;
@@ -38,10 +39,11 @@ export function EarnFlowStepper({
   steps: readonly string[];
 }) {
   const reduceMotion = useReducedMotion();
+  const t = useTranslations();
 
   return (
     <LazyMotion features={domAnimation}>
-      <nav aria-label="Progress" className="mb-6">
+      <nav aria-label={t("DashboardEarn.deposit.progressLabel")} className="mb-6">
         <ol className="flex items-start">
           {steps.map((step, index) => {
             const complete = index < currentStep;
