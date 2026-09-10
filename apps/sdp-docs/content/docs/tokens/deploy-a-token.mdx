@@ -7,12 +7,12 @@ steps:
   - Confirm deployment
 ---
 
-After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
+After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and signs the deployment with the exact SDP Wallet selected for execution.
 
 ## Prerequisites
 
 - A token in `pending` status
-- A [wallet configured](/docs/guides/setup-wallets) as the token's main signer
+- The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
 
@@ -20,7 +20,7 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 
 <Step number={1} title="Open the deploy action">
 
-Locate the token you want to deploy. Deployment is irreversible — the mint account is created onchain and authorities are locked to your configured wallets.
+Locate the token you want to deploy. Deployment is irreversible — the mint account and its configured authorities are created onchain.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -42,7 +42,12 @@ curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-deploy calls.
+Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..."
+```
 
 </Tab>
 </Tabs>
@@ -52,7 +57,7 @@ Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-SDP signs and submits the deploy transaction using the token's configured signer wallet.
+SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If you supply it here, it overrides the pending draft's execution wallet; if you omit it, SDP uses the value stored on the draft. One of those values is required. An override changes the deployment signer and historical attribution, but it does not rewrite immutable authority values already captured in the token's configuration.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -74,7 +79,9 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
-  -H "Idempotency-Key: deploy-acme-001"
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: deploy-acme-001" \
+  -d '{"signingCustodyWalletId":"cwlt_abc123"}'
 ```
 
 ```typescript title="deploy-token.ts"
@@ -84,8 +91,10 @@ const res = await fetch(
     method: "POST",
     headers: {
       Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
       "Idempotency-Key": "deploy-acme-001",
     },
+    body: JSON.stringify({ signingCustodyWalletId: "cwlt_abc123" }),
   }
 );
 const { data } = await res.json();
@@ -120,7 +129,10 @@ The deploy response includes the confirmed state:
 ```typescript title="deploy-token.ts"
 // data.token.status      — "active"
 // data.token.mintAddress — e.g., "AcMeXYZ..."
+// data.token.signingCustodyWalletId — exact wallet used for deployment
 ```
+
+After deployment, `signingCustodyWalletId` is historical deployment attribution. Mint and admin actions resolve their current on-chain authority, while a standard burn uses its exact source wallet; none use the deployment wallet as a fallback.
 
 Fetch the token at any time to verify:
 

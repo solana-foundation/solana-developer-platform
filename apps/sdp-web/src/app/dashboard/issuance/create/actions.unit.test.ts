@@ -37,7 +37,10 @@ const input = {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.enabled.mockResolvedValue(true);
-  mocks.wallets.mockResolvedValue({ ok: true, data: [{ walletId: "wallet-a" }] });
+  mocks.wallets.mockResolvedValue({
+    ok: true,
+    data: [{ id: "wallet-a", walletId: "provider-wallet-a" }],
+  });
   mocks.request.mockResolvedValue(
     new Response(JSON.stringify({ data: { token: { id: "tok_saved" } } }), { status: 201 })
   );
@@ -61,7 +64,7 @@ describe("save issuance draft", () => {
     );
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/issuance");
     expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toMatchObject({
-      signingWalletId: "wallet-a",
+      signingCustodyWalletId: "wallet-a",
     });
   });
   it("does not save a wallet outside the available project wallets", async () => {

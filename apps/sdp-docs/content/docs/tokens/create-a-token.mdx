@@ -113,7 +113,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 <Step number={3} title="Set operational settings">
 
-Choose the wallet that will sign token operations, and configure Token Access Control and supply controls.
+Choose the exact SDP Wallet that will deploy the token, and configure Token Access Control and supply controls.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -121,7 +121,7 @@ Choose the wallet that will sign token operations, and configure Token Access Co
 
 In step 3 of 3, configure:
 
-- **Main signer** — the SDP-controlled wallet for deploy and token actions
+- **Main signer** — the exact SDP-controlled wallet selected for deployment
 - **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
 
 Click **Create token** to save the draft.
@@ -131,7 +131,7 @@ Click **Create token** to save the draft.
 </Tab>
 <Tab value="API">
 
-Add operational fields to the same body:
+Add operational fields to the same body. `signingCustodyWalletId` is the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`), not the provider-specific `walletId` or the wallet's public key. You can omit it while drafting and provide it when you deploy.
 
 ```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
@@ -146,6 +146,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
     decimals: 6,
     description: "USD-backed stablecoin",
     template: "stablecoin",
+    signingCustodyWalletId: "cwlt_abc123",
     requiresAllowlist: false,
     isMintable: true,
     isFreezable: true,
@@ -161,6 +162,7 @@ body: JSON.stringify({
   symbol: "GAME",
   decimals: 0,
   template: "custom",
+  signingCustodyWalletId: "cwlt_abc123",
   overrides: {
     extensions: {
       pausable: {},
@@ -203,6 +205,7 @@ A successful response returns the new token object:
 const { data } = await res.json();
 // data.token.id     — save this; used in all subsequent calls
 // data.token.status — "pending"
+// data.token.signingCustodyWalletId — exact wallet selected for deployment
 ```
 
 The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tokens/deploy-a-token).

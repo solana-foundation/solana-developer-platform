@@ -7,7 +7,7 @@
 // migration. This mirrors how COUNTERPARTY_ACCOUNT_KINDS gates the open-TEXT
 // `account_kind` column.
 
-import type { Token } from "./tokens";
+import type { PublicToken } from "./tokens";
 
 // --- Asset Category --------------------------------------------------------
 
@@ -248,7 +248,7 @@ export interface AssetProfileResponse {
 }
 
 export interface TokenWithAssetProfileResponse {
-  token: Token;
+  token: PublicToken;
   assetProfile: AssetProfile;
 }
 

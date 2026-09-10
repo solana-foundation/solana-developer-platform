@@ -5,9 +5,7 @@ import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner } from "@/services/solana";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -21,7 +19,14 @@ import {
   requireProjectScope,
 } from "../helpers";
 import type { burnSchema } from "../schemas";
+import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveDirectIssuanceReplay,
+  resolveIssuanceWallet,
+} from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -146,14 +151,19 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   assertTokenAllowsOperation(token, "burn");
   assertTokenIsDeployed(token);
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const wallet = await resolveIssuanceWallet({
+    env: c.env,
     auth,
-    body.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
-
-  // Validate addresses and get custody authority (via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+    custodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    currentAuthority: wallet.publicKey,
+    requiredWalletPermissions: ["tokens:write"],
+  });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
   const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
@@ -195,6 +205,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId: wallet.custodyWalletId,
     type: "burn",
     params: {
       source: body.burn.source,
@@ -221,7 +232,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   });
 
   return success(c, {
-    transaction: tx,
+    transaction: toPublicTokenTransaction(tx),
     preparedTransaction: {
       serialized: prepared.serializedTx,
       blockhash: prepared.blockhash,
@@ -248,14 +259,47 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "burn",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "burn",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      action: "burn",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.burn.amount);
+    }
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
+  }
+
   assertTokenAllowsOperation(token, "burn");
   assertTokenIsDeployed(token);
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const wallet = await resolveIssuanceWallet({
+    env: c.env,
     auth,
-    body.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+    custodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
   const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
@@ -263,17 +307,21 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     token.decimals
   );
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "burn",
-    mode: "execute",
-    params: body,
+  const idempotencyMetadata = idempotencyForWallet(wallet.custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   // Create transaction record first
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId: wallet.custodyWalletId,
     type: "burn",
     params: {
       source: body.burn.source,
@@ -297,7 +345,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
     }
-    return success(c, { transaction });
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
   const auditIntent = await auditService.beginCritical(c, {
     action: "burn",
@@ -312,13 +360,13 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   });
   let onChainEffectCompleted = false;
   try {
-    // Get custody signer (via 3-tier resolution)
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      signingWalletId
-    );
+    const signer = await createResolvedAuthoritySigner({
+      env: c.env,
+      auth,
+      custodyWalletId: wallet.custodyWalletId,
+      currentAuthority: wallet.publicKey,
+      requiredWalletPermissions: ["tokens:write"],
+    });
     const normalizedSource = await resolveValidatedBurnSource(
       c.env,
       signer.address,
@@ -369,7 +417,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       slot: result.slot.toString(),
     });
 
-    return success(c, { transaction: updatedTx });
+    return success(c, { transaction: toPublicTokenTransaction(updatedTx) });
   } catch (error) {
     if (!onChainEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {

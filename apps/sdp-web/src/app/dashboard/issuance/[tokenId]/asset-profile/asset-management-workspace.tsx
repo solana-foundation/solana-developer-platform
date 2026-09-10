@@ -10,8 +10,10 @@ import { useTranslations } from "@/i18n/provider";
 import { getDraftDeploymentBlocker } from "../../draft-permissions";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
+import { TokenDeployWalletDialog } from "../token-deploy-wallet-dialog";
 import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
+import { TokenSignerSelect } from "../token-signer-select";
 import { AnimatedSection } from "./animated-section";
 import { AssetProfileHeader } from "./asset-profile-header";
 import { AssetProfileSaveBar } from "./asset-profile-save-bar";
@@ -83,12 +85,19 @@ export function AssetManagementWorkspace({
     shouldLoadAuthorityWallets: true,
     canManageTokenAdmin,
   });
-  const form = useAssetProfileForm({ token, assetProfile });
+  const form = useAssetProfileForm({
+    token,
+    assetProfile,
+    metadataSignerSelection: ops.metadataSignerSelection,
+    draftWallets: ops.authorityWalletsError ? [] : ops.authorityWallets,
+  });
   const draftDeploymentBlockerKey = getDraftDeploymentBlocker(
     form.draft.authorityWalletIds,
     form.draft.signingWalletId
   );
-  const draftDeploymentBlocker = draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null;
+  const draftDeploymentBlocker =
+    form.errors.authorityWalletIds ??
+    (draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null);
   const showSection = useCallback(
     (section: AssetManagementTab) => {
       setOpenSections((current) => ({ ...current, [section]: true }));
@@ -199,7 +208,19 @@ export function AssetManagementWorkspace({
         errorCount={form.showErrors ? form.errorCount : 0}
         onSave={() => void form.save()}
         onDiscard={form.discard}
-      />
+      >
+        {form.requiresMetadataSigner &&
+        (ops.metadataSignerSelection.wallets.length !== 1 ||
+          ops.metadataSignerSelection.wallets[0]?.id !== form.metadataSignerWalletId ||
+          ops.metadataSignerSelection.unavailableReason) ? (
+          <TokenSignerSelect
+            signerWallets={ops.metadataSignerSelection.wallets}
+            signerWalletId={form.metadataSignerWalletId}
+            signerUnavailableReason={ops.metadataSignerSelection.unavailableReason}
+            onSignerWalletIdChange={form.setMetadataSignerWalletId}
+          />
+        ) : null}
+      </AssetProfileSaveBar>
 
       <TokenAuthorityModal
         row={ops.authorityModalRow}
@@ -207,9 +228,12 @@ export function AssetManagementWorkspace({
         newAuthority={ops.authorityModalNewAuthority}
         authorityWallets={ops.authorityWallets}
         authorityWalletsError={ops.authorityWalletsError}
+        signerWallets={ops.authorityModalSignerSelection.wallets}
+        signerWalletId={ops.authorityModalSignerWalletId}
         signerUnavailableReason={ops.authorityModalSignerSelection.unavailableReason}
         isPending={ops.isPending}
         onNewAuthorityChange={ops.setAuthorityModalNewAuthority}
+        onSignerWalletIdChange={ops.setAuthorityModalSignerWalletId}
         onCancel={ops.handleAuthorityModalClose}
         onConfirm={ops.handleAuthorityModalConfirm}
       />
@@ -268,6 +292,18 @@ export function AssetManagementWorkspace({
         isPending={ops.isPending}
         onCancel={ops.dismissActionConfirmation}
         onConfirm={ops.confirmAction}
+        onSignerWalletIdChange={ops.selectConfirmationWallet}
+      />
+
+      <TokenDeployWalletDialog
+        isOpen={ops.deployWalletDialogOpen}
+        isPending={ops.isPending}
+        signerWallets={ops.deploySignerSelection.wallets}
+        signerUnavailableReason={ops.deploySignerSelection.unavailableReason}
+        signingCustodyWalletId={ops.deployCustodyWalletId}
+        onSigningCustodyWalletIdChange={ops.setDeployCustodyWalletId}
+        onCancel={ops.closeDeployWalletDialog}
+        onConfirm={ops.confirmDeployWallet}
       />
     </div>
   );

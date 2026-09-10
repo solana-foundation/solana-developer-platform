@@ -103,7 +103,7 @@ export function IssuanceDraftForm({
   const [draft, setDraft] = useState<DraftState>(() => ({
     ...INITIAL_DRAFT,
     authorities: Object.fromEntries(
-      Object.keys(authorityCopy).map((key) => [key, wallets[0]?.walletId ?? ""])
+      Object.keys(authorityCopy).map((key) => [key, wallets[0]?.id ?? ""])
     ) as Record<AuthorityKey, string>,
   }));
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -261,7 +261,7 @@ function CreateSurface(props: CreateSurfaceProps) {
                 disabled={
                   step === 3 &&
                   !permissionKeys(props.draft).every((key) =>
-                    props.wallets.some((wallet) => wallet.walletId === props.draft.authorities[key])
+                    props.wallets.some((wallet) => wallet.id === props.draft.authorities[key])
                   )
                 }
               >
@@ -702,7 +702,7 @@ function PermissionsStep({
               {t("DashboardIssuance.draftForm.selectWallet")}
             </option>
             {wallets.map((wallet) => (
-              <option key={wallet.walletId} value={wallet.walletId}>
+              <option key={wallet.id} value={wallet.id}>
                 {wallet.label || t("DashboardIssuance.draftForm.wallet")} ·{" "}
                 {shortenAddress(wallet.publicKey)}
               </option>
