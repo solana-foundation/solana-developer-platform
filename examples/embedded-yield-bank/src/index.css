@@ -110,51 +110,6 @@
   }
 }
 
-.brand-mark {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-radius: 0.65rem;
-  background: #111112;
-}
-
-.brand-mark::before,
-.brand-mark::after,
-.brand-mark > span::before,
-.brand-mark > span::after {
-  position: absolute;
-  content: "";
-  background: white;
-  border-radius: 999px;
-}
-
-.brand-mark::before {
-  width: 3px;
-  height: 18px;
-}
-
-.brand-mark::after {
-  width: 18px;
-  height: 3px;
-}
-
-.brand-mark > span::before {
-  width: 2px;
-  height: 12px;
-  transform: rotate(45deg);
-  opacity: 0.72;
-}
-
-.brand-mark > span::after {
-  width: 18px;
-  height: 2px;
-  transform: rotate(45deg);
-  opacity: 0.72;
-}
-
 .status-success {
   border-color: rgba(0, 160, 102, 0.2);
   background: rgba(0, 160, 102, 0.08);

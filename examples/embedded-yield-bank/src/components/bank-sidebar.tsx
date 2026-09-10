@@ -6,6 +6,7 @@ import {
   CreditCardIcon,
   LayoutDashboardIcon,
   SettingsIcon,
+  StarIcon,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -103,11 +104,15 @@ export function MobileHeader() {
 function NorthstarMark({ compact = false }: { compact?: boolean }) {
   return (
     <span
-      className={compact ? "brand-mark size-8" : "brand-mark size-9"}
+      className="flex shrink-0 items-center justify-center text-foreground"
       aria-label="Northstar Bank"
       role="img"
     >
-      <span />
+      <StarIcon
+        className={compact ? "size-6 fill-current" : "size-7 fill-current"}
+        strokeWidth={1.5}
+        aria-hidden="true"
+      />
     </span>
   );
 }

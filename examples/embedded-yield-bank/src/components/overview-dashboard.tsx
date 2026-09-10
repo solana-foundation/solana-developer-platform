@@ -2,12 +2,14 @@ import {
   ArrowDownLeftIcon,
   ArrowUpRightIcon,
   CheckCircle2Icon,
+  CopyIcon,
   ExternalLinkIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
   WalletCardsIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +60,15 @@ export function OverviewDashboard({
       movement.status !== "finalized" && movement.status !== "failed"
   );
 
+  async function copyWalletAddress() {
+    try {
+      await navigator.clipboard.writeText(data.wallet.address);
+      toast.success("Wallet address copied");
+    } catch {
+      toast.error("Could not copy the wallet address");
+    }
+  }
+
   return (
     <div className="flex flex-col gap-7 p-5 sm:p-8 xl:p-10">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -69,7 +80,19 @@ export function OverviewDashboard({
             Here is what is happening with your money today.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="px-1.5 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
+            aria-label={`Copy wallet address ${data.wallet.address}`}
+            title={data.wallet.address}
+            onClick={() => void copyWalletAddress()}
+          >
+            {shortAddress(data.wallet.address)}
+            <CopyIcon data-icon="inline-end" />
+          </Button>
           <Badge variant="outline" className="status-success">
             <span className="status-dot" />
             Solana devnet
