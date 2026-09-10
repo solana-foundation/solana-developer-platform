@@ -246,7 +246,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
              FROM dvp_trades
             WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
                OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                   AND updated_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+                   AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
             ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
                      observed_at ASC NULLS FIRST, created_at ASC, id ASC
             LIMIT ?`
@@ -268,6 +268,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   escrow_a_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
                   escrow_b_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
                   close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
+                  closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN sdp_iso_now() ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND status = ?
@@ -286,6 +287,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.escrowBAmount,
           input.escrowBAmount,
           input.closeSignature,
+          input.status,
           input.observedAt,
           input.id,
           input.expectedStatus
@@ -356,7 +358,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       const row = await db
         .prepare(
           `UPDATE dvp_trades
-              SET status = ?, close_signature = ?, updated_at = sdp_iso_now()
+              SET status = ?,
+                  close_signature = ?,
+                  closed_at = CASE WHEN closed_at IS NULL THEN sdp_iso_now() ELSE closed_at END,
+                  updated_at = sdp_iso_now()
             WHERE id = ?
               AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
             RETURNING ${SELECT_COLUMNS}`

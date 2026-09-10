@@ -70,4 +70,15 @@ describe("deriveDvpLegOutcome", () => {
   ] as const)("derives %s", (outcome, row) => {
     expect(deriveDvpLegOutcome(row, "a")).toBe(outcome);
   });
+
+  // Settle, Cancel and Reject close the escrow, so a balance under any closed
+  // trade is a deposit that arrived afterwards. Naming the leg delivered or
+  // refunded would hide funds only RecoverDvp can move.
+  it.each([
+    ["settled", trade({ status: "settled", escrowAAmount: "1" })],
+    ["cancelled", trade({ status: "cancelled", escrowAAmount: "1" })],
+    ["rejected", trade({ status: "rejected", escrowAAmount: "1" })],
+  ] as const)("reports a late deposit under a %s trade as recoverable", (_status, row) => {
+    expect(deriveDvpLegOutcome(row, "a")).toBe("recoverable");
+  });
 });

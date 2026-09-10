@@ -291,6 +291,9 @@ describe("reconcileDvpTrades", () => {
 
   it("revisits recently closed trades for late deposits", async () => {
     await seedTrade("dvp_settled", "settled");
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET closed_at = sdp_iso_now() WHERE id = 'dvp_settled'")
+      .run();
 
     await reconcileDvpTrades(env);
 

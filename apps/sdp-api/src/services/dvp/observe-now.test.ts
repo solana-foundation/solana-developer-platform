@@ -3,13 +3,14 @@
  *
  * The sweep runs once a minute. That is right for a background job and wrong
  * for a page waiting on a counterparty's deposit — the one event this product
- * exists to show, and the one nothing announces. So a request for an open trade
- * re-reads when the stored reading has aged out, and the rules about WHEN are
- * what keep that from becoming a chain call per request.
+ * exists to show, and the one nothing announces. A closed trade's escrow can
+ * also be re-created and paid into, so requests re-read eligible trades at a
+ * status-specific cadence.
  */
 
+import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
 
 const recordObservation = vi.hoisted(() => vi.fn());
@@ -35,6 +36,16 @@ vi.mock("./observe", async (importOriginal) => ({
 const { observeDvpTradeIfStale } = await import("./observe-now");
 
 const NOW = Date.parse("2026-09-03T21:00:00.000Z");
+const NEVER_REREAD_STATUSES = [
+  "expired",
+  "create_failed",
+] as const satisfies readonly DvpTradeStatus[];
+const CLOSED_REREAD_STATUSES = [
+  "settled",
+  "cancelled",
+  "rejected",
+  "closed_unknown",
+] as const satisfies readonly DvpTradeStatus[];
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   return {
@@ -92,14 +103,59 @@ describe("observeDvpTradeIfStale", () => {
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["settled", "cancelled", "rejected", "closed_unknown", "expired", "create_failed"])(
-    "does not spend a chain read on a %s trade",
+  it.each(NEVER_REREAD_STATUSES)("never spends a chain read on a %s trade", async (status) => {
+    await observeDvpTradeIfStale(env, trade({ status }), NOW);
+
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+  });
+
+  it.each(CLOSED_REREAD_STATUSES)(
+    "answers a recently observed %s trade from the row",
     async (status) => {
-      await observeDvpTradeIfStale(env, trade({ status: status as DvpTradeRow["status"] }), NOW);
+      await observeDvpTradeIfStale(
+        env,
+        trade({ status, observedAt: new Date(NOW - 30_000).toISOString() }),
+        NOW
+      );
 
       expect(readDvpTradeObservation).not.toHaveBeenCalled();
     }
   );
+
+  it.each(CLOSED_REREAD_STATUSES)(
+    "re-reads a %s trade after the closed cadence elapses",
+    async (status) => {
+      await observeDvpTradeIfStale(
+        env,
+        trade({ status, observedAt: new Date(NOW - 90_000).toISOString() }),
+        NOW
+      );
+
+      expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("does not resolve a missing trade account when the close signature is already stored", async () => {
+    readDvpTradeObservation.mockResolvedValue({
+      tradeAccountExists: false,
+      legA: { exists: false },
+      legB: { exists: false },
+      blockHeight: 100n,
+      closeResolution: null,
+    });
+
+    await observeDvpTradeIfStale(
+      env,
+      trade({
+        status: "settled",
+        closeSignature: signature("1".repeat(64)),
+        observedAt: new Date(NOW - 90_000).toISOString(),
+      }),
+      NOW
+    );
+
+    expect(resolveDvpClose).not.toHaveBeenCalled();
+  });
 
   // A read that fails must not fail the request that triggered it: the caller
   // asked for a trade, and answering with the stored one is correct.

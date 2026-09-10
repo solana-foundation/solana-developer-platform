@@ -8,7 +8,9 @@
  * a minute afterwards. The honest reading of that is that nothing happened.
  *
  * So an action that changes chain state observes its own result rather than
- * waiting to be told about it by a job.
+ * waiting to be told about it by a job. Page reads also revisit closed trades
+ * at a slower cadence because a closed escrow can be re-created and paid into,
+ * making a late deposit recoverable.
  */
 
 import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
@@ -61,9 +63,10 @@ export async function observeDvpTradeNow(
       },
       blockHeight
     );
-    observation.closeResolution = observation.tradeAccountExists
-      ? null
-      : await resolveDvpClose(rpc, trade.swapDvp);
+    observation.closeResolution =
+      observation.tradeAccountExists || trade.closeSignature !== null
+        ? null
+        : await resolveDvpClose(rpc, trade.swapDvp);
 
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
@@ -107,12 +110,17 @@ export async function observeDvpTradeNow(
  * Returns the trade unchanged when the chain cannot be read, which is the same
  * answer the recording path gives: a reading that failed is not a balance of
  * zero, and must not be shown as one.
+ *
+ * @param env - API process environment.
+ * @param trade - The trade to read without recording.
+ * @returns The live derived trade, or the stored trade when it is ineligible or
+ *   the chain cannot be read.
  */
 export async function observeDvpTradeWithoutRecording(
   env: Env,
   trade: DvpTradeRow
 ): Promise<DvpTradeRow> {
-  if (!OPEN_STATUSES.has(trade.status)) {
+  if (OBSERVATION_MAX_AGE_BY_STATUS[trade.status] === null) {
     return trade;
   }
   try {
@@ -127,9 +135,10 @@ export async function observeDvpTradeWithoutRecording(
       },
       blockHeight
     );
-    observation.closeResolution = observation.tradeAccountExists
-      ? null
-      : await resolveDvpClose(rpc, trade.swapDvp);
+    observation.closeResolution =
+      observation.tradeAccountExists || trade.closeSignature !== null
+        ? null
+        : await resolveDvpClose(rpc, trade.swapDvp);
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
     return {
@@ -150,17 +159,9 @@ export async function observeDvpTradeWithoutRecording(
   }
 }
 
-/** Statuses that can still change on chain without anyone telling us. */
-const OPEN_STATUSES: ReadonlySet<DvpTradeStatus> = new Set([
-  "created",
-  "partially_funded",
-  "funded",
-  "creating",
-]);
-
 /**
- * How stale a reading may be before a page asking for the trade pays for a
- * fresh one.
+ * How stale each status may be before a page asking for the trade pays for a
+ * fresh reading.
  *
  * The sweep's once-a-minute cadence is right for a background job and wrong for
  * somebody sitting on the page: a counterparty's deposit is the one event this
@@ -170,12 +171,27 @@ const OPEN_STATUSES: ReadonlySet<DvpTradeStatus> = new Set([
  * request.
  */
 const OBSERVATION_MAX_AGE_MS = 10_000;
+const CLOSED_OBSERVATION_MAX_AGE_MS = 60_000;
+const OBSERVATION_MAX_AGE_BY_STATUS = {
+  creating: OBSERVATION_MAX_AGE_MS,
+  created: OBSERVATION_MAX_AGE_MS,
+  partially_funded: OBSERVATION_MAX_AGE_MS,
+  funded: OBSERVATION_MAX_AGE_MS,
+  expired: null,
+  create_failed: null,
+  settled: CLOSED_OBSERVATION_MAX_AGE_MS,
+  cancelled: CLOSED_OBSERVATION_MAX_AGE_MS,
+  rejected: CLOSED_OBSERVATION_MAX_AGE_MS,
+  closed_unknown: CLOSED_OBSERVATION_MAX_AGE_MS,
+} as const satisfies Record<DvpTradeStatus, number | null>;
 
 /**
  * Re-reads a trade if the last observation is too old to answer with.
  *
- * Only for trades that can still change: a settled or cancelled trade is over,
- * and re-reading one would spend a chain call to confirm it is still over.
+ * Open trades use a short freshness window so deposits appear promptly. Closed
+ * trades use a slower cadence because their escrow can be re-created and paid
+ * into after close, making the late deposit recoverable. Expired and failed
+ * creates are never re-read here.
  *
  * @param env - API process environment.
  * @param trade - The trade as it was last stored.
@@ -187,13 +203,14 @@ export async function observeDvpTradeIfStale(
   trade: DvpTradeRow,
   now: number = Date.now()
 ): Promise<DvpTradeRow> {
-  if (!OPEN_STATUSES.has(trade.status)) {
+  const maxAge = OBSERVATION_MAX_AGE_BY_STATUS[trade.status];
+  if (maxAge === null) {
     return trade;
   }
   const observedAt = trade.observedAt ? Date.parse(trade.observedAt) : Number.NaN;
   // A trade never observed is the strongest case for reading it, not the
   // weakest: NaN must not fall through to "recent enough".
-  if (Number.isFinite(observedAt) && now - observedAt < OBSERVATION_MAX_AGE_MS) {
+  if (Number.isFinite(observedAt) && now - observedAt < maxAge) {
     return trade;
   }
   return (await observeDvpTradeNow(env, trade)) ?? trade;

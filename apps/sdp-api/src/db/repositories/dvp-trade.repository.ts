@@ -173,7 +173,9 @@ export interface DvpTradeRepository {
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: Address): Promise<DvpTradeRow | null>;
   /**
-   * Open trades across every project, stalest observation first.
+   * Open trades and recently closed trades across every project, stalest
+   * observation first. Closed trades remain eligible for seven days from the
+   * first time their closed status was recorded.
    *
    * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
    * for a caller — it is a background sweep, and scoping it to a project would
@@ -185,7 +187,9 @@ export interface DvpTradeRepository {
    *
    * Compare-and-swap on the status the derivation was computed FROM, so a sweep
    * working from a stale read cannot overwrite a newer one. Returns null when it
-   * lost that race, which is the same answer a vanished row gives.
+   * lost that race, which is the same answer a vanished row gives. The first
+   * closed observation starts the late-deposit sweep window and later
+   * observations never move it.
    */
   recordObservation(input: DvpTradeObservationUpdate): Promise<DvpTradeRow | null>;
   /**

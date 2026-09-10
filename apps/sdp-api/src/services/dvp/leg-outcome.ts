@@ -15,15 +15,20 @@ export function deriveDvpLegOutcome(trade: DvpTradeRow, side: DvpTradeSide): Dvp
   const frozen = side === "a" ? trade.escrowAFrozen : trade.escrowBFrozen;
   const target = side === "a" ? trade.amountA : trade.amountB;
 
+  // Every closed trade checks its escrow first. Settle, Cancel and Reject all
+  // close the escrow, so a balance under a closed trade can only be a deposit
+  // that landed afterwards into a re-created account, and only RecoverDvp can
+  // move it. Reporting the leg as delivered or refunded would hide those funds.
+  const holdsTokens = amount !== null && BigInt(amount) > 0n;
   switch (trade.status) {
     case "settled":
-      return "delivered";
+      return holdsTokens ? "recoverable" : "delivered";
     case "cancelled":
     case "rejected":
-      return "refunded";
+      return holdsTokens ? "recoverable" : "refunded";
     case "closed_unknown":
     case "create_failed":
-      return amount !== null && BigInt(amount) > 0n ? "recoverable" : "closed";
+      return holdsTokens ? "recoverable" : "closed";
     case "creating":
     case "created":
     case "partially_funded":

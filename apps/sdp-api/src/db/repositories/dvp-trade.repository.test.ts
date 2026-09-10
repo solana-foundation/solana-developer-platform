@@ -1,4 +1,4 @@
-import { type Address, address } from "@solana/kit";
+import { type Address, address, signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -30,6 +30,7 @@ const WALLET_B_PUBKEY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 // counterparty was told to fund.
 const BIG_NONCE = "18446744073709551610";
 const BIG_AMOUNT = "18446744073709551615";
+const CLOSE_SIGNATURE = signature("1".repeat(64));
 
 function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
   return {
@@ -243,6 +244,129 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(first?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAAmount).toBe("100");
+  });
+
+  it("sets the close time on the first closed observation and never moves it", async () => {
+    const db = getDb(env);
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+    await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "created",
+      status: "closed_unknown",
+      escrowAAmount: null,
+      escrowBAmount: null,
+      escrowAFrozen: null,
+      escrowBFrozen: null,
+      closeSignature: null,
+      observedAt: "2026-09-10T00:00:00.000Z",
+    });
+    const first = await db
+      .prepare("SELECT closed_at, updated_at FROM dvp_trades WHERE id = ?")
+      .bind(created.id)
+      .first<{ closed_at: string; updated_at: string }>();
+    await db
+      .prepare("UPDATE dvp_trades SET updated_at = '2026-09-01T00:00:00.000Z' WHERE id = ?")
+      .bind(created.id)
+      .run();
+
+    await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "closed_unknown",
+      status: "closed_unknown",
+      escrowAAmount: "1",
+      escrowBAmount: null,
+      escrowAFrozen: false,
+      escrowBFrozen: null,
+      closeSignature: null,
+      observedAt: "2026-09-10T00:01:00.000Z",
+    });
+    const second = await db
+      .prepare("SELECT closed_at, updated_at FROM dvp_trades WHERE id = ?")
+      .bind(created.id)
+      .first<{ closed_at: string; updated_at: string }>();
+
+    expect(first).not.toBeNull();
+    expect(second?.closed_at).toBe(first?.closed_at);
+    expect(second?.updated_at).not.toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  it("sets the close time when recording a close on an open trade", async () => {
+    const db = getDb(env);
+    const created = await repo.create(tradeInsert());
+    await db.prepare("UPDATE dvp_trades SET status = 'funded' WHERE id = ?").bind(created.id).run();
+
+    await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+    const row = await db
+      .prepare("SELECT closed_at FROM dvp_trades WHERE id = ?")
+      .bind(created.id)
+      .first<{ closed_at: string }>();
+
+    expect(row?.closed_at).toBeTruthy();
+  });
+
+  it("keeps the first close time when a closed_unknown trade is resolved", async () => {
+    const db = getDb(env);
+    const created = await repo.create(tradeInsert());
+    const firstClosedAt = "2026-09-01T00:00:00.000Z";
+    await db
+      .prepare("UPDATE dvp_trades SET status = 'closed_unknown', closed_at = ? WHERE id = ?")
+      .bind(firstClosedAt, created.id)
+      .run();
+
+    await repo.recordClose(created.id, "cancelled", CLOSE_SIGNATURE);
+    const row = await db
+      .prepare("SELECT closed_at FROM dvp_trades WHERE id = ?")
+      .bind(created.id)
+      .first<{ closed_at: string }>();
+
+    expect(row?.closed_at).toBe(firstClosedAt);
+  });
+
+  it("sweeps closed trades by close time and always includes open trades", async () => {
+    const db = getDb(env);
+    await repo.create(tradeInsert({ id: "dvp_closed_old" }));
+    await repo.create(
+      tradeInsert({
+        id: "dvp_closed_recent",
+        swapDvp: address("SwapR11111111111111111111111111111111111111"),
+      })
+    );
+    await repo.create(
+      tradeInsert({
+        id: "dvp_open_old",
+        swapDvp: address("SwapP11111111111111111111111111111111111111"),
+      })
+    );
+    await db
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'settled',
+                closed_at = CURRENT_TIMESTAMP - INTERVAL '8 days',
+                updated_at = sdp_iso_now()
+          WHERE id = 'dvp_closed_old'`
+      )
+      .run();
+    await db
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'cancelled',
+                closed_at = CURRENT_TIMESTAMP - INTERVAL '6 days'
+          WHERE id = 'dvp_closed_recent'`
+      )
+      .run();
+    await db
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'created',
+                updated_at = CURRENT_TIMESTAMP - INTERVAL '30 days'
+          WHERE id = 'dvp_open_old'`
+      )
+      .run();
+
+    const listed = await repo.listOpenForReconciliation(10);
+
+    expect(listed.map((trade) => trade.id).sort()).toEqual(["dvp_closed_recent", "dvp_open_old"]);
   });
 
   // Compare-and-swap: whoever moved the row off `creating` first had better
