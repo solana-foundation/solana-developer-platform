@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -349,17 +349,15 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
-  // DvP create is Kora-sponsored: the paymaster signs as fee payer and rent
-  // payer and returns bytes without sending, so the signature is known before
-  // the trade is recorded. Fund and settle still sign from the project's
+  // DvP create and payments share the owned sponsorship submission sink, which
+  // signs and persists before broadcasting. Fund and settle still sign from the project's
   // custody wallets; those sinks likewise return fully signed bytes without
   // sending, which is what lets settle cross the approved-operation fence
   // before broadcasting.
-  "apps/sdp-api/src/services/dvp/create.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/dvp/fund.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/dvp/settle.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
-  "apps/sdp-api/src/services/payments/signed-submission.ts": ["prepareOwnedSubmission"],
+  "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
@@ -382,6 +380,7 @@ const valueMovingSourceRoots = [
   // DvP settles and cancels sign from the project's settlement-authority
   // custody wallet, so it is a money-moving sink like the ones above.
   "apps/sdp-api/src/services/dvp",
+  "apps/sdp-api/src/services/sponsorship-submission.ts",
   "packages/sdp-issuance/src",
   "packages/sdp-solana/src",
 ];
@@ -391,6 +390,11 @@ function readSource(relativePath: string): string {
 }
 
 function sourceFiles(directory: string): string[] {
+  // A root may name a single module: the owned sponsorship submission helper
+  // lives beside the sponsorship services rather than in a directory of its own.
+  if (statSync(directory).isFile()) {
+    return [directory];
+  }
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {

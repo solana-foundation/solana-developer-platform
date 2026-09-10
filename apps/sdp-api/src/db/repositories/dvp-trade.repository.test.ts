@@ -31,6 +31,9 @@ const WALLET_B_PUBKEY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const BIG_NONCE = "18446744073709551610";
 const BIG_AMOUNT = "18446744073709551615";
 const CLOSE_SIGNATURE = signature("1".repeat(64));
+const CREATE_SIGNATURE = signature(
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+);
 
 function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
   return {
@@ -151,6 +154,33 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(created.counterpartyAccountIdA).toBeNull();
     expect(created.counterpartyAccountIdB).toBeNull();
     expect(created.createdAt).toBeTruthy();
+  });
+
+  it("attaches a create signature exactly once", async () => {
+    const created = await repo.create(tradeInsert());
+
+    const attached = await repo.attachCreateSignature(created.id, CREATE_SIGNATURE, "1500");
+    const second = await repo.attachCreateSignature(created.id, CREATE_SIGNATURE, "1500");
+
+    expect(attached).toMatchObject({
+      createSignature: CREATE_SIGNATURE,
+      createLastValidBlockHeight: "1500",
+    });
+    expect(second).toBeNull();
+  });
+
+  it("does not attach a signature to a failed claim", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "create_failed");
+
+    await expect(
+      repo.attachCreateSignature(created.id, CREATE_SIGNATURE, "1500")
+    ).resolves.toBeNull();
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      status: "create_failed",
+      createSignature: null,
+      createLastValidBlockHeight: null,
+    });
   });
 
   it("round-trips counterparty account attribution", async () => {

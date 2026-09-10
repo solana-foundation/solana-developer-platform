@@ -157,6 +157,30 @@ export interface DvpTradeRepository {
   /** Writes the row at `creating`, before the create transaction is broadcast. */
   create(row: DvpTradeInsert): Promise<DvpTradeRow>;
   /**
+   * Atomically releases a failed attempt's key and inserts its replacement claim.
+   *
+   * @param failedRowId - Failed attempt to release, or null for a first claim.
+   * @param row - The replacement claim to insert.
+   * @returns The newly inserted claim.
+   */
+  claimWithKeyRelease(failedRowId: string | null, row: DvpTradeInsert): Promise<DvpTradeRow>;
+  /**
+   * Attaches the sponsored signature to a still-live create claim.
+   *
+   * The compare-and-swap prevents resurrecting a claim that the reconciler
+   * failed while this request was waiting for its sponsor.
+   *
+   * @param id - Claim identifier.
+   * @param signature - Sponsor-signed transaction signature.
+   * @param lastValidBlockHeight - Last block height at which the transaction can land.
+   * @returns The updated claim, or null when it is no longer live or already signed.
+   */
+  attachCreateSignature(
+    id: string,
+    signature: Signature,
+    lastValidBlockHeight: string
+  ): Promise<DvpTradeRow | null>;
+  /**
    * Resolves a `creating` row once the broadcast outcome is known.
    *
    * Compare-and-swap on `creating`, so a reconciler that already resolved the

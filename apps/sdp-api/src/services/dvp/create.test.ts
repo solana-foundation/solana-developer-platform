@@ -31,17 +31,22 @@ import {
   SolanaError,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import type { DvpTradeRow } from "@/db/repositories";
+import type { AppError } from "@/lib/errors";
+import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const getFeePayer = vi.hoisted(() => vi.fn());
-const signAsFeePayer = vi.hoisted(() => vi.fn());
+const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
+const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 // The mint pre-flight is verified separately against real devnet mints in
 // mints.test.ts; here it is stubbed so these tests stay about broadcast
@@ -62,6 +67,11 @@ vi.mock("@/services/sponsorship.service", async () => {
 vi.mock("./mints", () => ({ validateDvpMints }));
 vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
+// The immediate chain read after a send is the reconciler's contract, tested in
+// observe-now.test.ts; here it is stubbed so these tests stay about the claim,
+// sign and send ordering. Null means "nothing observed yet".
+const observeDvpTradeNow = vi.hoisted(() => vi.fn());
+vi.mock("./observe-now", () => ({ observeDvpTradeNow }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -86,6 +96,20 @@ const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 // expiry, so two tradeInput() calls straddling a second boundary would be
 // different requests and 409 a replay the test meant to be identical.
 const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
+const TEST_SIGNATURE = signature(
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+);
+
+/**
+ * Configures RPC acceptance with the signature encoded in the submitted bytes.
+ *
+ * @returns Nothing.
+ */
+function acceptSend(): void {
+  sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
+    getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
+  );
+}
 
 function tradeInput() {
   return {
@@ -118,11 +142,13 @@ async function rowsInDb(): Promise<
     nonce: string;
     counterparty_account_id_a: string | null;
     counterparty_account_id_b: string | null;
+    create_signature: string | null;
+    create_last_valid_block_height: string | null;
   }[]
 > {
   const result = await getDb(env)
     .prepare(
-      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b FROM dvp_trades"
+      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b, create_signature, create_last_valid_block_height FROM dvp_trades"
     )
     .all<{
       id: string;
@@ -130,6 +156,8 @@ async function rowsInDb(): Promise<
       nonce: string;
       counterparty_account_id_a: string | null;
       counterparty_account_id_b: string | null;
+      create_signature: string | null;
+      create_last_valid_block_height: string | null;
     }>();
   return result.results ?? [];
 }
@@ -159,16 +187,28 @@ describe("createDvpTrade", () => {
     });
     sponsor = await generateKeyPairSigner();
     getFeePayer.mockResolvedValue(sponsor.address);
-    signAsFeePayer.mockImplementation(async (bytes: Uint8Array) => {
-      const transaction = getTransactionDecoder().decode(bytes);
-      expect(transaction.signatures[sponsor.address]).toBeNull();
-      const signed = await partiallySignTransaction([sponsor.keyPair], transaction);
-      return new Uint8Array(getTransactionEncoder().encode(signed));
-    });
+    prepareOwnedSubmission.mockImplementation(
+      async (
+        bytes: Uint8Array,
+        lifecycle: Parameters<SponsorshipFeePayment["prepareOwnedSubmission"]>[1]
+      ) => {
+        const transaction = getTransactionDecoder().decode(bytes);
+        expect(transaction.signatures[sponsor.address]).toBeNull();
+        const signed = await partiallySignTransaction([sponsor.keyPair], transaction);
+        const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
+        const signature = getSignatureFromTransaction(signed);
+        const submission = { signedTransaction, signature, releaseDefinitelyUnbroadcast };
+        await lifecycle.persistSigned(submission);
+        await lifecycle.markStarted();
+        return submission;
+      }
+    );
+    observeDvpTradeNow.mockResolvedValue(null);
     createProjectSponsorshipFeePayment.mockResolvedValue({
       getFeePayer,
-      signAsFeePayer,
+      prepareOwnedSubmission,
     });
+    acceptSend();
     originalSettlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
     env.DVP_SETTLEMENT_AUTHORITY = SETTLEMENT_AUTHORITY;
 
@@ -232,9 +272,9 @@ describe("createDvpTrade", () => {
 
   it("has the trade durably recorded at `creating` before the bytes go out", async () => {
     let rowsAtSendTime: Awaited<ReturnType<typeof rowsInDb>> = [];
-    sendTransaction.mockImplementation(async () => {
+    sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) => {
       rowsAtSendTime = await rowsInDb();
-      return "sig";
+      return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
     });
 
     const trade = await createDvpTrade(env, tradeInput());
@@ -247,14 +287,30 @@ describe("createDvpTrade", () => {
     expect(rowsAtSendTime[0].nonce).toBe(trade.nonce);
   });
 
-  it("advances the trade to created once the broadcast is accepted", async () => {
-    sendTransaction.mockResolvedValue("sig");
+  it("leaves the trade creating until chain observation confirms it", async () => {
+    acceptSend();
+
+    const trade = await createDvpTrade(env, tradeInput());
+
+    expect(trade.status).toBe("creating");
+    expect(trade.createSignature).toBeTruthy();
+    expect(observeDvpTradeNow).toHaveBeenCalledOnce();
+    await expect(rowsInDb()).resolves.toMatchObject([{ status: "creating" }]);
+  });
+
+  // RPC acceptance is not confirmation. Only a chain read may say `created`,
+  // and when the immediate read already sees the account the caller gets that
+  // row rather than a stale claim.
+  it("returns the observed row when the immediate chain read sees the trade", async () => {
+    acceptSend();
+    observeDvpTradeNow.mockImplementationOnce(async (_env: unknown, claimed: DvpTradeRow) => ({
+      ...claimed,
+      status: "created" as const,
+    }));
 
     const trade = await createDvpTrade(env, tradeInput());
 
     expect(trade.status).toBe("created");
-    expect(trade.createSignature).toBeTruthy();
-    await expect(rowsInDb()).resolves.toMatchObject([{ status: "created" }]);
   });
 
   // A preflight failure is the one send error the RPC guarantees never reached
@@ -280,11 +336,14 @@ describe("createDvpTrade", () => {
       })
     );
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow();
+    await expect(createDvpTrade(env, tradeInput())).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+    } satisfies Partial<AppError>);
 
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("create_failed");
+    expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledTimes(1);
   });
 
   // The dangerous case. A timeout does NOT mean the transaction failed — it may
@@ -298,6 +357,9 @@ describe("createDvpTrade", () => {
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("creating");
+    expect(rows[0].create_signature).not.toBeNull();
+    expect(rows[0].create_last_valid_block_height).toBe("100");
+    expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
   });
 
   // The pre-flight has to run BEFORE anything is signed or written. A mint the
@@ -311,7 +373,7 @@ describe("createDvpTrade", () => {
     await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/ScaledUiAmountConfig/);
 
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
-    expect(signAsFeePayer).not.toHaveBeenCalled();
+    expect(prepareOwnedSubmission).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
   });
@@ -321,7 +383,7 @@ describe("createDvpTrade", () => {
   // different address and the first trade sits on chain with a published escrow
   // nobody is watching.
   it("returns the original trade when a keyed request is retried", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     const input = { ...tradeInput(), idempotencyKey: "key-1" };
 
     const first = await createDvpTrade(env, input);
@@ -362,29 +424,29 @@ describe("createDvpTrade", () => {
 
     it("lets the same key create the trade on a retry", async () => {
       await failOnceWith("key-retry");
-      sendTransaction.mockResolvedValue("sig");
+      acceptSend();
 
       const retried = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
 
-      expect(retried.status).toBe("created");
+      expect(retried.status).toBe("creating");
     });
 
     it("keeps the failed attempt on the record rather than deleting it", async () => {
       await failOnceWith("key-retry");
-      sendTransaction.mockResolvedValue("sig");
+      acceptSend();
 
       await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
 
       const rows = await rowsInDb();
       expect(rows).toHaveLength(2);
-      expect(rows.map((row) => row.status).sort()).toEqual(["create_failed", "created"]);
+      expect(rows.map((row) => row.status).sort()).toEqual(["create_failed", "creating"]);
     });
 
     // Freed on the dead row only. Leaving it there would let a second retry
     // replay the corpse again.
     it("frees the key from the failed row so only the live trade answers to it", async () => {
       await failOnceWith("key-retry");
-      sendTransaction.mockResolvedValue("sig");
+      acceptSend();
       const live = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
 
       const replayed = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
@@ -397,13 +459,18 @@ describe("createDvpTrade", () => {
   // An AMBIGUOUS failure is the opposite case: the transaction may still land,
   // so its key must keep answering or the retry would create a second trade at
   // a second address while the first sits on chain.
+  // An ambiguous send is one the submission helper neither classifies as a
+  // preflight rejection nor retries as transient: the transaction may be in
+  // flight, so the claim keeps its signature and stays `creating` for the chain
+  // reader. (A transient failure such as a hung socket is retried by the
+  // helper itself; that schedule is covered in sponsorship-submission's tests.)
   it("does not free the key of a trade still stuck at creating", async () => {
-    sendTransaction.mockRejectedValueOnce(new Error("socket hang up"));
+    sendTransaction.mockRejectedValueOnce(new Error("rpc returned an unreadable response"));
     await expect(
       createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-ambiguous" })
-    ).rejects.toThrow("socket hang up");
+    ).rejects.toThrow("rpc returned an unreadable response");
 
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     const retried = await createDvpTrade(env, {
       ...tradeInput(),
       idempotencyKey: "key-ambiguous",
@@ -417,7 +484,7 @@ describe("createDvpTrade", () => {
   // unique index rejects one, and without recovery that retry gets a 500 —
   // exactly the case the key exists to make safe.
   it("replays rather than failing when two keyed requests race", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     const input = { ...tradeInput(), idempotencyKey: "key-race" };
 
     const [first, second] = await Promise.all([
@@ -429,10 +496,13 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
     // The loser must not broadcast a second transaction for the same trade.
     expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledTimes(1);
+    expect(getFeePayer).toHaveBeenCalledTimes(1);
+    expect(prepareOwnedSubmission).toHaveBeenCalledTimes(1);
   });
 
   it("creates separate trades for different keys", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
 
     const first = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-a" });
     const second = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-b" });
@@ -444,7 +514,7 @@ describe("createDvpTrade", () => {
   // Without a key there is nothing to replay against, so each call is a new
   // trade — which is exactly why the key matters on a retry.
   it("creates a new trade every time when no key is sent", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
 
     const first = await createDvpTrade(env, tradeInput());
     const second = await createDvpTrade(env, tradeInput());
@@ -461,7 +531,7 @@ describe("createDvpTrade", () => {
     ).rejects.toThrow(/settlementAuthority must not be/);
 
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
-    expect(signAsFeePayer).not.toHaveBeenCalled();
+    expect(prepareOwnedSubmission).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
   });
@@ -469,7 +539,7 @@ describe("createDvpTrade", () => {
   // A `{ walletId }` slot resolves to the wallet's address and stores NULL
   // attribution — fundability re-derives later, never from a stored column.
   it("resolves a walletId slot to the wallet's address and stores null attribution", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
 
     const trade = await createDvpTrade(env, tradeInput());
 
@@ -500,7 +570,7 @@ describe("createDvpTrade", () => {
       .bind(TEST_ORG.id, TEST_PROJECT_ID)
       .run();
 
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     const trade = await createDvpTrade(env, {
       ...tradeInput(),
       partyA: { counterpartyAccountId: "cpa_resolve" },
@@ -533,7 +603,7 @@ describe("createDvpTrade", () => {
       .bind(TEST_ORG.id, TEST_PROJECT_ID)
       .run();
 
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     await expect(
       createDvpTrade(env, {
         ...tradeInput(),
@@ -563,7 +633,7 @@ describe("createDvpTrade", () => {
       .bind(TEST_ORG.id, TEST_PROJECT_ID)
       .run();
 
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     await expect(
       createDvpTrade(env, {
         ...tradeInput(),
@@ -593,7 +663,7 @@ describe("createDvpTrade", () => {
       .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
       .run();
 
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     await expect(
       createDvpTrade(env, {
         ...tradeInput(),
@@ -605,7 +675,7 @@ describe("createDvpTrade", () => {
 
   // Unknown walletId — no active custody wallet with that row id in scope.
   it("refuses an unknown walletId", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     await expect(
       createDvpTrade(env, {
         ...tradeInput(),
@@ -628,7 +698,7 @@ describe("createDvpTrade", () => {
       .bind(CUSTODY_CONFIG_ID, archivedSigner.address)
       .run();
 
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     await expect(
       createDvpTrade(env, {
         ...tradeInput(),
@@ -639,7 +709,7 @@ describe("createDvpTrade", () => {
   });
 
   it("uses the sponsor as fee payer and instruction payer in one signature slot", async () => {
-    sendTransaction.mockResolvedValue("sig");
+    acceptSend();
     const trade = await createDvpTrade(env, tradeInput());
 
     const [, bytes] = sendTransaction.mock.calls[0];
@@ -660,7 +730,7 @@ describe("createDvpTrade", () => {
   });
 
   it("refuses sponsor bytes over a different message", async () => {
-    signAsFeePayer.mockImplementation(async () => {
+    prepareOwnedSubmission.mockImplementation(async (_bytes: Uint8Array, lifecycle) => {
       const foreign = pipe(
         createTransactionMessage({ version: 0 }),
         (message) => setTransactionMessageFeePayer(sponsor.address, message),
@@ -680,28 +750,47 @@ describe("createDvpTrade", () => {
         compileTransaction
       );
       const signed = await partiallySignTransaction([sponsor.keyPair], foreign);
-      return new Uint8Array(getTransactionEncoder().encode(signed));
+      const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
+      const submission = {
+        signedTransaction,
+        signature: getSignatureFromTransaction(signed),
+        releaseDefinitelyUnbroadcast,
+      };
+      await lifecycle.persistSigned(submission);
+      return submission;
     });
 
     await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/different message/);
-    await expect(rowsInDb()).resolves.toEqual([]);
+    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses bytes without the sponsor signature", async () => {
-    signAsFeePayer.mockImplementation(async (bytes: Uint8Array) => bytes);
+    prepareOwnedSubmission.mockImplementation(async (bytes: Uint8Array, lifecycle) => {
+      const submission = {
+        signedTransaction: bytes,
+        signature: TEST_SIGNATURE,
+        releaseDefinitelyUnbroadcast,
+      };
+      await lifecycle.persistSigned(submission);
+      return submission;
+    });
 
     await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/missing the sponsor/);
-    await expect(rowsInDb()).resolves.toEqual([]);
+    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  it("writes nothing when Kora denies sponsorship", async () => {
+  it("fails the claim when Kora denies and frees the key on replay", async () => {
     const denial = new FeePaymentError("Kora rate limit", "RATE_LIMITED");
-    signAsFeePayer.mockRejectedValue(denial);
+    prepareOwnedSubmission.mockRejectedValueOnce(denial);
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toBe(denial);
-    await expect(rowsInDb()).resolves.toEqual([]);
-    expect(sendTransaction).not.toHaveBeenCalled();
+    const input = { ...tradeInput(), idempotencyKey: "key-kora-denial" };
+    await expect(createDvpTrade(env, input)).rejects.toBe(denial);
+    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
+
+    const retried = await createDvpTrade(env, input);
+    expect(retried.status).toBe("creating");
+    await expect(rowsInDb()).resolves.toHaveLength(2);
   });
 });
