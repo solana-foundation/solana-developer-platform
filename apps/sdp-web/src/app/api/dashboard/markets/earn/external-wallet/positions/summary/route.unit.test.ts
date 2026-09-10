@@ -17,7 +17,7 @@ describe("GET external-wallet position summary proxy", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.external_wallet_positions.summary",
-      path: "/v1/earn/external-wallet/positions/summary",
+      path: "/v1/earn/external-wallet/positions/summary?includePositions=true",
     });
   });
 

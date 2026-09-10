@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -188,9 +188,9 @@ describe("external-wallet position reads", () => {
       label: "USDT vault",
     });
 
-    const response = await get("/v1/earn/external-wallet/positions/summary");
+    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: { summary: Record<string, unknown> } };
+    const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
 
     expect(body.data.summary).toMatchObject({
       walletCount: 2,
@@ -220,6 +220,23 @@ describe("external-wallet position reads", () => {
     expect(resolveVaultDirectClient).toHaveBeenCalledTimes(2);
     expect(resolveVaultDirectClient.mock.calls[0]?.[2]).not.toBe(
       resolveVaultDirectClient.mock.calls[1]?.[2]
+    );
+    const strategies = body.data.summary.totalsByStrategy;
+    expect(strategies.find((strategy) => strategy.label === "USDC vault")?.positions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ownerAddress: OWNER_A,
+          tokenMint: USDC,
+          tokenValue: "10.1",
+          shares: "1",
+          withdrawableShares: "1",
+        }),
+        expect.objectContaining({
+          ownerAddress: OWNER_B,
+          tokenMint: USDC,
+          tokenValue: "20.2",
+        }),
+      ])
     );
   });
 
@@ -303,6 +320,7 @@ describe("external-wallet position reads", () => {
       positionCount: 2,
     });
     expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
     expect(JSON.stringify(body)).not.toContain(OWNER_A);
     expect(JSON.stringify(body)).not.toContain(OWNER_B);
   });
@@ -310,6 +328,13 @@ describe("external-wallet position reads", () => {
   it("summary rejects a malformed includeOwnerAddresses rather than guessing", async () => {
     const response = await get(
       "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=maybe"
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects position details when owner addresses are explicitly omitted", async () => {
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false&includePositions=true"
     );
     expect(response.status).toBe(400);
   });
