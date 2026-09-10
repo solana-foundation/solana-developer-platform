@@ -22,7 +22,10 @@ import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
-import { resolveCustodyProviderAvailability } from "./provider-display-status";
+import {
+  type CustodyProviderAvailability,
+  resolveCustodyProviderAvailability,
+} from "./provider-display-status";
 import { WalletProviderChoices } from "./wallet-provider-choices";
 import { WalletProviderMark } from "./wallet-provider-mark";
 import {
@@ -177,6 +180,42 @@ function WalletCardsGrid({
   );
 }
 
+function EmptyWallets({
+  canManageCustody,
+  configsError,
+  onCreateWallet,
+  providerAvailability,
+}: Pick<WalletsOverviewProps, "canManageCustody" | "configsError" | "onCreateWallet"> & {
+  providerAvailability: CustodyProviderAvailability[];
+}) {
+  const t = useTranslations();
+  return (
+    <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
+      <div className="max-w-2xl space-y-2">
+        <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-primary">
+          {canManageCustody
+            ? t("DashboardCustody.createFirstWallet")
+            : t("DashboardCustody.noWalletsAvailable")}
+        </h2>
+        <p className="text-sm leading-6 text-secondary">
+          {canManageCustody
+            ? t("DashboardCustody.createWalletDescription")
+            : t("DashboardCustody.walletCreationLimited")}
+        </p>
+        {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
+      </div>
+
+      <WalletProviderChoices
+        availability={providerAvailability}
+        canSelect={canManageCustody}
+        grouped={false}
+        selectedProvider={null}
+        onSelect={onCreateWallet}
+      />
+    </div>
+  );
+}
+
 export function WalletsOverview({
   canManageCustody,
   connectedProviders,
@@ -267,29 +306,12 @@ export function WalletsOverview({
 
   if (wallets.length === 0) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
-        <div className="max-w-2xl space-y-2">
-          <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-primary">
-            {canManageCustody
-              ? t("DashboardCustody.createFirstWallet")
-              : t("DashboardCustody.noWalletsAvailable")}
-          </h2>
-          <p className="text-sm leading-6 text-secondary">
-            {canManageCustody
-              ? t("DashboardCustody.createWalletDescription")
-              : t("DashboardCustody.walletCreationLimited")}
-          </p>
-          {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
-        </div>
-
-        <WalletProviderChoices
-          availability={providerAvailability}
-          canSelect={canManageCustody}
-          grouped={false}
-          selectedProvider={null}
-          onSelect={onCreateWallet}
-        />
-      </div>
+      <EmptyWallets
+        canManageCustody={canManageCustody}
+        configsError={configsError}
+        onCreateWallet={onCreateWallet}
+        providerAvailability={providerAvailability}
+      />
     );
   }
 

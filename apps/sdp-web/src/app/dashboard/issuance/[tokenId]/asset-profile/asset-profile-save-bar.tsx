@@ -6,6 +6,16 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
+function UnsavedChangesMessage({ dirty, errorCount }: { dirty: boolean; errorCount: number }) {
+  const t = useTranslations();
+  if (!dirty) return null;
+  if (errorCount === 0) return t("DashboardIssuance.saveBar.unsaved");
+  return t("DashboardIssuance.saveBar.unsavedWithErrors", {
+    count: errorCount,
+    suffix: errorCount === 1 ? "" : "s",
+  });
+}
+
 // Settings editing and unsaved permission changes share the same footer.
 export function AssetProfileSaveBar({
   editing,
@@ -43,14 +53,7 @@ export function AssetProfileSaveBar({
               {children}
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm text-secondary">
-                  {!dirty
-                    ? null
-                    : errorCount > 0
-                      ? t("DashboardIssuance.saveBar.unsavedWithErrors", {
-                          count: errorCount,
-                          suffix: errorCount === 1 ? "" : "s",
-                        })
-                      : t("DashboardIssuance.saveBar.unsaved")}
+                  <UnsavedChangesMessage dirty={dirty} errorCount={errorCount} />
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
