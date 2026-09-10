@@ -161,9 +161,10 @@ pay.post(
       });
       if (!stored) {
         const superseding = await repository.getSponsoredTransactionClaim(request.id);
+        const heightNow = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
         if (
           superseding !== null &&
-          superseding.lastValidBlockHeight >= currentBlockHeight &&
+          superseding.lastValidBlockHeight >= heightNow &&
           superseding.account === payer &&
           superseding.signedTransaction !== null
         ) {
