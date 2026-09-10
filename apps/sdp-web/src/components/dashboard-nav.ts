@@ -8,6 +8,7 @@ import {
   CircleDotDashedIcon,
   CoinsIcon,
   FileTextIcon,
+  HandshakeIcon,
   KeyRoundIcon,
   LandmarkIcon,
   LayoutDashboardIcon,
@@ -170,6 +171,7 @@ export function getMarketsActions(
           {
             label: t("DashboardMarkets.dvp.navLabel"),
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+            icon: HandshakeIcon,
           },
         ]
       : []),

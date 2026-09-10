@@ -1,6 +1,19 @@
 "use client";
 
-import { SegmentedControl } from "@solana/design-system/segmented-control";
+/**
+ * The trades list.
+ *
+ * The filters live in the URL (`?status=<group>&q=<text>`, the transactions
+ * pattern): the group and the debounced search text are pushed with
+ * `router.replace` inside a transition, and the server refetches with them —
+ * the list is capped with no cursor, so a client-side search would make an
+ * older matching trade unfindable.
+ *
+ * `waiting` stays component state: it swaps in a different endpoint's rows
+ * (the inbound list), which the URL has no reason to carry, and its search
+ * stays client-side because that list is small and complete.
+ */
+
 import {
   ArrowDownLeftIcon,
   ArrowLeftRightIcon,
@@ -11,12 +24,17 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import {
+  DashboardWorkspaceCard,
+  DashboardWorkspaceOverviewPanel,
+} from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { SearchInput } from "@/components/ui/search-input";
+import { Select, SelectItem } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -28,6 +46,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { type UrlTableQueryAdapter, useUrlTableFilters } from "@/lib/use-url-table-filters";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
@@ -36,7 +55,6 @@ import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
   type DvpTradeLeg,
-  type DvpTradeStatus,
   formatLegAmount,
   frozenLegs,
   isDvpTradeClosed,
@@ -44,6 +62,78 @@ import {
   overFundedLegs,
 } from "./dvp-trade";
 import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
+import { type StatusFilter, serializeDvpTradesFilters } from "./dvp-trades-query";
+
+/** Their labels, in the order the dropdown shows them — which is the order a
+ * trade moves through, so the control reads as a lifecycle rather than as an
+ * arbitrary set. `satisfies` keeps it exhaustive: a fifth filter is a compile
+ * error here rather than a missing option at runtime. */
+const STATUS_FILTER_LABELS = {
+  all: "DashboardMarkets.dvp.filterAll",
+  waiting: "DashboardMarkets.dvp.filterWaiting",
+  open: "DashboardMarkets.dvp.filterOpen",
+  ready: "DashboardMarkets.dvp.filterReady",
+  closed: "DashboardMarkets.dvp.filterClosed",
+} as const satisfies Record<StatusFilter, MessageKey>;
+
+const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
+
+/** The trades status groups that ride the URL. */
+type UrlStatusFilter = Exclude<StatusFilter, "waiting">;
+
+interface DvpTradesUrlState {
+  status: UrlStatusFilter;
+  query: string;
+}
+
+/**
+ * Whether a trade answers the search box.
+ *
+ * What somebody has to hand when hunting for one trade: the counterparty they
+ * agreed it with, a symbol, or an address off an explorer. Both parties always,
+ * because on an agent trade neither of them is us and either is what somebody
+ * would paste in.
+ *
+ * Kept for the WAITING list only: that list is small and complete, so the
+ * client answers without a round trip. The project's own list is filtered
+ * server-side, where the whole history is searchable.
+ *
+ * @param trade - The inbound trade under the sieve.
+ * @param needle - The query, already trimmed and lowercased ("" matches all).
+ */
+function matchesTradeQuery(trade: DvpInboundTrade, needle: string): boolean {
+  if (!needle) {
+    return true;
+  }
+  return [
+    trade.id,
+    trade.swapDvp,
+    trade.legs.a.symbol,
+    trade.legs.b.symbol,
+    trade.legs.a.mint,
+    trade.legs.b.mint,
+    trade.legs.a.party.address,
+    trade.legs.b.party.address,
+  ]
+    .filter(Boolean)
+    .some((value) => matchesAddressQuery(String(value), needle));
+}
+
+/** Rows per client-side page of the trades table. */
+const TRADES_PER_PAGE = 10;
+
+/** The page path, with the filters serialized onto it. */
+function tradesHref(state: DvpTradesUrlState): string {
+  const query = serializeDvpTradesFilters(state.status, state.query === "" ? null : state.query);
+  return `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}${query}`;
+}
+
+const DVP_TRADES_QUERY_ADAPTER: UrlTableQueryAdapter<DvpTradesUrlState> = {
+  read: (state) => state.query,
+  write: (state, query) => ({ ...state, query }),
+  minLength: 2,
+  maxLength: 100,
+};
 
 /**
  * A leg as one cell: what it is worth, and whether the escrow has it.
@@ -111,96 +201,6 @@ function LegCell({
 }
 
 /**
- * The statuses worth filtering to, grouped the way somebody actually looks.
- *
- * Not one entry per status: `creating`, `create_failed` and the three closed
- * states are things you look for as a group ("what is finished?"), not
- * individually, and a nine-item dropdown for a list this size is a worse
- * answer than four.
- */
-const STATUS_FILTERS = {
-  all: null,
-  // Not a status the trade has: these belong to another organization and are
-  // filtered by who they name, not by where they are in their lifecycle. It
-  // shares the control because it answers the same question a reader is asking
-  // of it — "which of these do I need to look at" — and a second control beside
-  // the first would ask them to learn two.
-  waiting: [],
-  open: ["created", "partially_funded", "creating"],
-  ready: ["funded"],
-  closed: ["settled", "cancelled", "rejected", "closed_unknown", "create_failed", "expired"],
-} as const satisfies Record<string, readonly DvpTradeStatus[] | null>;
-
-type StatusFilter = keyof typeof STATUS_FILTERS;
-
-/**
- * Their labels, in the order the segmented control shows them — which is the
- * order a trade moves through, so the control reads as a lifecycle rather than
- * as an arbitrary set. `satisfies` keeps it exhaustive: a fifth filter is a
- * compile error here rather than a missing segment at runtime.
- */
-const STATUS_FILTER_LABELS = {
-  all: "DashboardMarkets.dvp.filterAll",
-  waiting: "DashboardMarkets.dvp.filterWaiting",
-  open: "DashboardMarkets.dvp.filterOpen",
-  ready: "DashboardMarkets.dvp.filterReady",
-  closed: "DashboardMarkets.dvp.filterClosed",
-} as const satisfies Record<StatusFilter, MessageKey>;
-
-const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
-
-/**
- * Whether a trade answers the search box.
- *
- * What somebody has to hand when hunting for one trade: the counterparty they
- * agreed it with, a symbol, or an address off an explorer. Both parties always,
- * because on an agent trade neither of them is us and either is what somebody
- * would paste in.
- *
- * Shared by the project's own list and the waiting segment so the two can never
- * answer the same query differently. `sdpWallet` and `refString` are absent on
- * purpose: a party is never told them.
- */
-function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): boolean {
-  if (!needle) {
-    return true;
-  }
-  return [
-    trade.id,
-    trade.swapDvp,
-    trade.legs.a.symbol,
-    trade.legs.b.symbol,
-    trade.legs.a.mint,
-    trade.legs.b.mint,
-    trade.legs.a.party.address,
-    trade.legs.b.party.address,
-  ]
-    .filter(Boolean)
-    .some((value) => matchesAddressQuery(String(value), needle));
-}
-
-/**
- * The same groupings as sets, built once.
- *
- * The filter runs per trade per keystroke, and `Array.includes` rescans the
- * whole group every time it is asked.
- */
-const STATUS_FILTER_SETS = Object.fromEntries(
-  Object.entries(STATUS_FILTERS).map(([filter, statuses]) => [
-    filter,
-    statuses ? new Set<string>(statuses) : null,
-  ])
-) as Record<StatusFilter, ReadonlySet<string> | null>;
-
-/** The project's own trades on the current segment. */
-function filterOwnTrades(trades: DvpTrade[], status: StatusFilter, needle: string): DvpTrade[] {
-  const allowed = STATUS_FILTER_SETS[status];
-  return trades.filter(
-    (trade) => (!allowed || allowed.has(trade.status)) && matchesTradeQuery(trade, needle)
-  );
-}
-
-/**
  * One row of the project's own trades.
  *
  * The whole row navigates, via a stretched link on the status cell. Actions
@@ -209,7 +209,7 @@ function filterOwnTrades(trades: DvpTrade[], status: StatusFilter, needle: strin
 function OwnTradeRow({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
   // Both parties, each styled for how the API classifies it: a counterparty
-  // link when registered, a "yours" mark when the caller custodies the
+  // link when registered, a wallet link when the caller custodies the
   // address, plain otherwise.
   const parties = [trade.legs.a.party, trade.legs.b.party];
   // Marked on the row rather than announced in a banner: a warning that does not
@@ -242,10 +242,10 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
         </Link>
       </TableCell>
       <TableCell>
-        <LegCell closed={closed} leg={trade.legs.a} mine={trade.legs.a.party.custodied} />
+        <LegCell closed={closed} leg={trade.legs.a} mine={trade.legs.a.party.wallet !== null} />
       </TableCell>
       <TableCell>
-        <LegCell closed={closed} leg={trade.legs.b} mine={trade.legs.b.party.custodied} />
+        <LegCell closed={closed} leg={trade.legs.b} mine={trade.legs.b.party.wallet !== null} />
       </TableCell>
       <TableCell className="text-secondary text-sm">
         {/* Shortened to read, copyable in full. A truncated address is not an
@@ -269,10 +269,10 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
 }
 
 /**
- * The status segments and the search box.
+ * The control strip: search, the status dropdown, and the create action.
  *
  * Extracted so the workspace reads as a sequence of sections rather than as one
- * function holding the filter markup, its counts and its empty-segment rule.
+ * function holding the filter markup, its counts and its empty-option rule.
  */
 function TradesToolbar({
   inboundCount,
@@ -280,19 +280,26 @@ function TradesToolbar({
   onStatusChange,
   query,
   status,
+  tradeCount,
 }: {
   inboundCount: number;
   onQueryChange: (next: string) => void;
   onStatusChange: (next: StatusFilter) => void;
   query: string;
   status: StatusFilter;
+  tradeCount: number;
 }) {
   const t = useTranslations();
-  // The waiting segment only exists when it has something in it; an empty one
+  // Only once there is enough to sift. A filter bar over three rows is
+  // furniture — but an inbound trade is reachable ONLY through its option, so
+  // hiding the control hides the trade with it. The create button stays either
+  // way; it is the strip's one permanent occupant.
+  const showFilters = tradeCount > 1 || inboundCount > 0;
+  // The waiting option only exists when it has something in it; an empty one
   // would be a permanent dead control. The count rides on the label, because a
   // trade waiting on this project is the one thing here with a deadline against
   // it and a number says so without a banner that is empty most days.
-  // One pass: dropping the empty segment and labelling the rest are the same
+  // One pass: dropping the empty option and labelling the rest are the same
   // decision per option, and splitting them into filter-then-map walks the list
   // twice to answer it.
   const items = STATUS_FILTER_ORDER.flatMap((option) => {
@@ -311,29 +318,39 @@ function TradesToolbar({
   });
 
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-      <div className="overflow-x-auto [scrollbar-width:none]">
-        <SegmentedControl
-          aria-label={t("DashboardMarkets.dvp.filterStatusLabel")}
-          items={items}
-          // Re-clicking the active segment can emit an empty value from the
-          // underlying toggle group, and a status filter always has a selection.
-          onValueChange={(next) => next && onStatusChange(next as StatusFilter)}
-          value={status}
-        />
-      </div>
-      <div className="w-full md:w-64 md:shrink-0">
-        <SearchInput
-          aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
-          clear={{
-            label: t("DashboardMarkets.dvp.filterClearSearch"),
-            onClear: () => onQueryChange(""),
-          }}
-          onChange={(event) => onQueryChange(event.currentTarget.value)}
-          placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
-          value={query}
-        />
-      </div>
+    <div className="border-b border-border-default p-3">
+      {showFilters ? (
+        <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-[minmax(280px,1fr)_190px_auto]">
+          <SearchInput
+            aria-label={t("DashboardMarkets.dvp.filterSearchLabel")}
+            clear={{
+              label: t("DashboardMarkets.dvp.filterClearSearch"),
+              onClear: () => onQueryChange(""),
+            }}
+            onChange={(event) => onQueryChange(event.currentTarget.value)}
+            placeholder={t("DashboardMarkets.dvp.filterSearchPlaceholder")}
+            value={query}
+          />
+          <Select
+            ariaLabel={t("DashboardMarkets.dvp.filterStatusLabel")}
+            // Clearing the selection is not a state this filter has: "all" is
+            // itself an option, so an empty value from the trigger is ignored.
+            onValueChange={(next) => next && onStatusChange(next as StatusFilter)}
+            value={status}
+          >
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </Select>
+          <CreateTradeButton />
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <CreateTradeButton />
+        </div>
+      )}
     </div>
   );
 }
@@ -356,81 +373,138 @@ function TradesTable({
 }) {
   const t = useTranslations();
   return (
-    <div className="overflow-hidden rounded-2xl border border-border-default">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("DashboardMarkets.dvp.columnStatus")}</TableHead>
-            <TableHead>{t("DashboardMarkets.dvp.columnAsset")}</TableHead>
-            <TableHead>{t("DashboardMarkets.dvp.columnCash")}</TableHead>
-            {/* "Parties", not "Counterparty": the list mixes trades
-                  where we hold a leg with trades set up for two other
-                  parties, and the second kind has no counterparty
-                  because we are not one of the sides. */}
-            <TableHead>
-              {t(
-                showingInbound
-                  ? "DashboardMarkets.dvp.inboundColumnFund"
-                  : "DashboardMarkets.dvp.columnParties"
-              )}
-            </TableHead>
-            <TableHead>
-              {t(
-                showingInbound
-                  ? "DashboardMarkets.dvp.inboundColumnExpires"
-                  : "DashboardMarkets.dvp.columnCreated"
-              )}
-            </TableHead>
-            <TableHead className="w-10" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {showingInbound ? <InboundRows trades={inbound} /> : null}
-          {trades.map((trade) => (
-            <OwnTradeRow key={trade.id} trade={trade} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <Table className="rounded-none border-0">
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("DashboardMarkets.dvp.columnStatus")}</TableHead>
+          <TableHead>{t("DashboardMarkets.dvp.columnAsset")}</TableHead>
+          <TableHead>{t("DashboardMarkets.dvp.columnCash")}</TableHead>
+          {/* "Parties", not "Counterparty": the list mixes trades
+              where we hold a leg with trades set up for two other
+              parties, and the second kind has no counterparty
+              because we are not one of the sides. */}
+          <TableHead>
+            {t(
+              showingInbound
+                ? "DashboardMarkets.dvp.inboundColumnFund"
+                : "DashboardMarkets.dvp.columnParties"
+            )}
+          </TableHead>
+          <TableHead>
+            {t(
+              showingInbound
+                ? "DashboardMarkets.dvp.inboundColumnExpires"
+                : "DashboardMarkets.dvp.columnCreated"
+            )}
+          </TableHead>
+          <TableHead className="w-10" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {showingInbound ? <InboundRows trades={inbound} /> : null}
+        {trades.map((trade) => (
+          <OwnTradeRow key={trade.id} trade={trade} />
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
 /** The one call to action on this page, in both places it appears. */
-function CreateTradeButton({ className }: { className?: string }) {
+function CreateTradeButton() {
   const t = useTranslations();
   return (
-    <Button asChild className={className} size="sm">
+    <Button asChild size="sm">
       <Link href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`}>
         <PlusIcon className="size-4" />
-        {t("DashboardMarkets.dvp.createAction")}
+        {t("DashboardMarkets.dvp.createCta")}
       </Link>
     </Button>
   );
 }
 
-/**
- * What the list is showing right now.
- *
- * Filtered here rather than in the URL: the list arrives already capped by
- * `listByProject`, so everything being filtered is on the page and a round trip
- * per keystroke would be slower and no more correct.
- *
- * The waiting segment lists trades belonging to other organizations, so the
- * project's own list is not filtered down to nothing, it is replaced. Both sides
- * run the same query so the search box means one thing on either.
- */
-function useTradeListView(
-  trades: DvpTrade[],
-  inbound: DvpInboundTrade[],
-  status: StatusFilter,
-  query: string
-) {
-  const showingInbound = status === "waiting";
-  const needle = query.trim().toLowerCase();
-  const visible = showingInbound ? [] : filterOwnTrades(trades, status, needle);
+export function DvpTradesWorkspace({
+  trades,
+  inbound,
+  error,
+  searchQuery,
+  statusFilter,
+}: {
+  trades: DvpTrade[];
+  /** Trades another organization created that name one of this project's wallets. */
+  inbound: DvpInboundTrade[];
+  error: string | null;
+  /** The active URL search text ("" when none), not the live input value. */
+  searchQuery: string;
+  /** The active URL status group for the trades list. */
+  statusFilter: UrlStatusFilter;
+}) {
+  const t = useTranslations();
+  const {
+    queryInput,
+    resetFilters,
+    resultKey,
+    setQueryInput,
+    state: urlFilters,
+    updateFilters,
+  } = useUrlTableFilters({
+    returnedState: { status: statusFilter, query: searchQuery },
+    href: tradesHref,
+    query: DVP_TRADES_QUERY_ADAPTER,
+  });
+
+  // Pagination belongs to the rows returned for one exact URL filter state.
+  // Adopting another state through Back/Forward therefore starts at page one,
+  // including when the old page number would happen to remain in range.
+  const [pagination, setPagination] = useState({ resultKey, page: 1 });
+  if (pagination.resultKey !== resultKey) {
+    setPagination({ resultKey, page: 1 });
+  }
+
+  // The URL is the filter state for the trades list; `waiting` selects the
+  // inbound segment instead and lives here only, because it answers from a
+  // different endpoint the URL has no reason to name. A browser navigation
+  // that changes the URL group lands back on the trades segment.
+  const [waitingSelection, setWaitingSelection] = useState({ status: statusFilter, active: false });
+  if (waitingSelection.status !== urlFilters.status) {
+    setWaitingSelection({ status: urlFilters.status, active: false });
+  }
+  const waiting = waitingSelection.status === urlFilters.status ? waitingSelection.active : false;
+
+  const onStatusChange = (next: StatusFilter) => {
+    setPagination({ resultKey, page: 1 });
+    if (next === "waiting") {
+      // The inbound segment swaps the table's rows rather than filtering the
+      // trades list, so it never reaches the URL or the trades API.
+      setWaitingSelection({ status: urlFilters.status, active: true });
+      return;
+    }
+    setWaitingSelection({ status: next, active: false });
+    updateFilters({ status: next });
+  };
+
+  /** Clear filters resets the search, the page and the URL params — the whole filter state. */
+  const clearFilters = () => {
+    setWaitingSelection({ status: "all", active: false });
+    setPagination({ resultKey, page: 1 });
+    resetFilters({ status: "all", query: "" });
+  };
+
+  const showingInbound = waiting;
+  // The inbound segment keeps its client-side sieve: that list is small and
+  // complete, so the live input answers without a round trip.
+  const needle = queryInput.trim().toLowerCase();
   const visibleInbound = showingInbound
     ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
     : [];
+  // Clamped during render rather than reset by an effect: shrinking the list
+  // from a later page lands on the last page that still exists.
+  const pageCount = Math.max(1, Math.ceil(trades.length / TRADES_PER_PAGE));
+  const currentPage = pagination.resultKey === resultKey ? Math.min(pagination.page, pageCount) : 1;
+  const pagedTrades = trades.slice(
+    (currentPage - 1) * TRADES_PER_PAGE,
+    currentPage * TRADES_PER_PAGE
+  );
 
   // A project whose only DvP activity is a trade somebody else set up for it has
   // none of its own, and treating that as an empty page rendered "No trades yet"
@@ -438,128 +512,98 @@ function useTradeListView(
   // reach it by. Having nothing to do is what empty means here.
   const listIsEmpty = trades.length === 0 && inbound.length === 0;
   // Rows shown on the current segment, from either source. The waiting segment
-  // draws from `inbound` and leaves `visible` empty by design, so counting only
-  // `visible` declared "no trades match" over a table that had a row to render.
-  const shownCount = showingInbound ? visibleInbound.length : visible.length;
+  // draws from `inbound` and leaves the trades table empty by design, so
+  // counting only `trades` declared "no trades match" over a table that had a
+  // row to render.
+  const shownCount = showingInbound ? visibleInbound.length : trades.length;
 
-  return {
-    showingInbound,
-    visible,
-    visibleInbound,
-    listIsEmpty,
-    filteredToNothing: !(listIsEmpty && !showingInbound) && shownCount === 0,
-  };
-}
+  const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
 
-export function DvpTradesWorkspace({
-  trades,
-  inbound,
-  error,
-}: {
-  trades: DvpTrade[];
-  /** Trades another organization created that name one of this project's wallets. */
-  inbound: DvpInboundTrade[];
-  error: string | null;
-}) {
-  const t = useTranslations();
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [query, setQuery] = useState("");
-
-  const { showingInbound, visible, visibleInbound, listIsEmpty, filteredToNothing } =
-    useTradeListView(trades, inbound, status, query);
   return (
-    <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <p className="max-w-3xl text-secondary text-sm">
-            {t("DashboardMarkets.dvp.description")}
-          </p>
-          {/* Suppressed while the list is empty, because the empty state already
-              carries this exact call to action and two of the same button on one
-              screen reads as two different actions. */}
-          {listIsEmpty ? null : <CreateTradeButton className="shrink-0" />}
-        </div>
-
-        {/* An error and a table of nothing say different things, and showing
-            both says the list is empty when the truth is that it could not be
-            read. The error stands alone. */}
-        {error ? (
-          <Callout live title={t("DashboardMarkets.dvp.listErrorTitle")} variant="danger">
-            {error}
-          </Callout>
-        ) : listIsEmpty ? (
-          <ListEmptyState
-            action={<CreateTradeButton />}
-            description={t("DashboardMarkets.dvp.emptyDescription")}
-            icon={<ArrowLeftRightIcon className="size-5" />}
-            message={t("DashboardMarkets.dvp.empty")}
-          />
-        ) : (
-          <>
-            {/* Only once there is enough to sift. A filter bar over three rows
-                is furniture — but an inbound trade is reachable ONLY through
-                its segment, so hiding the control hides the trade with it. */}
-            {trades.length > 1 || inbound.length > 0 ? (
-              /* The toolbar every other workspace uses: the shared SearchInput
-                 on the right, the status choices as one segmented control on
-                 the left. This was a bare Input beside a Select, and Select's
-                 trigger is w-full by design — so a two-word status filter
-                 claimed the whole row and shoved the search onto a line of its
-                 own, in a box too narrow to finish its own placeholder.
-
-                 A segmented control also shows the four choices instead of
-                 hiding them behind a chevron, which for four short labels is
-                 what a dropdown costs you. Contained, so it can never shed an
-                 orphaned pill onto a wrap line; on a narrow viewport it scrolls
-                 inside its own strip. Matches the integrations catalog. */
+    <DashboardWorkspaceOverviewPanel className="flex flex-col gap-4">
+      {/* The same section heading treasury-solutions renders over its card. */}
+      <h2 className="flex items-center gap-1 text-[19px] leading-6 font-medium text-primary">
+        {t("DashboardMarkets.dvp.tradesTitle")}
+      </h2>
+      {/* An error and a table of nothing say different things, and showing
+          both says the list is empty when the truth is that it could not be
+          read. The error stands alone. */}
+      {error ? (
+        <Callout live title={t("DashboardMarkets.dvp.listErrorTitle")} variant="danger">
+          {error}
+        </Callout>
+      ) : (
+        <DashboardWorkspaceCard>
+          {listIsEmpty ? (
+            /* The strip is suppressed with the list, because the empty state
+               already carries this exact call to action and two of the same
+               button on one screen reads as two different actions. */
+            <ListEmptyState
+              action={<CreateTradeButton />}
+              description={t("DashboardMarkets.dvp.emptyDescription")}
+              icon={<ArrowLeftRightIcon className="size-5" />}
+              message={t("DashboardMarkets.dvp.empty")}
+            />
+          ) : (
+            <>
+              {/* The control strip every list page opens with (transactions,
+                  recurring): search then filters on the left, the create
+                  action on the right, table flush below. */}
               <TradesToolbar
                 inboundCount={inbound.length}
-                onQueryChange={setQuery}
-                onStatusChange={setStatus}
-                query={query}
-                status={status}
+                onQueryChange={(next) => {
+                  setQueryInput(next);
+                  setPagination({ resultKey, page: 1 });
+                }}
+                onStatusChange={onStatusChange}
+                query={queryInput}
+                status={waiting ? "waiting" : urlFilters.status}
+                tradeCount={trades.length}
               />
-            ) : null}
 
-            {/* "Nothing matches" and "you have none" are different answers, and
-                offering "create a trade" to somebody who just over-filtered
-                sends them to make a second one they do not need. */}
-            {filteredToNothing ? (
-              <ListEmptyState
-                action={
-                  <Button
-                    onClick={() => {
-                      setStatus("all");
-                      setQuery("");
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    {t("DashboardMarkets.dvp.filterClear")}
-                  </Button>
-                }
-                icon={<ArrowLeftRightIcon className="size-5" />}
-                message={t("DashboardMarkets.dvp.filterNoMatches")}
-              />
-            ) : (
-              <TradesTable
-                inbound={visibleInbound}
-                showingInbound={showingInbound}
-                trades={visible}
-              />
-            )}
-          </>
-        )}
+              {/* "Nothing matches" and "you have none" are different
+                  answers, and offering "create a trade" to somebody who
+                  just over-filtered sends them to make a second one they
+                  do not need. */}
+              {filteredToNothing ? (
+                <ListEmptyState
+                  action={
+                    <Button onClick={clearFilters} size="sm" type="button" variant="secondary">
+                      {t("DashboardMarkets.dvp.filterClear")}
+                    </Button>
+                  }
+                  icon={<ArrowLeftRightIcon className="size-5" />}
+                  message={t("DashboardMarkets.dvp.filterNoMatches")}
+                />
+              ) : (
+                <>
+                  <TradesTable
+                    inbound={visibleInbound}
+                    showingInbound={showingInbound}
+                    trades={showingInbound ? [] : pagedTrades}
+                  />
+                  {!showingInbound && pageCount > 1 ? (
+                    <ArrowPagination
+                      className="border-border-default border-t p-3"
+                      onPageChange={(page) => setPagination({ resultKey, page })}
+                      page={currentPage}
+                      pageCount={pageCount}
+                    />
+                  ) : null}
+                </>
+              )}
+            </>
+          )}
+        </DashboardWorkspaceCard>
+      )}
 
-        {/* The list is capped and has no cursor upstream, so say so rather than
-            letting it read as the complete set. */}
-        {trades.length >= DVP_TRADES_PAGE_SIZE ? (
-          <p className="text-tertiary text-xs">
-            {t("DashboardMarkets.dvp.moreTrades", { count: String(DVP_TRADES_PAGE_SIZE) })}
-          </p>
-        ) : null}
-      </div>
+      {/* The list is capped and has no cursor upstream, so say so rather than
+          letting it read as the complete set. */}
+      {!showingInbound && trades.length >= DVP_TRADES_PAGE_SIZE ? (
+        <p className="text-tertiary text-xs">
+          {t("DashboardMarkets.dvp.moreTrades", { count: String(DVP_TRADES_PAGE_SIZE) })}
+        </p>
+      ) : null}
     </DashboardWorkspaceOverviewPanel>
   );
 }

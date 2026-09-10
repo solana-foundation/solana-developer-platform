@@ -9,6 +9,7 @@
  * than the helpers they call, because the bug worth catching is the wiring.
  */
 
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -27,7 +28,7 @@ function withI18n({ children }: { children: ReactNode }) {
   );
 }
 
-const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const WALLET_ADDRESS = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const ASSET_MINT = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1";
@@ -47,14 +48,16 @@ const context: DvpCreateContext = {
     {
       mint: ASSET_MINT,
       label: "TBOND",
+      name: "Test Bond",
       decimals: 6,
       tokenProgram: TOKEN_2022,
     },
   ],
 };
 
-/** Fills both party slots: the default wallet for A, a pasted address for B. */
+/** Fills both party slots with pasted addresses; neither is preselected. */
 function fillParties(result: ReturnType<typeof setup>["result"]) {
+  act(() => result.current.setParty("a", { mode: "address", address: WALLET_ADDRESS }));
   act(() => result.current.setParty("b", { mode: "address", address: PARTY_B }));
 }
 
@@ -63,11 +66,17 @@ function setup(ctx: DvpCreateContext = context) {
 }
 
 describe("useDvpCreateForm", () => {
-  it("preselects the first wallet as the asset party and the first issued token", () => {
+  // Every choice is the trade's whole point, so nothing preselects: both
+  // parties, the asset and the cash all start empty.
+  it("starts with both parties and both mints unselected", () => {
     const { result } = setup();
 
-    expect(result.current.values.partyA).toEqual({ mode: "wallet", walletId: "cwlt_1" });
-    expect(result.current.asset.token?.label).toBe("TBOND");
+    expect(result.current.values.partyA).toEqual({ mode: "address", address: "" });
+    expect(result.current.values.partyB).toEqual({ mode: "address", address: "" });
+    expect(result.current.asset.token).toBeNull();
+    expect(result.current.asset.mint).toBe("");
+    expect(result.current.cash.token).toBeNull();
+    expect(result.current.cash.mint).toBe("");
   });
 
   it("offers stablecoins for the cash leg on this cluster", () => {
@@ -84,6 +93,7 @@ describe("useDvpCreateForm", () => {
   it("converts a typed amount into base units", () => {
     const { result } = setup();
 
+    act(() => result.current.asset.setChoice(ASSET_MINT));
     act(() => result.current.asset.setAmount("10.5"));
 
     expect(result.current.asset.baseUnits).toBe("10500000");
@@ -94,6 +104,7 @@ describe("useDvpCreateForm", () => {
   it("refuses to resolve an amount finer than the mint allows", () => {
     const { result } = setup();
 
+    act(() => result.current.asset.setChoice(ASSET_MINT));
     act(() => result.current.asset.setAmount("1.9999999"));
 
     expect(result.current.asset.baseUnits).toBeNull();
@@ -120,7 +131,9 @@ describe("useDvpCreateForm", () => {
     const { result } = setup();
 
     fillParties(result);
+    act(() => result.current.asset.setChoice(ASSET_MINT));
     act(() => result.current.asset.setAmount("10"));
+    act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
     act(() => result.current.cash.setAmount("25"));
 
     expect(result.current.ready).toBe(true);
@@ -143,6 +156,7 @@ describe("useDvpCreateForm", () => {
     act(() => result.current.asset.setCustom("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"));
     fillParties(result);
     act(() => result.current.asset.setAmount("1000"));
+    act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
     act(() => result.current.cash.setAmount("25"));
 
     expect(result.current.asset.pendingLookup).toBe(true);
@@ -156,12 +170,6 @@ describe("useDvpCreateForm", () => {
 
     expect(result.current.asset.baseUnits).toBeNull();
     expect(result.current.ready).toBe(false);
-  });
-
-  it("defaults the payer to the project settlement wallet", () => {
-    const { result } = setup();
-
-    expect(result.current.payerWalletId).toBe("");
   });
 
   /**
@@ -189,6 +197,9 @@ describe("useDvpCreateForm", () => {
         wrapper: withI18n,
       });
 
+      act(() => result.current.setParty("a", { mode: "wallet", walletId: "cwlt_1" }));
+      act(() => result.current.asset.setChoice(ASSET_MINT));
+
       expect(result.current.assetBalance).toMatchObject({ amount: "25000000000", decimals: 6 });
     });
 
@@ -196,6 +207,9 @@ describe("useDvpCreateForm", () => {
       const { result } = renderHook(() => useDvpCreateForm("devnet", context), {
         wrapper: withI18n,
       });
+
+      act(() => result.current.setParty("a", { mode: "wallet", walletId: "cwlt_1" }));
+      act(() => result.current.asset.setChoice(ASSET_MINT));
 
       expect(result.current.assetBalance).toMatchObject({ amount: "0", decimals: 6 });
     });
@@ -218,6 +232,7 @@ describe("useDvpCreateForm", () => {
 
       act(() => result.current.setParty("a", { mode: "address", address: PARTY_B }));
       act(() => result.current.setParty("b", { mode: "wallet", walletId: "cwlt_1" }));
+      act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
 
       expect(result.current.assetBalance).toBeNull();
       expect(result.current.cashBalance).not.toBeNull();

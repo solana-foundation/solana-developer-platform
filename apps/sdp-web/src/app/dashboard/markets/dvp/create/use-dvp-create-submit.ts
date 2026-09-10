@@ -100,6 +100,7 @@ export interface DvpCreateRequest {
   payerWalletId: string | null;
   amountA: string;
   amountB: string;
+  /** The expiry as a local wall-clock datetime, "YYYY-MM-DDTHH:mm". */
   expiry: string;
   mintA: string;
   mintB: string;
@@ -156,9 +157,9 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
           tokenProgramB: request.tokenProgramB ?? TOKEN_2022,
           amountA: request.amountA,
           amountB: request.amountB,
-          expiryTimestamp: String(
-            Math.floor(new Date(`${request.expiry}T23:59:59Z`).getTime() / 1000)
-          ),
+          // Local wall clock, deliberately: the person picked a time off
+          // their own clock, so the deadline lands at that local moment.
+          expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
           ...(request.refString ? { refString: request.refString } : {}),
           // Omitted rather than sent empty. The API reads absent as "the
           // party's own address"; an empty string would fail the address

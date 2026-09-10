@@ -40,6 +40,7 @@
     "@sdp/types": "workspace:*",
     "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",
+    "@solana/fixed-points": "7.1.1",
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:"

@@ -423,14 +423,14 @@ describe("deriveDvpTradeKind", () => {
   });
 
   it("derives principal when one side is the caller's", () => {
-    const caller = new Map([[PARTY_A_ADDRESS, BOUND_WALLET.id]]);
+    const caller = new Map([[PARTY_A_ADDRESS, { id: BOUND_WALLET.id, name: null }]]);
     expect(deriveDvpTradeKind(caller, PARTY_A_ADDRESS, PARTY_B_EXTERNAL)).toBe("principal");
   });
 
   it("derives bilateral when both sides are the caller's", () => {
     const caller = new Map([
-      [PARTY_A_ADDRESS, BOUND_WALLET.id],
-      [PARTY_B_EXTERNAL, UNBOUND_WALLET.id],
+      [PARTY_A_ADDRESS, { id: BOUND_WALLET.id, name: null }],
+      [PARTY_B_EXTERNAL, { id: UNBOUND_WALLET.id, name: null }],
     ]);
     expect(deriveDvpTradeKind(caller, PARTY_A_ADDRESS, PARTY_B_EXTERNAL)).toBe("bilateral");
   });
@@ -862,7 +862,7 @@ describe("DvP routes", () => {
             party: {
               address: PARTY_A_ADDRESS,
               counterparty: { id: accountId, label: "Acme Desk" },
-              custodied: true,
+              wallet: { id: BOUND_WALLET.id, name: null },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -883,7 +883,7 @@ describe("DvP routes", () => {
             party: {
               address: PARTY_B_EXTERNAL,
               counterparty: null,
-              custodied: false,
+              wallet: null,
             },
             mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -941,7 +941,7 @@ describe("DvP routes", () => {
             party: {
               address: PARTY_A_ADDRESS,
               counterparty: null,
-              custodied: true,
+              wallet: { id: "cwlt_dvp_party", name: null },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -957,7 +957,7 @@ describe("DvP routes", () => {
             party: {
               address: PARTY_B_EXTERNAL,
               counterparty: null,
-              custodied: false,
+              wallet: null,
             },
             mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -1003,8 +1003,8 @@ describe("DvP routes", () => {
             id: string;
             kind: string;
             legs: {
-              a: { party: { custodied: boolean; counterparty: unknown } };
-              b: { party: { custodied: boolean } };
+              a: { party: { wallet: { id: string } | null; counterparty: unknown } };
+              b: { party: { wallet: { id: string } | null } };
             };
           }[];
         };
@@ -1015,15 +1015,117 @@ describe("DvP routes", () => {
         throw new Error("seeded list trades missing from the response");
       }
       expect(first.kind).toBe("principal");
-      expect(first.legs.a.party.custodied).toBe(true);
+      expect(first.legs.a.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
       expect(first.legs.a.party.counterparty).toEqual({
         id: accountId,
         label: "Acme Desk",
       });
       // Both sides held by the creator's wallets: bilateral.
       expect(second.kind).toBe("bilateral");
-      expect(second.legs.a.party.custodied).toBe(true);
-      expect(second.legs.b.party.custodied).toBe(true);
+      expect(second.legs.a.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
+      expect(second.legs.b.party.wallet).toEqual({ id: BOUND_WALLET.id, name: null });
+    });
+
+    // The list is capped with no cursor, so the filters must narrow SERVER-SIDE:
+    // a client-side filter over the newest page makes an older matching trade
+    // unfindable, which is the bug this endpoint family exists without.
+    describe("server-side list filters", () => {
+      beforeEach(async () => {
+        await seedTradeFor({
+          tradeId: "dvp_filter_open",
+          swapDvp: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+        });
+      });
+
+      /** A second trade, advanced to a closed status the open one is not in. */
+      async function seedClosedTrade(): Promise<void> {
+        await seedTradeFor({ tradeId: "dvp_filter_settled" });
+        await getDb(env)
+          .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
+          .bind("dvp_filter_settled")
+          .run();
+      }
+
+      it("narrows by a comma-separated status list", async () => {
+        await seedClosedTrade();
+
+        const open = await app.request(
+          "/v1/dvp/trades?status=created,partially_funded",
+          { headers: authHeaders() },
+          env
+        );
+        const openBody = (await open.json()) as { data: { trades: { id: string }[] } };
+        expect(openBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_open"]);
+
+        const closed = await app.request(
+          "/v1/dvp/trades?status=settled",
+          {
+            headers: authHeaders(),
+          },
+          env
+        );
+        const closedBody = (await closed.json()) as { data: { trades: { id: string }[] } };
+        expect(closedBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_settled"]);
+      });
+
+      it("rejects an unknown status naming the allowed set", async () => {
+        const res = await app.request(
+          "/v1/dvp/trades?status=banana",
+          {
+            headers: authHeaders(),
+          },
+          env
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as {
+          error?: { message?: string; details?: { allowedStatuses?: string[] } };
+        };
+        expect(body.error?.message).toContain("status");
+        expect(body.error?.details?.allowedStatuses).toContain("created");
+      });
+
+      it("matches q against the trade id and a party address, case-insensitively", async () => {
+        await seedClosedTrade();
+
+        const byId = await app.request(
+          "/v1/dvp/trades?q=dvp_filter_open",
+          {
+            headers: authHeaders(),
+          },
+          env
+        );
+        const byIdBody = (await byId.json()) as { data: { trades: { id: string }[] } };
+        expect(byIdBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_open"]);
+
+        const byParty = await app.request(
+          `/v1/dvp/trades?q=${PARTY_A_ADDRESS.toLowerCase()}`,
+          { headers: authHeaders() },
+          env
+        );
+        const byPartyBody = (await byParty.json()) as { data: { trades: { id: string }[] } };
+        // Both seeded trades name PARTY_A_ADDRESS as side A.
+        expect(byPartyBody.data.trades.map((trade) => trade.id).sort()).toEqual([
+          "dvp_filter_open",
+          "dvp_filter_settled",
+        ]);
+      });
+
+      it("rejects a search shorter than two characters after trim", async () => {
+        const res = await app.request("/v1/dvp/trades?q=a", { headers: authHeaders() }, env);
+        expect(res.status).toBe(400);
+      });
+
+      it("composes status and q", async () => {
+        await seedClosedTrade();
+
+        const res = await app.request(
+          `/v1/dvp/trades?status=settled&q=${encodeURIComponent(PARTY_A_ADDRESS)}`,
+          { headers: authHeaders() },
+          env
+        );
+        const body = (await res.json()) as { data: { trades: { id: string }[] } };
+        expect(body.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_settled"]);
+      });
     });
   });
 
@@ -1047,10 +1149,10 @@ describe("DvP routes", () => {
             kind?: unknown;
             legs: {
               a: {
-                party: { address: string; counterparty: unknown; custodied: boolean };
+                party: { address: string; counterparty: unknown; wallet: unknown };
                 fundingSignature?: unknown;
               };
-              b: { party: { address: string; counterparty: unknown; custodied: boolean } };
+              b: { party: { address: string; counterparty: unknown; wallet: unknown } };
             };
           }[];
         };
@@ -1065,12 +1167,12 @@ describe("DvP routes", () => {
       expect(trade.legs.a.party).toEqual({
         address: PARTY_A_ADDRESS,
         counterparty: null,
-        custodied: true,
+        wallet: { id: "cwlt_dvp_party", name: null },
       });
       expect(trade.legs.b.party).toEqual({
         address: PARTY_B_EXTERNAL,
         counterparty: null,
-        custodied: false,
+        wallet: null,
       });
       // The inbound shape carries neither the creator's derived kind nor the
       // funding claims — both belong to organizations that can read the row.

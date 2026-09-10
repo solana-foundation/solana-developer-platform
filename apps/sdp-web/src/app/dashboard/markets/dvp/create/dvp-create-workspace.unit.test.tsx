@@ -9,6 +9,7 @@
  * not about layout.
  */
 
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -42,8 +43,9 @@ const context: DvpCreateContext = {
     {
       mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
       label: "TBOND",
+      name: "Test Bond",
       decimals: 6,
-      tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
     },
   ],
 };
@@ -59,11 +61,41 @@ function renderForm(
   );
 }
 
-/** Fills the second party slot with a pasted address (the first is preselect). */
-function fillPartyB(address: string = PARTY_B) {
-  fireEvent.change(screen.getByRole("textbox", { name: /second party/i }), {
-    target: { value: address },
+/** Opens a party combobox by its label and types into its search box. */
+function searchParty(trigger: RegExp, query: string) {
+  fireEvent.click(screen.getByRole("button", { name: trigger }));
+  fireEvent.change(screen.getByPlaceholderText(/paste a Solana address/i), {
+    target: { value: query },
   });
+}
+
+/** Fills the seller slot by picking the registered counterparty. */
+function fillPartyA() {
+  fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
+  fireEvent.click(screen.getByText("Acme OTC"));
+}
+
+/**
+ * Fills the cash payer slot by pasting an address and picking the option it
+ * surfaces. The last match is the open popover's option — a pasted address
+ * already selected in the other slot shows the same text in its trigger.
+ */
+function fillPartyB(address: string = PARTY_B) {
+  searchParty(/paying the cash/i, address);
+  const options = screen.getAllByText("Use this address");
+  fireEvent.click(options[options.length - 1]);
+}
+
+/** Picks the issued token in the asset slot, which starts unselected. */
+function fillAssetMint() {
+  fireEvent.click(screen.getByRole("button", { name: /^asset/i }));
+  fireEvent.click(screen.getByText("TBOND"));
+}
+
+/** Picks the first stablecoin in the cash slot, which also starts unselected. */
+function fillCashMint() {
+  fireEvent.click(screen.getByRole("button", { name: /^cash/i }));
+  fireEvent.click(screen.getByText("USDC"));
 }
 
 /** Fills both legs' amounts, the last input the legs step gates on. */
@@ -73,23 +105,17 @@ function fillAmounts() {
 }
 
 /**
- * Walks the wizard to a stage, filling only what the previous stages require.
- *
- * Continue is disabled until a stage is complete, so navigating IS the
- * assertion that each stage can be satisfied on its own — which is most of
- * what staging bought.
+ * Fills the one configuring step and continues to review. Continue is disabled
+ * until the step is complete, so navigating IS the assertion that the step can
+ * be satisfied.
  */
-function advanceTo(stage: "legs" | "terms" | "review") {
-  const next = () => fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+function advanceToReview() {
+  fillPartyA();
   fillPartyB();
-  next(); // parties -> legs
-  if (stage === "legs") return;
-
+  fillAssetMint();
+  fillCashMint();
   fillAmounts();
-  next(); // legs -> terms
-  if (stage === "terms") return;
-
-  next(); // terms -> review
+  fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 }
 
 afterEach(cleanup);
@@ -103,51 +129,51 @@ describe("DvpCreateWorkspace", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
-  it("offers the three ways to name a party in each slot", () => {
+  // One combobox per slot: registered counterparties are options — custody
+  // wallets deliberately are not, a wallet is not a counterparty — and a
+  // pasted base58 address surfaces as an option of its own.
+  it("offers counterparties and pasted addresses, never custody wallets", () => {
     renderForm();
 
-    expect(screen.getAllByText("My wallets").length).toBe(2);
-    expect(screen.getAllByText("Counterparties").length).toBe(2);
-    expect(screen.getAllByText("Paste address").length).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: /paying the cash/i }));
+
+    expect(screen.getByText("Acme OTC")).toBeTruthy();
+    expect(screen.queryByText("Treasury")).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(/paste a Solana address/i), {
+      target: { value: PARTY_B },
+    });
+    expect(screen.getByText("Use this address")).toBeTruthy();
   });
 
   it("reaches review once every stage is answered, and only then offers Create", () => {
     renderForm();
-    advanceTo("review");
+    advanceToReview();
 
     expect(screen.getByRole("button", { name: /create trade/i })).toBeTruthy();
   });
 
-  // The whole point of the conversion: the amount the chain receives is shown
-  // before it is sent, so a three-orders-of-magnitude mistake is visible.
-  it("discloses the base units a typed amount resolves to", () => {
+  // The scale is enforced at the keystroke: a digit the mint cannot represent
+  // never lands in the field, so no correction hint is ever needed.
+  it("blocks typing more decimal places than the mint supports", () => {
     renderForm();
-    advanceTo("legs");
+    fillAssetMint();
+    const input = screen.getByLabelText(/asset amount/i) as HTMLInputElement;
 
-    fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10.5" } });
+    fireEvent.change(input, { target: { value: "1.999999" } });
+    fireEvent.change(input, { target: { value: "1.9999999" } });
 
-    expect(screen.getAllByText(/10500000/).length).toBeGreaterThan(0);
+    expect(input.value).toBe("1.999999");
   });
 
-  // Truncating would move a different amount than the one on screen, so the
-  // form has to say so rather than rounding.
-  it("refuses an amount finer than the mint allows, and says why", () => {
-    renderForm();
-    advanceTo("legs");
-
-    fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "1.9999999" } });
-
-    expect(screen.getByText(/More decimal places than/i)).toBeTruthy();
-  });
-
-  it("flags a pasted party address that is not a Solana address", () => {
+  // A malformed paste never becomes an option, so the slot cannot hold an
+  // invalid address at all — refusal happens before selection, not after.
+  it("offers no address option for a paste that is not a Solana address", () => {
     renderForm();
 
-    fireEvent.change(screen.getByRole("textbox", { name: /second party/i }), {
-      target: { value: "nope" },
-    });
+    searchParty(/paying the cash/i, "nope");
 
-    expect(screen.getByText(/does not look like a Solana address/i)).toBeTruthy();
+    expect(screen.queryByText("Use this address")).toBeNull();
   });
 
   // The program refuses one address on both sides, and the parties step is the
@@ -155,9 +181,9 @@ describe("DvpCreateWorkspace", () => {
   it("refuses to proceed when both slots resolve to the same address", () => {
     renderForm();
 
-    fireEvent.change(screen.getByRole("textbox", { name: /second party/i }), {
-      target: { value: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn" },
-    });
+    searchParty(/delivering the asset/i, PARTY_B);
+    fireEvent.click(screen.getByText("Use this address"));
+    fillPartyB(PARTY_B);
 
     expect(screen.getByText(/Both sides are the same address/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
@@ -175,14 +201,6 @@ describe("DvpCreateWorkspace", () => {
     renderForm();
 
     expect(screen.queryByText(/deployed on devnet only/i)).toBeNull();
-  });
-
-  // The payer defaults to the project settlement wallet, editable on review.
-  it("defaults the payer to the project settlement wallet on review", () => {
-    renderForm();
-    advanceTo("review");
-
-    expect(screen.getByText("Project settlement wallet (default)")).toBeTruthy();
   });
 
   // A failed token load must not read as "you have no tokens", and the form

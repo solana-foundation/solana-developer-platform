@@ -4,7 +4,12 @@ import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { DvpInboundScope, DvpTradeInsert, DvpTradeRepository } from "./dvp-trade.repository";
+import type {
+  DvpInboundScope,
+  DvpTradeInsert,
+  DvpTradeListFilters,
+  DvpTradeRepository,
+} from "./dvp-trade.repository";
 import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_dvp_repo_test";
@@ -64,6 +69,9 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
 }
 
 const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+
+/** The explicit no-filter filters: unfiltered is a choice, never a default. */
+const UNFILTERED: DvpTradeListFilters = { statuses: null, q: null };
 
 describe("DvpTradeRepository (postgres)", () => {
   let repo: DvpTradeRepository;
@@ -262,7 +270,7 @@ describe("DvpTradeRepository (postgres)", () => {
       tradeInsert({ id: "dvp_b", swapDvp: address("SwapB11111111111111111111111111111111111111") })
     );
 
-    const listed = await repo.listByProject(scope, 10);
+    const listed = await repo.listByProject(scope, UNFILTERED, 10);
 
     expect(listed).toHaveLength(2);
     expect(listed.map((t) => t.id).sort()).toEqual(["dvp_a", "dvp_b"]);
@@ -361,7 +369,7 @@ describe("DvpTradeRepository (postgres)", () => {
       tradeInsert({ id: "dvp_n2", swapDvp: address("SwapN21111111111111111111111111111111111111") })
     );
 
-    await expect(repo.listByProject(scope, 10)).resolves.toHaveLength(2);
+    await expect(repo.listByProject(scope, UNFILTERED, 10)).resolves.toHaveLength(2);
   });
 
   // The program's nonce tombstone makes a (seeds, nonce) pair single-use forever,
@@ -407,7 +415,7 @@ describe("DvpTradeRepository (postgres)", () => {
     it("returns every trade when the scope is unrestricted", async () => {
       await bothTrades();
 
-      const listed = await repo.listByProject({ ...scope, sdpWalletIds: null }, 10);
+      const listed = await repo.listByProject({ ...scope, sdpWalletIds: null }, UNFILTERED, 10);
 
       expect(listed.map((t) => t.id).sort()).toEqual(["dvp_mine", "dvp_theirs"]);
     });
@@ -415,7 +423,11 @@ describe("DvpTradeRepository (postgres)", () => {
     it("admits only trades where a bound wallet's public key is a party", async () => {
       await bothTrades();
 
-      const listed = await repo.listByProject({ ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] }, 10);
+      const listed = await repo.listByProject(
+        { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] },
+        UNFILTERED,
+        10
+      );
 
       expect(listed.map((t) => t.id)).toEqual(["dvp_mine"]);
     });
@@ -423,7 +435,9 @@ describe("DvpTradeRepository (postgres)", () => {
     it("denies everything for a key with no usable bindings", async () => {
       await bothTrades();
 
-      await expect(repo.listByProject({ ...scope, sdpWalletIds: [] }, 10)).resolves.toEqual([]);
+      await expect(
+        repo.listByProject({ ...scope, sdpWalletIds: [] }, UNFILTERED, 10)
+      ).resolves.toEqual([]);
     });
 
     it("hides an out-of-scope trade from getById and getBySwapDvp", async () => {
@@ -435,6 +449,95 @@ describe("DvpTradeRepository (postgres)", () => {
         repo.getBySwapDvp(bound, address("SwapB11111111111111111111111111111111111111"))
       ).resolves.toBeNull();
       await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
+    });
+  });
+
+  // The filters narrow SERVER-SIDE, before the LIMIT, because the list is
+  // capped with no cursor: a client-side filter over the newest page makes a
+  // matching trade older than the page unfindable.
+  describe("listByProject filters", () => {
+    const SETTLED_SWAP = address("SwapS11111111111111111111111111111111111111");
+
+    beforeEach(async () => {
+      const db = getDb(env);
+      await repo.create(tradeInsert({ id: "dvp_fl_open" }));
+      await repo.create(tradeInsert({ id: "dvp_fl_settled", swapDvp: SETTLED_SWAP }));
+      // The insert lands rows at `creating`, the only status a create may write;
+      // advancing one to a terminal state is what a real close would leave.
+      await db
+        .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
+        .bind("dvp_fl_settled")
+        .run();
+    });
+
+    it("narrows to the listed statuses", async () => {
+      const open = await repo.listByProject(
+        scope,
+        { statuses: ["created", "creating"], q: null },
+        10
+      );
+      expect(open.map((t) => t.id)).toEqual(["dvp_fl_open"]);
+
+      const settled = await repo.listByProject(scope, { statuses: ["settled"], q: null }, 10);
+      expect(settled.map((t) => t.id)).toEqual(["dvp_fl_settled"]);
+    });
+
+    it("matches q against the trade id, a party address and a mint, case-insensitively", async () => {
+      const byId = await repo.listByProject(scope, { statuses: null, q: "dvp_fl_open" }, 10);
+      expect(byId.map((t) => t.id)).toEqual(["dvp_fl_open"]);
+
+      // WALLET_A_PUBKEY is user_a on both seeded trades.
+      const byParty = await repo.listByProject(
+        scope,
+        { statuses: null, q: WALLET_A_PUBKEY.toLowerCase() },
+        10
+      );
+      expect(byParty.map((t) => t.id).sort()).toEqual(["dvp_fl_open", "dvp_fl_settled"]);
+
+      // mint_a on both seeded trades.
+      const byMint = await repo.listByProject(
+        scope,
+        { statuses: null, q: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1" },
+        10
+      );
+      expect(byMint.map((t) => t.id).sort()).toEqual(["dvp_fl_open", "dvp_fl_settled"]);
+    });
+
+    it("matches q against a leg symbol", async () => {
+      // tradeInsert seeds symbolA "ATD", symbolB "USDC".
+      const bySymbol = await repo.listByProject(scope, { statuses: null, q: "usdc" }, 10);
+      expect(bySymbol.map((t) => t.id).sort()).toEqual(["dvp_fl_open", "dvp_fl_settled"]);
+
+      const byNothing = await repo.listByProject(scope, { statuses: null, q: "ZZZZ" }, 10);
+      expect(byNothing).toEqual([]);
+    });
+
+    // A raw `%` in the query is a literal, not a wildcard: unescaped it would
+    // match every row and quietly turn the filter off.
+    it("treats ILIKE wildcards in the query as literal characters", async () => {
+      const percent = await repo.listByProject(scope, { statuses: null, q: "%" }, 10);
+      expect(percent).toEqual([]);
+
+      const underscore = await repo.listByProject(scope, { statuses: null, q: "dvp_fl_ope_" }, 10);
+      expect(underscore).toEqual([]);
+    });
+
+    it("composes with the wallet-scope clause: a bound wallet still sees only its party trades, filtered", async () => {
+      const listed = await repo.listByProject(
+        { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] },
+        { statuses: ["settled"], q: null },
+        10
+      );
+      expect(listed.map((t) => t.id)).toEqual(["dvp_fl_settled"]);
+    });
+
+    it("stays tenant-scoped under filters: another project's matching trade is empty", async () => {
+      const other = await repo.listByProject(
+        { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
+        { statuses: ["settled"], q: "dvp_fl_settled" },
+        10
+      );
+      expect(other).toEqual([]);
     });
   });
 

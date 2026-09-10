@@ -12,6 +12,7 @@
  * blocked submit in either state.
  */
 
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CUSTOM, useDvpLeg } from "./use-dvp-leg";
@@ -34,7 +35,7 @@ function resolved(address: string, decimals: number): PastedMintState {
       decimals,
       name: null,
       symbol: "X",
-      tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
       eligible: true,
       blockedBy: null,
     },
@@ -43,7 +44,7 @@ function resolved(address: string, decimals: number): PastedMintState {
 
 function leg(state: PastedMintState, typed: string, amount: string) {
   pastedState.current = state;
-  const { result, rerender } = renderHook(() => useDvpLeg([]));
+  const { result, rerender } = renderHook(() => useDvpLeg([], false));
   result.current.setChoice(CUSTOM);
   result.current.setCustom(typed);
   result.current.setAmount(amount);
@@ -57,7 +58,7 @@ describe("a pasted leg whose lookup has not caught up", () => {
   it("does not scale by a previous mint's decimals", () => {
     const result = leg(resolved(MINT_A, 9), MINT_B, "1000");
 
-    expect(result.current.decimalsKnown).toBe(false);
+    expect(result.current.decimals).toBeNull();
     expect(result.current.pendingLookup).toBe(true);
   });
 
@@ -83,7 +84,7 @@ describe("a pasted leg whose lookup has not caught up", () => {
     const result = leg(resolved(MINT_B, 6), MINT_B, "1000");
 
     expect(result.current.pendingLookup).toBe(false);
-    expect(result.current.decimalsKnown).toBe(true);
+    expect(result.current.decimals).toBe(6);
     expect(result.current.baseUnits).toBe("1000000000");
   });
 
@@ -91,14 +92,18 @@ describe("a pasted leg whose lookup has not caught up", () => {
   it("never waits when the mint came from the list", () => {
     pastedState.current = { address: "", loading: true, notFound: false, mint: null };
     const { result } = renderHook(() =>
-      useDvpLeg([
-        {
-          mint: MINT_A,
-          label: "ATD",
-          decimals: 6,
-          tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-        },
-      ])
+      useDvpLeg(
+        [
+          {
+            mint: MINT_A,
+            label: "ATD",
+            name: null,
+            decimals: 6,
+            tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+          },
+        ],
+        true
+      )
     );
 
     expect(result.current.pendingLookup).toBe(false);

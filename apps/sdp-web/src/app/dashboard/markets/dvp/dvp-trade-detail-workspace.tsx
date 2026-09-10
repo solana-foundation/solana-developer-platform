@@ -407,8 +407,14 @@ function PartySectionRow({
     <div>
       <dt className="flex items-center gap-2 text-tertiary text-xs">
         {title}
-        {party.custodied ? (
-          <Badge variant="outline">{t("DashboardMarkets.dvp.partyYours")}</Badge>
+        {party.wallet ? (
+          // A referenced wallet is a link with the arrow affordance, never
+          // plain text — the same house rule the counterparty link follows.
+          <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
+            {party.wallet.name === null
+              ? t("DashboardMarkets.dvp.partySdpWallet")
+              : party.wallet.name}
+          </EntityLink>
         ) : null}
       </dt>
       <dd className="mt-0.5">
@@ -631,7 +637,7 @@ function holderLabel(
   side: DvpTradeSide,
   leg: DvpTradeLeg
 ): string {
-  if (leg.party.custodied) {
+  if (leg.party.wallet !== null) {
     return t("DashboardMarkets.dvp.legYours");
   }
   if (leg.party.counterparty) {
@@ -690,8 +696,8 @@ function LegCards({
   // the cards under it run opposite ways on a trade where the caller holds leg
   // B. With no custodied leg (agent) or both custodied (bilateral) the trade's
   // own A-then-B order stays.
-  const custodiedA = trade.legs.a.party.custodied;
-  const custodiedB = trade.legs.b.party.custodied;
+  const custodiedA = trade.legs.a.party.wallet !== null;
+  const custodiedB = trade.legs.b.party.wallet !== null;
   if (custodiedB && !custodiedA) {
     return [cardB, cardA];
   }
@@ -701,13 +707,15 @@ function LegCards({
 /**
  * Whether the caller may fund a leg right now.
  *
- * The API says which sides are the caller's via `custodied`; beyond that the
+ * The API says which sides are the caller's via `party.wallet`; beyond that the
  * escrow has to still be payable: the trade must not be over, the leg must not
  * already hold its target, and a frozen escrow bounces transfers.
  */
 function canFundLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
   const fundableStatus = status === "created" || status === "partially_funded";
-  return leg.party.custodied && fundableStatus && !leg.funding?.funded && !leg.funding?.frozen;
+  return (
+    leg.party.wallet !== null && fundableStatus && !leg.funding?.funded && !leg.funding?.frozen
+  );
 }
 
 export function DvpTradeDetailWorkspace({
