@@ -293,3 +293,42 @@ async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Resp
     req.end(init.body);
   });
 }
+
+/**
+ * `guardedFetch` behind the WHATWG fetch signature, for libraries that accept
+ * a `fetch` implementation but know nothing about the egress guard.
+ *
+ * Strict on purpose: a `Request` input or a non-string body is refused rather
+ * than partially honored, because silently dropping a body or an option would
+ * send a request the caller did not write. Every JSON-RPC client this serves
+ * sends string bodies.
+ */
+export function createGuardedFetch(options?: {
+  maxRedirects?: number;
+  maxResponseBytes?: number;
+}): typeof globalThis.fetch {
+  return async (input, init) => {
+    if (typeof input !== "string" && !(input instanceof URL)) {
+      throw new TypeError("guarded fetch takes a URL, not a Request");
+    }
+    if (init?.body !== undefined && init.body !== null && typeof init.body !== "string") {
+      throw new TypeError("guarded fetch only sends string bodies");
+    }
+
+    const headers: Record<string, string> = {};
+    new Headers(init?.headers).forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    return guardedFetch(input.toString(), {
+      method: init?.method ?? "GET",
+      headers,
+      body: init?.body ?? "",
+      ...(init?.signal ? { signal: init.signal } : {}),
+      ...(options?.maxRedirects === undefined ? {} : { maxRedirects: options.maxRedirects }),
+      ...(options?.maxResponseBytes === undefined
+        ? {}
+        : { maxResponseBytes: options.maxResponseBytes }),
+    });
+  };
+}

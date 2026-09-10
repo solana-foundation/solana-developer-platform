@@ -151,8 +151,20 @@ function Summary({
                 key={balance.mint}
                 className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm"
               >
-                <span className="tabular-nums text-primary">
-                  {formatAssetAmount(balance.amountRaw, balance.mint)}
+                <span className="flex flex-wrap items-baseline gap-2">
+                  <span className="tabular-nums text-primary">
+                    {formatAssetAmount(balance.amountRaw, balance.mint)}
+                  </span>
+                  {/* Only when fragmented: a single note is the settled case
+                      and saying so on every row would be noise. This is what
+                      makes the composer's Merge tab legible. */}
+                  {balance.noteCount > 1 ? (
+                    <span className="text-xs text-tertiary">
+                      {t("DashboardHeliusRings.overview.noteCount", {
+                        count: balance.noteCount,
+                      })}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="tabular-nums text-secondary">
                   {typeof balance.usdValue === "number"

@@ -8,6 +8,7 @@ import {
   EARN_METRICS_REFRESH_MONITOR,
   runEarnMetricsRefreshTick,
 } from "@/cron/earn-metrics-refresh";
+import { EARN_SPLIT_SWAPS_MONITOR } from "@/cron/earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
@@ -30,6 +31,7 @@ import { getLogger } from "@/runtime/logger";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
@@ -208,6 +210,12 @@ export async function runCronJob(): Promise<void> {
     // Non-fatal: a DvP sweep that cannot reach the RPC must not fail the whole
     // tick and starve the money-moving reconcilers that run after it.
     await monitored(DVP_TRADES_MONITOR, () => reconcileDvpTrades(env)).catch(() => undefined);
+    // Orphaned split-swap detection (PRO-1864): advisory work that never touches
+    // a movement. Placed AFTER the vault-movement sweep on purpose, so the exit
+    // reconciler never waits on it (ADR 0002), and collected like that sweep
+    // rather than swallowed: a failed detection tick is a real failure of the
+    // job, and `collect` already guarantees every later tick still runs.
+    await collect(monitored(EARN_SPLIT_SWAPS_MONITOR, () => detectOrphanedEarnSplitSwaps(env)));
     if (assetProfilesEnabled) {
       await collect(monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env)));
     } else {

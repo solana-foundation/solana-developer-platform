@@ -395,6 +395,12 @@ function bridgedCode(error: unknown): BridgedErrorCode | undefined {
     if (error.cause instanceof TransactionError) {
       return TRANSACTION_ERROR_CODES_TO_DOMAIN[error.cause.code];
     }
+    // The ring builders wrap their own domain errors too: RING_BUILD_TRANSFER
+    // around RING_INSUFFICIENT_BALANCE would otherwise report a retryable
+    // upstream outage for a balance the caller can see is short.
+    if (error.cause instanceof RingError) {
+      return RING_ERROR_CODES_TO_DOMAIN[error.cause.code];
+    }
     return RING_ERROR_CODES_TO_DOMAIN[error.code];
   }
 

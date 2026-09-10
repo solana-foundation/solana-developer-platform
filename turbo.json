@@ -44,10 +44,6 @@
     "FLAGS",
     "FLAGS_SECRET",
     "HELIUS_RINGS_ENABLED",
-    "HELIUS_RINGS_RPC_URL",
-    "HELIUS_RINGS_INDEXER_URL",
-    "HELIUS_RINGS_PROVER_URL",
-    "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
     "CHAINALYSIS_API_BASE_URL",
     "CHAINALYSIS_API_KEY",
     "ELLIPTIC_API_BASE_URL",
@@ -214,7 +210,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "env": ["TEST_SHARD"],
+      "outputs": ["coverage/**", ".vitest-reports/**"]
     },
     "test:coverage": {
       "dependsOn": ["^build"],

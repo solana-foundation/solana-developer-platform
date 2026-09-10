@@ -6,6 +6,7 @@ import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { logEvent } from "@/runtime/money-path-events";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
@@ -43,6 +44,10 @@ vi.mock("@/cron/earn-metrics-refresh", () => ({
 
 vi.mock("@/cron/dvp-trades", () => ({
   DVP_TRADES_MONITOR: "sdp-api-reconcile-dvp-trades",
+}));
+
+vi.mock("@/cron/earn-split-swaps", () => ({
+  EARN_SPLIT_SWAPS_MONITOR: "sdp-api-detect-orphaned-earn-split-swaps",
 }));
 
 vi.mock("@/cron/earn-vault-movements", () => ({
@@ -135,6 +140,10 @@ vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
   reconcileSponsorshipBudgets: vi.fn(async () => {}),
 }));
 
+vi.mock("@/services/jobs/detect-orphaned-earn-split-swaps", () => ({
+  detectOrphanedEarnSplitSwaps: vi.fn(async () => {}),
+}));
+
 vi.mock("@/services/jobs/reconcile-earn-vault-movements", () => ({
   reconcileEarnVaultMovements: vi.fn(async () => {}),
 }));
@@ -181,6 +190,7 @@ describe("runCronJob", () => {
     vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
+    vi.mocked(detectOrphanedEarnSplitSwaps).mockReset().mockResolvedValue(undefined);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
     vi.mocked(runDueWorkflowExecutions)
@@ -299,6 +309,12 @@ describe("runCronJob", () => {
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    // The split-swap detector is ungated and runs AFTER the vault sweep, so the
+    // exit reconciler never waits on advisory work (ADR 0002, PRO-1864).
+    expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledExactlyOnceWith(env);
+    expect(vi.mocked(reconcileEarnVaultMovements).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(detectOrphanedEarnSplitSwaps).mock.invocationCallOrder[0]
+    );
     // Managed deployments always have asset profiles on, so the workflow tick runs.
     expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined, {
@@ -394,6 +410,7 @@ describe("runCronJob", () => {
       .mock.calls.filter(([, payload]) => payload.event === "sdp_cron_run");
     expect(runs.map(([, payload]) => payload.monitor).sort()).toEqual([
       "sdp-api-managed-collect-recurring-payments",
+      "sdp-api-managed-detect-orphaned-earn-split-swaps",
       "sdp-api-managed-poll-rings-indexing",
       "sdp-api-managed-reconcile-dvp-trades",
       "sdp-api-managed-reconcile-earn-vault-movements",

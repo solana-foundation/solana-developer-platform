@@ -77,19 +77,15 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     refString: null,
     escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
     escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    sdpSide: "a" as const,
-    tradeKind: "principal" as const,
-    sdpWalletId: "cwlt_leg",
+    counterpartyAccountIdA: null,
+    counterpartyAccountIdB: null,
     status: "funded",
     observedAt: null,
-    sdpLegFundingSignature: null,
-    sdpLegFundingTx: null,
     idempotencyKey: null,
     idempotencyFingerprint: null,
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
-    fundingClaimExpiryHeight: null,
     escrowAAmount: "1000",
     escrowBAmount: "2000",
     escrowAFrozen: false,
@@ -303,14 +299,6 @@ describe("closeDvpTrade", () => {
 
       const figure = (message: string) => Number(/needs about (\d+)/.exec(message)?.[1]);
       expect(figure(cancelCost as string)).toBeLessThan(figure(settleCost as string));
-    });
-
-    // A missing account reads as 0n from getBalance, which is the case this
-    // check exists for: a freshly provisioned authority holds nothing, and
-    // settlement must be refused before a signature is spent.
-    it("blocks when the authority holds nothing", async () => {
-      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(/holds 0 lamports/);
-      expect(sendTransaction).not.toHaveBeenCalled();
     });
   });
 });

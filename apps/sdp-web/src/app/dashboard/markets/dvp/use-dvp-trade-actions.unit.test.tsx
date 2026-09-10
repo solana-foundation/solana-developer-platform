@@ -119,6 +119,30 @@ describe("useDvpTradeActions", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/dashboard/markets/dvp/trades/dvp%2F1/settle");
   });
 
+  // The unified fund endpoint names the leg it moves; the action is the same
+  // whatever the side, so settle and cancel carry no body.
+  it("sends the side as the fund request body", async () => {
+    const fetchMock = respond(200);
+    global.fetch = fetchMock as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+
+    await act(async () => await result.current.act("fund", { side: "b" }));
+
+    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
+    expect(JSON.parse(init.body ?? "{}")).toEqual({ side: "b" });
+  });
+
+  it("sends no body for settle", async () => {
+    const fetchMock = respond(200);
+    global.fetch = fetchMock as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+
+    await act(async () => await result.current.act("settle"));
+
+    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
+    expect(init.body).toBeUndefined();
+  });
+
   // A second attempt after a refusal must not still show the first refusal.
   it("clears the previous error when the action is retried", async () => {
     global.fetch = respond(409, { error: { message: "Nope." } }) as never;

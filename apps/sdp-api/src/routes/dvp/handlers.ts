@@ -1,23 +1,35 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
+import {
+  createCounterpartyAccountsRepository,
+  createDvpTradeRepository,
+  type DvpTradeRow,
+  type DvpTradeSide,
+} from "@/db/repositories";
+import {
+  createPostgresDvpLegFundingClaimRepository,
+  type DvpLegFundingClaim,
+} from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
+  assertFreshApiKeyActive,
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
+import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
-import { fundDvpTradeLegAsParty } from "@/services/dvp/fund-as-party";
-import { resolveFundableLeg } from "@/services/dvp/fund-authorization";
-import { listInboundDvpTrades } from "@/services/dvp/inbound";
+import type { DvpCallerWallet } from "@/services/dvp/inbound";
+import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import {
   observeDvpTradeIfStale,
@@ -29,25 +41,24 @@ import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight"
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
-import type { DvpCloseResolved } from "./policy";
-import { type createDvpTradeSchema, listDvpTradesQuerySchema } from "./schemas";
+import { type DvpCloseResolved, type DvpFundResolved, walletIdIfHoldsAddress } from "./policy";
+import {
+  type createDvpTradeSchema,
+  type fundDvpTradeSchema,
+  listDvpTradesQuerySchema,
+} from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
 /**
  * The custody wallets this caller may see trades for, or null for unrestricted.
- *
- * A trade names the custody wallet that holds SDP's leg, so a wallet-scoped API
- * key reading a trade for a wallet it is not bound to would be reading outside
- * its scope. Returns an EMPTY ARRAY, not null, for a key with no usable
- * bindings — the repository reads that as deny-all.
+ * Empty means deny-all, never "no filter".
  */
 function readableSdpWalletIds(c: AppContext): string[] | null {
   return getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), ["payments:read"]);
 }
 
 interface LegInput {
-  party: string;
   mint: string;
   tokenProgram: string;
   amount: string;
@@ -59,20 +70,106 @@ interface LegInput {
   frozen: boolean | null;
 }
 
+/** One party of a trade, as the caller may see it. */
+interface PartyRef {
+  address: string;
+  /** The creator org's registered counterparty, or null (attribution never crosses orgs; a dead reference reads null). */
+  counterparty: { id: string; label: string } | null;
+  /** The caller's custody wallet holding this address, or null. Truthy = the caller custodies this party. */
+  wallet: DvpCallerWallet | null;
+}
+
 /**
- * One leg, including what the reconciler last saw in its escrow.
- *
- * `funding` is derived here rather than left to each client, because getting it
- * wrong is consequential in both directions and the rules are not obvious:
- * settlement needs `observed >= target` on BOTH legs, and a surplus is a
- * settlement RISK rather than a harmless overpayment — settle refunds it, and
- * on a transfer-hook mint that refund can revert the whole settlement.
- *
- * Null until the reconciler has looked. Null is not zero: "nobody has paid" and
- * "we have not checked" are different answers, and collapsing them would show a
- * brand-new trade as definitively unfunded.
+ * How the caller stands on a trade — display copy only, never stored and
+ * never a term of the trade.
  */
-function legResponse(leg: LegInput) {
+export type DvpTradeKind = "agent" | "principal" | "bilateral";
+
+/**
+ * The caller's standing on a trade: agent (0 sides held), principal (1),
+ * bilateral (2). Display copy only, derived from the same custody map that
+ * decides what the caller can see and fund.
+ *
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @param userA - Side A's party address.
+ * @param userB - Side B's party address.
+ * @returns The standing kind.
+ */
+export function deriveDvpTradeKind(
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
+  userA: string,
+  userB: string
+): DvpTradeKind {
+  const holdsA = callerAddresses.has(userA);
+  const holdsB = callerAddresses.has(userB);
+  if (holdsA && holdsB) {
+    return "bilateral";
+  }
+  if (holdsA || holdsB) {
+    return "principal";
+  }
+  return "agent";
+}
+
+/**
+ * One leg's party object: `wallet` from the request's single custody map,
+ * never a per-row lookup.
+ *
+ * @param address - The party address on the wire.
+ * @param counterpartyAccountId - The creator's counterparty link stored on the row, or null.
+ * @param callerAddresses - The caller's custody wallets (address → wallet identity).
+ * @param counterpartyLabels - Creator-org counterparty display names, keyed by account id.
+ * @returns The party object the response carries.
+ */
+function resolveParty(
+  address: string,
+  counterpartyAccountId: string | null,
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
+  counterpartyLabels: ReadonlyMap<string, string>
+): PartyRef {
+  const wallet = callerAddresses.get(address);
+  if (counterpartyAccountId === null) {
+    return {
+      address,
+      counterparty: null,
+      wallet: wallet === undefined ? null : wallet,
+    };
+  }
+  const label = counterpartyLabels.get(counterpartyAccountId);
+  return {
+    address,
+    counterparty: label === undefined ? null : { id: counterpartyAccountId, label },
+    wallet: wallet === undefined ? null : wallet,
+  };
+}
+
+/**
+ * The transaction that moved a leg into escrow: the receipt, else the live
+ * claim's signature while the funding is in flight, else null. Claims rows
+ * are tenant-scoped to the FUNDING org, so an unseen row simply reads null.
+ */
+function fundingSignatureFor(
+  claims: ReadonlyMap<DvpTradeSide, DvpLegFundingClaim>,
+  side: DvpTradeSide
+): string | null {
+  const claim = claims.get(side);
+  if (claim === undefined) {
+    return null;
+  }
+  if (claim.fundingTx !== null) {
+    return claim.fundingTx;
+  }
+  return claim.signature;
+}
+
+/**
+ * One leg, including what the reconciler last saw in its escrow. Derived here
+ * because the rules are not obvious: settlement needs `observed >= target` on
+ * BOTH legs, a surplus is a settlement RISK (settle refunds it, and on a
+ * transfer-hook mint the refund can revert settlement), and null is "not
+ * checked", not zero.
+ */
+function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | null) {
   const funding =
     leg.observedAmount === null
       ? null
@@ -89,18 +186,11 @@ function legResponse(leg: LegInput) {
         };
 
   return {
-    party: leg.party,
+    party,
     mint: leg.mint,
     tokenProgram: leg.tokenProgram,
     amount: leg.amount,
-    /**
-     * The mint's decimals, or null when the trade predates them being stored.
-     *
-     * Every amount here is base units. Without the scale a reader has no way to
-     * turn 1000000000 back into the 1,000 somebody typed, which is what every
-     * surface reading a trade was showing. Null rather than a default: a wrong
-     * scale misstates an amount by orders of magnitude.
-     */
+    /** The mint's decimals, or null when unknown — a wrong scale would misstate every amount. */
     decimals: leg.decimals,
     /** The mint's symbol, or null when it carries no metadata. Never invented. */
     symbol: leg.symbol,
@@ -108,91 +198,77 @@ function legResponse(leg: LegInput) {
     escrow: leg.escrow,
     settlementDestination: leg.settlementDestination,
     funding,
+    /** Which transaction funded this leg. @see {@link fundingSignatureFor} */
+    fundingSignature,
   };
 }
 
-/**
- * Wire shape of a trade.
- *
- * The escrow addresses are the point of this response. They are what a
- * counterparty pays into, and a plain `TransferChecked` to one is the whole of
- * their integration. Every 64-bit value stays a string, because a JSON number
- * would round it above 2^53.
- */
-/** The custody wallet a trade spends from, as much of it as a reader needs. */
-interface SdpWalletRef {
-  address: string;
-  label: string | null;
+/** Everything a read derives for the caller, resolved ONCE per request. */
+interface TradeReadContext {
+  /** The caller's custody wallets (address → wallet identity). */
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>;
+  /** Creator-org counterparty names; empty on cross-org party reads (attribution is the creator's fact). */
+  counterpartyLabels: ReadonlyMap<string, string>;
+  /** This trade's funding claims, keyed by side. RLS-scoped to the funding org. */
+  fundingClaims: ReadonlyMap<DvpTradeSide, DvpLegFundingClaim>;
 }
 
 /**
- * Resolves the custody wallets a set of trades funds from.
- *
- * One query for the whole page rather than one per row. Missing entries are
- * simply absent: a wallet deactivated since the trade was created is a real
- * state, and the surface says the trade's wallet is no longer available rather
- * than inventing an address for it.
+ * Wire shape of a trade. The escrows are what a counterparty pays into;
+ * every 64-bit value stays a string (a JSON number rounds above 2^53).
+ * The caller's standing (`party.wallet`, `kind`) is derived from
+ * {@link TradeReadContext} and never stored.
  */
-async function readSdpWallets(env: Env, walletIds: string[]): Promise<Map<string, SdpWalletRef>> {
-  const unique = [...new Set(walletIds.filter(Boolean))];
-  if (unique.length === 0) {
-    return new Map();
-  }
-  const placeholders = unique.map(() => "?").join(", ");
-  const result = await getDb(env)
-    .prepare(`SELECT id, public_key, label FROM custody_wallets WHERE id IN (${placeholders})`)
-    .bind(...unique)
-    .all<{ id: string; public_key: string; label: string | null }>();
-
-  return new Map(
-    (result.results ?? []).map((row) => [row.id, { address: row.public_key, label: row.label }])
-  );
-}
-
-function toTradeResponse(row: DvpTradeRow, sdpWallet?: SdpWalletRef) {
+function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
   return {
     id: row.id,
     status: row.status,
     swapDvp: row.swapDvp,
     settlementAuthority: row.settlementAuthority,
     legs: {
-      a: legResponse({
-        party: row.userA,
-        mint: row.mintA,
-        tokenProgram: row.tokenProgramA,
-        amount: row.amountA,
-        escrow: row.escrowA,
-        settlementDestination: row.userASettlementDestination,
-        observedAmount: row.escrowAAmount,
-        decimals: row.decimalsA,
-        symbol: row.symbolA,
-        frozen: row.escrowAFrozen,
-      }),
-      b: legResponse({
-        party: row.userB,
-        mint: row.mintB,
-        tokenProgram: row.tokenProgramB,
-        amount: row.amountB,
-        escrow: row.escrowB,
-        settlementDestination: row.userBSettlementDestination,
-        observedAmount: row.escrowBAmount,
-        decimals: row.decimalsB,
-        symbol: row.symbolB,
-        frozen: row.escrowBFrozen,
-      }),
+      a: legResponse(
+        {
+          mint: row.mintA,
+          tokenProgram: row.tokenProgramA,
+          amount: row.amountA,
+          escrow: row.escrowA,
+          settlementDestination: row.userASettlementDestination,
+          observedAmount: row.escrowAAmount,
+          decimals: row.decimalsA,
+          symbol: row.symbolA,
+          frozen: row.escrowAFrozen,
+        },
+        resolveParty(
+          row.userA,
+          row.counterpartyAccountIdA,
+          context.callerAddresses,
+          context.counterpartyLabels
+        ),
+        fundingSignatureFor(context.fundingClaims, "a")
+      ),
+      b: legResponse(
+        {
+          mint: row.mintB,
+          tokenProgram: row.tokenProgramB,
+          amount: row.amountB,
+          escrow: row.escrowB,
+          settlementDestination: row.userBSettlementDestination,
+          observedAmount: row.escrowBAmount,
+          decimals: row.decimalsB,
+          symbol: row.symbolB,
+          frozen: row.escrowBFrozen,
+        },
+        resolveParty(
+          row.userB,
+          row.counterpartyAccountIdB,
+          context.callerAddresses,
+          context.counterpartyLabels
+        ),
+        fundingSignatureFor(context.fundingClaims, "b")
+      ),
     },
-    sdpSide: row.sdpSide,
-    /** Whether SDP delivers a leg, or only set the trade up. */
-    tradeKind: row.tradeKind,
-    /**
-     * The wallet this organization's leg is funded from.
-     *
-     * Absent from this response until now, which meant the only wallet-shaped
-     * address on a trade page was the settlement authority — a system account
-     * with signing power over the trade, sitting where a reader looks for their
-     * own wallet. It was mistaken for exactly that.
-     */
-    sdpWallet: sdpWallet ?? null,
+    /** The caller's standing, derived per caller. @see {@link deriveDvpTradeKind} */
+    kind: deriveDvpTradeKind(context.callerAddresses, row.userA, row.userB),
     nonce: row.nonce,
     expiryTimestamp: row.expiryTimestamp,
     earliestSettlementTimestamp: row.earliestSettlementTimestamp,
@@ -200,19 +276,57 @@ function toTradeResponse(row: DvpTradeRow, sdpWallet?: SdpWalletRef) {
     createSignature: row.createSignature,
     /** The transaction that closed it, so settlement is verifiable after the fact. */
     closeSignature: row.closeSignature,
-    /**
-     * What moved SDP's leg into escrow.
-     *
-     * The receipt, falling back to a live claim so a funding still in flight
-     * links to the transaction it is waiting on. Reading the claim ALONE — as
-     * this did — meant the link showed for the minute the claim lived and then
-     * disappeared from a leg that had funded successfully.
-     */
-    fundingSignature: row.sdpLegFundingTx ?? row.sdpLegFundingSignature,
     observedAt: row.observedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Display names for the counterparties a set of trades attributes to — one
+ * batched query for the page. Creator-org reads only; an archived account
+ * simply does not resolve, and answers null.
+ */
+async function readCounterpartyLabels(
+  env: Env,
+  organizationId: string,
+  projectId: string,
+  trades: DvpTradeRow[]
+): Promise<Map<string, string>> {
+  const accountIds = [
+    ...new Set(
+      trades
+        .flatMap((trade) => [trade.counterpartyAccountIdA, trade.counterpartyAccountIdB])
+        .filter((id): id is string => id !== null)
+    ),
+  ];
+  if (accountIds.length === 0) {
+    return new Map();
+  }
+  const { rows } = await createCounterpartyAccountsRepository(
+    env,
+    createTenantScope({ organizationId, projectId })
+  ).listBatchRecipients({
+    organizationId,
+    projectId,
+    accountIds,
+    limit: accountIds.length,
+    offset: 0,
+  });
+  return new Map(rows.map((row) => [row.account_id, row.counterparty_display_name]));
+}
+
+/**
+ * The funding claims on one trade, keyed by side. One query per trade (N for
+ * a page, acceptable at the documented limit of 100); not widened into a batch
+ * because claim rows are RLS-scoped to the funding org, and unseen means null.
+ */
+async function readFundingClaims(
+  env: Env,
+  tradeId: string
+): Promise<Map<DvpTradeSide, DvpLegFundingClaim>> {
+  const claims = await createPostgresDvpLegFundingClaimRepository(getDb(env)).listForTrade(tradeId);
+  return new Map(claims.map((claim) => [claim.side, claim]));
 }
 
 export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeSchema>) => {
@@ -220,28 +334,49 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  // `payments:write` alone only says the key may write. It does not say which
-  // wallet, and this wallet pays the fee and the escrow rent and delivers SDP's
-  // leg. Re-read from the database rather than trusting the request's auth
-  // context, which may be up to an hour of cached KV — the same guard Payments
-  // uses before any money-moving write.
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, body.sdpWalletId, [
-    "payments:write",
+  // A wallet named here either spends fee+rent (the payer) or is staged for
+  // funding (a party slot), so the key's binding on it is re-read from the DB
+  // (never the hour-old auth snapshot). The DEFAULTED payer — the settlement
+  // wallet — is project infrastructure every trade uses and needs no per-key
+  // assertion; key/wallet bindings gate caller-chosen wallets only.
+  // Liveness first, for EVERY key: with a defaulted payer and pasted-address
+  // slots no wallet is named below, yet create provisions the settlement
+  // wallet and spends its rent — a revoked key must not get that far on a
+  // stale snapshot.
+  await assertFreshApiKeyActive(getDb(c.env), auth);
+  // A wallet-scoped key only SEES trades its bound wallets are party to, and
+  // visibility filters on the READ scope — a binding can hold payments:write
+  // without payments:read, so the guard checks read admission, not write. A
+  // `{walletId}` slot is the explicit ownership claim; a pasted address that
+  // happens to be a bound wallet's is not, and the remedy is naming it.
+  const readAdmittedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
+    "payments:read",
   ]);
+  if (
+    readAdmittedWalletIds !== null &&
+    !("walletId" in body.partyA && readAdmittedWalletIds.includes(body.partyA.walletId)) &&
+    !("walletId" in body.partyB && readAdmittedWalletIds.includes(body.partyB.walletId))
+  ) {
+    throw forbidden(
+      "A wallet-scoped key must name one of its wallets with payments:read as a party (a walletId slot) — the trade would otherwise be invisible to this key"
+    );
+  }
+  const assertedWalletIds = [
+    ...(body.payerWalletId ? [body.payerWalletId] : []),
+    ...("walletId" in body.partyA ? [body.partyA.walletId] : []),
+    ...("walletId" in body.partyB ? [body.partyB.walletId] : []),
+  ];
+  for (const walletId of assertedWalletIds) {
+    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, walletId, ["payments:write"]);
+  }
 
   const trade = await createDvpTrade(c.env, {
     organizationId: auth.organizationId,
     projectId,
-    sdpWalletId: body.sdpWalletId,
-    // Omitted kind is principal, so callers written before agent trades
-    // existed keep working unchanged.
-    ...(body.tradeKind === "agent"
-      ? { tradeKind: "agent" as const, partyA: body.partyA, partyB: body.partyB }
-      : {
-          tradeKind: "principal" as const,
-          sdpSide: body.sdpSide,
-          counterparty: body.counterparty,
-        }),
+    partyA: body.partyA,
+    partyB: body.partyB,
+    payerWalletId:
+      body.payerWalletId === null || body.payerWalletId === undefined ? null : body.payerWalletId,
     mintA: body.mintA,
     tokenProgramA: body.tokenProgramA,
     mintB: body.mintB,
@@ -265,17 +400,30 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
   });
 
-  const wallets = await readSdpWallets(c.env, [trade.sdpWalletId]);
-  return success(c, { trade: toTradeResponse(trade, wallets.get(trade.sdpWalletId)) }, 201);
+  // The response derives everything from the caller's viewpoint: one custody
+  // map and one labels batch per request. A just-created trade has no funding
+  // claims — claims only appear when somebody funds it — so none are read.
+  const [callerAddresses, counterpartyLabels] = await Promise.all([
+    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+    readCounterpartyLabels(c.env, auth.organizationId, projectId, [trade]),
+  ]);
+  return success(
+    c,
+    {
+      trade: toTradeResponse(trade, {
+        callerAddresses,
+        counterpartyLabels,
+        fundingClaims: new Map<DvpTradeSide, DvpLegFundingClaim>(),
+      }),
+    },
+    201
+  );
 };
 
 /**
- * Settles or cancels a trade.
- *
- * The policy gate has already run by the time this executes: a denied close is
- * a 403 and one needing approval is a 202, neither of which reaches here. On an
- * approved replay it runs again with the same resolved trade, which is why the
- * gate resolves it rather than the handler.
+ * Settles or cancels a trade. The policy gate has already run (denied = 403,
+ * approval needed = 202); on an approved replay it re-runs with the same
+ * resolved trade, which is why the gate resolves it rather than the handler.
  */
 const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
@@ -283,68 +431,99 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
-  // Re-read the binding from the database before anything irreversible.
-  //
-  // The scope used by the gate came from the request's auth context, which can
-  // be up to an hour of cached KV. A binding revoked inside that window would
-  // still resolve the trade and still settle it — and settle moves both legs at
-  // once and closes the trade permanently, so a stale read here is not a
-  // read-authorization slip, it is an irreversible spend by a revoked key.
-  // Same guard Payments uses before a money-moving write, and the same one
-  // create already runs.
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
-    "payments:write",
-  ]);
+  // Re-read the binding before anything irreversible: the gate's auth context
+  // can be an hour stale, and settling with a revoked key is an irreversible
+  // two-leg spend, not a read slip. The wallet asserted is the SETTLEMENT
+  // wallet — the one that signs; the liveness assert covers keys the
+  // wallet-scoped check skips.
+  await assertFreshApiKeyActive(getDb(c.env), getAuth(c));
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    getAuth(c),
+    resolved.settlement.custodyWalletId,
+    ["payments:write"]
+  );
 
   const result = await closeDvpTrade(c, resolved.trade, action);
 
-  // We broadcast it, so we know what it was. Left to the sweep this becomes
-  // `closed_unknown` — an honest answer to "the account vanished, why?", but a
-  // silly one to give about a settlement the product just performed itself.
+  // We broadcast it, so we know the outcome — not `closed_unknown` from the sweep.
   await createDvpTradeRepository(c.env).recordClose(
     resolved.trade.id,
     action === "settle" ? "settled" : "cancelled",
     result.signature
   );
 
-  // Same reason: settling closes both escrows and the trade account, and the
-  // page should show that when it happens rather than a minute later.
   await observeDvpTradeNow(c.env, resolved.trade, result.signature);
 
   return success(c, {
     tradeId: resolved.trade.id,
     action,
     signature: result.signature,
-    // Named because they cost rent from the settlement wallet, and because a
-    // caller seeing accounts appear should know why.
     createdAccounts: result.createdAccounts,
   });
 };
 
 /**
- * Funds SDP's leg. Same gate as settle and cancel — it spends from a custody
- * wallet, and once the escrow holds the tokens only settle, cancel or reclaim
- * gets them back.
+ * Funds one side of a trade. Same gate as settle and cancel: it spends from a
+ * custody wallet, and the right to fund side X is holding an active custody
+ * wallet whose public key equals `user_x`.
  */
-export const fundTrade = async (c: AppContext) => {
-  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
+export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const body = c.req.valid("json");
+  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpFundResolved>(c);
   if (!resolved.trade) {
     throw notFound("DvP trade not found");
   }
+  const trade = resolved.trade;
 
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), resolved.trade.sdpWalletId, [
+  if (!resolved.funding) {
+    // Not "not found": the caller can see this trade, so pretending it does not
+    // exist would be a worse answer than the true one. It names two addresses
+    // and they hold the key to neither.
+    throw forbidden(
+      `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${body.side} party address`
+    );
+  }
+  const { side } = resolved.funding;
+  const partyAddress = side === "a" ? trade.userA : trade.userB;
+
+  // PRE-BROADCAST RE-READ — the ticket's authorization invariant: re-derive
+  // the wallet and re-assert the key's binding from the database (the gate's
+  // resolution and auth context can both be an hour stale). Omitted
+  // `walletId`, that is the custody lookup on the party address; explicit, it
+  // is that the named wallet still holds the address (naming narrows).
+  const rereadWalletId =
+    body.walletId !== null && body.walletId !== undefined
+      ? await walletIdIfHoldsAddress(c, body.walletId, partyAddress)
+      : await custodyWalletForParty(
+          c.env,
+          { organizationId: auth.organizationId, projectId },
+          partyAddress,
+          getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
+        );
+  if (rereadWalletId === null) {
+    throw forbidden(
+      `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
+    );
+  }
+  await assertFreshApiKeyActive(getDb(c.env), auth);
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, rereadWalletId, [
     "payments:write",
   ]);
 
-  const result = await fundDvpTradeLeg(c, resolved.trade);
+  const result = await fundDvpTradeLeg(c, trade, {
+    side,
+    custodyWalletId: rereadWalletId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
 
-  // The tokens have moved. Waiting for the once-a-minute sweep to say so left
-  // the page reading "Waiting on funds" straight after a successful transfer,
-  // which is indistinguishable from it having failed.
-  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+  await observeDvpTradeNow(c.env, trade, result.signature);
 
   return success(c, {
-    tradeId: resolved.trade.id,
+    tradeId: trade.id,
     leg: result.leg,
     amount: result.amount,
     signature: result.signature,
@@ -355,61 +534,12 @@ export const settleTrade = closeTrade("settle");
 export const cancelTrade = closeTrade("cancel");
 
 /**
- * Trades somebody else created that are waiting on this caller.
- *
- * No parameters at all, deliberately. The filter is the caller's own custody
- * wallet addresses, resolved server-side: a party address is the only input
- * this would otherwise take, and accepting one would make the endpoint an
- * oracle for enumerating the trades of any address on Solana.
- *
- * Its own serializer, `toDvpInboundResponse`, rather than the one the rest of
- * this file uses. That one speaks to the organization that created the trade
- * and carries fields belonging to it.
+ * Trades somebody else created that are waiting on this caller. No parameters,
+ * deliberately: the filter is the caller's own custody addresses, resolved
+ * server-side — accepting a party address would make this an oracle for any
+ * Solana address's trades. Uses its own serializer because `toTradeResponse`
+ * carries the creating org's fields.
  */
-/**
- * A party funding its own leg of a trade another organization created.
- *
- * Separate from `fundTrade` because the two answer authorization differently:
- * that one asks whether the caller owns the trade, this one asks whether the
- * caller holds the key to a party address on it. Folding them together would
- * mean one endpoint with two authorization rules and a branch deciding which
- * applies, on a route that moves money.
- */
-export const fundTradeAsParty = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
-  if (!resolved.trade) {
-    throw notFound("DvP trade not found");
-  }
-
-  // Optional, and read tolerantly because the route has never required a body.
-  // It only matters when the caller holds BOTH party addresses, which happens
-  // on an agent trade set up for one organization: without it leg A always
-  // wins and leg B can never be funded through the product.
-  const body = (await c.req.json().catch(() => ({}))) as { side?: unknown };
-  const preferredSide = body.side === "a" || body.side === "b" ? body.side : undefined;
-
-  const result = await fundDvpTradeLegAsParty(c, resolved.trade, {
-    organizationId: auth.organizationId,
-    projectId,
-    auth,
-    preferredSide,
-  });
-
-  // Same reason as the other funding path: the sweep runs once a minute and the
-  // page would otherwise read "Waiting on funds" straight after a transfer that
-  // worked, which is indistinguishable from one that did not.
-  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
-
-  return success(c, {
-    tradeId: resolved.trade.id,
-    leg: result.leg,
-    amount: result.amount,
-    signature: result.signature,
-  });
-};
-
 export const listInboundTrades = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -420,16 +550,34 @@ export const listInboundTrades = async (c: AppContext) => {
     auth,
   });
 
-  return success(c, { trades: inbound.map(toDvpInboundResponse) });
+  return success(c, {
+    trades: inbound.trades.map((trade) => toDvpInboundResponse(trade, inbound.callerAddresses)),
+  });
 };
 
 export const listTrades = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const query = listDvpTradesQuerySchema.safeParse({ limit: c.req.query("limit") });
+  const query = listDvpTradesQuerySchema.safeParse({
+    limit: c.req.query("limit"),
+    status: c.req.query("status"),
+    q: c.req.query("q"),
+  });
   if (!query.success) {
-    throw badRequest("Invalid limit: expected an integer between 1 and 100");
+    const issue = query.error.issues[0];
+    // A bad status value names itself and the allowed set, the issuance
+    // transactions convention; every other failure is the limit's message.
+    if (issue.path[0] === "status") {
+      throw badRequest("Invalid status query parameter", {
+        allowedStatuses: DVP_TRADE_STATUSES,
+      });
+    }
+    throw badRequest(
+      issue.path[0] === "q"
+        ? "Invalid q query parameter: expected a search string of 2 to 100 characters"
+        : "Invalid limit: expected an integer between 1 and 100"
+    );
   }
 
   const trades = await createDvpTradeRepository(c.env).listByProject(
@@ -438,29 +586,35 @@ export const listTrades = async (c: AppContext) => {
       projectId,
       sdpWalletIds: readableSdpWalletIds(c),
     },
+    {
+      statuses: query.data.status === undefined ? null : query.data.status,
+      q: query.data.q === undefined || query.data.q === "" ? null : query.data.q,
+    },
     query.data.limit
   );
 
-  const wallets = await readSdpWallets(
-    c.env,
-    trades.map((trade) => trade.sdpWalletId)
-  );
+  // Resolved once for the page; claims stay index-aligned with the trades.
+  const [callerAddresses, counterpartyLabels, fundingClaimsByTrade] = await Promise.all([
+    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+    readCounterpartyLabels(c.env, auth.organizationId, projectId, trades),
+    Promise.all(trades.map((trade) => readFundingClaims(c.env, trade.id))),
+  ]);
   return success(c, {
-    trades: trades.map((trade) => toTradeResponse(trade, wallets.get(trade.sdpWalletId))),
+    trades: trades.map((trade, index) =>
+      toTradeResponse(trade, {
+        callerAddresses,
+        counterpartyLabels,
+        fundingClaims: fundingClaimsByTrade[index],
+      })
+    ),
   });
 };
 
 /**
  * Whether the settlement authority can pay for the close this trade will need.
- *
- * Read on the detail view rather than left for the attempt, because the failure
- * it prevents is silent until it happens: the authority is provisioned empty,
- * it pays the fee and the rent for every account settlement creates, and the
- * first settle in a project failed in simulation with an error naming neither
- * the account nor the amount.
- *
- * Never fatal. This is a readiness hint on a page that has to render either
- * way; an RPC that will not answer must not take the trade with it.
+ * Read on the detail view rather than left for the attempt (the failure is
+ * silent until paid for). Never fatal: an RPC that will not answer must not
+ * take the trade with it.
  */
 async function readSettlementReadiness(
   c: AppContext,
@@ -475,9 +629,7 @@ async function readSettlementReadiness(
       return null;
     }
     const rpc = solanaRpc.createRpc(c.env);
-    // Four accounts is settlement's worst case, which is the number worth
-    // quoting: telling somebody they are ready and then asking for more mid-flow
-    // is worse than asking for the ceiling once.
+    // Settlement's worst case (4 accounts) is the number worth quoting: the ceiling once beats more mid-flow.
     const funding = await findSettlementFundingShortfall(rpc, settlement.address, 4);
     return {
       address: settlement.address,
@@ -498,9 +650,7 @@ export const getTrade = async (c: AppContext) => {
     throw notFound("DvP trade not found");
   }
 
-  // A trade outside the key's wallet scope is 404, not 403. The scope filter is
-  // part of the lookup, so an unauthorized id is indistinguishable from an
-  // unknown one and nothing leaks about which trades exist.
+  // Out-of-scope trades 404 like unknown ones, so nothing leaks about which exist.
   const trade = await createDvpTradeRepository(c.env).getById(
     {
       organizationId: auth.organizationId,
@@ -509,102 +659,111 @@ export const getTrade = async (c: AppContext) => {
     },
     tradeId
   );
-  // Not ours, but possibly ours to READ: a party named on a trade another
-  // organization created can see it (0089), and discovery puts a link to this
-  // page in front of them. Without this fallback that link is a 404 — the
-  // product tells somebody a trade is waiting on them and then denies it
-  // exists.
+  // Not ours, but possibly ours to READ: a party on another org's trade can
+  // see it (0089) — without this fallback the inbound link would 404.
   if (!trade) {
     return respondWithPartyTrade(c, tradeId);
   }
 
-  // The sweep runs once a minute. That is the right cadence for a background
-  // job and the wrong one for somebody watching this page wait on a deposit, so
-  // a request for an open trade pays for a fresh reading when the stored one has
-  // aged out. Closed trades are answered from the row: they cannot change.
+  // Re-read open trades whose stored reading aged out; closed ones cannot change.
   const observed = await observeDvpTradeIfStale(c.env, trade);
 
-  const [wallets, settlementReadiness] = await Promise.all([
-    readSdpWallets(c.env, [observed.sdpWalletId]),
-    readSettlementReadiness(c, observed),
-  ]);
+  const [callerAddresses, counterpartyLabels, fundingClaims, settlementReadiness] =
+    await Promise.all([
+      callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+      readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
+      readFundingClaims(c.env, observed.id),
+      readSettlementReadiness(c, observed),
+    ]);
   return success(c, {
     trade: {
-      ...toTradeResponse(observed, wallets.get(observed.sdpWalletId)),
+      ...toTradeResponse(observed, { callerAddresses, counterpartyLabels, fundingClaims }),
       settlementReadiness,
     },
   });
 };
 
 /**
- * The same page, for a party who is not the trade's author.
- *
- * Answers in the SHAPE the detail page already reads, with everything belonging
- * to the creating organization withheld — rather than a second response the UI
- * would need a second branch for. What is withheld is what
- * `routes/dvp/inbound-response.ts` withholds and for the same reason: the terms
- * are on chain and theirs to read, the wallet, the reference and the settlement
- * readiness are ours.
- *
- * A 404 when they are not a party, matching the read above: an id they have no
- * claim on must be indistinguishable from one that does not exist.
+ * Which side of another org's trade this caller is party to, if any: a side
+ * is the caller's iff an active custody wallet of theirs holds its party
+ * address. Answers for the ORGANIZATION; callers layer key scope on top.
+ */
+async function resolveYourSide(
+  c: AppContext,
+  trade: DvpTradeRow,
+  projectId: string
+): Promise<{ side: "a" | "b"; custodyWalletId: string } | null> {
+  const org = { organizationId: getAuth(c).organizationId, projectId };
+  const walletForA = await custodyWalletForParty(c.env, org, trade.userA, null);
+  if (walletForA !== null) {
+    return { side: "a", custodyWalletId: walletForA };
+  }
+  const walletForB = await custodyWalletForParty(c.env, org, trade.userB, null);
+  if (walletForB !== null) {
+    return { side: "b", custodyWalletId: walletForB };
+  }
+  return null;
+}
+
+/**
+ * The same page, for a party who is not the trade's author: the detail
+ * shape with the creating org's facts (attribution, funding claims,
+ * settlement readiness) withheld. 404 when they are not a party, matching
+ * the read above.
  */
 async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
   const trade = await createDvpTradeRepository(c.env).getByIdAsParty(tradeId);
-  // The 0089 policy already refuses a trade naming nobody here, so a row coming
-  // back means a wallet of theirs is on it. Resolving WHICH leg is still needed
-  // and still theirs to be told.
   if (!trade) {
     throw notFound("DvP trade not found");
   }
 
-  // This path is for a trade ANOTHER organization created. Reaching it for one
-  // of our own means the scoped lookup above already refused it, and the only
-  // way that happens is a wallet-scoped key asking for a wallet it is not bound
-  // to. Answering here would launder the trade straight past its own scope.
-  //
-  // The query behind `getByIdAsParty` is deliberately unfiltered and leans on
-  // RLS 0089 to decide who may see the row. That is correct in a deployed
-  // environment and enforces nothing locally, where the API connects as a role
-  // that bypasses RLS, so this cannot be the only thing standing between a key
-  // and another wallet's trade.
+  // This path is for a trade ANOTHER org created; reaching it for our own is
+  // the scoped lookup refusing a wallet-scoped key, and answering here would
+  // launder the trade past its scope. `getByIdAsParty` is deliberately
+  // unfiltered and leans on RLS 0089, which enforces nothing in tests, so
+  // BOTH this guard and the key-scope check below are load-bearing.
   if (trade.organizationId === auth.organizationId) {
     throw notFound("DvP trade not found");
   }
 
-  const fundable = await resolveFundableLeg(c.env, trade, {
-    organizationId: auth.organizationId,
-    projectId,
-    auth,
-  });
+  const fundable = await resolveYourSide(c, trade, projectId);
   if (!fundable) {
     throw notFound("DvP trade not found");
   }
 
-  // The party leg resolves against the ORGANIZATION's addresses, which is a
-  // wider question than the one the key is allowed to ask. Without this the
-  // scope filter on the lookup above is decorative: it refuses the trade and
-  // this fallback hands the same trade straight back to a key bound to a
-  // different wallet. Same 404 as everywhere else, so the two paths cannot be
-  // told apart from outside.
+  // Key-scope filtering on the ORGANIZATION-level resolution, or the fallback
+  // would hand the trade to a key bound to a different wallet. Same 404.
   const scopedWalletIds = readableSdpWalletIds(c);
   if (scopedWalletIds !== null && !scopedWalletIds.includes(fundable.custodyWalletId)) {
     throw notFound("DvP trade not found");
   }
 
-  // Read, not recorded. Persisting it would be an UPDATE on another
-  // organization's row, which 0089 refuses by design.
+  // Read, not recorded: persisting would UPDATE another org's row (0089).
   const observed = await observeDvpTradeWithoutRecording(c.env, trade);
+
+  // Derived from the caller's OWN wallets, like any other view. Labels are
+  // never resolved (attribution is the creator's fact); claims ARE read, and
+  // claim-row RLS scopes them to the funding org.
+  const [callerAddresses, fundingClaims] = await Promise.all([
+    callerPartyAddresses(c.env, {
+      organizationId: auth.organizationId,
+      projectId,
+      auth,
+    }),
+    readFundingClaims(c.env, observed.id),
+  ]);
 
   return success(c, {
     trade: {
-      ...toTradeResponse(observed, undefined),
-      // Theirs, not ours. `toTradeResponse` speaks to the creating org and
-      // carries these; a party gets the trade without them.
-      sdpWallet: null,
+      ...toTradeResponse(observed, {
+        callerAddresses,
+        counterpartyLabels: new Map<string, string>(),
+        fundingClaims,
+      }),
+      // Theirs, not ours: a party gets the trade without the creator's fields.
       refString: null,
       settlementReadiness: null,
       /** Which leg is the reader's, so the page can say so. */
@@ -614,14 +773,8 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
 }
 
 /**
- * Inspects a mint so the create form can take a human amount for it.
- *
- * Read-only and permissionless beyond `payments:read`: it reports public chain
- * state about an address the caller already has. The value is that it answers
- * BEFORE a trade is signed — decimals, so the amount field can convert rather
- * than demand base units, and eligibility, so a mint DvP refuses is named in
- * the form instead of surfacing as a failed create that already cost a
- * signature.
+ * Inspects a mint so the create form can take a human amount for it: public
+ * chain state, answered BEFORE a trade is signed or costs a signature.
  */
 export const inspectMint = async (c: AppContext) => {
   const mint = c.req.param("mint");

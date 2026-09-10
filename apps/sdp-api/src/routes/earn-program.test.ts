@@ -1330,6 +1330,7 @@ describe("Earn program — session callers and environment isolation", () => {
     await expect(
       repo.listProviderWallets({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
         environment: "sandbox",
         limit: 20,
         offset: 0,
@@ -2541,7 +2542,81 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     expect(operations).toHaveLength(1);
   });
 
-  it("re-answers the same hold when the retry arrives under a sibling project", async () => {
+  it("refuses a create whose replayed program belongs to a sibling project (HOO-1563)", async () => {
+    // The create key is derived organization-wide on purpose — narrowing it
+    // would give a retry spanning a deploy a NEW key, and the provider answers a
+    // new key with a SECOND wallet holding real funds. So a sibling project can
+    // still land on the first project's program, and the boundary is enforced
+    // here: say the key is taken rather than hand back a program it cannot use.
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    await seedGroundStrategy();
+    const createWallet = vi
+      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
+    stubProgramReads();
+    const callerKey = crypto.randomUUID();
+
+    const created = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: callerKey })
+    );
+    expect(created.status).toBe(201);
+
+    const sibling = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      createProgramBody({ requestId: callerKey }),
+      { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` }
+    );
+    expect(sibling.status).toBe(409);
+    const body = (await sibling.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("another project");
+
+    // Still exactly one program: the refusal happens on the link row, so the
+    // provider was asked once for this key and no second wallet was persisted.
+    expect(createWallet).toHaveBeenCalledTimes(2);
+    const rows = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM earn_provider_wallets")
+      .first<{ count: number }>();
+    expect(rows?.count).toBe(1);
+  });
+
+  it("hides the program from a sibling project on every per-program route (HOO-1563)", async () => {
+    // The decision is that the project is the boundary for deposits, withdrawals
+    // and previews alike, so it is enforced where every per-program route
+    // resolves its row rather than route by route.
+    await seedAuth();
+    await seedSiblingProjectAuth();
+    const program = await seedProgramWallet();
+    const siblingAuth = { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` };
+
+    const read = await requestEarn("GET", programPath(program.id), undefined, siblingAuth);
+    expect(read.status).toBe(404);
+
+    const deposits = await requestEarn(
+      "GET",
+      programPath(program.id, "/deposits"),
+      undefined,
+      siblingAuth
+    );
+    expect(deposits.status).toBe(404);
+
+    const preview = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawal-preview"),
+      { amountUsd: "25.50", token: "usdc" },
+      siblingAuth
+    );
+    expect(preview.status).toBe(404);
+  });
+
+  it("refuses a sibling project's key on the same program (HOO-1563)", async () => {
+    // The project is the boundary: a key scoped to a sibling project cannot
+    // reach this program at all, so it can never open a second approval for one
+    // payout. 404, not 403 — a caller who may not see the program must not
+    // learn that it exists.
     await seedAuth();
     await seedSiblingProjectAuth();
     const program = await seedProgramWallet();
@@ -2556,15 +2631,10 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
     expect(held.status).toBe(202);
 
-    // A program is addressed per (organization, environment) and its payout
-    // ledger is keyed by organization + provider wallet + request id, so the
-    // hold must answer the same key from any project in the organization. A
-    // project-scoped lookup would miss it and open a SECOND approval for one
-    // payout — two approvers, each able to release it.
-    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
+    const sibling = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
       Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}`,
     });
-    expect(retried.status).toBe(202);
+    expect(sibling.status).toBe(404);
 
     expect(createWithdrawal).not.toHaveBeenCalled();
     await expect(countMovements()).resolves.toBe(0);

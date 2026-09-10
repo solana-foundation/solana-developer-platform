@@ -17,3 +17,4 @@ export {
   scrubTelemetryString,
 } from "./scrub";
 export { type SentryScrubbingHooks, sentryScrubbingHooks } from "./sentry";
+export { summarizeUpstreamErrorBody } from "./upstream-error";

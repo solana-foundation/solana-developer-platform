@@ -73,6 +73,8 @@ export interface ProvisionRingDeps {
    * table.
    */
   readonly recordLookupTable?: (lookupTableAddress: string) => Promise<void>;
+  /** Carries the Ring RPC leg, so a caller-supplied guarded fetch covers it. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -456,7 +458,10 @@ async function requestAuditorKey(
   authority: Address
 ) {
   const genesisHash = await deps.client.solanaRpc.getGenesisHash().send();
-  return new RingRpc(deps.ringRpcUrl).createAuditorKey({
+  return new RingRpc(
+    deps.ringRpcUrl,
+    deps.fetch === undefined ? undefined : { fetch: deps.fetch }
+  ).createAuditorKey({
     ringProgramId,
     // The genesis hash pins the cluster, so a key minted for devnet cannot be
     // replayed into a mainnet config.

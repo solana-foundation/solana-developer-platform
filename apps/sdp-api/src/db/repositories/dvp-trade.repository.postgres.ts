@@ -2,12 +2,11 @@ import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
 import type {
   DvpTradeInsert,
-  DvpTradeKind,
+  DvpTradeListFilters,
   DvpTradeObservationUpdate,
   DvpTradeRepository,
   DvpTradeRow,
   DvpTradeScope,
-  DvpTradeSide,
   DvpTradeStatus,
 } from "./dvp-trade.repository";
 
@@ -24,6 +23,11 @@ function assertString(value: unknown, field: string): string {
     throw new Error(`DvP trade ${field} is missing`);
   }
   return value;
+}
+
+/** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
@@ -45,8 +49,6 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
     decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
     closeSignature: typeof row.close_signature === "string" ? signature(row.close_signature) : null,
-    fundingClaimExpiryHeight:
-      typeof row.funding_claim_expiry_height === "string" ? row.funding_claim_expiry_height : null,
     symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
     symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
     tokenProgramB: address(assertString(row.token_program_b, "token_program_b")),
@@ -69,18 +71,13 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     escrowA: address(assertString(row.escrow_a, "escrow_a")),
     escrowB: address(assertString(row.escrow_b, "escrow_b")),
 
-    sdpSide: typeof row.sdp_side === "string" ? (row.sdp_side as DvpTradeSide) : null,
-    tradeKind: assertString(row.trade_kind, "trade_kind") as DvpTradeKind,
-    sdpWalletId: assertString(row.sdp_wallet_id, "sdp_wallet_id"),
+    counterpartyAccountIdA:
+      typeof row.counterparty_account_id_a === "string" ? row.counterparty_account_id_a : null,
+    counterpartyAccountIdB:
+      typeof row.counterparty_account_id_b === "string" ? row.counterparty_account_id_b : null,
 
     status: row.status as DvpTradeStatus,
     observedAt: typeof row.observed_at === "string" ? row.observed_at : null,
-    sdpLegFundingSignature:
-      typeof row.sdp_leg_funding_signature === "string"
-        ? signature(row.sdp_leg_funding_signature)
-        : null,
-    sdpLegFundingTx:
-      typeof row.sdp_leg_funding_tx === "string" ? signature(row.sdp_leg_funding_tx) : null,
     idempotencyKey: typeof row.idempotency_key === "string" ? row.idempotency_key : null,
     idempotencyFingerprint:
       typeof row.idempotency_fingerprint === "string" ? row.idempotency_fingerprint : null,
@@ -105,21 +102,19 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          decimals_a, decimals_b, symbol_a, symbol_b,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
-         escrow_a, escrow_b, sdp_side, trade_kind, sdp_wallet_id,
-         status, observed_at, sdp_leg_funding_signature, sdp_leg_funding_tx,
+         escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
+         status, observed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
-         funding_claim_expiry_height,
          escrow_a_amount, escrow_b_amount, escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
 /**
- * The wallet allowlist clause, as SQL plus its bindings.
- *
- * An empty list is "authorized for no wallet" and must match nothing — `1 = 0`
- * rather than a dropped clause. Absent or null is genuinely unrestricted. That
- * asymmetry is the whole point: treating empty as "no filter" would hand a key
- * with no usable bindings the entire project's trades.
+ * The wallet allowlist clause, as SQL plus its bindings. Empty means
+ * "authorized for no wallet" (`1 = 0`, never a dropped clause); absent or
+ * null is unrestricted. A bound wallet admits the trades it is a PARTY to —
+ * the wallet ids join to `custody_wallets.public_key`, duplicated across the
+ * two per-side IN subqueries.
  */
 function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
   sql: string;
@@ -132,7 +127,11 @@ function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
     return { sql: " AND 1 = 0", bindings: [] };
   }
   const placeholders = sdpWalletIds.map(() => "?").join(", ");
-  return { sql: ` AND sdp_wallet_id IN (${placeholders})`, bindings: sdpWalletIds };
+  return {
+    sql: ` AND (user_a IN (SELECT public_key FROM custody_wallets WHERE id IN (${placeholders}))
+            OR user_b IN (SELECT public_key FROM custody_wallets WHERE id IN (${placeholders})))`,
+    bindings: [...sdpWalletIds, ...sdpWalletIds],
+  };
 }
 
 export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository {
@@ -147,7 +146,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               decimals_a, decimals_b, symbol_a, symbol_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
-              escrow_a, escrow_b, sdp_side, trade_kind, sdp_wallet_id,
+              escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
               idempotency_key, idempotency_fingerprint,
               create_signature, create_last_valid_block_height
             ) VALUES (
@@ -157,8 +156,9 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               ?, ?, ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?,
-              ?, ?, ?, ?, ?,
-              ?, ?, ?, ?
+              ?, ?, ?, ?,
+              ?, ?,
+              ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
         )
@@ -188,9 +188,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           row.refString,
           row.escrowA,
           row.escrowB,
-          row.sdpSide,
-          row.tradeKind,
-          row.sdpWalletId,
+          row.counterpartyAccountIdA,
+          row.counterpartyAccountIdB,
           row.idempotencyKey,
           row.idempotencyFingerprint,
           row.createSignature,
@@ -303,72 +302,6 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async claimLegFunding(id: string, signature: Signature, expiryHeight: string) {
-      // Compare-and-swap: only the request that finds the column NULL may send.
-      // The expiry height rides along so a claim left behind by a failure the
-      // code could not classify has a point at which it is provably dead.
-      const row = await db
-        .prepare(
-          `UPDATE dvp_trades
-              SET sdp_leg_funding_signature = ?,
-                  funding_claim_expiry_height = ?,
-                  updated_at = sdp_iso_now()
-            WHERE id = ? AND sdp_leg_funding_signature IS NULL
-            RETURNING id`
-        )
-        .bind(signature, expiryHeight, id)
-        .first<{ id: string }>();
-      return row !== null;
-    },
-
-    async releaseExpiredFundingClaims(blockHeight: bigint) {
-      // Only claims on trades still open, and only past the height at which the
-      // signed transaction can no longer be accepted. A trade that closed keeps
-      // its record; a claim inside its window is left alone, because the
-      // transfer it belongs to may still land.
-      const result = await db
-        .prepare(
-          `UPDATE dvp_trades
-              SET sdp_leg_funding_signature = NULL,
-                  funding_claim_expiry_height = NULL,
-                  updated_at = sdp_iso_now()
-            WHERE sdp_leg_funding_signature IS NOT NULL
-              AND funding_claim_expiry_height IS NOT NULL
-              AND CAST(funding_claim_expiry_height AS NUMERIC) < ?
-              AND status IN ('created', 'partially_funded')
-            RETURNING id`
-        )
-        .bind(blockHeight.toString())
-        .all<{ id: string }>();
-      return (result.results ?? []).length;
-    },
-
-    async releaseLegFunding(id: string, signature: Signature) {
-      // Only the holder may release, so a late failure cannot clear a claim a
-      // different request has since taken.
-      await db
-        .prepare(
-          `UPDATE dvp_trades
-              SET sdp_leg_funding_signature = NULL, updated_at = sdp_iso_now()
-            WHERE id = ? AND sdp_leg_funding_signature = ?`
-        )
-        .bind(id, signature)
-        .run();
-    },
-
-    async recordLegFundingTx(id: string, signature: Signature) {
-      // Only ever written, never cleared — the claim is what gets released, and
-      // conflating the two is what made a funded leg look unfunded.
-      await db
-        .prepare(
-          `UPDATE dvp_trades
-              SET sdp_leg_funding_tx = ?, updated_at = sdp_iso_now()
-            WHERE id = ?`
-        )
-        .bind(signature, id)
-        .run();
-    },
-
     async getByIdempotencyKey(projectId: string, idempotencyKey: string) {
       const row = await db
         .prepare(
@@ -415,17 +348,62 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async listByProject(scope: DvpTradeScope, limit: number) {
+    async listByProject(scope: DvpTradeScope, filters: DvpTradeListFilters, limit: number) {
       const wallets = walletScopeClause(scope.sdpWalletIds);
+      const clauses = ["organization_id = ?", "project_id = ?"];
+      const bindings: unknown[] = [scope.organizationId, scope.projectId];
+
+      // Composed with the scope predicates in the WHERE, before the LIMIT: the
+      // list is capped with no cursor, so narrowing after the page would make a
+      // matching trade older than the newest page unfindable.
+      if (filters.statuses !== null) {
+        const placeholders = filters.statuses.map(() => "?").join(", ");
+        clauses.push(`status IN (${placeholders})`);
+        bindings.push(...filters.statuses);
+      }
+
+      // Same semantics as the dashboard's `matchesAddressQuery`, as close as SQL
+      // allows: case-insensitive substring over id, the on-chain account, both
+      // parties, both escrows, both mints and both leg symbols. Wildcards in the
+      // query are literal, and an ellipsis split is NOT offered — see the
+      // divergence note in dvp-trade.repository.ts's sibling web module.
+      if (filters.q !== null) {
+        clauses.push(
+          `(id ILIKE ? ESCAPE '\\'
+             OR swap_dvp ILIKE ? ESCAPE '\\'
+             OR user_a ILIKE ? ESCAPE '\\'
+             OR user_b ILIKE ? ESCAPE '\\'
+             OR escrow_a ILIKE ? ESCAPE '\\'
+             OR escrow_b ILIKE ? ESCAPE '\\'
+             OR mint_a ILIKE ? ESCAPE '\\'
+             OR mint_b ILIKE ? ESCAPE '\\'
+             OR symbol_a ILIKE ? ESCAPE '\\'
+             OR symbol_b ILIKE ? ESCAPE '\\')`
+        );
+        const pattern = `%${escapeLikePattern(filters.q)}%`;
+        bindings.push(
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern,
+          pattern
+        );
+      }
+
       const result = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ?${wallets.sql}
+            WHERE ${clauses.join(" AND ")}${wallets.sql}
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(scope.organizationId, scope.projectId, ...wallets.bindings, limit)
+        .bind(...bindings, ...wallets.bindings, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

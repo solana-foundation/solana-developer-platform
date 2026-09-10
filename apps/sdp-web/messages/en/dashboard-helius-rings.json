@@ -6,6 +6,23 @@
     "workspace": {
       "selectPrompt": "Select a private wallet above to see its details, operations, and activity."
     },
+    "setup": {
+      "title": "Set up Helius Rings",
+      "description": "Save the Solana RPC, Photon indexer, prover, and Ring RPC shared by every Helius ring in this project.",
+      "configuredTitle": "Rings configuration",
+      "configuredDescription": "{name} is shared by every Helius ring in this project.",
+      "adminRequired": "An organization administrator must configure Helius Rings before wallets can be used.",
+      "name": "Configuration name",
+      "rpc": "Solana RPC URL",
+      "indexer": "Photon indexer URL",
+      "prover": "Prover URL",
+      "ringRpc": "Custom Ring RPC URL (optional)",
+      "allowHttp": "Allow plain HTTP for local development",
+      "save": "Test and save configuration",
+      "saving": "Checking configuration…",
+      "loading": "Loading project configuration…",
+      "failed": "The configuration could not be saved."
+    },
     "overview": {
       "loading": "Reading shielded balance…",
       "failed": "Balance could not be read. Try again from the wallet's row.",
@@ -14,7 +31,8 @@
       "unpriced": "—",
       "privateBalanceLabel": "Private balance",
       "defaultRing": "Default ring",
-      "customRing": "Custom ring {id}"
+      "customRing": "Custom ring {id}",
+      "noteCount": "{count} notes"
     },
     "health": {
       "title": "Health",
@@ -128,6 +146,8 @@
       "opType_timelock_create": "Timelock",
       "opType_timelock_settle": "Timelock settle",
       "opType_zone_create": "Zone create",
+      "opType_ring_exit": "Move out of ring",
+      "opType_ring_entry": "Move into ring",
       "state_draft": "Draft",
       "state_preparing": "Preparing",
       "state_approval_required": "Approval required",
@@ -148,10 +168,14 @@
       "description_shield": "Move funds from the custody wallet into this private wallet.",
       "description_withdraw": "Move funds back to the backing custody wallet.",
       "description_transfer_registered": "Send funds privately to another private wallet in this project.",
+      "description_merge": "Combine this wallet's smaller notes into one. Moves no funds.",
+      "description_move": "Move this wallet's shielded SOL between the default ring and a custom ring. Funds stay shielded the whole way.",
       "operation": "Operation",
       "opTab_shield": "Shield",
       "opTab_withdraw": "Withdraw",
       "opTab_transfer_registered": "Private transfer",
+      "opTab_merge": "Merge",
+      "opTab_move": "Move",
       "recipientPrivateWallet": "Recipient private wallet",
       "recipientPrivateWalletPlaceholder": "Select a private wallet",
       "privateTransferNoRecipients": "No other provisioned private wallets in this project to transfer to.",
@@ -172,7 +196,14 @@
       "ringShieldHint": "The ring the shielded notes land in.",
       "ringSpendHint": "The source of funds: only notes bound to the chosen ring can be spent by it.",
       "ringNoneActive": "No ring is active yet; complete bring-up in the Custom rings card before targeting one.",
-      "summaryRing": "Ring"
+      "summaryRing": "Ring",
+      "moveFrom": "From",
+      "moveTo": "To",
+      "moveHint": "One side is a custom ring, the other is the default ring. Funds stay shielded the whole way.",
+      "moveChooseRing": "Pick a custom ring on one side; the default ring is the other side of every move.",
+      "moveBothCustom": "Ring-to-ring moves aren't supported yet — value routes through the default ring. Run two moves: into the default ring, then into the destination ring.",
+      "summaryFrom": "From",
+      "summaryTo": "To"
     },
     "detail": {
       "title": "Operation detail",

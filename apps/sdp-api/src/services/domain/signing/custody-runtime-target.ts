@@ -406,6 +406,43 @@ export class CustodyRuntimeTargets {
     return wallets.find((wallet) => wallet.id === params.custodyWalletId) ?? null;
   }
 
+  /**
+   * Every active custody wallet holding an on-chain address, oldest first —
+   * an indexed read (`idx_custody_wallets_public_key`) over both ownership
+   * paths with the same active/org/project filters as {@link listWallets}.
+   * Multiple records can hold one address, so callers pick.
+   */
+  async findOperationalWalletIdsByAddress(params: {
+    organizationId: string;
+    projectId: string;
+    publicKey: string;
+  }): Promise<string[]> {
+    const rows = await this.db.queryMany<{ id: string }>(
+      `SELECT w.id
+         FROM custody_wallets w
+         LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+         LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+        WHERE w.public_key = ?
+          AND w.status = 'active'
+          AND (
+            (cfg.id IS NOT NULL AND cfg.organization_id = ? AND cfg.status = 'active'
+               AND (cfg.project_id = ? OR cfg.project_id IS NULL))
+            OR
+            (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
+               AND conn.status = 'active')
+          )
+        ORDER BY w.created_at ASC`,
+      [
+        params.publicKey,
+        params.organizationId,
+        params.projectId,
+        params.organizationId,
+        params.projectId,
+      ]
+    );
+    return rows.map((row) => row.id);
+  }
+
   async findOwnedWalletForMutation(params: {
     organizationId: string;
     projectId?: string;

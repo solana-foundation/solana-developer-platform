@@ -12,10 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 /**
  * The one seam these tests reach through; everything else runs for real. Left
@@ -27,8 +30,11 @@ vi.mock("@/services/helius-rings/gateway", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/helius-rings/gateway")>();
   return {
     ...actual,
-    resolveRingsGateway: (...args: Parameters<typeof actual.resolveRingsGateway>) =>
-      (gatewayOverride.current as RingsGatewayPort | null) ?? actual.resolveRingsGateway(...args),
+    resolvePersistedRingsGateway: (
+      ...args: Parameters<typeof actual.resolvePersistedRingsGateway>
+    ) =>
+      (gatewayOverride.current as RingsGatewayPort | null) ??
+      actual.resolvePersistedRingsGateway(...args),
   };
 });
 
@@ -36,6 +42,10 @@ const TEST_ORG = { id: "org_hr_route", name: "Rings Route Org", slug: "rings-rou
 const TEST_PROJECT = { id: "prj_hr_route", slug: "rings-route-project" };
 const TEST_USER = { id: "usr_hr_route", email: "rings-route@example.com" };
 const TEST_API_KEY = { id: "key_hr_route", raw: "sk_test_helius_rings", prefix: "sk_test_hr" };
+/** Devnet USDC, seeded active by migration 0057. */
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+/** Allowlisted by neither the asset catalogue nor the spend gate. */
+const OTHER_MINT = "E4KqM12ZDosJbV7gZ5iR8rK1T2mC3nF4pQ6sU8wX9yZa";
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
@@ -148,7 +158,50 @@ function authHeaders() {
   };
 }
 
-function post(path: string, body: unknown) {
+async function seedRingsConnection(): Promise<void> {
+  const db = getDb(env);
+  const connections = new HeliusRingsConnectionStore(db);
+  if (await connections.findDefault(TEST_ORG.id, TEST_PROJECT.id)) return;
+
+  const credentialId = "pcred_hr_route";
+  const connectionId = "hrconn_hr_route";
+  const credential = await new ProviderCredentialStore(db).insertCredential({
+    id: credentialId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    provider: "helius_rings",
+    label: "Route test",
+    scope: "project",
+    source: "stored",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "test-only" },
+    displayMetadata: {},
+    version: 1,
+    rotatedFromId: null,
+    idempotencyKey: connectionId,
+    idempotencyFingerprint: connectionId,
+    createdBy: TEST_USER.id,
+  });
+  await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+    credentialId,
+  ]);
+  await connections.insert({
+    id: connectionId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    name: "Route test",
+    providerCredentialId: credentialId,
+    providerCredentialScopeKey: credential.scope_key,
+    allowInsecureHttp: false,
+    displayMetadata: {},
+    makeDefault: true,
+    createdBy: TEST_USER.id,
+  });
+}
+
+async function post(path: string, body: unknown) {
+  if (path.startsWith("/v1/helius-rings/operations") && gatewayOverride.current) {
+    await seedRingsConnection();
+  }
   return app.request(
     path,
     { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
@@ -183,6 +236,39 @@ describe("Helius Rings routes", () => {
     expect(body.data.health.rpc).toBe("red");
     expect(body.data.health.prover).toBe("red");
     expect(body.data.health.photon).toBe("red");
+  });
+
+  it("GET /setup-status asks for project setup without exposing management to API keys", async () => {
+    const res = await app.request("/v1/helius-rings/setup-status", { headers: authHeaders() }, env);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: {
+        configured: false,
+        source: "none",
+        canManage: false,
+        allowInsecureHttpAllowed: true,
+        defaultConnection: null,
+      },
+    });
+  });
+
+  it("ignores retired endpoint environment variables", async () => {
+    const retiredEnv = {
+      ...env,
+      HELIUS_RINGS_RPC_URL: "https://rpc.invalid",
+      HELIUS_RINGS_INDEXER_URL: "https://indexer.invalid",
+      HELIUS_RINGS_PROVER_URL: "https://prover.invalid",
+      HELIUS_RINGS_RING_RPC_URL: "https://ring.invalid",
+    } as Env;
+
+    const res = await app.request(
+      "/v1/helius-rings/setup-status",
+      { headers: authHeaders() },
+      retiredEnv
+    );
+    await expect(res.json()).resolves.toMatchObject({
+      data: { configured: false, source: "none", defaultConnection: null },
+    });
   });
 
   describe("project rings", () => {
@@ -281,6 +367,10 @@ describe("Helius Rings routes", () => {
   describe("operations", () => {
     beforeEach(async () => {
       await provisionRouteWallet();
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("config_error", "Helius Rings setup is required"));
+      gatewayOverride.current = gateway;
     });
 
     it("prepares an operation through real policy and fails honestly at the port", async () => {
@@ -301,8 +391,8 @@ describe("Helius Rings routes", () => {
         };
       };
 
-      // Default policy is implicit allow, so the operation advances to the port
-      // call, which the unconfigured gateway refuses.
+      // Default policy is implicit allow, so the operation advances to the
+      // configured gateway and records its domain failure.
       expect(body.data.operation.state).toBe("failed");
       expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
         code: "config_error",
@@ -462,6 +552,165 @@ describe("Helius Rings routes", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    // USDC is the one SPL asset with a settlement path this build assembles:
+    // the pool's own vault for a withdraw, and nothing public for a merge.
+    it.each([
+      [
+        "withdraw",
+        {
+          opType: "withdraw",
+          asset: { mint: USDC_MINT, amountRaw: "1000000" },
+          to: "HrRouteTestPublicKey111111111111111111111111",
+        },
+      ],
+      [
+        "private transfer",
+        {
+          opType: "transfer_registered",
+          asset: { mint: USDC_MINT, amountRaw: "1000000" },
+          to: "rings1recipient",
+        },
+      ],
+      ["merge", { opType: "merge", asset: { mint: USDC_MINT } }],
+    ])("accepts a USDC %s on the default ring", async (label, body) => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        clientNonce: `route-nonce-usdc-${label.replace(/\s/g, "-")}`,
+        ...body,
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it.each([
+      [
+        "withdraw",
+        {
+          opType: "withdraw",
+          asset: { mint: OTHER_MINT, amountRaw: "1000000" },
+          to: "HrRouteTestPublicKey111111111111111111111111",
+        },
+      ],
+      ["merge", { opType: "merge", asset: { mint: OTHER_MINT } }],
+    ])("400s a %s of a mint outside the two the build settles", async (label, body) => {
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        clientNonce: `route-nonce-unknown-${label}`,
+        ...body,
+      });
+      expect(res.status).toBe(400);
+    });
+
+    describe("ring moves", () => {
+      const RING_PROGRAM = "Stake11111111111111111111111111111111111111";
+      const LOOKUP_TABLE = "LookupTab1e11111111111111111111111111111111";
+
+      /** Records and activates a ring, then hands the gateway seam back. */
+      async function seedActiveRing(): Promise<void> {
+        // Restored afterwards so the operation posts below still hit the
+        // describe's own failing gateway, not this bring-up stub.
+        const previous = gatewayOverride.current;
+        gatewayOverride.current = {
+          provisionRing: async () => ({
+            auditorPublicKeyHex: "04ff",
+            lookupTableAddress: LOOKUP_TABLE,
+          }),
+        } as unknown as RingsGatewayPort;
+        const created = await post("/v1/helius-rings/rings", {
+          name: "treasury",
+          ringProgramId: RING_PROGRAM,
+        });
+        if (created.status !== 201) throw new Error("ring fixture did not activate");
+        gatewayOverride.current = previous;
+      }
+
+      it("prepares a ring_exit pinned to the active ring and fails honestly at the port", async () => {
+        await seedActiveRing();
+        const res = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_exit",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-1",
+          ring: "treasury",
+        });
+        expect(res.status).toBe(201);
+        const body = (await res.json()) as {
+          data: {
+            operation: {
+              opType: string;
+              ringProgramId: string | null;
+              state: string;
+              failure: { code: string } | null;
+            };
+          };
+        };
+        expect(body.data.operation.opType).toBe("ring_exit");
+        expect(body.data.operation.ringProgramId).toBe(RING_PROGRAM);
+        // Default policy is implicit allow, so the operation advances to the
+        // port call, where the describe's gateway records its config_error.
+        expect(body.data.operation.state).toBe("failed");
+        expect(body.data.operation.failure).toMatchObject({ code: "config_error" });
+      });
+
+      it("400s a ring move naming the default ring", async () => {
+        for (const opType of ["ring_exit", "ring_entry"]) {
+          const res = await post("/v1/helius-rings/operations", {
+            walletId: ringsWalletId,
+            opType,
+            asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+            clientNonce: `route-nonce-move-default-${opType}`,
+            ring: "default",
+          });
+          expect(res.status).toBe(400);
+        }
+      });
+
+      it("400s a ring_entry without a ring, and a ring_exit carrying a `to`", async () => {
+        await seedActiveRing();
+        const missingRing = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_entry",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-no-ring",
+        });
+        expect(missingRing.status).toBe(400);
+
+        // Strict objects: a recipient field on a self-only move is refused,
+        // never silently stripped.
+        const withRecipient = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_exit",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          to: "HrRouteTestPublicKey111111111111111111111111",
+          clientNonce: "route-nonce-move-to",
+          ring: "treasury",
+        });
+        expect(withRecipient.status).toBe(400);
+      });
+
+      it("400s a non-SOL ring move", async () => {
+        await seedActiveRing();
+        const res = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_entry",
+          asset: { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-usdc",
+          ring: "treasury",
+        });
+        expect(res.status).toBe(400);
+      });
+
+      it("400s a ring move naming a ring the project never recorded", async () => {
+        const res = await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "ring_entry",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-move-unknown",
+          ring: "treasury",
+        });
+        expect(res.status).toBe(400);
+      });
+    });
   });
 
   describe("POST /wallets/:walletId/sync", () => {
@@ -502,6 +751,7 @@ describe("Helius Rings routes", () => {
             decimals: 9,
             symbol: "SOL",
             ringProgramId: null,
+            noteCount: 3,
           },
         ],
         history: [],
@@ -526,7 +776,7 @@ describe("Helius Rings routes", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         data: {
-          balances: Array<{ mint: string; amountRaw: string }>;
+          balances: Array<{ mint: string; amountRaw: string; noteCount: number }>;
           degraded: boolean;
           observedAt: string;
         };
@@ -534,6 +784,9 @@ describe("Helius Rings routes", () => {
 
       expect(body.data).toMatchObject({ degraded: true, observedAt: observed.observedAt });
       expect(body.data.balances[0]?.amountRaw).toBe("18446744073709551615");
+      // Rides through the USD enrichment, which spreads each balance rather
+      // than rebuilding it; the dashboard reads this to offer a merge.
+      expect(body.data.balances[0]?.noteCount).toBe(3);
       // The stored identity is pinned so a derivation mismatch fails rather
       // than answering with someone else's balances.
       expect(seen[0]).toMatchObject({

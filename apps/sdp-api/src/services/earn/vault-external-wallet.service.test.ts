@@ -27,9 +27,12 @@ const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
+const readOwnerMintBalance = vi.hoisted(() => vi.fn());
 
 // `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
 // what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
+vi.mock("./owner-token-balance", () => ({ readOwnerMintBalance }));
+
 vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
   fetchJupiterSwapLeg,
@@ -124,6 +127,7 @@ function depositInput(
     projectId: PROJECT,
     environment: "sandbox",
     provider: "kamino",
+    strategyId: "strategy_ext_test",
     providerReference: VAULT,
     ownerAddress,
     tokenMint: TOKEN_MINT,
@@ -249,6 +253,9 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await seedTenancy();
   vi.clearAllMocks();
+  // The split path's build-time baseline: the owner already holds 0.5 of the
+  // deposit token, which the detector must never mistake for the swap.
+  readOwnerMintBalance.mockResolvedValue({ atoms: 500000n, decimals: 6 });
 
   ownerKeyPair = await generateKeyPair();
   ownerAddress = await getAddressFromPublicKey(ownerKeyPair.publicKey);
@@ -359,6 +366,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       sourceAmount: "25",
       quotedAmount: "24.99",
       minOutAmount: "24.8",
+      minOutAtoms: "24800000",
       priceImpactPct: "0.0001",
       routeLabels: ["Whirlpool"],
       slippageBps: 50,
@@ -470,11 +478,85 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     const decoded = getTransactionDecoder().decode(result.swapTransaction.bytes);
     expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
 
-    // Nothing durable: the split answer hands out no consumable build.
+    // No consumable build and no movement: the split answer hands out nothing
+    // SDP could ever consume. What it DOES leave behind is the advisory the
+    // orphan detector reads (PRO-1864), with the floor in atoms and the
+    // owner's deposit-token baseline read at build time.
     const row = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
       .first<{ builds: number }>();
     expect(row?.builds).toBe(0);
+    const advisory = await getDb(env)
+      .prepare("SELECT * FROM earn_split_swap_advisories")
+      .first<Record<string, unknown>>();
+    expect(advisory).toMatchObject({
+      owner_address: ownerAddress,
+      strategy_id: "strategy_ext_test",
+      deposit_token_mint: TOKEN_MINT,
+      deposit_token_decimals: 6,
+      swap_min_out_amount: "24.8",
+      swap_min_out_atoms: "24800000",
+      baseline_deposit_token_atoms: "500000",
+      resolved_at: null,
+    });
+    expect(String(advisory?.swap_last_valid_block_height)).toBe(
+      result.swapTransaction.lastValidBlockHeight
+    );
+    expect(readOwnerMintBalance).toHaveBeenCalledWith(env, "sandbox", ownerAddress, TOKEN_MINT);
+  });
+
+  it("refuses the split when the baseline balance cannot be read, recording nothing", async () => {
+    // Fail-closed on purpose (money IN may refuse): a blind advisory could only
+    // ever page on any wallet that happened to hold the deposit token.
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+    readOwnerMintBalance.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(buildExternalWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
+      "rpc unavailable"
+    );
+
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS advisories FROM earn_split_swap_advisories")
+      .first<{ advisories: number }>();
+    expect(row?.advisories).toBe(0);
+  });
+
+  it("refuses the split when the baseline balance uses a different mint scale", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+    readOwnerMintBalance.mockResolvedValue({ atoms: 500000n, decimals: 9 });
+
+    await expect(buildExternalWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
+      "reports 9 decimals for a 6-decimal deposit token"
+    );
+
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS advisories FROM earn_split_swap_advisories")
+      .first<{ advisories: number }>();
+    expect(row?.advisories).toBe(0);
   });
 
   it("keeps an unswapped oversized provider plan a loud failure, not a split", async () => {

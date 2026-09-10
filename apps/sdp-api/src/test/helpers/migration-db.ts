@@ -2,6 +2,7 @@ import type { Client } from "pg";
 import { expect } from "vitest";
 
 /** Postgres SQLSTATEs the migration tests distinguish between. */
+export const NOT_NULL_VIOLATION = "23502";
 export const UNIQUE_VIOLATION = "23505";
 export const FK_VIOLATION = "23503";
 export const CHECK_VIOLATION = "23514";
@@ -55,4 +56,36 @@ export async function seedOrgProject(
   );
 
   return { organizationId, projectId, userId };
+}
+
+/** Seeds the active project connection required by Helius Rings operations. */
+export async function seedHeliusRingsConnection(
+  client: Client,
+  input: {
+    organizationId: string;
+    projectId: string;
+    userId: string;
+    tag: string;
+  }
+): Promise<string> {
+  const credentialId = `pcred_hr_${input.tag}`;
+  const connectionId = `hrconn_${input.tag}`;
+
+  await client.query(
+    `INSERT INTO provider_credentials (
+       id, organization_id, project_id, provider, label, scope, source,
+       storage_backend, encrypted_secret_payload, status, created_by
+     ) VALUES ($1, $2, $3, 'helius_rings', $4, 'project', 'stored',
+               'encrypted_db', 'test-only', 'active', $5)`,
+    [credentialId, input.organizationId, input.projectId, input.tag, input.userId]
+  );
+  await client.query(
+    `INSERT INTO helius_rings_connections (
+       id, organization_id, project_id, name, provider_credential_id,
+       provider_credential_scope_key, status, is_default, activated_at, created_by
+     ) VALUES ($1, $2, $3, $4, $5, $3, 'active', TRUE, sdp_iso_now(), $6)`,
+    [connectionId, input.organizationId, input.projectId, input.tag, credentialId, input.userId]
+  );
+
+  return connectionId;
 }

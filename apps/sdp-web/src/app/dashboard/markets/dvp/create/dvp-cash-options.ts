@@ -20,6 +20,7 @@ export function cashOptionsFor(cluster: SolanaCluster): DvpCreateOption[] {
     options.push({
       mint: mint.address,
       label: token.symbol,
+      name: token.name,
       decimals: mint.decimals,
       // USDC and USDT are legacy SPL Token. Assuming Token-2022 here would have
       // create reject every stablecoin leg.

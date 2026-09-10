@@ -21,6 +21,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import {
+  assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   type EarnPositionRow,
@@ -38,6 +39,7 @@ import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {
   buildEarnVaultDepositFingerprint,
   buildEarnVaultWithdrawalFingerprint,
+  resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
@@ -53,6 +55,7 @@ import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
+import { createSigningService } from "@/services/domain/signing.service";
 import {
   earnClusterFor,
   resolveVaultDirectClient,
@@ -539,6 +542,39 @@ export async function extractEarnVaultDepositPolicyCandidate(
     },
     idempotencyKey: requestId,
   };
+}
+
+/** Check custody execution separately from Earn strategy availability. */
+export async function admitEarnVaultRuntimeExecution(
+  c: AppContext,
+  extraction: PolicyGateExtraction
+): Promise<void> {
+  // SAFETY: wired only beside the two vault extractors, which authorize this exact wallet.
+  const resolved = extraction.resolved as EarnVaultDepositResolved | EarnVaultWithdrawalResolved;
+  // Approved requests cannot take the gate's replay response: policy resume and
+  // the handler's effect fence still apply. Skip only this new admission check
+  // when the service will return its own recorded movement without signing.
+  if (approvedWalletOperationId(c) && resolved.requestId !== null) {
+    const requestId = resolved.requestId;
+    const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+    const movement = await resolveIdempotencyReplay(
+      () =>
+        repo.findVaultMovementByRequestId({
+          organizationId: resolved.auth.organizationId,
+          requestId,
+        }),
+      resolved.idempotencyFingerprint
+    );
+    if (movement) {
+      assertMovementIsOwnReplay(movement, resolved);
+      return;
+    }
+  }
+  await createSigningService(c.env).admitRuntimeExecution(
+    resolved.auth.organizationId,
+    resolved.projectId,
+    resolved.wallet.id
+  );
 }
 
 /** Resolve both durable movement replays and pre-execution policy replays. */
@@ -1082,6 +1118,11 @@ export async function listEarnVaultPositions(c: AppContext) {
 
   const last = rows.at(-1);
   const nextCursor = hasMore && last ? encodeVaultPositionCursor(last.createdAt, last.id) : null;
+  // The withdrawal's own sponsorship gate, answered once for the page: a
+  // position's exit runs on the environment's cluster, so the copy a client
+  // shows on the exit step can read this instead of a quote that a provider
+  // with no exit floor never produces.
+  const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment));
 
   return success(c, {
     positions: rows.map((row) => {
@@ -1096,6 +1137,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         shareMint: row.shareMint,
         createdAt: row.createdAt,
         closedAt: row.closedAt,
+        feeSponsored,
         // Absent (not zero) when the chain read failed or returned nothing.
         shares: hydrated?.shares,
         withdrawableShares: hydrated?.withdrawableShares,
@@ -1129,14 +1171,14 @@ interface EarnVaultWithdrawalResolved {
  *
  * WHAT IS DELIBERATELY MISSING is the point (ADR 0002 exit safety, "money out
  * beats money off"): no surfacing gate, no entitlement gate, no availability
- * gate, no environment capability, no catalogue lookup and no admission check.
+ * gate, no environment capability, no catalogue lookup and no Earn-provider admission check.
  * The caller names its own POSITION — the org's recorded claim, which carries
  * the vault, the wallet and both mints — so an exit works for a paused
  * strategy, a delisted vault, an un-surfaced or un-entitled provider, and in
  * every environment a position exists in. The only refusals left are the ones
  * that protect the org itself: the position must belong to the caller's org
  * and environment (404), the key binding must carry a write scope for the
- * signing wallet, and the org's own wallet policy still runs. A shared
+ * signing wallet, and custody runtime admission precedes the org's wallet policy. A shared
  * organization-level custody wallet intentionally lets sibling projects exit
  * the same org-owned position, matching the deposit route's wallet boundary.
  */

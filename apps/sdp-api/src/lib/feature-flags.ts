@@ -30,16 +30,6 @@ export function isHeliusRingsEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): bo
   return isTruthyFlag(env.HELIUS_RINGS_ENABLED);
 }
 
-/**
- * Permits plain-http Rings upstreams. Explicit rather than read off the URL
- * scheme: in plaintext an indexer response reveals which notes an identity owns.
- */
-export function isRingsInsecureHttpAllowed(
-  env: Pick<Env, "HELIUS_RINGS_ALLOW_INSECURE_HTTP">
-): boolean {
-  return isTruthyFlag(env.HELIUS_RINGS_ALLOW_INSECURE_HTTP);
-}
-
 export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
   return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
 }

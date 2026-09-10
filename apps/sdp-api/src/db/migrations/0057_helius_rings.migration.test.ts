@@ -8,6 +8,7 @@ import {
   CHECK_VIOLATION,
   expectSqlstate as expectSqlstateOn,
   FK_VIOLATION,
+  seedHeliusRingsConnection,
   seedOrgProject,
   UNIQUE_VIOLATION,
 } from "@/test/helpers/migration-db";
@@ -45,7 +46,8 @@ async function seedWallet(tag: string): Promise<{
   projectId: string;
   walletId: string;
 }> {
-  const { organizationId, projectId } = await seedOrgProject(client, tag);
+  const { organizationId, projectId, userId } = await seedOrgProject(client, tag);
+  await seedHeliusRingsConnection(client, { organizationId, projectId, userId, tag });
   const walletId = `hrw_${tag}`;
   await client.query(
     `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name)
@@ -65,7 +67,16 @@ async function insertOperation(
     intent_key: string;
   }
 ): Promise<void> {
-  const row: Record<string, string | boolean | null> = { op_type: "shield", ...overrides };
+  const connection = await client.query<{ id: string }>(
+    `SELECT id FROM helius_rings_connections
+      WHERE organization_id = $1 AND project_id = $2 AND is_default = TRUE`,
+    [overrides.organization_id, overrides.project_id]
+  );
+  const row: Record<string, string | boolean | null> = {
+    op_type: "shield",
+    rings_connection_id: connection.rows[0]?.id ?? null,
+    ...overrides,
+  };
   const columns = Object.keys(row);
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
   await client.query(
@@ -114,6 +125,7 @@ describe("0057_helius_rings schema", () => {
         "idx_helius_rings_operations_intent_key",
         "idx_helius_rings_operations_wallet_created",
         "idx_helius_rings_operations_in_flight",
+        "idx_helius_rings_operations_connection",
         "idx_helius_rings_timelocks_pending",
         "idx_helius_rings_events_operation_created",
       ])

@@ -169,7 +169,7 @@ const contracts: ValueMovingContract[] = [
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/policy.ts",
-      evidence: "const settlement = await getOrCreateDvpSettlementWallet(c.env, {",
+      evidence: "const settlement = await readDvpSettlementWallet(c.env, {",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",

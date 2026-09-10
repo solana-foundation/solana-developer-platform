@@ -8,10 +8,16 @@ import type { AppContext } from "../context";
 /**
  * Audit-ledger parity for earn money movements (PRO-1866).
  *
- * Every earn money write lands one hash-chained audit event whose actor is
- * the movement row's own attribution (`created_by`/`initiated_by_key_id`),
- * passed explicitly so the two records cannot disagree: the audit feed and
- * the wire-level movement must name the same key or user.
+ * Every earn money write lands one hash-chained audit event naming the same
+ * actor as its movement row, reached two different ways. WITHDRAWALS read the
+ * actor off the row itself (`created_by`/`initiated_by_key_id`), because the
+ * row exists by the time the post-effect audit is written. DEPOSITS are
+ * admitted BEFORE any movement row exists, so their intent carries the
+ * request's own auth (`auth.userId`/`auth.apiKeyId`), which is exactly what
+ * the service then writes into the row: same source, so the two agree, but
+ * the audit is not copied FROM the row on that path. Passing the values
+ * explicitly in both cases keeps `log()` from falling back to a context that
+ * could name a different actor.
  *
  * The two directions deliberately take different failure postures, the same
  * asymmetry the metered quotas follow (routes/earn/CLAUDE.md):
@@ -58,8 +64,12 @@ function earnMovementEntry(
 ): AuditLogEntry {
   return {
     organizationId: actor.organizationId,
-    // `log()` falls back to the request context for absent actor fields; the
-    // movement's own values are passed so a mismatch is unrepresentable.
+    // `log()` falls back to the request context for absent actor fields, and a
+    // null here becomes `undefined`, so that fallback DOES evaluate for a null
+    // user or key. It cannot pick a different actor: the caller passes the
+    // actor explicitly (the row's values on a withdrawal, the request's auth on
+    // a deposit, see the header), and the request contexts are mutually
+    // exclusive, so whatever the fallback finds is the same principal.
     userId: actor.userId ?? undefined,
     apiKeyId: actor.apiKeyId ?? undefined,
     action,

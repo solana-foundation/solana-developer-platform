@@ -26,6 +26,8 @@ export const OP_TYPES = [
   "timelock_create",
   "timelock_settle",
   "zone_create",
+  "ring_exit",
+  "ring_entry",
 ] as const;
 
 export const FAILURE_CODES = [

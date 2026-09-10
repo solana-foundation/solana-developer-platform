@@ -52,11 +52,23 @@ const TOKEN = {
   decimals: 6,
 };
 
+const ACCOUNT = {
+  counterpartyAccountId: "cpa_1",
+  counterpartyId: "cp_1",
+  name: "Acme OTC",
+  address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
+  label: "Settlement wallet",
+};
+
 /** Routes each call by path, so ordering assumptions cannot hide a bug. */
-function request(responses: { wallets: unknown; tokens: unknown }) {
-  return vi.fn(async (path: string) =>
-    path.startsWith("/v1/wallets") ? responses.wallets : responses.tokens
-  ) as never;
+function request(responses: { wallets: unknown; tokens: unknown; counterparties?: unknown }) {
+  return vi.fn(async (path: string) => {
+    if (path.startsWith("/v1/wallets")) return responses.wallets;
+    if (path.startsWith("/v1/counterparties/accounts")) {
+      return responses.counterparties ?? ok({ data: { accounts: [] } });
+    }
+    return responses.tokens;
+  }) as never;
 }
 
 describe("fetchDvpCreateContext", () => {
@@ -95,6 +107,42 @@ describe("fetchDvpCreateContext", () => {
     );
 
     expect(context.tokens).toEqual([]);
+  });
+
+  it("maps counterparty crypto-wallet accounts for the party slots", async () => {
+    const context = await fetchDvpCreateContext(
+      request({
+        wallets: ok({ data: [] }),
+        tokens: ok({ data: [] }),
+        counterparties: ok({ data: { accounts: [ACCOUNT] } }),
+      })
+    );
+
+    expect(context.counterpartyAccounts).toEqual([
+      {
+        counterpartyAccountId: "cpa_1",
+        name: "Acme OTC",
+        label: "Settlement wallet",
+        address: ACCOUNT.address,
+      },
+    ]);
+  });
+
+  // Same rule as the tokens: a failed counterparty list must not read as "you
+  // have no counterparties", which would hide the second-reference option from
+  // somebody who uses it daily.
+  it("reports a failed counterparty load rather than showing none", async () => {
+    const context = await fetchDvpCreateContext(
+      request({
+        wallets: ok({ data: [WALLET] }),
+        tokens: ok({ data: [TOKEN] }),
+        counterparties: fail(503, { error: { message: "Counterparties unavailable." } }),
+      })
+    );
+
+    expect(context.error).toBe("Counterparties unavailable.");
+    expect(context.wallets).toHaveLength(1);
+    expect(context.tokens).toHaveLength(1);
   });
 
   it("falls back to the name, then the mint, when a token has no symbol", async () => {

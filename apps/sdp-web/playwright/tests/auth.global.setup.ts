@@ -4,6 +4,7 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
+import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
@@ -81,14 +82,16 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   );
 
   await expect
-    .poll(() =>
-      target.evaluate(() => {
-        return (
-          window as unknown as {
-            Clerk?: { organization?: { id?: string } };
-          }
-        ).Clerk?.organization?.id;
-      })
+    .poll(
+      () =>
+        target.evaluate(() => {
+          return (
+            window as unknown as {
+              Clerk?: { organization?: { id?: string } };
+            }
+          ).Clerk?.organization?.id;
+        }),
+      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
     )
     .toBe(identity.organizationId);
 

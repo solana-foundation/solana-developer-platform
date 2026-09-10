@@ -29,6 +29,16 @@ export interface SelectNotesInput {
   readonly pinned?: readonly string[];
 }
 
+/**
+ * Notes one merge may consume. Zolana's circuit is padded to eight, but the
+ * deployed prover refuses more than this, so SDP selects its own inputs rather
+ * than letting the SDK's auto-selector reach for eight and fail at proving.
+ */
+export const MERGE_MAX_INPUTS = 5;
+
+/** Below this a merge has nothing to consolidate; the protocol refuses it too. */
+const MERGE_MIN_INPUTS = 2;
+
 export function selectNotes(input: SelectNotesInput): NoteSelection {
   const available = spendable(input);
 
@@ -45,12 +55,62 @@ export function selectNotes(input: SelectNotesInput): NoteSelection {
   return { notes, ids: notes.map(noteId), total };
 }
 
+export interface SelectMergeNotesInput {
+  readonly wallet: Wallet;
+  /** The protocol's asset address; native SOL is the system program. */
+  readonly asset: Address;
+  /**
+   * The tree the merge proves against. Inputs may not span trees, and SDP
+   * builds every operation against the one tree its client is configured with.
+   */
+  readonly tree: Address;
+  /** From a previous build of this same operation; binding when present. */
+  readonly pinned?: readonly string[];
+}
+
+/**
+ * Notes a merge consolidates into one.
+ *
+ * Smallest first, which is the opposite of a spend: a spend wants the fewest
+ * inputs that cover an amount, whereas a merge exists to retire the small notes
+ * a spend's change keeps producing. Taking the largest notes would consolidate
+ * the value that was never fragmented and leave the dust behind.
+ */
+export function selectMergeNotes(input: SelectMergeNotesInput): NoteSelection {
+  const available = spendable(input).filter((note) => note.outputContext.tree === input.tree);
+
+  const notes = input.pinned
+    ? repin(available, input.pinned)
+    : byCommitment([...available].sort(bySmallestFirst).slice(0, MERGE_MAX_INPUTS));
+
+  if (notes.length < MERGE_MIN_INPUTS) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      `a merge consolidates at least ${MERGE_MIN_INPUTS} notes; this wallet has ${notes.length} for that asset`
+    );
+  }
+  if (notes.length > MERGE_MAX_INPUTS) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      `a merge consolidates at most ${MERGE_MAX_INPUTS} notes; ${notes.length} were selected`
+    );
+  }
+
+  return { notes, ids: notes.map(noteId), total: notes.reduce((s, n) => s + n.utxo.amount, 0n) };
+}
+
+/** Ties broken by commitment so equal-value notes still order deterministically. */
+function bySmallestFirst(left: WalletUtxo, right: WalletUtxo): number {
+  if (left.utxo.amount === right.utxo.amount) return noteId(left).localeCompare(noteId(right));
+  return left.utxo.amount < right.utxo.amount ? -1 : 1;
+}
+
 /**
  * Unspent notes of the requested asset, sorted by commitment: two syncs can
  * return the same notes in different orders, and a selection depending on that
  * would choose differently on a rebuild.
  */
-function spendable(input: SelectNotesInput): readonly WalletUtxo[] {
+function spendable(input: Readonly<{ wallet: Wallet; asset: Address }>): readonly WalletUtxo[] {
   return byCommitment(
     input.wallet
       .utxos()
@@ -70,7 +130,7 @@ function byCommitment(notes: readonly WalletUtxo[]): WalletUtxo[] {
 /**
  * Fewest notes that cover the amount, largest first: every input enlarges the
  * proof and the circuit caps how many a transaction may carry. The trade-off is
- * fragmentation, which a later merge flow would clean up.
+ * fragmentation, which `selectMergeNotes` cleans up.
  */
 function cover(available: readonly WalletUtxo[], amount: bigint): readonly WalletUtxo[] {
   const byValueDesc = [...available].sort((left, right) => {

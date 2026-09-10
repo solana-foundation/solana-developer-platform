@@ -1,5 +1,6 @@
+import type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import type { DvpTrade } from "./dvp-trade";
+import type { DvpPartyRef, DvpTrade } from "./dvp-trade";
 
 /**
  * The upstream list is capped at 100 and has no cursor. Asking for a bounded
@@ -7,6 +8,19 @@ import type { DvpTrade } from "./dvp-trade";
  * view instead of pretending to be a complete ledger.
  */
 export const DVP_TRADES_PAGE_SIZE = 50;
+
+/**
+ * The list filters the API narrows SERVER-SIDE. `statuses` maps the UI's status
+ * group to the real statuses behind it; `q` is the search text. `null` means
+ * unfiltered on that axis, explicit because the house has no default params.
+ */
+export interface DvpTradesFilters {
+  statuses: DvpTradeStatus[] | null;
+  q: string | null;
+}
+
+/** The explicit no-filter filters: unfiltered is a choice, never a default. */
+export const UNFILTERED_DVP_TRADES: DvpTradesFilters = { statuses: null, q: null };
 
 export interface DvpTradesResult {
   trades: DvpTrade[];
@@ -45,9 +59,33 @@ function isRenderableTrade(value: unknown): value is DvpTrade {
   );
 }
 
-export async function fetchDvpTrades(request: SdpApiClient["request"]): Promise<DvpTradesResult> {
+/**
+ * Reads the project's trades, narrowed server-side by the given filters.
+ *
+ * The filters ride the query string because the upstream list is capped with
+ * no cursor: a client-side filter over the newest page makes a matching trade
+ * older than the page unfindable.
+ *
+ * @param request - The dashboard API client's request function.
+ * @param filters - Status and search narrowing; null on an axis means unfiltered.
+ * @returns The trades plus an error message, never a throw.
+ */
+export async function fetchDvpTrades(
+  request: SdpApiClient["request"],
+  filters: DvpTradesFilters
+): Promise<DvpTradesResult> {
   try {
-    const response = await request(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
+    const query = new URLSearchParams({ limit: String(DVP_TRADES_PAGE_SIZE) });
+    // An EMPTY group must serialize to the absence of the param: the API
+    // rejects an empty `status=`, and the `waiting` URL filter (which carries
+    // no statuses of its own) parses to one.
+    if (filters.statuses !== null && filters.statuses.length > 0) {
+      query.set("status", filters.statuses.join(","));
+    }
+    if (filters.q !== null) {
+      query.set("q", filters.q);
+    }
+    const response = await request(`/v1/dvp/trades?${query.toString()}`);
     const body = (await response.json().catch(() => ({}))) as {
       data?: { trades?: DvpTrade[] };
       error?: { message?: string };
@@ -84,8 +122,8 @@ export interface DvpInboundTrade {
   id: string;
   status: string;
   swapDvp: string;
-  /** Which leg is this caller's. */
-  yourSide: "a" | "b";
+  /** Which leg is this caller's, per the API's custody lookup. */
+  yourSide: DvpTradeSide;
   legs: {
     a: DvpInboundLeg;
     b: DvpInboundLeg;
@@ -95,7 +133,11 @@ export interface DvpInboundTrade {
 }
 
 export interface DvpInboundLeg {
-  party: string;
+  /**
+   * Never attributed on inbound: which registered counterparty a party is
+   * belongs to the creating organization, so `counterparty` is always null.
+   */
+  party: DvpPartyRef;
   mint: string;
   amount: string;
   decimals: number | null;

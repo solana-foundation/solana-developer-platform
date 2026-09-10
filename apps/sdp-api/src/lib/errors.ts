@@ -14,6 +14,7 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "RATE_LIMITED"
+  | "PAYLOAD_TOO_LARGE"
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR"
   | "NOT_ALLOWLISTED"
@@ -69,6 +70,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   RATE_LIMITED: 429,
+  PAYLOAD_TOO_LARGE: 413,
   SERVICE_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
   NOT_ALLOWLISTED: 403,
@@ -115,6 +117,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: "Resource not found",
   CONFLICT: "Resource already exists",
   RATE_LIMITED: "Too many requests",
+  PAYLOAD_TOO_LARGE: "Request body is too large",
   SERVICE_UNAVAILABLE: "Service temporarily unavailable",
   INTERNAL_ERROR: "An internal error occurred",
   NOT_ALLOWLISTED: "Email or domain not on allowlist",
@@ -225,6 +228,10 @@ export function conflict(message?: string, details?: Record<string, unknown>): A
 
 export function rateLimited(message?: string): AppError {
   return new AppError("RATE_LIMITED", message);
+}
+
+export function payloadTooLarge(message?: string): AppError {
+  return new AppError("PAYLOAD_TOO_LARGE", message);
 }
 
 export function serviceUnavailable(message?: string): AppError {
