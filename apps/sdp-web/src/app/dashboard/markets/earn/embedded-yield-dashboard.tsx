@@ -16,7 +16,7 @@ import {
   Layers3Icon,
   WalletIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -93,10 +93,12 @@ function buildGrowthSeries(
   positions: EarnExternalWalletPosition[],
   kind: "positions" | "wallets"
 ): PortfolioGrowthPoint[] {
-  const datedPositions = positions
-    .map((position) => ({ position, createdAt: Date.parse(position.createdAt) }))
-    .filter(({ createdAt }) => Number.isFinite(createdAt))
-    .sort((left, right) => left.createdAt - right.createdAt);
+  const datedPositions: Array<{ position: EarnExternalWalletPosition; createdAt: number }> = [];
+  for (const position of positions) {
+    const createdAt = Date.parse(position.createdAt);
+    if (Number.isFinite(createdAt)) datedPositions.push({ position, createdAt });
+  }
+  datedPositions.sort((left, right) => left.createdAt - right.createdAt);
 
   if (datedPositions.length === 0) {
     return Array.from({ length: PORTFOLIO_GROWTH_POINTS }, (_, index) => ({
@@ -148,7 +150,7 @@ function GrowthAreaChart({
   const gradientId = `portfolio-${kind}-fill`;
 
   return (
-    <motion.svg
+    <m.svg
       aria-hidden="true"
       className="h-[5.25rem] w-full overflow-visible"
       data-portfolio-chart={kind}
@@ -165,14 +167,14 @@ function GrowthAreaChart({
         </linearGradient>
       </defs>
       <path d={`M0 ${baseline} H${width}`} stroke="currentColor" strokeOpacity="0.1" />
-      <motion.path
+      <m.path
         d={areaPath}
         fill={`url(#${gradientId})`}
         initial={reduceMotion ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={reduceMotion ? { duration: 0 } : { duration: 0.4 }}
       />
-      <motion.path
+      <m.path
         d={linePath}
         fill="none"
         stroke={color}
@@ -185,7 +187,7 @@ function GrowthAreaChart({
       />
       {coordinates.map(({ x, y }, index) =>
         index === coordinates.length - 1 ? (
-          <motion.circle
+          <m.circle
             animate={{ opacity: 1, scale: 1 }}
             cx={x}
             cy={y}
@@ -197,7 +199,7 @@ function GrowthAreaChart({
           />
         ) : null
       )}
-    </motion.svg>
+    </m.svg>
   );
 }
 
@@ -216,7 +218,7 @@ function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
       className="flex min-h-[5.25rem] items-center justify-between gap-5"
       data-portfolio-chart="assets"
     >
-      <motion.svg
+      <m.svg
         aria-hidden="true"
         className="size-[5.25rem] shrink-0 -rotate-90"
         initial={reduceMotion ? false : { opacity: 0, scale: 0.82 }}
@@ -238,7 +240,7 @@ function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
           const segmentOffset = offset;
           offset += length;
           return (
-            <motion.circle
+            <m.circle
               animate={{ opacity: 1 }}
               cx="28"
               cy="28"
@@ -255,7 +257,7 @@ function AssetMixChart({ values }: { values: PortfolioChartValue[] }) {
             />
           );
         })}
-      </motion.svg>
+      </m.svg>
       <div className="min-w-0 flex-1 space-y-2">
         {positiveValues.slice(0, 4).map(({ id, label, value }, index) => (
           <div className="flex items-center justify-between gap-3 text-xs" key={id}>
@@ -595,18 +597,18 @@ function PortfolioByStrategy({
                         </div>
                       </TableCell>
                       <TableCell align="right" className="w-12">
-                        <motion.span
+                        <m.span
                           animate={{ rotate: isOpen ? 90 : 0 }}
                           className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary"
                           transition={{ duration: 0.22, ease: "easeOut" }}
                         >
                           <ChevronRightIcon aria-hidden="true" className="size-4" />
-                        </motion.span>
+                        </m.span>
                       </TableCell>
                     </TableRow>
                     <AnimatePresence initial={false}>
                       {isOpen ? (
-                        <motion.tr
+                        <m.tr
                           animate={{ opacity: 1 }}
                           className="border-b border-border-subtle"
                           exit={{ opacity: 0 }}
@@ -616,11 +618,11 @@ function PortfolioByStrategy({
                           transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
                         >
                           <td className="p-0 align-top" colSpan={8}>
-                            <motion.div
-                              animate={{ height: "auto", opacity: 1 }}
-                              className="overflow-hidden"
-                              exit={{ height: 0, opacity: 0 }}
-                              initial={{ height: 0, opacity: 0 }}
+                            <m.div
+                              animate={{ opacity: 1, scaleY: 1, y: 0 }}
+                              className="origin-top overflow-hidden"
+                              exit={{ opacity: 0, scaleY: 0.98, y: -6 }}
+                              initial={{ opacity: 0, scaleY: 0.98, y: -6 }}
                               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
                             >
                               <StrategyWalletDetails
@@ -628,9 +630,9 @@ function PortfolioByStrategy({
                                 strategy={strategy}
                                 strategyDefinition={strategyDefinition}
                               />
-                            </motion.div>
+                            </m.div>
                           </td>
-                        </motion.tr>
+                        </m.tr>
                       ) : null}
                     </AnimatePresence>
                   </Fragment>
@@ -659,119 +661,123 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 
   return (
-    <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-4 pt-3">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="flex items-center gap-2 text-[19px] leading-6 font-medium text-primary">
-            {t("DashboardMarkets.earnProgram.dashboardTitle")}
-            <PortfolioInfoTip label={t("DashboardMarkets.earnProgram.dashboardDescription")} />
-          </h2>
-          <Button asChild size="xs">
-            <Link aria-label={t("DashboardMarkets.earnProgram.configure")} href={configureHref}>
-              {t("DashboardMarkets.earnProgram.configureShort")}
-            </Link>
-          </Button>
-        </div>
+    <LazyMotion features={domAnimation}>
+      <DashboardWorkspaceOverviewPanel>
+        <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-4 pt-3">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="flex items-center gap-2 text-[19px] leading-6 font-medium text-primary">
+              {t("DashboardMarkets.earnProgram.dashboardTitle")}
+              <PortfolioInfoTip label={t("DashboardMarkets.earnProgram.dashboardDescription")} />
+            </h2>
+            <Button asChild size="xs">
+              <Link aria-label={t("DashboardMarkets.earnProgram.configure")} href={configureHref}>
+                {t("DashboardMarkets.earnProgram.configureShort")}
+              </Link>
+            </Button>
+          </div>
 
-        {!summary ? (
-          <Card className="rounded-2xl">
-            <ListEmptyState
-              action={
-                <Button asChild variant="secondary">
-                  <Link href={configureHref}>
-                    {t("DashboardMarkets.earnProgram.configureShort")}
-                  </Link>
-                </Button>
-              }
-              description={t("DashboardMarkets.earnProgram.portfolioErrorDescription")}
-              icon={<AlertTriangleIcon aria-hidden="true" className="size-5" />}
-              message={t("DashboardMarkets.earnProgram.portfolioErrorTitle")}
-            />
-          </Card>
-        ) : (
-          <>
-            <dl className="grid gap-2 sm:grid-cols-3">
-              <PortfolioMetric
-                chartValues={summary.totalsByStrategy.map((strategy) => ({
-                  id: `${strategy.provider}:${strategy.providerReference}`,
-                  label: strategy.label,
-                  value: strategy.walletCount,
-                }))}
-                growthPoints={walletGrowth}
-                kind="wallets"
-                label={t("DashboardMarkets.earnProgram.customerWallets")}
-                value={summary.walletCount}
+          {!summary ? (
+            <Card className="rounded-2xl">
+              <ListEmptyState
+                action={
+                  <Button asChild variant="secondary">
+                    <Link href={configureHref}>
+                      {t("DashboardMarkets.earnProgram.configureShort")}
+                    </Link>
+                  </Button>
+                }
+                description={t("DashboardMarkets.earnProgram.portfolioErrorDescription")}
+                icon={<AlertTriangleIcon aria-hidden="true" className="size-5" />}
+                message={t("DashboardMarkets.earnProgram.portfolioErrorTitle")}
               />
-              <PortfolioMetric
-                chartValues={summary.totalsByStrategy.map((strategy) => ({
-                  id: `${strategy.provider}:${strategy.providerReference}`,
-                  label: strategy.label,
-                  value: strategy.positionCount,
-                }))}
-                growthPoints={positionGrowth}
-                kind="positions"
-                label={t("DashboardMarkets.earnProgram.livePositions")}
-                value={summary.positionCount}
-              />
-              <PortfolioMetric
-                chartValues={summary.totalsByToken.map((total) => ({
-                  id: total.tokenMint,
-                  label: earnMintAsset(total.tokenMint).symbol,
-                  value: total.positionCount,
-                }))}
-                kind="assets"
-                label={t("DashboardMarkets.earnProgram.assetsEarning")}
-                value={summary.totalsByToken.length}
-              />
-            </dl>
+            </Card>
+          ) : (
+            <>
+              <dl className="grid gap-2 sm:grid-cols-3">
+                <PortfolioMetric
+                  chartValues={summary.totalsByStrategy.map((strategy) => ({
+                    id: `${strategy.provider}:${strategy.providerReference}`,
+                    label: strategy.label,
+                    value: strategy.walletCount,
+                  }))}
+                  growthPoints={walletGrowth}
+                  kind="wallets"
+                  label={t("DashboardMarkets.earnProgram.customerWallets")}
+                  value={summary.walletCount}
+                />
+                <PortfolioMetric
+                  chartValues={summary.totalsByStrategy.map((strategy) => ({
+                    id: `${strategy.provider}:${strategy.providerReference}`,
+                    label: strategy.label,
+                    value: strategy.positionCount,
+                  }))}
+                  growthPoints={positionGrowth}
+                  kind="positions"
+                  label={t("DashboardMarkets.earnProgram.livePositions")}
+                  value={summary.positionCount}
+                />
+                <PortfolioMetric
+                  chartValues={summary.totalsByToken.map((total) => ({
+                    id: total.tokenMint,
+                    label: earnMintAsset(total.tokenMint).symbol,
+                    value: total.positionCount,
+                  }))}
+                  kind="assets"
+                  label={t("DashboardMarkets.earnProgram.assetsEarning")}
+                  value={summary.totalsByToken.length}
+                />
+              </dl>
 
-            <div
-              aria-atomic="true"
-              className={
-                error
-                  ? "flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning"
-                  : "sr-only"
-              }
-              role="status"
-            >
-              {error ? (
-                <>
-                  <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                  <p>{t("DashboardMarkets.earnProgram.portfolioRefreshError")}</p>
-                </>
-              ) : null}
-            </div>
-
-            {summary.unavailablePositionCount > 0 ? (
-              <div className="flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
-                <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                <p>
-                  {t("DashboardMarkets.earnProgram.incompletePortfolio", {
-                    count: summary.unavailablePositionCount,
-                  })}
-                </p>
+              <div
+                aria-atomic="true"
+                className={
+                  error
+                    ? "flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning"
+                    : "sr-only"
+                }
+                role="status"
+              >
+                {error ? (
+                  <>
+                    <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                    <p>{t("DashboardMarkets.earnProgram.portfolioRefreshError")}</p>
+                  </>
+                ) : null}
               </div>
-            ) : null}
 
-            {/* The removed UI builder persists no configuration, so zero recorded positions is
+              {summary.unavailablePositionCount > 0 ? (
+                <div className="flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning">
+                  <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  <p>
+                    {t("DashboardMarkets.earnProgram.incompletePortfolio", {
+                      count: summary.unavailablePositionCount,
+                    })}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* The removed UI builder persists no configuration, so zero recorded positions is
                 the only truthful empty portfolio state. */}
-            {summary.positionCount === 0 ? (
-              <PortfolioOnboarding configureHref={configureHref} />
-            ) : (
-              <PortfolioByStrategy
-                cluster={cluster}
-                selectedStrategyId={selectedStrategyId}
-                strategies={strategies}
-                summary={summary}
-                onStrategyToggle={(strategy) => {
-                  const strategyId = `${strategy.provider}:${strategy.providerReference}`;
-                  setSelectedStrategyId((current) => (current === strategyId ? null : strategyId));
-                }}
-              />
-            )}
-          </>
-        )}
-      </div>
-    </DashboardWorkspaceOverviewPanel>
+              {summary.positionCount === 0 ? (
+                <PortfolioOnboarding configureHref={configureHref} />
+              ) : (
+                <PortfolioByStrategy
+                  cluster={cluster}
+                  selectedStrategyId={selectedStrategyId}
+                  strategies={strategies}
+                  summary={summary}
+                  onStrategyToggle={(strategy) => {
+                    const strategyId = `${strategy.provider}:${strategy.providerReference}`;
+                    setSelectedStrategyId((current) =>
+                      current === strategyId ? null : strategyId
+                    );
+                  }}
+                />
+              )}
+            </>
+          )}
+        </div>
+      </DashboardWorkspaceOverviewPanel>
+    </LazyMotion>
   );
 }

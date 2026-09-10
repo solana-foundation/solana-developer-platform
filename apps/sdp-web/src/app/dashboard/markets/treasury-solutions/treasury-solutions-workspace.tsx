@@ -99,6 +99,7 @@ import {
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
   type TreasuryAllocation,
+  type VaultShareMintVocabulary,
 } from "./treasury-allocation";
 
 type TrackedVaultDeposit = Pick<
@@ -1056,12 +1057,184 @@ function EarnWithdrawalLedgerRecovery({
   return null;
 }
 
+function treasuryShareMints(
+  positions: readonly EarnVaultPosition[] | undefined,
+  strategies: readonly EarnStrategy[] | undefined,
+  strategiesError: unknown
+): VaultShareMintVocabulary {
+  const known = new Set<string>();
+  for (const position of positions ?? []) {
+    if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.shareMint)?.isUsdStable) {
+      known.add(position.shareMint);
+    }
+  }
+  for (const strategy of strategies ?? []) {
+    const shareMint = strategy.shareMint;
+    if (shareMint && !WELL_KNOWN_TOKEN_BY_MINT.get(shareMint)?.isUsdStable) {
+      known.add(shareMint);
+    }
+  }
+  return {
+    known,
+    complete:
+      strategies !== undefined &&
+      !strategiesError &&
+      strategies.every((strategy) => strategy.shareMint !== undefined),
+  };
+}
+
+function availableValue<Value>(error: unknown, value: Value | undefined): Value | undefined {
+  return error ? undefined : value;
+}
+
+function treasuryPortfolioApy(
+  allocation: TreasuryAllocation,
+  positions: readonly EarnVaultPosition[] | undefined,
+  positionsError: unknown,
+  strategies: readonly EarnStrategy[] | undefined,
+  strategiesError: unknown
+): string | undefined {
+  if (allocation.deployedValue === undefined || positionsError || strategiesError) return undefined;
+  return estimatedTreasuryApy({ positions, strategies });
+}
+
+function treasurySummaryLoading(input: {
+  positionsError: unknown;
+  positionsLoading: boolean;
+  strategiesError: unknown;
+  strategiesLoading: boolean;
+  walletsError: unknown;
+  walletsLoading: boolean;
+}): boolean {
+  const {
+    positionsError,
+    positionsLoading,
+    strategiesError,
+    strategiesLoading,
+    walletsError,
+    walletsLoading,
+  } = input;
+  if (walletsError || positionsError || strategiesError) return false;
+  return walletsLoading || positionsLoading || strategiesLoading;
+}
+
+interface TreasuryWorkspaceContentProps {
+  activeWallets: readonly EarnFundingWallet[];
+  allocation: TreasuryAllocation;
+  catalogueCluster: SolanaCluster;
+  catalogueError: unknown;
+  catalogueLoading: boolean;
+  catalogueStrategies: readonly EarnStrategy[] | undefined;
+  environment: SdpEnvironment;
+  onCatalogueClusterChange: (cluster: SolanaCluster) => void;
+  onDeposit: (strategy: EarnStrategy) => void;
+  onRefresh: () => void;
+  onWithdrawPosition: (position: EarnVaultPosition) => void;
+  onWithdrawProgram: (program: EarnProgram) => void;
+  portfolioApy: string | undefined;
+  positions: readonly EarnVaultPosition[] | undefined;
+  positionsError: unknown;
+  positionsLoading: boolean;
+  programs: readonly EarnProgram[];
+  programsLoading: boolean;
+  programsUnavailable: boolean;
+  providerAccess: EarnProviderAccess | null;
+  summaryLoading: boolean;
+  vaultDeposits: readonly TrackedVaultDeposit[];
+  vaultWithdrawals: readonly TrackedVaultWithdrawal[];
+  walletsError: unknown;
+  walletsLoading: boolean;
+}
+
+function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
+  const {
+    activeWallets,
+    allocation,
+    catalogueCluster,
+    catalogueError,
+    catalogueLoading,
+    catalogueStrategies,
+    environment,
+    onCatalogueClusterChange,
+    onDeposit,
+    onRefresh,
+    onWithdrawPosition,
+    onWithdrawProgram,
+    portfolioApy,
+    positions,
+    positionsError,
+    positionsLoading,
+    programs,
+    programsLoading,
+    programsUnavailable,
+    providerAccess,
+    summaryLoading,
+    vaultDeposits,
+    vaultWithdrawals,
+    walletsError,
+    walletsLoading,
+  } = props;
+  const t = useTranslations();
+
+  return (
+    <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
+      <TreasuryAllocationCard
+        allocation={allocation}
+        estimatedApy={portfolioApy}
+        isLoading={summaryLoading}
+      />
+
+      <TreasuryWalletsCard
+        allocation={allocation}
+        error={walletsError}
+        isLoading={walletsLoading}
+        wallets={activeWallets}
+      />
+
+      <ActiveVaultPositionsCard
+        deposits={vaultDeposits}
+        error={positionsError}
+        isLoading={positionsLoading}
+        onWithdraw={onWithdrawPosition}
+        positions={positionsError ? undefined : positions}
+        unrecordedShareMints={allocation.unrecordedShareMints}
+        wallets={activeWallets}
+        withdrawals={vaultWithdrawals}
+      />
+
+      <TreasuryStrategiesCard
+        cluster={catalogueCluster}
+        environment={environment}
+        error={catalogueError}
+        isLoading={catalogueLoading}
+        onClusterChange={onCatalogueClusterChange}
+        onDeposit={onDeposit}
+        onRefresh={onRefresh}
+        positions={positionsError ? undefined : positions}
+        providerAccess={providerAccess}
+        strategies={catalogueStrategies}
+        unrecordedShareMints={allocation.unrecordedShareMints}
+      />
+
+      {programsLoading ? <SkeletonBlock className="h-48 rounded-xl" /> : null}
+      {programsUnavailable ? (
+        <Card className="px-6 py-5">
+          <p className="text-sm text-secondary">
+            {t("DashboardMarkets.treasury.existingProgramsUnavailable")}
+          </p>
+        </Card>
+      ) : (
+        <ExistingProgramsCard programs={programs} onWithdraw={onWithdrawProgram} />
+      )}
+    </div>
+  );
+}
+
 export function TreasurySolutionsWorkspace({
   providerAccess,
 }: {
   providerAccess: EarnProviderAccess | null;
 }) {
-  const t = useTranslations();
   const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const {
     wallets,
@@ -1229,24 +1402,13 @@ export function TreasurySolutionsWorkspace({
   //     its error state over stale rows, so this matches that posture), and
   //   - every row actually NAMED its share mint, since a row without one
   //     contributes nothing and leaves a real vault unnameable.
-  const shareMints = {
-    known: new Set(
-      [
-        ...(positions ?? []).map((position) => position.shareMint),
-        ...(strategies ?? []).flatMap((strategy) => strategy.shareMint ?? []),
-      ].filter((mint) => !WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.isUsdStable)
-    ),
-    complete:
-      strategies !== undefined &&
-      !strategiesError &&
-      strategies.every((strategy) => strategy.shareMint !== undefined),
-  };
+  const shareMints = treasuryShareMints(positions, strategies, strategiesError);
   // Every figure on this page comes from here, so no two surfaces can compute
   // the same thing differently.
   const allocation = summarizeTreasuryAllocation({
-    positions: positionsError ? undefined : positions,
+    positions: availableValue(positionsError, positions),
     shareMints,
-    wallets: walletsError ? undefined : wallets,
+    wallets: availableValue(walletsError, wallets),
   });
   const programs = programsState?.kind === "ready" ? programsState.programs : [];
   // Recovery seeds durable component state. Do not derive tracker mounts
@@ -1268,88 +1430,59 @@ export function TreasurySolutionsWorkspace({
   const activeVaultWithdrawalWatches = vaultWithdrawalWatches.filter(
     (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
   );
-  const portfolioApy =
-    allocation.deployedValue === undefined || positionsError || strategiesError
-      ? undefined
-      : estimatedTreasuryApy({ positions, strategies });
+  const portfolioApy = treasuryPortfolioApy(
+    allocation,
+    positions,
+    positionsError,
+    strategies,
+    strategiesError
+  );
+  const summaryLoading = treasurySummaryLoading({
+    positionsError,
+    positionsLoading,
+    strategiesError,
+    strategiesLoading,
+    walletsError,
+    walletsLoading,
+  });
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
-        {/* Errors pass undefined so a stale SWR success never renders as a
-         * live figure: unavailable must read as unavailable, not as the last
-         * total that happened to load. */}
-        {/* The strategies read gates the skeleton too: it is the share-mint
-         * vocabulary, it pages sequentially so it usually lands last, and
-         * without it the summary can only report "unavailable". */}
-        <TreasuryAllocationCard
-          allocation={allocation}
-          estimatedApy={portfolioApy}
-          isLoading={
-            !(walletsError || positionsError || strategiesError) &&
-            (walletsLoading || positionsLoading || strategiesLoading)
-          }
-        />
-
-        <TreasuryWalletsCard
-          allocation={allocation}
-          error={walletsError}
-          isLoading={walletsLoading}
-          wallets={activeWallets}
-        />
-
-        <ActiveVaultPositionsCard
-          deposits={vaultDepositWatches}
-          error={positionsError}
-          isLoading={positionsLoading}
-          onWithdraw={setWithdrawPosition}
-          positions={positionsError ? undefined : positions}
-          unrecordedShareMints={allocation.unrecordedShareMints}
-          wallets={activeWallets}
-          withdrawals={vaultWithdrawalWatches}
-        />
-
-        <TreasuryStrategiesCard
-          cluster={strategiesCluster ?? environmentCluster}
-          environment={sdpEnvironment}
-          error={catalogueError}
-          // keepPreviousData holds the outgoing shelf's rows through a toggle
-          // flip, so skeletons are for the true first load only.
-          isLoading={catalogueLoading && catalogueStrategies === undefined}
-          onClusterChange={(cluster) =>
-            setCatalogueCluster(cluster === environmentCluster ? undefined : cluster)
-          }
-          onDeposit={setDepositStrategy}
-          onRefresh={() => {
-            refreshWalletBalances();
-            refreshStrategies();
-            // On the default shelf both strategy hooks share one SWR key, and
-            // refreshing it twice would run the paged catalogue fetch twice
-            // per click; the mirror shelf only needs its own refresh once the
-            // toggle has left the default.
-            if (strategiesCluster !== undefined) {
-              refreshCatalogue();
-            }
-            refreshPositions();
-            refreshPrograms();
-          }}
-          positions={positionsError ? undefined : positions}
-          providerAccess={providerAccess}
-          strategies={catalogueStrategies}
-          unrecordedShareMints={allocation.unrecordedShareMints}
-        />
-
-        {programsLoading ? <SkeletonBlock className="h-48 rounded-xl" /> : null}
-        {programsError || programsState?.kind === "unconfigured" ? (
-          <Card className="px-6 py-5">
-            <p className="text-sm text-secondary">
-              {t("DashboardMarkets.treasury.existingProgramsUnavailable")}
-            </p>
-          </Card>
-        ) : (
-          <ExistingProgramsCard programs={programs} onWithdraw={setWithdrawProgram} />
-        )}
-      </div>
+      <TreasuryWorkspaceContent
+        activeWallets={activeWallets}
+        allocation={allocation}
+        catalogueCluster={strategiesCluster ?? environmentCluster}
+        catalogueError={catalogueError}
+        catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
+        catalogueStrategies={catalogueStrategies}
+        environment={sdpEnvironment}
+        onCatalogueClusterChange={(cluster) =>
+          setCatalogueCluster(cluster === environmentCluster ? undefined : cluster)
+        }
+        onDeposit={setDepositStrategy}
+        onRefresh={() => {
+          refreshWalletBalances();
+          refreshStrategies();
+          if (strategiesCluster !== undefined) refreshCatalogue();
+          refreshPositions();
+          refreshPrograms();
+        }}
+        onWithdrawPosition={setWithdrawPosition}
+        onWithdrawProgram={setWithdrawProgram}
+        portfolioApy={portfolioApy}
+        positions={positions}
+        positionsError={positionsError}
+        positionsLoading={positionsLoading}
+        programs={programs}
+        programsLoading={programsLoading}
+        programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
+        providerAccess={providerAccess}
+        summaryLoading={summaryLoading}
+        vaultDeposits={vaultDepositWatches}
+        vaultWithdrawals={vaultWithdrawalWatches}
+        walletsError={walletsError}
+        walletsLoading={walletsLoading}
+      />
 
       {depositStrategy ? (
         <EarnVaultDepositModal

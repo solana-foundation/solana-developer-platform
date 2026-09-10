@@ -193,6 +193,80 @@ function resolveWithdrawalSubmission(
   return { kind: "outcome", outcome: { kind: "withdrawal", withdrawal }, withdrawn: withdrawal };
 }
 
+function observableWithdrawalMovementId(outcome: WithdrawalOutcome | null): string | undefined {
+  if (outcome?.kind !== "withdrawal" || outcome.absorbedByApproval) return undefined;
+  return outcome.withdrawal.movementId;
+}
+
+function mergeObservedWithdrawal(
+  outcome: WithdrawalOutcome | null,
+  observedWithdrawal: EarnVaultWithdrawal | undefined
+): WithdrawalOutcome | null {
+  if (outcome?.kind !== "withdrawal" || !observedWithdrawal) return outcome;
+  return { ...outcome, withdrawal: { ...outcome.withdrawal, ...observedWithdrawal } };
+}
+
+function withdrawalProgressStep(
+  outcome: WithdrawalOutcome | null,
+  step: "details" | "review"
+): number {
+  if (!outcome) return step === "review" ? 1 : 0;
+  if (outcome.kind !== "withdrawal" || outcome.absorbedByApproval) return 2;
+  return earnVaultWithdrawalUiState(outcome.withdrawal.status).progressStep;
+}
+
+function withdrawalPanelKey(outcome: WithdrawalOutcome | null, step: "details" | "review"): string {
+  if (!outcome) return `form:${step}`;
+  const status = outcome.kind === "withdrawal" ? outcome.withdrawal.status : "approval";
+  return `outcome:${outcome.kind}:${status}`;
+}
+
+function deriveWithdrawalFormState(
+  position: EarnVaultPosition,
+  amountInput: string,
+  slippagePolicy: ReturnType<typeof earnWithdrawSlippageFloor>,
+  slippageInput: string,
+  invalidAmountMessage: string
+) {
+  const amountValidation = validateVaultWithdrawalAmount(amountInput);
+  const availableAmount = vaultWithdrawalAvailableAmount(position);
+  const sharesToRedeem =
+    amountValidation.kind === "valid"
+      ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
+      : undefined;
+  const hasStakedShares =
+    position.shares !== undefined &&
+    position.withdrawableShares !== undefined &&
+    compareUnsignedDecimals(position.shares, position.withdrawableShares) === 1;
+  const overAvailableAmount =
+    amountValidation.kind === "valid" && availableAmount !== undefined
+      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
+      : false;
+  const amountError =
+    amountInput.trim() === "" || amountValidation.kind === "valid" ? null : invalidAmountMessage;
+  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
+  const slippageInvalid = slippagePolicy !== null && slippageBps === null;
+  const quoteShares =
+    slippagePolicy !== null && sharesToRedeem !== undefined ? sharesToRedeem : null;
+  const quoteKey = quoteShares === null ? null : JSON.stringify([position.id, quoteShares]);
+  const continueBlocked =
+    amountValidation.kind !== "valid" || sharesToRedeem === undefined || overAvailableAmount;
+
+  return {
+    amountError,
+    amountValidation,
+    availableAmount,
+    continueBlocked,
+    hasStakedShares,
+    overAvailableAmount,
+    quoteKey,
+    quoteShares,
+    sharesToRedeem,
+    slippageBps,
+    slippageInvalid,
+  };
+}
+
 function TransactionLink({
   signature,
   environment,
@@ -215,14 +289,129 @@ function TransactionLink({
   );
 }
 
-function WithdrawalResult({
+function WithdrawalApprovalResult({
+  outcome,
+  onClose,
+}: {
+  outcome: Extract<WithdrawalOutcome, { kind: "approval_pending" }>;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+
+  return (
+    <>
+      <EarnOutcomeMark tone="warning" />
+      <div className="flex items-center gap-2 pr-8">
+        <h2
+          className="text-base font-medium text-primary outline-none"
+          data-modal-focus-target
+          tabIndex={-1}
+        >
+          {t("DashboardEarn.vaultWithdraw.approvalTitle")}
+        </h2>
+        <Badge variant="warning">{t("DashboardEarn.vaultWithdraw.approvalStatus")}</Badge>
+      </div>
+      <p className="mt-2 text-sm leading-5 text-secondary">
+        {t("DashboardEarn.vaultWithdraw.approvalBody")}
+      </p>
+      {outcome.approvalRequestId || outcome.walletOperationId ? (
+        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+          {outcome.approvalRequestId ? (
+            <div className="flex items-start justify-between gap-5">
+              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
+              <dd className="max-w-64 break-all text-right text-primary">
+                {outcome.approvalRequestId}
+              </dd>
+            </div>
+          ) : null}
+          {outcome.walletOperationId ? (
+            <div className="flex items-start justify-between gap-5">
+              <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
+              <dd className="max-w-64 break-all text-right text-primary">
+                {outcome.walletOperationId}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      <div className="mt-5 flex justify-end">
+        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
+      </div>
+    </>
+  );
+}
+
+interface WithdrawalResultCopy {
+  body: string;
+  note: string;
+  status: string;
+  statusVariant: BadgeVariant;
+  title: string;
+}
+
+function withdrawalResultCopy(
+  outcome: Extract<WithdrawalOutcome, { kind: "withdrawal" }>,
+  t: ReturnType<typeof useTranslations>
+): WithdrawalResultCopy {
+  if (outcome.absorbedByApproval) {
+    return {
+      title: t("DashboardEarn.vaultWithdraw.absorbedTitle"),
+      body: t("DashboardEarn.vaultWithdraw.absorbedBody"),
+      note: t("DashboardEarn.vaultWithdraw.absorbedNote"),
+      status: t("DashboardEarn.vaultWithdraw.absorbedStatus"),
+      statusVariant: "info",
+    };
+  }
+  switch (outcome.withdrawal.status) {
+    case "requested":
+      return {
+        title: t("DashboardEarn.vaultWithdraw.recordedTitle"),
+        body: t("DashboardEarn.vaultWithdraw.recordedBody"),
+        note: t("DashboardEarn.vaultWithdraw.recordedNote"),
+        status: t("DashboardEarn.vaultWithdraw.recordedStatus"),
+        statusVariant: "warning",
+      };
+    case "confirmed":
+      return {
+        title: t("DashboardEarn.vaultWithdraw.confirmedTitle"),
+        body: t("DashboardEarn.vaultWithdraw.confirmedBody"),
+        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        status: t("DashboardEarn.vaultWithdraw.confirmedStatus"),
+        statusVariant: "warning",
+      };
+    case "finalized":
+      return {
+        title: t("DashboardEarn.vaultWithdraw.finalizedTitle"),
+        body: t("DashboardEarn.vaultWithdraw.finalizedBody"),
+        note: t("DashboardEarn.vaultWithdraw.finalizedNote"),
+        status: t("DashboardEarn.vaultWithdraw.finalizedStatus"),
+        statusVariant: "success",
+      };
+    default:
+      return {
+        title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
+        body: t("DashboardEarn.vaultWithdraw.submittedBody"),
+        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        status: t("DashboardEarn.vaultWithdraw.submittedStatus"),
+        statusVariant: "default",
+      };
+  }
+}
+
+function outcomeTone(statusVariant: BadgeVariant): "info" | "success" | "warning" {
+  if (statusVariant === "success") return "success";
+  if (statusVariant === "warning") return "warning";
+  return "info";
+}
+
+function WithdrawalMovementResult({
   outcome,
   environment,
   onClose,
   position,
   requestedAmount,
 }: {
-  outcome: WithdrawalOutcome;
+  outcome: Extract<WithdrawalOutcome, { kind: "withdrawal" }>;
   environment: SdpEnvironment;
   onClose: () => void;
   position: EarnVaultPosition;
@@ -233,96 +422,8 @@ function WithdrawalResult({
   const asset = earnMintAsset(position.tokenMint);
   const positionName = position.label || shortenMarketAddress(position.providerReference);
 
-  if (outcome.kind === "approval_pending") {
-    return (
-      <>
-        <EarnOutcomeMark tone="warning" />
-        <div className="flex items-center gap-2 pr-8">
-          <h2
-            className="text-base font-medium text-primary outline-none"
-            data-modal-focus-target
-            tabIndex={-1}
-          >
-            {t("DashboardEarn.vaultWithdraw.approvalTitle")}
-          </h2>
-          <Badge variant="warning">{t("DashboardEarn.vaultWithdraw.approvalStatus")}</Badge>
-        </div>
-        <p className="mt-2 text-sm leading-5 text-secondary">
-          {t("DashboardEarn.vaultWithdraw.approvalBody")}
-        </p>
-        {outcome.approvalRequestId || outcome.walletOperationId ? (
-          <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-            {outcome.approvalRequestId ? (
-              <div className="flex items-start justify-between gap-5">
-                <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
-                <dd className="max-w-64 break-all text-right text-primary">
-                  {outcome.approvalRequestId}
-                </dd>
-              </div>
-            ) : null}
-            {outcome.walletOperationId ? (
-              <div className="flex items-start justify-between gap-5">
-                <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
-                <dd className="max-w-64 break-all text-right text-primary">
-                  {outcome.walletOperationId}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        ) : null}
-        <div className="mt-5 flex justify-end">
-          <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-        </div>
-      </>
-    );
-  }
-
   const { withdrawal } = outcome;
-  const copy: {
-    body: string;
-    note: string;
-    status: string;
-    statusVariant: BadgeVariant;
-    title: string;
-  } = outcome.absorbedByApproval
-    ? {
-        title: t("DashboardEarn.vaultWithdraw.absorbedTitle"),
-        body: t("DashboardEarn.vaultWithdraw.absorbedBody"),
-        note: t("DashboardEarn.vaultWithdraw.absorbedNote"),
-        status: t("DashboardEarn.vaultWithdraw.absorbedStatus"),
-        statusVariant: "info",
-      }
-    : withdrawal.status === "requested"
-      ? {
-          title: t("DashboardEarn.vaultWithdraw.recordedTitle"),
-          body: t("DashboardEarn.vaultWithdraw.recordedBody"),
-          note: t("DashboardEarn.vaultWithdraw.recordedNote"),
-          status: t("DashboardEarn.vaultWithdraw.recordedStatus"),
-          statusVariant: "warning",
-        }
-      : withdrawal.status === "confirmed"
-        ? {
-            title: t("DashboardEarn.vaultWithdraw.confirmedTitle"),
-            body: t("DashboardEarn.vaultWithdraw.confirmedBody"),
-            note: t("DashboardEarn.vaultWithdraw.settlingNote"),
-            status: t("DashboardEarn.vaultWithdraw.confirmedStatus"),
-            statusVariant: "warning",
-          }
-        : withdrawal.status === "finalized"
-          ? {
-              title: t("DashboardEarn.vaultWithdraw.finalizedTitle"),
-              body: t("DashboardEarn.vaultWithdraw.finalizedBody"),
-              note: t("DashboardEarn.vaultWithdraw.finalizedNote"),
-              status: t("DashboardEarn.vaultWithdraw.finalizedStatus"),
-              statusVariant: "success",
-            }
-          : {
-              title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
-              body: t("DashboardEarn.vaultWithdraw.submittedBody"),
-              note: t("DashboardEarn.vaultWithdraw.settlingNote"),
-              status: t("DashboardEarn.vaultWithdraw.submittedStatus"),
-              statusVariant: "default",
-            };
+  const copy = withdrawalResultCopy(outcome, t);
   const sharedStatus = outcome.absorbedByApproval
     ? null
     : earnVaultPositionStatusDisplay(
@@ -335,11 +436,7 @@ function WithdrawalResult({
 
   return (
     <>
-      <EarnOutcomeMark
-        tone={
-          statusVariant === "success" ? "success" : statusVariant === "warning" ? "warning" : "info"
-        }
-      />
+      <EarnOutcomeMark tone={outcomeTone(statusVariant)} />
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -384,6 +481,33 @@ function WithdrawalResult({
   );
 }
 
+function WithdrawalResult({
+  outcome,
+  environment,
+  onClose,
+  position,
+  requestedAmount,
+}: {
+  outcome: WithdrawalOutcome;
+  environment: SdpEnvironment;
+  onClose: () => void;
+  position: EarnVaultPosition;
+  requestedAmount: string;
+}) {
+  if (outcome.kind === "approval_pending") {
+    return <WithdrawalApprovalResult onClose={onClose} outcome={outcome} />;
+  }
+  return (
+    <WithdrawalMovementResult
+      environment={environment}
+      onClose={onClose}
+      outcome={outcome}
+      position={position}
+      requestedAmount={requestedAmount}
+    />
+  );
+}
+
 interface EarnVaultWithdrawalOutcomeTrackerProps {
   movementId: string;
   /** Keep the table's status badge current while the movement advances. */
@@ -416,12 +540,223 @@ export interface EarnVaultWithdrawModalProps {
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
 }
 
+interface WithdrawalDetailsStepProps {
+  amountError: string | null;
+  amountInput: string;
+  availableAmount: string | undefined;
+  continueBlocked: boolean;
+  hasStakedShares: boolean;
+  onAmountChange: (value: string) => void;
+  onContinue: () => void;
+  onMax: () => void;
+  overAvailableAmount: boolean;
+  positionValue: string | undefined;
+  submitting: boolean;
+}
+
+function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
+  const {
+    amountError,
+    amountInput,
+    availableAmount,
+    continueBlocked,
+    hasStakedShares,
+    onAmountChange,
+    onContinue,
+    onMax,
+    overAvailableAmount,
+    positionValue,
+    submitting,
+  } = props;
+  const locale = useLocale();
+  const t = useTranslations();
+
+  return (
+    <>
+      <div className="mt-5 flex flex-col gap-2">
+        <div className="flex items-end justify-between gap-3">
+          <Label htmlFor="earn-vault-withdraw-amount">
+            {t("DashboardEarn.vaultWithdraw.amountLabel")}
+          </Label>
+          <Button
+            disabled={submitting || availableAmount === undefined}
+            onClick={onMax}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {t("DashboardEarn.vaultWithdraw.max")}
+          </Button>
+        </div>
+        <Input
+          aria-describedby="earn-vault-withdraw-balance"
+          aria-invalid={amountError ? true : undefined}
+          disabled={submitting}
+          id="earn-vault-withdraw-amount"
+          inputMode="decimal"
+          maxDecimals={VAULT_WITHDRAWAL_AMOUNT_DECIMALS}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountChange(event.target.value)}
+          placeholder="0.00"
+          value={amountInput}
+        />
+        <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
+          {amountBalanceHint(t, locale, positionValue, availableAmount, hasStakedShares)}
+        </div>
+        {amountError ? (
+          <p className="text-xs text-error" role="alert">
+            {amountError}
+          </p>
+        ) : null}
+        {overAvailableAmount ? (
+          <p className="text-xs text-warning" role="status">
+            {t("DashboardEarn.vaultWithdraw.overAmount")}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-6">
+        <Button className="!w-full" disabled={continueBlocked} onClick={onContinue}>
+          {t("DashboardEarn.deposit.continueAction")}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+interface WithdrawalReviewStepProps {
+  amount: string;
+  assetSymbol: string;
+  minAmountOut: string | undefined;
+  onBack: () => void;
+  onSlippageChange: (value: string) => void;
+  onSlippageToggle: () => void;
+  onSubmit: () => void;
+  position: EarnVaultPosition;
+  quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
+  slippageBps: number | null;
+  slippageInput: string;
+  slippageInvalid: boolean;
+  slippageOpen: boolean;
+  slippagePolicy: ReturnType<typeof earnWithdrawSlippageFloor>;
+  submitBlocked: boolean;
+  submitError: string | null;
+  submitting: boolean;
+}
+
+function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
+  const {
+    amount,
+    assetSymbol,
+    minAmountOut,
+    onBack,
+    onSlippageChange,
+    onSlippageToggle,
+    onSubmit,
+    position,
+    quote,
+    slippageBps,
+    slippageInput,
+    slippageInvalid,
+    slippageOpen,
+    slippagePolicy,
+    submitBlocked,
+    submitError,
+    submitting,
+  } = props;
+  const locale = useLocale();
+  const t = useTranslations();
+
+  return (
+    <>
+      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.deposit.progressReview")}</p>
+
+      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+          <dd className="max-w-64 text-right text-primary">
+            {position.label || shortenMarketAddress(position.providerReference)}
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
+          <dd className="text-right tabular-nums text-primary">{formatUsd(amount, locale)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
+          <dd className="text-right text-primary">{assetSymbol}</dd>
+        </div>
+        {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
+            <dd className="text-right tabular-nums text-primary">
+              {formatTokenQuantity(quote.preview.assetsOut, locale, assetSymbol)}
+            </dd>
+          </div>
+        ) : null}
+        {minAmountOut !== undefined ? (
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
+            <dd className="text-right tabular-nums text-primary">
+              {formatTokenQuantity(minAmountOut, locale, assetSymbol)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      <WithdrawalQuoteNotices quote={quote} />
+
+      {slippagePolicy ? (
+        <VaultSlippageSection
+          help={t("DashboardEarn.vaultWithdraw.slippageHelp")}
+          idPrefix="earn-vault-withdraw"
+          input={slippageInput}
+          invalid={slippageInvalid}
+          onChange={onSlippageChange}
+          onToggle={onSlippageToggle}
+          open={slippageOpen}
+          submitting={submitting}
+          toleranceBps={slippageBps}
+        />
+      ) : null}
+
+      <p className="mt-4 text-xs leading-5 text-tertiary">
+        {position.feeSponsored
+          ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
+          : t("DashboardEarn.vaultWithdraw.confirmNote")}
+      </p>
+      {submitError ? (
+        <p
+          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
+          role="alert"
+        >
+          {submitError}
+        </p>
+      ) : null}
+
+      <div className="mt-6 flex gap-2">
+        <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
+          {t("DashboardEarn.deposit.back")}
+        </Button>
+        <Button
+          className="flex-[2]"
+          disabled={submitting || submitBlocked}
+          iconLeft={submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+          onClick={onSubmit}
+        >
+          {submitting
+            ? t("DashboardEarn.vaultWithdraw.submitting")
+            : t("DashboardEarn.vaultWithdraw.submit")}
+        </Button>
+      </div>
+    </>
+  );
+}
+
 /**
  * Exit a vault position using a stablecoin amount. The UI converts that amount
  * from the live position value into the exact share quantity the API requires,
  * then reviews the provider's payout quote before anything is submitted.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The flow keeps value-moving validation, quote state, and its two UI steps in one auditable state machine.
 export function EarnVaultWithdrawModal({
   position,
   environment,
@@ -431,7 +766,6 @@ export function EarnVaultWithdrawModal({
   onMovementUpdated,
 }: EarnVaultWithdrawModalProps) {
   const t = useTranslations();
-  const locale = useLocale();
   const [amountInput, setAmountInput] = useState("");
   // Declared per provider in @sdp/types: non-null means this provider REQUIRES
   // an explicit exit floor derived from a live quote. Null renders no slippage
@@ -449,32 +783,19 @@ export function EarnVaultWithdrawModal({
   const submittingRef = useRef(false);
   const requestControllerRef = useRef<AbortController | null>(null);
   const observedWithdrawal = useEarnVaultWithdrawalOutcome(
-    outcome?.kind === "withdrawal" && !outcome.absorbedByApproval
-      ? outcome.withdrawal.movementId
-      : undefined,
+    observableWithdrawalMovementId(outcome),
     undefined,
     onMovementUpdated
   );
-  const visibleOutcome: WithdrawalOutcome | null =
-    outcome?.kind === "withdrawal" && observedWithdrawal
-      ? { ...outcome, withdrawal: { ...outcome.withdrawal, ...observedWithdrawal } }
-      : outcome;
-  const progressStep = visibleOutcome
-    ? visibleOutcome.kind !== "withdrawal" || visibleOutcome.absorbedByApproval
-      ? 2
-      : earnVaultWithdrawalUiState(visibleOutcome.withdrawal.status).progressStep
-    : step === "review"
-      ? 1
-      : 0;
+  const visibleOutcome = mergeObservedWithdrawal(outcome, observedWithdrawal);
+  const progressStep = withdrawalProgressStep(visibleOutcome, step);
   const progressSteps = [
     t("DashboardEarn.vaultWithdraw.flowDetails"),
     t("DashboardEarn.vaultWithdraw.flowReview"),
     t("DashboardEarn.vaultWithdraw.flowProcessing"),
     t("DashboardEarn.vaultWithdraw.flowComplete"),
   ];
-  const panelKey = visibleOutcome
-    ? `outcome:${visibleOutcome.kind}:${visibleOutcome.kind === "withdrawal" ? visibleOutcome.withdrawal.status : "approval"}`
-    : `form:${step}`;
+  const panelKey = withdrawalPanelKey(visibleOutcome, step);
   const contentRef = useModalFocus({
     focusKey: panelKey,
     initialFocusSelector: "[data-modal-focus-target]",
@@ -494,33 +815,25 @@ export function EarnVaultWithdrawModal({
   );
 
   const asset = earnMintAsset(position.tokenMint);
-  const amountValidation = validateVaultWithdrawalAmount(amountInput);
-  const totalShares = position.shares;
-  const withdrawableShares = position.withdrawableShares;
-  const availableAmount = vaultWithdrawalAvailableAmount(position);
-  const sharesToRedeem =
-    amountValidation.kind === "valid"
-      ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
-      : undefined;
-  const hasStakedShares =
-    totalShares !== undefined &&
-    withdrawableShares !== undefined &&
-    compareUnsignedDecimals(totalShares, withdrawableShares) === 1;
-  const overAvailableAmount =
-    amountValidation.kind === "valid" && availableAmount !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
-      : false;
-  const amountError =
-    amountInput.trim() === "" || amountValidation.kind === "valid"
-      ? null
-      : t("DashboardEarn.vaultWithdraw.amountInvalid");
-  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
-  const slippageInvalid = slippagePolicy !== null && slippageBps === null;
-  const quoteShares =
-    slippagePolicy !== null && sharesToRedeem !== undefined ? sharesToRedeem : null;
-  // The key serializes EVERY quote input, per the hook's contract: shares
-  // alone would keep serving the previous position's quote across a swap.
-  const quoteKey = quoteShares === null ? null : JSON.stringify([position.id, quoteShares]);
+  const {
+    amountError,
+    amountValidation,
+    availableAmount,
+    continueBlocked,
+    hasStakedShares,
+    overAvailableAmount,
+    quoteKey,
+    quoteShares,
+    sharesToRedeem,
+    slippageBps,
+    slippageInvalid,
+  } = deriveWithdrawalFormState(
+    position,
+    amountInput,
+    slippagePolicy,
+    slippageInput,
+    t("DashboardEarn.vaultWithdraw.amountInvalid")
+  );
   const rawQuote = useDebouncedVaultQuote<EarnVaultWithdrawalPreview>(
     quoteKey,
     (signal) =>
@@ -532,8 +845,6 @@ export function EarnVaultWithdrawModal({
   );
   const quote = quoteForKey(rawQuote, quoteKey);
   const minAmountOut = derivedMinAmountOut(slippageBps, quote);
-  const continueBlocked =
-    amountValidation.kind !== "valid" || sharesToRedeem === undefined || overAvailableAmount;
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
   async function submitResolvedIntent(controller: AbortController, shares: string) {
@@ -670,180 +981,57 @@ export function EarnVaultWithdrawModal({
           </h2>
 
           {step === "details" ? (
-            <>
-              <div className="mt-5 flex flex-col gap-2">
-                <div className="flex items-end justify-between gap-3">
-                  <Label htmlFor="earn-vault-withdraw-amount">
-                    {t("DashboardEarn.vaultWithdraw.amountLabel")}
-                  </Label>
-                  <Button
-                    disabled={submitting || availableAmount === undefined}
-                    onClick={() => {
-                      if (availableAmount === undefined) return;
-                      setAmountInput(availableAmount);
-                      setSubmitError(null);
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    {t("DashboardEarn.vaultWithdraw.max")}
-                  </Button>
-                </div>
-                <Input
-                  aria-describedby="earn-vault-withdraw-balance"
-                  aria-invalid={amountError ? true : undefined}
-                  disabled={submitting}
-                  id="earn-vault-withdraw-amount"
-                  inputMode="decimal"
-                  maxDecimals={VAULT_WITHDRAWAL_AMOUNT_DECIMALS}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    setAmountInput(event.target.value);
-                    setSubmitError(null);
-                  }}
-                  placeholder="0.00"
-                  value={amountInput}
-                />
-                <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
-                  {amountBalanceHint(
-                    t,
-                    locale,
-                    position.tokenValue,
-                    availableAmount,
-                    hasStakedShares
-                  )}
-                </div>
-                {amountError ? (
-                  <p className="text-xs text-error" role="alert">
-                    {amountError}
-                  </p>
-                ) : null}
-                {overAvailableAmount ? (
-                  <p className="text-xs text-warning" role="status">
-                    {t("DashboardEarn.vaultWithdraw.overAmount")}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="mt-6">
-                <Button
-                  className="!w-full"
-                  disabled={continueBlocked}
-                  onClick={() => {
-                    setSubmitError(null);
-                    setStep("review");
-                  }}
-                >
-                  {t("DashboardEarn.deposit.continueAction")}
-                </Button>
-              </div>
-            </>
+            <WithdrawalDetailsStep
+              amountError={amountError}
+              amountInput={amountInput}
+              availableAmount={availableAmount}
+              continueBlocked={continueBlocked}
+              hasStakedShares={hasStakedShares}
+              onAmountChange={(value) => {
+                setAmountInput(value);
+                setSubmitError(null);
+              }}
+              onContinue={() => {
+                setSubmitError(null);
+                setStep("review");
+              }}
+              onMax={() => {
+                if (availableAmount === undefined) return;
+                setAmountInput(availableAmount);
+                setSubmitError(null);
+              }}
+              overAvailableAmount={overAvailableAmount}
+              positionValue={position.tokenValue}
+              submitting={submitting}
+            />
           ) : (
-            <>
-              <p className="mt-1 text-sm text-secondary">
-                {t("DashboardEarn.deposit.progressReview")}
-              </p>
-
-              <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-                <div className="flex items-baseline justify-between gap-5">
-                  <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-                  <dd className="max-w-64 text-right text-primary">
-                    {position.label || shortenMarketAddress(position.providerReference)}
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-5">
-                  <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
-                  <dd className="text-right tabular-nums text-primary">
-                    {amountValidation.kind === "valid"
-                      ? formatUsd(amountValidation.canonicalAmount, locale)
-                      : amountInput}
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-5">
-                  <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
-                  <dd className="text-right text-primary">{asset.symbol}</dd>
-                </div>
-                {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-                  <div className="flex items-baseline justify-between gap-5">
-                    <dt className="text-tertiary">
-                      {t("DashboardEarn.vaultWithdraw.expectedAmount")}
-                    </dt>
-                    <dd className="text-right tabular-nums text-primary">
-                      {formatTokenQuantity(quote.preview.assetsOut, locale, asset.symbol)}
-                    </dd>
-                  </div>
-                ) : null}
-                {minAmountOut !== undefined ? (
-                  <div className="flex items-baseline justify-between gap-5">
-                    <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
-                    <dd className="text-right tabular-nums text-primary">
-                      {formatTokenQuantity(minAmountOut, locale, asset.symbol)}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-
-              <WithdrawalQuoteNotices quote={quote} />
-
-              {slippagePolicy ? (
-                <VaultSlippageSection
-                  help={t("DashboardEarn.vaultWithdraw.slippageHelp")}
-                  idPrefix="earn-vault-withdraw"
-                  input={slippageInput}
-                  invalid={slippageInvalid}
-                  onChange={(value) => {
-                    setSlippageInput(value);
-                    setSubmitError(null);
-                  }}
-                  onToggle={() => setSlippageOpen((open) => !open)}
-                  open={slippageOpen}
-                  submitting={submitting}
-                  toleranceBps={slippageBps}
-                />
-              ) : null}
-
-              <p className="mt-4 text-xs leading-5 text-tertiary">
-                {/* From the position, not the quote: Kamino declares no exit floor
-                    and so never quotes, which left its note stuck on wallet-pays. */}
-                {position.feeSponsored
-                  ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
-                  : t("DashboardEarn.vaultWithdraw.confirmNote")}
-              </p>
-              {submitError ? (
-                <p
-                  className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-                  role="alert"
-                >
-                  {submitError}
-                </p>
-              ) : null}
-
-              <div className="mt-6 flex gap-2">
-                <Button
-                  className="flex-1"
-                  disabled={submitting}
-                  onClick={() => {
-                    setSubmitError(null);
-                    setStep("details");
-                  }}
-                  variant="outline"
-                >
-                  {t("DashboardEarn.deposit.back")}
-                </Button>
-                <Button
-                  className="flex-[2]"
-                  disabled={submitting || submitBlocked}
-                  iconLeft={
-                    submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
-                  }
-                  onClick={() => void submit()}
-                >
-                  {submitting
-                    ? t("DashboardEarn.vaultWithdraw.submitting")
-                    : t("DashboardEarn.vaultWithdraw.submit")}
-                </Button>
-              </div>
-            </>
+            <WithdrawalReviewStep
+              amount={
+                amountValidation.kind === "valid" ? amountValidation.canonicalAmount : amountInput
+              }
+              assetSymbol={asset.symbol}
+              minAmountOut={minAmountOut}
+              onBack={() => {
+                setSubmitError(null);
+                setStep("details");
+              }}
+              onSlippageChange={(value) => {
+                setSlippageInput(value);
+                setSubmitError(null);
+              }}
+              onSlippageToggle={() => setSlippageOpen((open) => !open)}
+              onSubmit={() => void submit()}
+              position={position}
+              quote={quote}
+              slippageBps={slippageBps}
+              slippageInput={slippageInput}
+              slippageInvalid={slippageInvalid}
+              slippageOpen={slippageOpen}
+              slippagePolicy={slippagePolicy}
+              submitBlocked={submitBlocked}
+              submitError={submitError}
+              submitting={submitting}
+            />
           )}
         </EarnFlowTransition>
       </div>
