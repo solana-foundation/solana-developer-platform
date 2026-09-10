@@ -65,6 +65,11 @@ describe("dashboard quick start", () => {
     const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
     fireEvent.click(launcher);
     expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(readQuickStart(key())).toBe("api-key");
+    await waitFor(() => expect(document.activeElement).toBe(launcher));
+    fireEvent.click(launcher);
     fireEvent.click(view.getByRole("button", { name: "Continue later" }));
     expect(view.queryByRole("dialog")).toBeNull();
     expect(readQuickStart(key())).toBe("api-key");
@@ -183,15 +188,21 @@ describe("dashboard quick start", () => {
     await waitFor(() => expect(document.activeElement).toBe(launcher));
   });
 
-  it("keeps a compact launcher in the collapsed sidebar with dismissal in the guide", () => {
+  it("minimizes to the compact launcher and preserves saved progress when reopened", () => {
+    setQuickStart(key(), "wallet");
     const view = render(ui(true));
-    const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
-    expect(launcher.getAttribute("title")).toBe("SDP quick start · 1/3");
+    const launcher = view.getByRole("button", { name: "SDP quick start · 2/3" });
+    expect(launcher.getAttribute("title")).toBe("SDP quick start · 2/3");
     fireEvent.click(launcher);
     expect(view.getByRole("dialog")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
     expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.queryByRole("complementary")).toBeNull();
+    expect(view.getByRole("complementary")).toBeTruthy();
+    expect(window.localStorage.getItem(key())).toBe("wallet");
+    view.unmount();
+    const restored = render(ui(true));
+    fireEvent.click(restored.getByRole("button", { name: "SDP quick start · 2/3" }));
+    expect(restored.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
   });
 
   it("keeps the optional step skippable when custody is unavailable", () => {
@@ -210,6 +221,8 @@ describe("dashboard quick start", () => {
     const view = renderGuide();
     fireEvent.click(view.getByRole("button", { name: "I already have an API key" }));
     expect(view.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
+    expect(readQuickStart(key())).toBe("wallet");
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     expect(view.queryByRole("complementary")).toBeNull();
   });

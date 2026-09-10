@@ -1,6 +1,6 @@
 # Dashboard quick start QA
 
-The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress, opens the guide on click, and supports dismissal. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
+The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress and opens the guide on click. The expanded guide's X minimizes it back to the card and preserves progress, just like Escape or Continue later. The sidebar card's X dismisses the guide. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
 
 ## Sidebar card verification — September 10
 

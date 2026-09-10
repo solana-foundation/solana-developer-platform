@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, ChevronDown, ListChecks, X } from "lucide-react";
+import { ArrowUpRight, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "radix-ui";
@@ -184,27 +184,15 @@ export function DashboardQuickStart({ collapsed = false }: { collapsed?: boolean
             {step === "wallet" ? ` · ${t("Shared.quickStart.optional")}` : null}
           </p>
         </div>
-        <div className="flex items-center">
-          <button
-            type="button"
-            aria-expanded={true}
-            aria-label={t("Shared.quickStart.minimize")}
-            title={t("Shared.quickStart.minimize")}
-            onClick={minimize}
-            className="-mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-          >
-            <ChevronDown className="size-4" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => setQuickStart(storageKey, "done")}
-            aria-label={t("Shared.quickStart.skip")}
-            title={t("Shared.quickStart.skip")}
-            className="-mr-2 -mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-          >
-            <X className="size-4" aria-hidden />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={minimize}
+          aria-label={t("Shared.quickStart.minimize")}
+          title={t("Shared.quickStart.minimize")}
+          className="-mr-2 -mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <X className="size-4" aria-hidden />
+        </button>
       </div>
       <h2 className="mt-1 text-base font-medium" aria-live="polite">
         {title}
