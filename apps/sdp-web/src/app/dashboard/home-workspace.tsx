@@ -22,7 +22,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { readApiErrorMessage } from "@/lib/api-error";
-import { quickStartKey, readQuickStart, subscribeQuickStart } from "@/lib/dashboard-quick-start";
+import {
+  isQuickStartDismissed,
+  quickStartKey,
+  readQuickStart,
+  subscribeQuickStart,
+} from "@/lib/dashboard-quick-start";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -557,7 +562,9 @@ export function HomeWorkspace({
   const progressKey = quickStartKey(dashboardCacheScope);
   const quickStartFinished = useSyncExternalStore(
     subscribeQuickStart,
-    () => readQuickStart(progressKey, initialQuickStartStep) === "done",
+    () =>
+      isQuickStartDismissed(progressKey) ||
+      readQuickStart(progressKey, initialQuickStartStep) === "done",
     () => initialQuickStartStep === "done"
   );
   const custodyEnabled = flags.custody;

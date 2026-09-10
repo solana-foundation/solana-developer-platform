@@ -3,20 +3,26 @@
 import { ArrowUpRight, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Dialog } from "radix-ui";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { AlertDialog, Dialog } from "radix-ui";
+import { type RefObject, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
+  dismissQuickStart,
+  isQuickStartDismissed,
+  type QuickStartStep,
   quickStartKey,
   readQuickStart,
+  resumeQuickStart,
   setQuickStart,
   subscribeQuickStart,
 } from "@/lib/dashboard-quick-start";
 import styles from "./dashboard-quick-start.module.css";
 
 const serverSnapshot = () => null;
+const dialogClassName = `${styles.enter} fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[420px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-6 text-primary shadow-xl`;
 const stepCopy = {
   "api-key": {
     number: 1,
@@ -95,83 +101,199 @@ function isQuickStartEligible(workspace: ReturnType<typeof useDashboardWorkspace
   );
 }
 
-export function DashboardQuickStart({ collapsed = false }: { collapsed?: boolean }) {
+function QuickStartSettingsLauncher({
+  step,
+  expanded,
+  launcherRef,
+  onResume,
+}: {
+  step: QuickStartStep | null;
+  expanded: boolean;
+  launcherRef: RefObject<HTMLButtonElement | null>;
+  onResume: () => void;
+}) {
+  const t = useTranslations();
+  const workspace = useDashboardWorkspace();
+  const eligible = isQuickStartEligible(workspace);
+  let description: string;
+  if (workspace.initialQuickStartStep === "done") {
+    description = t("Shared.quickStart.settingsComplete");
+  } else if (workspace.sdpEnvironment !== "sandbox") {
+    description = t("Shared.quickStart.settingsSandbox");
+  } else if (!eligible) {
+    description = t("Shared.quickStart.settingsUnavailable");
+  } else if (!step) {
+    description = t("Shared.quickStart.settingsLoading");
+  } else if (step === "done") {
+    description = t("Shared.quickStart.settingsRestartDescription");
+  } else {
+    const current = stepCopy[step];
+    description = `${t("Shared.quickStart.progress", { current: current.number, total: 3 })} · ${t(current.title)}`;
+  }
+  return (
+    <Card id="onboarding" className="scroll-mt-6">
+      <CardHeader>
+        <CardTitle>
+          <h2>{t("Shared.quickStart.settingsTitle")}</h2>
+        </CardTitle>
+        <CardDescription>{t("Shared.quickStart.settingsDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h3 className="text-sm font-medium">{t("Shared.quickStart.title")}</h3>
+          <p className="text-sm text-secondary">{description}</p>
+        </div>
+        {eligible && step ? (
+          <Button variant="secondary" asChild>
+            <button
+              type="button"
+              ref={launcherRef}
+              aria-haspopup="dialog"
+              aria-expanded={expanded}
+              onClick={onResume}
+            >
+              {t(
+                step === "done"
+                  ? "Shared.quickStart.settingsRestart"
+                  : "Shared.quickStart.settingsContinue"
+              )}
+            </button>
+          </Button>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function DashboardQuickStart({
+  collapsed = false,
+  variant = "sidebar",
+}: {
+  collapsed?: boolean;
+  variant?: "sidebar" | "settings";
+}) {
   const t = useTranslations();
   const workspace = useDashboardWorkspace();
   const { dashboardCacheScope, dashboardAccess, flags, initialQuickStartStep } = workspace;
   const eligible = isQuickStartEligible(workspace);
   const storageKey = quickStartKey(dashboardCacheScope);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [dismissKey, setDismissKey] = useState<string | null>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const step = useSyncExternalStore(
     subscribeQuickStart,
     () => readQuickStart(storageKey, initialQuickStartStep),
     serverSnapshot
   );
-  if (!eligible || !step || step === "done") return null;
+  const dismissed = useSyncExternalStore(
+    subscribeQuickStart,
+    () => isQuickStartDismissed(storageKey),
+    () => false
+  );
+  const canShowGuide = eligible && step && step !== "done" && !dismissed;
+  if (variant === "sidebar" && !canShowGuide) return null;
 
-  const current = stepCopy[step];
+  const activeStep = step && step !== "done" ? step : "api-key";
+  const current = stepCopy[activeStep];
   const stepNumber = current.number;
-  const isModal = expandedKey === storageKey;
+  const isModal = canShowGuide && expandedKey === storageKey;
   const minimize = () => setExpandedKey(null);
   const canCreateWallet = flags.custody && dashboardAccess.capabilities.canManageCustody;
   const title = t(current.title);
   const description = t(current.description);
   const launcherLabel = `${t("Shared.quickStart.title")} · ${stepNumber}/3`;
-  const launcher = (
-    <aside
-      aria-label={t("Shared.quickStart.title")}
-      data-quick-start-sidebar
-      className="relative shrink-0 rounded-xl border border-border-default bg-fill-subtle text-primary"
-    >
-      <button
-        type="button"
-        aria-label={launcherLabel}
-        aria-haspopup="dialog"
-        aria-expanded={isModal}
-        title={collapsed ? launcherLabel : undefined}
-        ref={launcherRef}
-        onClick={() => setExpandedKey(storageKey)}
-        className={
-          collapsed
-            ? "flex h-10 w-full items-center justify-center rounded-xl hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
-            : "block w-full rounded-xl p-3 text-left hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
-        }
+  const launcher =
+    variant === "settings" ? (
+      <QuickStartSettingsLauncher
+        step={step}
+        expanded={Boolean(isModal)}
+        launcherRef={launcherRef}
+        onResume={() => {
+          resumeQuickStart(storageKey);
+          setExpandedKey(storageKey);
+        }}
+      />
+    ) : (
+      <aside
+        aria-label={t("Shared.quickStart.title")}
+        data-quick-start-sidebar
+        className="relative shrink-0 rounded-xl border border-border-default bg-fill-subtle text-primary"
       >
-        {collapsed ? (
-          <ListChecks className="size-4 text-secondary" aria-hidden />
-        ) : (
-          <>
-            <span className="block pr-6 text-sm font-medium">{t("Shared.quickStart.title")}</span>
-            <span className="mt-3 flex items-center justify-between gap-3 text-xs text-secondary">
-              <span className="truncate">{title}</span>
-              <span className="shrink-0 text-tertiary">{stepNumber}/3</span>
-            </span>
-            <span
-              className="mt-2 block h-1 overflow-hidden rounded-full bg-fill-strong"
-              aria-hidden
-            >
-              <span
-                className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
-                style={{ width: `${(stepNumber / 3) * 100}%` }}
-              />
-            </span>
-          </>
-        )}
-      </button>
-      {collapsed ? null : (
         <button
           type="button"
-          onClick={() => setQuickStart(storageKey, "done")}
-          aria-label={t("Shared.quickStart.skip")}
-          title={t("Shared.quickStart.skip")}
-          className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+          aria-label={launcherLabel}
+          aria-haspopup="dialog"
+          aria-expanded={Boolean(isModal)}
+          title={collapsed ? launcherLabel : undefined}
+          ref={launcherRef}
+          onClick={() => setExpandedKey(storageKey)}
+          className={
+            collapsed
+              ? "flex h-10 w-full items-center justify-center rounded-xl hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
+              : "block w-full rounded-xl p-3 text-left hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
+          }
         >
-          <X className="size-3.5" aria-hidden />
+          {collapsed ? (
+            <ListChecks className="size-4 text-secondary" aria-hidden />
+          ) : (
+            <>
+              <span className="block pr-6 text-sm font-medium">{t("Shared.quickStart.title")}</span>
+              <span className="mt-3 flex items-center justify-between gap-3 text-xs text-secondary">
+                <span className="truncate">{title}</span>
+                <span className="shrink-0 text-tertiary">{stepNumber}/3</span>
+              </span>
+              <span
+                className="mt-2 block h-1 overflow-hidden rounded-full bg-fill-strong"
+                aria-hidden
+              >
+                <span
+                  className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
+                  style={{ width: `${(stepNumber / 3) * 100}%` }}
+                />
+              </span>
+            </>
+          )}
         </button>
-      )}
-    </aside>
-  );
+        {collapsed ? null : (
+          <AlertDialog.Root
+            open={dismissKey === storageKey}
+            onOpenChange={(open) => setDismissKey(open ? storageKey : null)}
+          >
+            <AlertDialog.Trigger asChild>
+              <button
+                type="button"
+                aria-label={t("Shared.quickStart.skip")}
+                title={t("Shared.quickStart.skip")}
+                className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                <X className="size-3.5" aria-hidden />
+              </button>
+            </AlertDialog.Trigger>
+            <AlertDialog.Portal>
+              <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+              <AlertDialog.Content className={dialogClassName}>
+                <AlertDialog.Title className="text-base font-medium">
+                  {t("Shared.quickStart.dismissTitle")}
+                </AlertDialog.Title>
+                <AlertDialog.Description className="mt-2 text-sm leading-5 text-secondary">
+                  {t("Shared.quickStart.dismissDescription")}
+                </AlertDialog.Description>
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <AlertDialog.Cancel asChild>
+                    <Button variant="secondary">{t("Shared.quickStart.dismissCancel")}</Button>
+                  </AlertDialog.Cancel>
+                  <AlertDialog.Action asChild>
+                    <Button onClick={() => dismissQuickStart(storageKey)}>
+                      {t("Shared.quickStart.dismissConfirm")}
+                    </Button>
+                  </AlertDialog.Action>
+                </div>
+              </AlertDialog.Content>
+            </AlertDialog.Portal>
+          </AlertDialog.Root>
+        )}
+      </aside>
+    );
   if (!isModal) return launcher;
 
   const content = (
@@ -214,7 +336,7 @@ export function DashboardQuickStart({ collapsed = false }: { collapsed?: boolean
       </div>
       <div className="mt-4">
         <StepAction
-          step={step}
+          step={activeStep}
           onFollow={minimize}
           onBack={minimize}
           canCreateWallet={canCreateWallet}
@@ -251,7 +373,7 @@ export function DashboardQuickStart({ collapsed = false }: { collapsed?: boolean
               }
             }}
             aria-describedby={undefined}
-            className={`${styles.enter} fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[420px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-border-default bg-surface-raised p-6 text-primary shadow-xl`}
+            className={dialogClassName}
           >
             <Dialog.Title className="sr-only">{t("Shared.quickStart.title")}</Dialog.Title>
             {content}

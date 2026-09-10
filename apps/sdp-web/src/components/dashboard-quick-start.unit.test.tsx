@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
   completeQuickStartStep,
+  dismissQuickStart,
+  isQuickStartDismissed,
   quickStartKey,
   readQuickStart,
   setQuickStart,
@@ -30,6 +32,11 @@ const key = () => quickStartKey(workspace.dashboardCacheScope);
 const ui = (collapsed = false) => (
   <I18nProvider locale="en" messages={getMessages("en")}>
     <DashboardQuickStart collapsed={collapsed} />
+  </I18nProvider>
+);
+const settingsUi = () => (
+  <I18nProvider locale="en" messages={getMessages("en")}>
+    <DashboardQuickStart variant="settings" />
   </I18nProvider>
 );
 
@@ -111,15 +118,87 @@ describe("dashboard quick start", () => {
   it("remembers dismissal and does not reopen after unrelated creation", () => {
     const view = render(ui());
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
-    expect(window.localStorage.getItem(key())).toBe("done");
+    expect(view.getByRole("alertdialog", { name: "Dismiss SDP quick start?" })).toBeTruthy();
+    expect(view.getByText(/You can continue anytime in Settings → Onboarding/)).toBeTruthy();
+    expect(isQuickStartDismissed(key())).toBe(false);
+    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
+    expect(isQuickStartDismissed(key())).toBe(true);
     act(() => completeQuickStartStep(key(), "api-key"));
-    expect(readQuickStart(key())).toBe("done");
+    expect(readQuickStart(key())).toBe("wallet");
     view.unmount();
     expect(render(ui()).queryByRole("complementary")).toBeNull();
   });
 
-  it("keeps dismissal across projects and isolates it between organizations and users", () => {
+  it("keeps the card and its progress when dismissal is canceled", async () => {
+    setQuickStart(key(), "wallet");
+    const view = render(ui());
+    const dismiss = view.getByRole("button", { name: "Dismiss SDP quick start" });
+    fireEvent.click(dismiss);
+    fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
+    expect(view.queryByRole("alertdialog")).toBeNull();
+    expect(view.getByRole("button", { name: "SDP quick start · 2/3" })).toBeTruthy();
+    expect(readQuickStart(key())).toBe("wallet");
+    expect(isQuickStartDismissed(key())).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(dismiss));
+  });
+
+  it("resumes a dismissed guide from Settings at the saved step and restores the sidebar", async () => {
+    setQuickStart(key(), "wallet");
+    const view = render(
+      <>
+        {ui()}
+        {settingsUi()}
+      </>
+    );
+    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
+    expect(view.queryByRole("complementary")).toBeNull();
+    view.unmount();
+    const restored = render(
+      <>
+        {ui()}
+        {settingsUi()}
+      </>
+    );
+    expect(restored.getByRole("heading", { name: "Onboarding" })).toBeTruthy();
+    const resume = restored.getByRole("button", { name: "Continue quick start" });
+    fireEvent.click(resume);
+    expect(
+      within(restored.getByRole("dialog")).getByRole("heading", { name: "Set up a wallet" })
+    ).toBeTruthy();
+    expect(isQuickStartDismissed(key())).toBe(false);
+    fireEvent.click(restored.getByRole("button", { name: "Minimize SDP quick start" }));
+    expect(restored.getByRole("button", { name: "SDP quick start · 2/3" })).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(resume));
+  });
+
+  it("allows old dismissed previews to restart from Settings", () => {
     setQuickStart(key(), "done");
+    const view = render(settingsUi());
+    fireEvent.click(view.getByRole("button", { name: "Restart quick start" }));
+    expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
+    expect(readQuickStart(key())).toBe("api-key");
+  });
+
+  it("keeps completed organization setup, production, and unknown state out of the guide in Settings", () => {
+    workspace.initialQuickStartStep = "done";
+    const view = render(settingsUi());
+    expect(view.getByText("Your workspace is already set up.")).toBeTruthy();
+    expect(view.queryByRole("button", { name: /quick start/ })).toBeNull();
+    workspace.initialQuickStartStep = "api-key";
+    workspace.sdpEnvironment = "production";
+    view.rerender(settingsUi());
+    expect(view.getByText("Switch to Sandbox to use SDP quick start.")).toBeTruthy();
+    expect(view.queryByRole("button", { name: /quick start/ })).toBeNull();
+    workspace.sdpEnvironment = "sandbox";
+    workspace.initialQuickStartStep = null;
+    view.rerender(settingsUi());
+    expect(view.getByText(/Quick start is unavailable right now/)).toBeTruthy();
+    expect(view.queryByRole("button", { name: /quick start/ })).toBeNull();
+  });
+
+  it("keeps dismissal across projects and isolates it between organizations and users", () => {
+    dismissQuickStart(key());
     const view = render(ui());
     expect(view.queryByRole("complementary")).toBeNull();
     workspace.selectedProjectId = "another_project";
@@ -130,6 +209,7 @@ describe("dashboard quick start", () => {
     view.rerender(ui());
     expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
     workspace.dashboardCacheScope.userId = "another_user";
     view.rerender(ui());
     expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
@@ -224,6 +304,7 @@ describe("dashboard quick start", () => {
     fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
     expect(readQuickStart(key())).toBe("wallet");
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
     expect(view.queryByRole("complementary")).toBeNull();
   });
 
@@ -231,8 +312,10 @@ describe("dashboard quick start", () => {
     setQuickStart(key(), "wallet");
     const view = render(ui());
     act(() => {
-      window.localStorage.setItem(key(), "done");
-      window.dispatchEvent(new StorageEvent("storage", { key: key(), newValue: "done" }));
+      window.localStorage.setItem(`${key()}:dismissed`, "true");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: `${key()}:dismissed`, newValue: "true" })
+      );
     });
     expect(view.queryByRole("complementary")).toBeNull();
   });

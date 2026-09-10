@@ -5,7 +5,12 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { quickStartKey, setQuickStart } from "@/lib/dashboard-quick-start";
+import {
+  dismissQuickStart,
+  quickStartKey,
+  resumeQuickStart,
+  setQuickStart,
+} from "@/lib/dashboard-quick-start";
 import { HomeWorkspace } from "./home-workspace";
 
 const workspace = vi.hoisted(() => ({
@@ -52,6 +57,16 @@ afterEach(() => {
 });
 
 describe("home after quick start", () => {
+  it("shows balances while the guide is dismissed and restores onboarding when resumed", () => {
+    setQuickStart(progressKey, "wallet");
+    const view = render(ui());
+    expect(view.queryByText("Total Balance")).toBeNull();
+    act(() => dismissQuickStart(progressKey));
+    expect(view.getByText("Total Balance")).toBeTruthy();
+    act(() => resumeQuickStart(progressKey));
+    expect(view.queryByText("Total Balance")).toBeNull();
+  });
+
   it("keeps the balance and first-wallet surface in production without the sandbox guide", () => {
     workspace.sdpEnvironment = "production";
     setQuickStart(progressKey, "api-key");

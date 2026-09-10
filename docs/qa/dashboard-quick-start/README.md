@@ -1,6 +1,13 @@
 # Dashboard quick start QA
 
-The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress and opens the guide on click. The expanded guide's X minimizes it back to the card and preserves progress, just like Escape or Continue later. The sidebar card's X dismisses the guide. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
+The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress and opens the guide on click. The expanded guide's X minimizes it back to the card and preserves progress, just like Escape or Continue later. The sidebar card's X asks for confirmation before hiding the guide, with a reminder that it can be resumed in Settings → Onboarding. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
+
+## Dismissal and Settings verification — September 10
+
+- Settings has an Onboarding section with the saved step and a Continue quick start action. Resuming restores the sidebar card and opens the guide at the saved step. Older previews that stored dismissal as completion can restart explicitly from Settings. Existing organization setup still suppresses the guide.
+- Checked the actual component and application CSS in an isolated browser fixture at 1280 × 720 and 390 × 700. Verified the confirmation, dismissal across reload, recovery from Settings at step 2, and minimizing with focus returning to the Settings button. Both new surfaces fit the narrow viewport.
+- 61 focused tests passed for dismissal/cancel, Settings recovery, browser persistence, storage failure, cross-tab updates, organization eligibility, home state, loading layouts, and i18n. Web typecheck, scoped Biome checks, module boundaries, and diff checks passed.
+- Workspace and account data were synthetic. No live API key, wallet, or transaction was created.
 
 ## Sidebar card verification — September 10
 
@@ -36,7 +43,7 @@ September 10 verification: 50 focused web tests passed, along with the web typec
 
 The guide uses existing organization state: legacy completion, a configured default custody wallet, or any wallet in an accessible project suppresses it. Wallet checks include all providers and omit balances. Unknown organization or wallet state does not show the guide. Creating a wallet also dismisses the guide immediately; skipping wallet setup still leads to the test USDC faucet.
 
-Progress and dismissal live in browser storage, scoped to the user and organization, so changing projects does not reopen the guide. Dismissal is not shared with teammates or other browsers and resets when browser data is cleared. Existing wallets still suppress the guide on a new device.
+Progress and dismissal live separately in browser storage, scoped to the user and organization, so hiding the guide preserves the current step and changing projects does not reopen it. Settings → Onboarding can clear dismissal and resume progress. Dismissal is not shared with teammates or other browsers and resets when browser data is cleared. Existing wallets still suppress the guide on a new device.
 
 No SDP API changes, organization-settings writes, shared-type changes, or database migrations are required.
 
