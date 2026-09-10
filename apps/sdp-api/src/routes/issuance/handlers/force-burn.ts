@@ -1,10 +1,16 @@
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
+import type { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -17,7 +23,13 @@ import {
   requireProjectScope,
 } from "../helpers";
 import type { forceBurnSchema } from "../schemas";
-import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
+import {
+  createResolvedAuthoritySigner,
+  resolveAuthoritySigner,
+  resolvePermanentDelegateAuthority,
+  resolveAuthorityWallet,
+} from "./authority-resolution";
+import { buildIssuancePolicyCandidate } from "./policy";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
   persistSettledTransactionThenOutcome,
@@ -120,10 +132,26 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   });
 };
 
-export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnSchema>) => {
+type ForceBurnBody = z.output<typeof forceBurnSchema>;
+
+interface ForceBurnPolicyResolved {
+  tokenId: string;
+  auth: ApiKeyContext;
+  projectId: string;
+  tokenService: TokenService;
+  supplyBaselineUpdatedAt: string | null;
+  mosaicAmount: number;
+  permanentDelegateRaw: string;
+  walletId: string;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  source: ReturnType<typeof assertValidAddress>;
+}
+
+export async function extractForceBurnPolicyCandidate(
+  c: ValidatedBodyContext<typeof forceBurnSchema>
+): Promise<PolicyGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
-
   const body = c.req.valid("json");
 
   const tokenService = getTenantTokenService(c);
@@ -132,7 +160,6 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     organizationId: orgId,
     projectId,
   });
-
   if (!token) {
     throw notFound("Token");
   }
@@ -149,16 +176,79 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     throw badRequest("Permanent delegate is not configured for this token");
   }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { walletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
     token,
     requestedWalletId: body.signingWalletId,
     currentAuthority: permanentDelegateRaw,
   });
-
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
+  const policyWallet = await resolvePolicyCustodyWallet(c.env, auth, walletId);
+
+  return {
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: policyWallet === null ? null : policyWallet.id,
+      walletId,
+      operationType: "issuance_force_burn_execute",
+      amount: body.forceBurn.amount,
+      destination: null,
+    }),
+    legs: [],
+    body,
+    resolved: {
+      tokenId,
+      auth,
+      projectId,
+      tokenService,
+      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
+      mosaicAmount,
+      permanentDelegateRaw,
+      walletId,
+      mintAddress,
+      source,
+    } satisfies ForceBurnPolicyResolved,
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "force_burn",
+      source: body.forceBurn.source,
+      amount: body.forceBurn.amount,
+    },
+    idempotencyKey: null,
+  };
+}
+
+export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnSchema>) => {
+  const {
+    body,
+    resolved: {
+      tokenId,
+      auth,
+      projectId,
+      tokenService,
+      supplyBaselineUpdatedAt,
+      mosaicAmount,
+      permanentDelegateRaw,
+      walletId,
+      mintAddress,
+      source,
+    },
+  } = getPolicyGateContext<
+    ForceBurnBody,
+    ForceBurnPolicyResolved,
+    WalletOperationPolicyEnforcement | null
+  >(c);
+
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId,
+    currentAuthority: permanentDelegateRaw,
+  });
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -176,7 +266,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       memo: body.forceBurn.memo,
-      supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
+      supplyBaselineUpdatedAt,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
@@ -241,7 +331,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
 
     emitTokenOperationCompleted(c, {
-      organizationId: orgId,
+      organizationId: auth.organizationId,
       projectId,
       tokenId,
       operation: "force_burn",
