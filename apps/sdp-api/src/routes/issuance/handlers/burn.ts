@@ -2,12 +2,16 @@ import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -31,6 +35,7 @@ import { buildIdempotencyMetadata } from "./idempotency";
 import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -347,6 +352,10 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       transaction: tx,
       action: "burn",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved burn execution is incomplete and requires manual reconciliation");
+    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
     }
@@ -384,6 +393,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     // Execute burn on Solana
     const token2022 = createIssuanceToken2022Service(c, signer);
 
+    await beginApprovedWalletOperationEffect(c);
     const result = await token2022.burn({
       mint: mintAddress,
       source: normalizedSource,

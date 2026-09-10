@@ -1,12 +1,16 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -32,6 +36,7 @@ import { buildIdempotencyMetadata } from "./idempotency";
 import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -266,6 +271,10 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       transaction: tx,
       action: "seize",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved seize execution is incomplete and requires manual reconciliation");
+    }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
@@ -294,6 +303,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.forceTransfer({
       mint: mintAddress,
       source,
