@@ -196,6 +196,10 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       transaction: earlyReplay,
       action: "seize",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved seize execution is incomplete and requires manual reconciliation");
+    }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 

@@ -185,6 +185,12 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       transaction: earlyReplay,
       action: "force_burn",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved force-burn execution is incomplete and requires manual reconciliation"
+      );
+    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.forceBurn.amount);
     }

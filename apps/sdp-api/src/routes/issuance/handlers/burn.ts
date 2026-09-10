@@ -293,6 +293,10 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       transaction: earlyReplay,
       action: "burn",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved burn execution is incomplete and requires manual reconciliation");
+    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.burn.amount);
     }
