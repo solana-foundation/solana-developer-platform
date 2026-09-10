@@ -6,6 +6,7 @@ import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env as testEnv } from "@/test/helpers/env";
 import {
   getInitialPermanentDelegateAuthority,
+  persistDiscoveredPermanentDelegate,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolveMetadataAuthority,
@@ -100,6 +101,78 @@ describe("authority-resolution", () => {
 
     expect(delegate).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(tokenService.updateTokenAuthorities).toHaveBeenCalledWith("tok_test", {
+      permanentDelegate: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+    });
+  });
+
+  it("reads the on-chain permanent delegate without writing when discovery must not persist", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: {
+          value: {
+            data: {
+              parsed: {
+                info: {
+                  extensions: [
+                    {
+                      extension: "permanentDelegate",
+                      state: {
+                        delegate: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenService = {
+      updateTokenAuthorities: vi.fn(),
+    } as unknown as {
+      updateTokenAuthorities: ReturnType<typeof vi.fn>;
+    };
+
+    const delegate = await resolvePermanentDelegateAuthority(
+      {
+        SOLANA_RPC_URL: "https://rpc.example.test",
+        SOLANA_NETWORK: "devnet",
+      } as never,
+      tokenService as never,
+      createToken(),
+      { persistDiscovery: false }
+    );
+
+    expect(delegate).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
+    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+  });
+
+  it("repairs the cached permanent delegate only when it differs", async () => {
+    const tokenService = {
+      updateTokenAuthorities: vi.fn(),
+    } as unknown as {
+      updateTokenAuthorities: ReturnType<typeof vi.fn>;
+    };
+
+    await persistDiscoveredPermanentDelegate(
+      tokenService as never,
+      "tok_test",
+      "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
+      "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9"
+    );
+    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
+
+    await persistDiscoveredPermanentDelegate(
+      tokenService as never,
+      "tok_test",
+      null,
+      "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9"
+    );
     expect(tokenService.updateTokenAuthorities).toHaveBeenCalledWith("tok_test", {
       permanentDelegate: "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9",
     });

@@ -25,6 +25,7 @@ import {
 import type { forceBurnSchema } from "../schemas";
 import {
   createResolvedAuthoritySigner,
+  persistDiscoveredPermanentDelegate,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolvePermanentDelegateAuthority,
@@ -142,6 +143,7 @@ interface ForceBurnPolicyResolved {
   supplyBaselineUpdatedAt: string | null;
   mosaicAmount: number;
   permanentDelegateRaw: string;
+  cachedPermanentDelegate: string | null;
   walletId: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
   source: ReturnType<typeof assertValidAddress>;
@@ -171,7 +173,9 @@ export async function extractForceBurnPolicyCandidate(
 
   const permanentDelegateRaw =
     body.forceBurn.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
+    (await resolvePermanentDelegateAuthority(c.env, tokenService, token, {
+      persistDiscovery: false,
+    }));
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -207,6 +211,7 @@ export async function extractForceBurnPolicyCandidate(
       supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
       mosaicAmount,
       permanentDelegateRaw,
+      cachedPermanentDelegate: token.extensions?.permanentDelegate ?? null,
       walletId,
       mintAddress,
       source,
@@ -233,6 +238,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       supplyBaselineUpdatedAt,
       mosaicAmount,
       permanentDelegateRaw,
+      cachedPermanentDelegate,
       walletId,
       mintAddress,
       source,
@@ -249,6 +255,13 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     walletId,
     currentAuthority: permanentDelegateRaw,
   });
+
+  await persistDiscoveredPermanentDelegate(
+    tokenService,
+    tokenId,
+    cachedPermanentDelegate,
+    permanentDelegateRaw
+  );
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,

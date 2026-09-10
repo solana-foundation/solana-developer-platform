@@ -26,6 +26,7 @@ import type { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import {
   createResolvedAuthoritySigner,
+  persistDiscoveredPermanentDelegate,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolvePermanentDelegateAuthority,
@@ -152,6 +153,7 @@ interface SeizePolicyResolved {
   tokenService: TokenService;
   mosaicAmount: number;
   permanentDelegateRaw: string;
+  cachedPermanentDelegate: string | null;
   walletId: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
   source: ReturnType<typeof assertValidAddress>;
@@ -189,7 +191,9 @@ export async function extractSeizePolicyCandidate(
 
   const permanentDelegateRaw =
     body.seize.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
+    (await resolvePermanentDelegateAuthority(c.env, tokenService, token, {
+      persistDiscovery: false,
+    }));
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -225,6 +229,7 @@ export async function extractSeizePolicyCandidate(
       tokenService,
       mosaicAmount,
       permanentDelegateRaw,
+      cachedPermanentDelegate: token.extensions?.permanentDelegate ?? null,
       walletId,
       mintAddress,
       source,
@@ -252,6 +257,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       tokenService,
       mosaicAmount,
       permanentDelegateRaw,
+      cachedPermanentDelegate,
       walletId,
       mintAddress,
       source,
@@ -267,6 +273,13 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     walletId,
     currentAuthority: permanentDelegateRaw,
   });
+
+  await persistDiscoveredPermanentDelegate(
+    tokenService,
+    tokenId,
+    cachedPermanentDelegate,
+    permanentDelegateRaw
+  );
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,

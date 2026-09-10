@@ -121,7 +121,11 @@ async function fetchMintPermanentDelegate(
 export async function resolvePermanentDelegateAuthority(
   env: Env,
   tokenService: TokenService,
-  token: TokenRecord
+  token: TokenRecord,
+  // Policy extractors resolve the delegate before the gate decides, where a
+  // dry-run or a denied request must leave no trace. They pass false and hand
+  // the cache repair to the handler, which runs only once policy allows.
+  options: { persistDiscovery?: boolean } = {}
 ): Promise<string | null> {
   if (!token) {
     return null;
@@ -139,10 +143,13 @@ export async function resolvePermanentDelegateAuthority(
     const { rpcUrl } = getSolanaConfig(env);
     const { permanentDelegate } = await fetchMintPermanentDelegate(rpcUrl, token.mintAddress);
 
-    if (permanentDelegate && token.extensions?.permanentDelegate !== permanentDelegate) {
-      await tokenService.updateTokenAuthorities(token.id, {
-        permanentDelegate,
-      });
+    if ((options.persistDiscovery ?? true) && permanentDelegate) {
+      await persistDiscoveredPermanentDelegate(
+        tokenService,
+        token.id,
+        token.extensions?.permanentDelegate ?? null,
+        permanentDelegate
+      );
     }
 
     return permanentDelegate;
@@ -152,6 +159,19 @@ export async function resolvePermanentDelegateAuthority(
       error instanceof Error ? error.message : "Failed to resolve permanent delegate authority"
     );
   }
+}
+
+export async function persistDiscoveredPermanentDelegate(
+  tokenService: TokenService,
+  tokenId: string,
+  cachedPermanentDelegate: string | null,
+  permanentDelegate: string
+): Promise<void> {
+  if (cachedPermanentDelegate === permanentDelegate) {
+    return;
+  }
+
+  await tokenService.updateTokenAuthorities(tokenId, { permanentDelegate });
 }
 
 export async function resolveMetadataAuthority(
