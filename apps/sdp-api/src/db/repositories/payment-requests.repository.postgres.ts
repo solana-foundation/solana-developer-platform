@@ -225,9 +225,11 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         .prepare(
           `UPDATE payment_requests
              SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
-           WHERE id = ? AND sponsored_tx_account = ?`
+           WHERE id = ?
+             AND sponsored_tx_account = ?
+             AND sponsored_tx_unsigned = ?`
         )
-        .bind(params.signedTransaction, params.requestId, params.account)
+        .bind(params.signedTransaction, params.requestId, params.account, params.unsignedTransaction)
         .run();
     },
 

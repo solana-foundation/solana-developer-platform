@@ -103,6 +103,7 @@ export interface PaymentRequestsRepository {
   storeSponsoredTransactionSignature(params: {
     requestId: string;
     account: string;
+    unsignedTransaction: string;
     signedTransaction: string;
   }): Promise<void>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;

@@ -156,6 +156,7 @@ pay.post(
       await repository.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: payer,
+        unsignedTransaction: unsignedBase64,
         signedTransaction: signedBase64,
       });
       return respondWithClaim(signedBase64);
