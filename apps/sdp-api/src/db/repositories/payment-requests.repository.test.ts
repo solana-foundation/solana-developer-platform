@@ -485,6 +485,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       await repo.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: ACCOUNT_B,
+        unsignedTransaction: "dHhB",
         signedTransaction: "c2lnQg==",
       });
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
@@ -492,10 +493,51 @@ describe("PaymentRequestsRepository (postgres)", () => {
       await repo.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: ACCOUNT_A,
+        unsignedTransaction: "dHhB",
         signedTransaction: "c2lnQQ==",
       });
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
         "c2lnQQ=="
+      );
+    });
+
+    it("refuses a stale signature written against superseded unsigned bytes", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+      await repo.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhPbGQ=",
+        lastValidBlockHeight: 1_000n,
+        currentBlockHeight: 900n,
+      });
+      await repo.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhOZXc=",
+        lastValidBlockHeight: 1_200n,
+        currentBlockHeight: 1_001n,
+      });
+
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhPbGQ=",
+          signedTransaction: "c2lnT2xk",
+        })
+      ).toBe(false);
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
+
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhOZXc=",
+          signedTransaction: "c2lnTmV3",
+        })
+      ).toBe(true);
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
+        "c2lnTmV3"
       );
     });
 
