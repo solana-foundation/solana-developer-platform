@@ -132,7 +132,12 @@ export function createPaymentRequestsRepository(
     createPostgresPaymentRequestsRepository(getDb(env)),
     scope,
     "PaymentRequestsRepository",
-    ["getPaymentRequestByPublicToken", "reserveSponsoredSignature"]
+    [
+      "getPaymentRequestByPublicToken",
+      "claimSponsoredTransactionWindow",
+      "getSponsoredTransactionClaim",
+      "storeSponsoredTransactionSignature",
+    ]
   );
 }
 

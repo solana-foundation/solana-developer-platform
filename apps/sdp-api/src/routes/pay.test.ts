@@ -115,97 +115,105 @@ describe("Public payment request routes", () => {
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
   });
 
-  describe("sponsored signature cap", () => {
+  describe("sponsored transaction window", () => {
     beforeEach(() => {
       createRpcMock.mockReturnValue({
         getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 900n }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     });
-    it("serves the cap then returns 429 and stops calling the sponsorship service", async () => {
+
+    it("signs once per window and replays the stored transaction for the same account", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest();
 
-      for (let i = 0; i < 5; i++) {
-        expect((await postTransaction(request.public_token)).status).toBe(200);
-      }
-      const refused = await postTransaction(request.public_token);
-      expect(refused.status).toBe(429);
-      await expect(refused.json()).resolves.toMatchObject({ error: { code: "RATE_LIMITED" } });
-      expect(sponsorship).toHaveBeenCalledTimes(5);
+      const first = await postTransaction(request.public_token);
+      expect(first.status).toBe(200);
+      const firstBody = (await first.json()) as { transaction: string };
+
+      const second = await postTransaction(request.public_token);
+      expect(second.status).toBe(200);
+      const secondBody = (await second.json()) as { transaction: string };
+
+      expect(secondBody.transaction).toBe(firstBody.transaction);
+      expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps the slot spent when signing may have produced a signature", async () => {
+    it("answers a different account with 429 and Retry-After while the claim is live", async () => {
+      stubSponsorship();
       const request = await createAwaitingPaymentRequest();
-      vi.spyOn(sponsorshipService, "createProjectSponsorshipFeePayment").mockImplementation(
-        async () => ({
-          providerId: "test",
-          getFeePayer: async () => address(TEST_KORA_FEE_PAYER),
-          signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
-          signAndSend: () => Promise.reject(new Error("not used")),
-          prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
-        })
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const other = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet3 }),
+        },
+        env
       );
-
-      expect((await postTransaction(request.public_token)).status).toBe(500);
-
-      stubSponsorship();
-      for (let i = 0; i < 4; i++) {
-        expect((await postTransaction(request.public_token)).status).toBe(200);
-      }
-      expect((await postTransaction(request.public_token)).status).toBe(429);
+      expect(other.status).toBe(429);
+      expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
     });
 
-    it("returns the counter slot when the request fails before signing", async () => {
-      const sponsorship = stubSponsorship();
-      sponsorship.mockRejectedValueOnce(new Error("provider down"));
-      const request = await createAwaitingPaymentRequest();
-
-      expect((await postTransaction(request.public_token)).status).toBe(500);
-      for (let i = 0; i < 5; i++) {
-        expect((await postTransaction(request.public_token)).status).toBe(200);
-      }
-      expect((await postTransaction(request.public_token)).status).toBe(429);
-    });
-
-    it("enforces the cap when the rate-limit store admits everything", async () => {
-      vi.spyOn(rateLimit, "enforceRateLimit").mockResolvedValue();
-      stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
-
-      for (let i = 0; i < 5; i++) {
-        expect((await postTransaction(request.public_token)).status).toBe(200);
-      }
-      expect((await postTransaction(request.public_token)).status).toBe(429);
-    });
-
-    it("does not spend a sponsored slot on a payload it cannot build a transaction from", async () => {
+    it("lets a new account claim after the window expires", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest();
+      expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      for (let i = 0; i < 5; i++) {
-        const malformed = await app.request(
-          `/pay/${request.public_token}/tx`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ account: "not-a-solana-address" }),
-          },
-          env
-        );
-        expect(malformed.status).toBe(400);
-      }
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 2_000n }),
+      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+
+      const other = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet3 }),
+        },
+        env
+      );
+      expect(other.status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {
+      const sponsorship = stubSponsorship();
+      sponsorship.mockImplementationOnce(async () => ({
+        providerId: "test",
+        getFeePayer: async () => address(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
+        signAndSend: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest();
+
+      expect((await postTransaction(request.public_token)).status).toBe(500);
+      const retried = await postTransaction(request.public_token);
+      expect(retried.status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not open a claim for a payload it cannot build a transaction from", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+
+      const malformed = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: "not-a-solana-address" }),
+        },
+        env
+      );
+      expect(malformed.status).toBe(400);
       expect(sponsorship).not.toHaveBeenCalled();
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
-    });
-
-    it("rate limits per payment token before touching the database counter", async () => {
-      const spy = vi.spyOn(rateLimit, "enforceRateLimit");
-      stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
-
-      await postTransaction(request.public_token);
-      expect(spy).toHaveBeenCalledWith(expect.anything(), `pay-tx:${request.public_token}`, 10);
     });
   });
 });

@@ -163,30 +163,71 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
-    async reserveSponsoredSignature(params) {
+    async claimSponsoredTransactionWindow(params) {
       const row = await db
         .prepare(
           `UPDATE payment_requests
-             SET sponsored_signature_count = sponsored_signature_count + 1,
+             SET sponsored_tx_account = ?,
+                 sponsored_tx_unsigned = ?,
+                 sponsored_tx_signed = NULL,
+                 sponsored_tx_last_valid_block_height = ?,
                  updated_at = sdp_iso_now()
            WHERE id = ?
-             AND sponsored_signature_count < ?
+             AND status = 'awaiting_payment'
+             AND (
+               sponsored_tx_last_valid_block_height IS NULL
+               OR sponsored_tx_last_valid_block_height < ?
+             )
            RETURNING id`
         )
-        .bind(params.requestId, params.cap)
+        .bind(
+          params.account,
+          params.unsignedTransaction,
+          params.lastValidBlockHeight.toString(),
+          params.requestId,
+          params.currentBlockHeight.toString()
+        )
         .first<{ id: string }>();
       return row !== null;
     },
 
-    async releaseSponsoredSignature(requestId) {
+    async getSponsoredTransactionClaim(requestId) {
+      const row = await db
+        .prepare(
+          `SELECT sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
+                  sponsored_tx_last_valid_block_height
+             FROM payment_requests
+            WHERE id = ?`
+        )
+        .bind(requestId)
+        .first<{
+          sponsored_tx_account: string | null;
+          sponsored_tx_unsigned: string | null;
+          sponsored_tx_signed: string | null;
+          sponsored_tx_last_valid_block_height: string | number | null;
+        }>();
+      if (!row || row.sponsored_tx_account === null) {
+        return null;
+      }
+      if (row.sponsored_tx_unsigned === null || row.sponsored_tx_last_valid_block_height === null) {
+        throw internalError("payment_requests sponsored claim row is missing claim fields");
+      }
+      return {
+        account: row.sponsored_tx_account,
+        unsignedTransaction: row.sponsored_tx_unsigned,
+        signedTransaction: row.sponsored_tx_signed,
+        lastValidBlockHeight: BigInt(row.sponsored_tx_last_valid_block_height),
+      };
+    },
+
+    async storeSponsoredTransactionSignature(params) {
       await db
         .prepare(
           `UPDATE payment_requests
-             SET sponsored_signature_count = GREATEST(sponsored_signature_count - 1, 0),
-                 updated_at = sdp_iso_now()
-           WHERE id = ?`
+             SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
+           WHERE id = ? AND sponsored_tx_account = ?`
         )
-        .bind(requestId)
+        .bind(params.signedTransaction, params.requestId, params.account)
         .run();
     },
 

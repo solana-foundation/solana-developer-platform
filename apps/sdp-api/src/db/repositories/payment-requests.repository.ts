@@ -76,6 +76,13 @@ export interface ListPaymentRequestsResult {
   total: number;
 }
 
+export interface SponsoredTransactionClaim {
+  account: string;
+  unsignedTransaction: string;
+  signedTransaction: string | null;
+  lastValidBlockHeight: bigint;
+}
+
 export interface PaymentRequestsRepository {
   createPaymentRequest(input: CreatePaymentRequestInput): Promise<PaymentRequestRow>;
   markPaymentRequest(input: MarkPaymentRequestInput): Promise<PaymentRequestRow | null>;
@@ -85,7 +92,18 @@ export interface PaymentRequestsRepository {
     projectId: string;
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
-  reserveSponsoredSignature(params: { requestId: string; cap: number }): Promise<boolean>;
-  releaseSponsoredSignature(requestId: string): Promise<void>;
+  claimSponsoredTransactionWindow(params: {
+    requestId: string;
+    account: string;
+    unsignedTransaction: string;
+    lastValidBlockHeight: bigint;
+    currentBlockHeight: bigint;
+  }): Promise<boolean>;
+  getSponsoredTransactionClaim(requestId: string): Promise<SponsoredTransactionClaim | null>;
+  storeSponsoredTransactionSignature(params: {
+    requestId: string;
+    account: string;
+    signedTransaction: string;
+  }): Promise<void>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }
