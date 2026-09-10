@@ -31,6 +31,7 @@ import {
 } from "@/services/payments/payment-requests";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
+import { solanaAddressSchema } from "./payments/schemas";
 import {
   buildSplTransferInstructions,
   resolveTokenLabel,
@@ -40,13 +41,10 @@ import {
 const REQUEST_LABEL = "Solana Developer Platform";
 const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
 
-// Lifetime signature budget per payment request: room for legitimate wallet
-// retries (expired blockhash, re-scanned QR) while keeping the sponsored
-// spend behind one payment link bounded.
 const SPONSORED_SIGNATURES_PER_REQUEST = 5;
 const PAY_TX_TOKEN_MAX_REQUESTS = 10;
 
-const transactionRequestBodySchema = z.object({ account: z.string() });
+const transactionRequestBodySchema = z.object({ account: solanaAddressSchema("account") });
 
 const pay = new Hono<{ Bindings: Env }>();
 
@@ -104,6 +102,10 @@ pay.post(
       throw badRequest("Payment request is no longer payable");
     }
 
+    const payer = assertValidAddress(c.req.valid("json").account, "account");
+    const recipient = assertValidAddress(request.destination_address, "destinationAddress");
+    const reference = assertValidAddress(request.reference, "reference");
+
     const admitted = await repository.reserveSponsoredSignature({
       requestId: request.id,
       cap: SPONSORED_SIGNATURES_PER_REQUEST,
@@ -112,9 +114,6 @@ pay.post(
       throw rateLimited("Payment request has exhausted its sponsored transaction attempts");
     }
 
-    const payer = assertValidAddress(c.req.valid("json").account, "account");
-    const recipient = assertValidAddress(request.destination_address, "destinationAddress");
-    const reference = assertValidAddress(request.reference, "reference");
     const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
       ...instruction,
       accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
