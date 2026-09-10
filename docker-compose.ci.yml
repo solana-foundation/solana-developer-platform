@@ -3,17 +3,17 @@
 services:
   sdp-migrate:
     build:
-      cache_from: [type=gha,scope=sdp-api]
-      cache_to: [type=gha,scope=sdp-api,mode=max]
+      cache_from: ["type=gha,scope=sdp-api"]
+      cache_to: ["type=gha,scope=sdp-api,mode=max"]
   sdp-api:
     build:
-      cache_from: [type=gha,scope=sdp-api]
-      cache_to: [type=gha,scope=sdp-api,mode=max]
+      cache_from: ["type=gha,scope=sdp-api"]
+      cache_to: ["type=gha,scope=sdp-api,mode=max"]
   sdp-web:
     build:
-      cache_from: [type=gha,scope=sdp-web]
-      cache_to: [type=gha,scope=sdp-web,mode=max]
+      cache_from: ["type=gha,scope=sdp-web"]
+      cache_to: ["type=gha,scope=sdp-web,mode=max"]
   sdp-docs:
     build:
-      cache_from: [type=gha,scope=sdp-docs]
-      cache_to: [type=gha,scope=sdp-docs,mode=max]
+      cache_from: ["type=gha,scope=sdp-docs"]
+      cache_to: ["type=gha,scope=sdp-docs,mode=max"]
