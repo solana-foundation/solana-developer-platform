@@ -134,13 +134,13 @@ describe("Public payment request routes", () => {
       expect(sponsorship).toHaveBeenCalledTimes(5);
     });
 
-    it("does not return the counter slot when signing fails", async () => {
+    it("returns the counter slot when no sponsored signature was produced", async () => {
       const sponsorship = stubSponsorship();
       sponsorship.mockRejectedValueOnce(new Error("provider down"));
       const request = await createAwaitingPaymentRequest();
 
       expect((await postTransaction(request.public_token)).status).toBe(500);
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 5; i++) {
         expect((await postTransaction(request.public_token)).status).toBe(200);
       }
       expect((await postTransaction(request.public_token)).status).toBe(429);

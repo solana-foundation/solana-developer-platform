@@ -86,5 +86,6 @@ export interface PaymentRequestsRepository {
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
   reserveSponsoredSignature(params: { requestId: string; cap: number }): Promise<boolean>;
+  releaseSponsoredSignature(requestId: string): Promise<void>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }

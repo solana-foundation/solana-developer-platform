@@ -114,63 +114,67 @@ pay.post(
       throw rateLimited("Payment request has exhausted its sponsored transaction attempts");
     }
 
-    const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
-      ...instruction,
-      accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
-    });
-
-    const payerSigner = createNoopSigner(payer);
-    const rpc = solanaRpc.createRpc(c.env);
-    if (!request.project_id) {
-      throw badRequest("Payment request is not eligible for sponsored fees");
-    }
-    const feePayment = await createProjectSponsorshipFeePayment(c.env, {
-      organizationId: request.organization_id,
-      projectId: request.project_id,
-      actor: { type: "wallet", id: request.wallet_id },
-    });
-    const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
-      feePayment.getFeePayer(),
-      solanaRpc.getRecentBlockhash(rpc, "confirmed"),
-    ]);
-
-    let instructions: Instruction[];
-    if (request.token === SOL_MINT) {
-      const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
-      if (lamports <= 0n) {
-        throw badRequest("Transfer amount must be greater than zero");
-      }
-      const transferInstruction = getTransferSolInstruction({
-        source: payerSigner,
-        destination: recipient,
-        amount: lamports,
+    try {
+      const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
+        ...instruction,
+        accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
       });
-      instructions = [withReference(transferInstruction)];
-    } else {
-      const { createDestinationAtaInstruction, transferInstruction } =
-        await buildSplTransferInstructions(rpc, {
-          authority: payerSigner,
+
+      const payerSigner = createNoopSigner(payer);
+      const rpc = solanaRpc.createRpc(c.env);
+      if (!request.project_id) {
+        throw badRequest("Payment request is not eligible for sponsored fees");
+      }
+      const feePayment = await createProjectSponsorshipFeePayment(c.env, {
+        organizationId: request.organization_id,
+        projectId: request.project_id,
+        actor: { type: "wallet", id: request.wallet_id },
+      });
+      const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
+        feePayment.getFeePayer(),
+        solanaRpc.getRecentBlockhash(rpc, "confirmed"),
+      ]);
+
+      let instructions: Instruction[];
+      if (request.token === SOL_MINT) {
+        const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
+        if (lamports <= 0n) {
+          throw badRequest("Transfer amount must be greater than zero");
+        }
+        const transferInstruction = getTransferSolInstruction({
+          source: payerSigner,
           destination: recipient,
-          mint: assertValidAddress(request.token, "token"),
-          amount: request.amount,
-          ataRentPayer: feePayer,
+          amount: lamports,
         });
-      instructions = [createDestinationAtaInstruction, withReference(transferInstruction)];
+        instructions = [withReference(transferInstruction)];
+      } else {
+        const { createDestinationAtaInstruction, transferInstruction } =
+          await buildSplTransferInstructions(rpc, {
+            authority: payerSigner,
+            destination: recipient,
+            mint: assertValidAddress(request.token, "token"),
+            amount: request.amount,
+            ataRentPayer: feePayer,
+          });
+        instructions = [createDestinationAtaInstruction, withReference(transferInstruction)];
+      }
+
+      const message = pipe(
+        createTransactionMessage({ version: 0 }),
+        (m) => setTransactionMessageFeePayer(feePayer, m),
+        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+        (m) => appendTransactionMessageInstructions(instructions, m)
+      );
+      const txBytes = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+      const sponsored = await feePayment.signAsFeePayer(txBytes);
+      return c.json({
+        transaction: getBase64Decoder().decode(sponsored),
+        message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
+      });
+    } catch (error) {
+      await repository.releaseSponsoredSignature(request.id);
+      throw error;
     }
-
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayer(feePayer, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-      (m) => appendTransactionMessageInstructions(instructions, m)
-    );
-    const txBytes = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
-    const sponsored = await feePayment.signAsFeePayer(txBytes);
-
-    return c.json({
-      transaction: getBase64Decoder().decode(sponsored),
-      message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
-    });
   }
 );
 

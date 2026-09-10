@@ -178,6 +178,18 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row !== null;
     },
 
+    async releaseSponsoredSignature(requestId) {
+      await db
+        .prepare(
+          `UPDATE payment_requests
+             SET sponsored_signature_count = GREATEST(sponsored_signature_count - 1, 0),
+                 updated_at = sdp_iso_now()
+           WHERE id = ?`
+        )
+        .bind(requestId)
+        .run();
+    },
+
     async getPaymentRequestByPublicToken(publicToken) {
       const row = await db
         .prepare(`SELECT * FROM payment_requests WHERE public_token = ?`)
