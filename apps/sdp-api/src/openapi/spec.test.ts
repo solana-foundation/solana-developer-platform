@@ -26,6 +26,16 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
+  it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
+    const operation = createPublicOpenApiDocument().paths?.["/v1/wallets/signer-check"]?.post;
+    expect(operation?.responses).toHaveProperty("403");
+    expect(operation?.responses).toHaveProperty("404");
+    expect(operation?.responses).toHaveProperty("409");
+    const request = getJsonSchema(operation?.requestBody);
+    expect(request.properties).toEqual({ walletId: expect.any(Object) });
+    expect(request.required).toBeUndefined();
+  });
+
   it("documents path-based versioning policy", () => {
     const doc = createOpenApiDocument();
 
