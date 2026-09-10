@@ -4,6 +4,10 @@ import path from "node:path";
 const DEFAULT_CLERK_TEST_ORG_NAME = "Solana";
 const DEFAULT_CLERK_TEST_EMAIL = "e2e-smoke+sdp-web@example.com";
 const BASE_URL = "http://localhost:3100";
+// Deployed dashboards the external GCP smoke may target instead of a local `next start`.
+// The production Clerk instance scopes its client cookie to solana.com, so the page under
+// test must live there; a localhost or vercel.app page can never complete the sign-in.
+const GCP_DEPLOYED_WEB_URLS = ["https://app-preview.solana.com"];
 const GCP_EXTERNAL_API_URLS = [
   "https://api-dev.solana.com",
   "https://api-stage.solana.com",
@@ -19,6 +23,8 @@ type E2EEnvCommon = {
   clerkTestEmail: string;
   sdpApiBaseUrl: string;
   ticketAuth: boolean;
+  /** True when the run targets a deployed dashboard and must not start a local web server. */
+  deployedWeb: boolean;
   webServerEnv: Record<string, string>;
 };
 
@@ -118,8 +124,17 @@ export function getE2EEnv(): E2EEnv {
 
   const fallback = getFallbackEnv();
   const useExternalApi = process.env.PLAYWRIGHT_USE_EXTERNAL_API === "1";
-  if (useExternalApi && process.env.PLAYWRIGHT_USE_NEXT_START !== "1") {
-    throw new Error("External GCP smoke requires PLAYWRIGHT_USE_NEXT_START=1");
+  const deployedWebUrl = process.env.PLAYWRIGHT_BASE_URL?.trim().replace(/\/$/, "") || null;
+  if (useExternalApi && deployedWebUrl && !GCP_DEPLOYED_WEB_URLS.includes(deployedWebUrl)) {
+    throw new Error(
+      `External GCP smoke only accepts ${GCP_DEPLOYED_WEB_URLS.join(", ")} as PLAYWRIGHT_BASE_URL; received ${deployedWebUrl}`
+    );
+  }
+  const deployedWeb = useExternalApi && deployedWebUrl !== null;
+  if (useExternalApi && !deployedWeb && process.env.PLAYWRIGHT_USE_NEXT_START !== "1") {
+    throw new Error(
+      "External GCP smoke requires PLAYWRIGHT_USE_NEXT_START=1 or a deployed PLAYWRIGHT_BASE_URL"
+    );
   }
   if (useExternalApi && process.env.NODE_ENV !== "production") {
     throw new Error("External GCP smoke requires NODE_ENV=production");
@@ -175,13 +190,14 @@ export function getE2EEnv(): E2EEnv {
         useExternalApi: false as const,
       };
   cachedEnv = {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? BASE_URL,
+    baseURL: deployedWebUrl ?? BASE_URL,
     clerkSecretKey,
     clerkPublishableKey,
     clerkOrgName: resolveEnvValue("E2E_CLERK_ORG_NAME", fallback, DEFAULT_CLERK_TEST_ORG_NAME),
     ...identityEnv,
     sdpApiBaseUrl,
     ticketAuth,
+    deployedWeb,
     webServerEnv: {
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
       CLERK_SECRET_KEY: clerkSecretKey,
