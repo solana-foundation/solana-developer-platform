@@ -22,7 +22,8 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, notFound, rateLimited } from "@/lib/errors";
+import { enforceRateLimit } from "@/middleware/rate-limit";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import {
   isPaymentRequestExpired,
@@ -38,6 +39,12 @@ import {
 
 const REQUEST_LABEL = "Solana Developer Platform";
 const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
+
+// Lifetime signature budget per payment request: room for legitimate wallet
+// retries (expired blockhash, re-scanned QR) while keeping the sponsored
+// spend behind one payment link bounded.
+const SPONSORED_SIGNATURES_PER_REQUEST = 5;
+const PAY_TX_TOKEN_MAX_REQUESTS = 10;
 
 const transactionRequestBodySchema = z.object({ account: z.string() });
 
@@ -85,15 +92,24 @@ pay.post(
   validateBody(transactionRequestBodySchema),
   async (c: ValidatedBodyContext<typeof transactionRequestBodySchema>) => {
     const { token } = c.req.param();
-    const existing = await createSystemPaymentRequestsRepository(
-      c.env
-    ).getPaymentRequestByPublicToken(token);
+    await enforceRateLimit(c, `pay-tx:${token}`, PAY_TX_TOKEN_MAX_REQUESTS);
+
+    const repository = createSystemPaymentRequestsRepository(c.env);
+    const existing = await repository.getPaymentRequestByPublicToken(token);
     if (!existing) {
       throw notFound("Payment request");
     }
     const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: false });
     if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
       throw badRequest("Payment request is no longer payable");
+    }
+
+    const admitted = await repository.reserveSponsoredSignature({
+      requestId: request.id,
+      cap: SPONSORED_SIGNATURES_PER_REQUEST,
+    });
+    if (!admitted) {
+      throw rateLimited("Payment request has exhausted its sponsored transaction attempts");
     }
 
     const payer = assertValidAddress(c.req.valid("json").account, "account");
