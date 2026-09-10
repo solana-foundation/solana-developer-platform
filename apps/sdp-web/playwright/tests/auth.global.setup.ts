@@ -103,7 +103,7 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
         url: env.baseURL,
         httpOnly: true,
         sameSite: "Lax",
-        secure: false,
+        secure: env.baseURL.startsWith("https:"),
       },
     ]);
   }

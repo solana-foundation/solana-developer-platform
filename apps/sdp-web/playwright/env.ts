@@ -12,7 +12,18 @@ const GCP_EXTERNAL_API_URLS = [
 const GCP_DEV_API_URL = GCP_EXTERNAL_API_URLS[0];
 
 type E2EEnvCommon = {
+  /** Origin the browser navigates to. Differs from webServerURL under a same-site proxy. */
   baseURL: string;
+  /** Origin the local Next server listens on. */
+  webServerURL: string;
+  /**
+   * Production Clerk instances scope `__client` (SameSite=Lax) to the Clerk
+   * host and `__client_uat` to the root domain, so the browser must sit on an
+   * https origin under that root domain. When set, a TLS proxy on sameSitePort
+   * fronts the web server and Chromium resolves this host to 127.0.0.1.
+   */
+  sameSiteHost: string | null;
+  sameSitePort: string;
   clerkSecretKey: string;
   clerkPublishableKey: string;
   clerkOrgName: string;
@@ -144,6 +155,14 @@ export function getE2EEnv(): E2EEnv {
       "E2E_CLERK_TICKET_AUTH=1 requires a production (pk_live_) Clerk publishable key"
     );
   }
+  const sameSiteHost = process.env.PLAYWRIGHT_SAME_SITE_HOST?.trim() || null;
+  if (ticketAuth && !sameSiteHost) {
+    throw new Error(
+      "E2E_CLERK_TICKET_AUTH=1 requires PLAYWRIGHT_SAME_SITE_HOST (an https origin under the Clerk instance's root domain); a production Clerk instance never completes sign-in from localhost"
+    );
+  }
+  const sameSitePort = process.env.PLAYWRIGHT_SAME_SITE_PORT?.trim() || "3443";
+  const webServerURL = process.env.PLAYWRIGHT_BASE_URL ?? BASE_URL;
   const sdpApiBaseUrl =
     explicitExternalApiUrl ??
     resolveEnvValue(
@@ -175,7 +194,10 @@ export function getE2EEnv(): E2EEnv {
         useExternalApi: false as const,
       };
   cachedEnv = {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? BASE_URL,
+    baseURL: sameSiteHost ? `https://${sameSiteHost}:${sameSitePort}` : webServerURL,
+    webServerURL,
+    sameSiteHost,
+    sameSitePort,
     clerkSecretKey,
     clerkPublishableKey,
     clerkOrgName: resolveEnvValue("E2E_CLERK_ORG_NAME", fallback, DEFAULT_CLERK_TEST_ORG_NAME),

@@ -9,7 +9,7 @@ const useExternalApi = env.useExternalApi;
 const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8788";
 const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
 const apiBaseUrl = useExternalApi ? env.sdpApiBaseUrl : localApiUrl;
-const webPort = new URL(env.baseURL).port || "3001";
+const webPort = new URL(env.webServerURL).port || "3001";
 const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
 const useNextStart = process.env.PLAYWRIGHT_USE_NEXT_START === "1";
 const webCommand = useNextStart
@@ -33,6 +33,15 @@ export default defineConfig({
   use: {
     baseURL: env.baseURL,
     trace: "retain-on-failure",
+    ...(env.sameSiteHost
+      ? {
+          // Self-signed cert from scripts/playwright-same-site-proxy.mjs.
+          ignoreHTTPSErrors: true,
+          launchOptions: {
+            args: [`--host-resolver-rules=MAP ${env.sameSiteHost} 127.0.0.1`],
+          },
+        }
+      : {}),
   },
   webServer: [
     ...(!useExternalApi
@@ -56,7 +65,7 @@ export default defineConfig({
     {
       command: webCommand,
       cwd: __dirname,
-      url: env.baseURL,
+      url: env.webServerURL,
       reuseExistingServer: false,
       env: {
         ...resolveProcessEnv(),
@@ -69,6 +78,28 @@ export default defineConfig({
       stderr: "pipe",
       timeout: 180_000,
     },
+    ...(env.sameSiteHost
+      ? [
+          {
+            command: "node scripts/playwright-same-site-proxy.mjs",
+            cwd: __dirname,
+            // Health-check by IP: Node does not honour Chromium's resolver rule.
+            url: `https://127.0.0.1:${env.sameSitePort}/`,
+            ignoreHTTPSErrors: true,
+            reuseExistingServer: false,
+            env: {
+              ...resolveProcessEnv(),
+              SAME_SITE_HOST: env.sameSiteHost,
+              SAME_SITE_PORT: env.sameSitePort,
+              SAME_SITE_TARGET: env.webServerURL,
+              SAME_SITE_CERT_DIR: path.join(__dirname, "test-results/.same-site-tls"),
+            },
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            timeout: 60_000,
+          },
+        ]
+      : []),
   ],
   projects: [
     {
