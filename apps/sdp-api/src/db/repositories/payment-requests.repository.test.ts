@@ -407,4 +407,30 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(result).toBeNull();
     });
   });
+
+  describe("reserveSponsoredSignature", () => {
+    it("admits up to the cap and refuses after", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+
+      expect(await repo.reserveSponsoredSignature({ requestId: request.id, cap: 2 })).toBe(true);
+      expect(await repo.reserveSponsoredSignature({ requestId: request.id, cap: 2 })).toBe(true);
+      expect(await repo.reserveSponsoredSignature({ requestId: request.id, cap: 2 })).toBe(false);
+    });
+
+    it("admits exactly one of two concurrent reservations at cap 1", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+
+      const results = await Promise.all([
+        repo.reserveSponsoredSignature({ requestId: request.id, cap: 1 }),
+        repo.reserveSponsoredSignature({ requestId: request.id, cap: 1 }),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+    });
+
+    it("returns false for an unknown request id", async () => {
+      expect(await repo.reserveSponsoredSignature({ requestId: "preq_missing", cap: 5 })).toBe(
+        false
+      );
+    });
+  });
 });
