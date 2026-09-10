@@ -2,18 +2,18 @@ import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
-import { z } from "zod";
+import type { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { success } from "@/lib/response";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
-import type { TokenService } from "@/services/token.service";
 import { createOrgSigner } from "@/services/solana";
+import type { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -286,7 +286,9 @@ export async function extractBurnPolicyCandidate(
     token.decimals
   );
   const policyWallet =
-    signingWalletId === null ? null : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
+    signingWalletId === null
+      ? null
+      : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
 
   return {
     candidate:

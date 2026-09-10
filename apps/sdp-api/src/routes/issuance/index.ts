@@ -26,7 +26,11 @@ import {
   prepareDeploy,
   prepareDeployMetadata,
 } from "./handlers/deploy";
-import { executeForceBurn, extractForceBurnPolicyCandidate, prepareForceBurn } from "./handlers/force-burn";
+import {
+  executeForceBurn,
+  extractForceBurnPolicyCandidate,
+  prepareForceBurn,
+} from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
 import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
