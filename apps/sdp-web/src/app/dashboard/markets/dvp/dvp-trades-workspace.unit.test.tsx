@@ -16,7 +16,8 @@
  * filter strip's presence rules, and the party/leg rendering.
  */
 
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ChangeEvent, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -41,6 +42,35 @@ const replaceMock = vi.fn();
 // not throw in a node environment.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
+}));
+
+// The select's popup positioning is integration-tested with the shared UI
+// primitive. This workspace suite needs only its value-change contract.
+vi.mock("@/components/ui/select", () => ({
+  Select: ({
+    ariaLabel,
+    children,
+    onValueChange,
+    value,
+  }: {
+    ariaLabel?: string;
+    children: ReactNode;
+    onValueChange?: (value: string | null) => void;
+    value?: string | null;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+        onValueChange?.(event.currentTarget.value)
+      }
+      value={value ?? ""}
+    >
+      {children}
+    </select>
+  ),
+  SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
+    <option value={value}>{children}</option>
+  ),
 }));
 
 function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
@@ -105,7 +135,10 @@ function inboundTrade(): DvpInboundTrade {
 }
 
 afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
   replaceMock.mockClear();
+  window.history.replaceState(null, "", "/");
 });
 
 describe("DvpTradesWorkspace", () => {
@@ -197,7 +230,34 @@ describe("DvpTradesWorkspace", () => {
     );
 
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("abc");
-    vi.useRealTimers();
+  });
+
+  it("writes a pending search and a new status as one filter state", () => {
+    vi.useFakeTimers();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery=""
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ab" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by status" }), {
+      target: { value: "open" },
+    });
+
+    expect(replaceMock).toHaveBeenCalledTimes(1);
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard/markets/dvp?status=open&q=ab", {
+      scroll: false,
+    });
+
+    act(() => vi.advanceTimersByTime(400));
+    expect(replaceMock).toHaveBeenCalledTimes(1);
   });
 
   // An EXTERNAL navigation (Back/Forward, a pasted URL) is exactly when the
@@ -218,6 +278,10 @@ describe("DvpTradesWorkspace", () => {
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abacus" } });
     // Back/Forward lands before the debounce flushes.
+    act(() => {
+      window.history.pushState(null, "", "/dashboard/markets/dvp?q=bamboo");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
     view.rerender(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <DvpTradesWorkspace
@@ -238,7 +302,42 @@ describe("DvpTradesWorkspace", () => {
     expect(replaceMock).not.toHaveBeenCalledWith("/dashboard/markets/dvp?q=abacus", {
       scroll: false,
     });
-    vi.useRealTimers();
+  });
+
+  it("starts from page one when browser navigation changes the search", () => {
+    const trades = Array.from({ length: 12 }, (_, index) => trade({ id: `dvp_${index + 1}` }));
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery="first"
+          statusFilter="all"
+          trades={trades}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+
+    act(() => {
+      window.history.pushState(null, "", "/dashboard/markets/dvp?q=second");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery="second"
+          statusFilter="all"
+          trades={trades}
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.getByText("Page 1 of 2")).toBeTruthy();
   });
 
   // The trigger names what the control filters, not the opaque "All" — the

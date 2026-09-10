@@ -23,8 +23,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState } from "react";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -47,7 +46,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { useDebounce } from "@/lib/use-debounce";
+import { type UrlTableQueryAdapter, useUrlTableFilters } from "@/lib/use-url-table-filters";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
@@ -81,6 +80,11 @@ const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
 
 /** The trades status groups that ride the URL. */
 type UrlStatusFilter = Exclude<StatusFilter, "waiting">;
+
+interface DvpTradesUrlState {
+  status: UrlStatusFilter;
+  query: string;
+}
 
 /**
  * Whether a trade answers the search box.
@@ -119,10 +123,17 @@ function matchesTradeQuery(trade: DvpInboundTrade, needle: string): boolean {
 const TRADES_PER_PAGE = 10;
 
 /** The page path, with the filters serialized onto it. */
-function tradesHref(status: UrlStatusFilter | "waiting", q: string | null): string {
-  const query = serializeDvpTradesFilters(status, q);
+function tradesHref(state: DvpTradesUrlState): string {
+  const query = serializeDvpTradesFilters(state.status, state.query === "" ? null : state.query);
   return `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}${query}`;
 }
+
+const DVP_TRADES_QUERY_ADAPTER: UrlTableQueryAdapter<DvpTradesUrlState> = {
+  read: (state) => state.query,
+  write: (state, query) => ({ ...state, query }),
+  minLength: 2,
+  maxLength: 100,
+};
 
 /**
  * A leg as one cell: what it is worth, and whether the escrow has it.
@@ -429,79 +440,54 @@ export function DvpTradesWorkspace({
   statusFilter: UrlStatusFilter;
 }) {
   const t = useTranslations();
-  const router = useRouter();
-  const [, startTransition] = useTransition();
-  // The search input's live value: it stays local so typing never navigates
-  // per keystroke; the debounced copy is what reaches the URL, and the server
-  // filters the full history behind the fetch cap.
-  const [queryInput, setQueryInput] = useState(searchQuery);
-  // The last q THIS component pushed. Distinguishes the echo of our own
-  // router.replace (the prop catching up, which must NOT touch the input —
-  // clobbering it here is how keystrokes typed during the transition were
-  // lost) from an external navigation (Back/Forward, a pasted URL), which is
-  // exactly when the input must adopt the URL's value.
-  const [lastPushedQuery, setLastPushedQuery] = useState(searchQuery);
-  const [syncedSearchQuery, setSyncedSearchQuery] = useState(searchQuery);
-  if (syncedSearchQuery !== searchQuery) {
-    setSyncedSearchQuery(searchQuery);
-    if (searchQuery !== lastPushedQuery) {
-      setQueryInput(searchQuery);
-      setLastPushedQuery(searchQuery);
-    }
+  const {
+    queryInput,
+    resetFilters,
+    resultKey,
+    setQueryInput,
+    state: urlFilters,
+    updateFilters,
+  } = useUrlTableFilters({
+    returnedState: { status: statusFilter, query: searchQuery },
+    href: tradesHref,
+    query: DVP_TRADES_QUERY_ADAPTER,
+  });
+
+  // Pagination belongs to the rows returned for one exact URL filter state.
+  // Adopting another state through Back/Forward therefore starts at page one,
+  // including when the old page number would happen to remain in range.
+  const [pagination, setPagination] = useState({ resultKey, page: 1 });
+  if (pagination.resultKey !== resultKey) {
+    setPagination({ resultKey, page: 1 });
   }
-  const debouncedQuery = useDebounce(queryInput.trim(), 300);
-  // Client-side pages over the loaded window; the fetch cap stays the outer
-  // bound. Filter changes reset to the first page in their own handlers.
-  const [page, setPage] = useState(1);
 
   // The URL is the filter state for the trades list; `waiting` selects the
   // inbound segment instead and lives here only, because it answers from a
   // different endpoint the URL has no reason to name. A browser navigation
   // that changes the URL group lands back on the trades segment.
-  const [waiting, setWaiting] = useState(false);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: statusFilter is a prop; changing the filter is exactly when the inbound segment should be left.
-  useEffect(() => {
-    setWaiting(false);
-  }, [statusFilter]);
-
-  // The debounced input becomes the URL's q. The API floor is two characters:
-  // shorter text is still in the box but not yet a filter. A flush is written
-  // only while it still matches the live input, so keystrokes superseded by an
-  // external navigation (which resets the input during render) are dropped
-  // instead of undoing that navigation.
-  useEffect(() => {
-    if (debouncedQuery !== queryInput.trim()) {
-      return;
-    }
-    if (debouncedQuery === searchQuery) {
-      return;
-    }
-    const q = debouncedQuery.length >= 2 ? debouncedQuery : null;
-    setLastPushedQuery(q === null ? "" : q);
-    startTransition(() => router.replace(tradesHref(statusFilter, q), { scroll: false }));
-  }, [debouncedQuery, queryInput, router, searchQuery, statusFilter]);
+  const [waitingSelection, setWaitingSelection] = useState({ status: statusFilter, active: false });
+  if (waitingSelection.status !== urlFilters.status) {
+    setWaitingSelection({ status: urlFilters.status, active: false });
+  }
+  const waiting = waitingSelection.status === urlFilters.status ? waitingSelection.active : false;
 
   const onStatusChange = (next: StatusFilter) => {
-    setPage(1);
+    setPagination({ resultKey, page: 1 });
     if (next === "waiting") {
       // The inbound segment swaps the table's rows rather than filtering the
       // trades list, so it never reaches the URL or the trades API.
-      setWaiting(true);
+      setWaitingSelection({ status: urlFilters.status, active: true });
       return;
     }
-    setWaiting(false);
-    const q = searchQuery === "" ? null : searchQuery;
-    startTransition(() => router.replace(tradesHref(next, q), { scroll: false }));
+    setWaitingSelection({ status: next, active: false });
+    updateFilters({ status: next });
   };
 
   /** Clear filters resets the search, the page and the URL params — the whole filter state. */
   const clearFilters = () => {
-    setWaiting(false);
-    setQueryInput("");
-    setLastPushedQuery("");
-    setPage(1);
-    startTransition(() => router.replace(tradesHref("all", null), { scroll: false }));
+    setWaitingSelection({ status: "all", active: false });
+    setPagination({ resultKey, page: 1 });
+    resetFilters({ status: "all", query: "" });
   };
 
   const showingInbound = waiting;
@@ -514,7 +500,7 @@ export function DvpTradesWorkspace({
   // Clamped during render rather than reset by an effect: shrinking the list
   // from a later page lands on the last page that still exists.
   const pageCount = Math.max(1, Math.ceil(trades.length / TRADES_PER_PAGE));
-  const currentPage = Math.min(page, pageCount);
+  const currentPage = pagination.resultKey === resultKey ? Math.min(pagination.page, pageCount) : 1;
   const pagedTrades = trades.slice(
     (currentPage - 1) * TRADES_PER_PAGE,
     currentPage * TRADES_PER_PAGE
@@ -567,11 +553,11 @@ export function DvpTradesWorkspace({
                 inboundCount={inbound.length}
                 onQueryChange={(next) => {
                   setQueryInput(next);
-                  setPage(1);
+                  setPagination({ resultKey, page: 1 });
                 }}
                 onStatusChange={onStatusChange}
                 query={queryInput}
-                status={waiting ? "waiting" : statusFilter}
+                status={waiting ? "waiting" : urlFilters.status}
                 tradeCount={trades.length}
               />
 
@@ -599,7 +585,7 @@ export function DvpTradesWorkspace({
                   {!showingInbound && pageCount > 1 ? (
                     <ArrowPagination
                       className="border-border-default border-t p-3"
-                      onPageChange={setPage}
+                      onPageChange={(page) => setPagination({ resultKey, page })}
                       page={currentPage}
                       pageCount={pageCount}
                     />
