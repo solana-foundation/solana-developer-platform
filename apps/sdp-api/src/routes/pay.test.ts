@@ -6,7 +6,6 @@ import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
-import * as rateLimit from "@/middleware/rate-limit";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
