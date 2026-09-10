@@ -63,7 +63,12 @@ test.describe("GCP dev API golden endpoints", () => {
         ? `${endpoint.path}?${new URLSearchParams(endpoint.query)}`
         : endpoint.path;
       const read = api.get(path).catch((error: unknown) => {
-        if (endpoint.allowDisabled && /not enabled for this environment/i.test(String(error))) {
+        if (
+          endpoint.allowDisabled &&
+          /^Error: Local API request failed \(403\): \w+ is not enabled for this environment$/.test(
+            String(error)
+          )
+        ) {
           return "feature-disabled";
         }
         throw error;
