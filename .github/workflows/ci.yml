@@ -897,9 +897,26 @@ jobs:
           - name: Dashboard E2E (Transactions / Surfpool Local)
             test_script: test:e2e:dashboard-transactions
             artifact_suffix: dashboard-transactions-surfpool
-          - name: Issuance E2E (Surfpool Shards)
+          - name: Issuance E2E (basics)
             test_script: kora:surfpool:e2e:issuance
-            artifact_suffix: issuance
+            issuance_group: basics
+            artifact_suffix: issuance-basics
+          - name: Issuance E2E (authority and supply)
+            test_script: kora:surfpool:e2e:issuance
+            issuance_group: authority-and-supply
+            artifact_suffix: issuance-authority-and-supply
+          - name: Issuance E2E (freeze controls)
+            test_script: kora:surfpool:e2e:issuance
+            issuance_group: freeze-controls
+            artifact_suffix: issuance-freeze-controls
+          - name: Issuance E2E (pause controls)
+            test_script: kora:surfpool:e2e:issuance
+            issuance_group: pause-controls
+            artifact_suffix: issuance-pause-controls
+          - name: Issuance E2E (allowlist)
+            test_script: kora:surfpool:e2e:issuance
+            issuance_group: allowlist
+            artifact_suffix: issuance-allowlist
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
@@ -1036,7 +1053,7 @@ jobs:
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
           if [ "${{ matrix.test_script }}" = "kora:surfpool:e2e:issuance" ]; then
-            scripts/doppler/run-with-config.sh pnpm ${{ matrix.test_script }}
+            scripts/doppler/run-with-config.sh pnpm ${{ matrix.test_script }} -- ${{ matrix.issuance_group }}
           else
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
           fi
@@ -1055,3 +1072,20 @@ jobs:
             apps/sdp-web/playwright-report
             apps/sdp-web/test-results
           if-no-files-found: ignore
+
+  issuance_e2e:
+    name: Issuance E2E (Surfpool Shards)
+    runs-on: ubuntu-latest
+    needs: [unit_test_scope, browser_e2e]
+    if: always() && needs.unit_test_scope.outputs.e2e == 'true'
+    timeout-minutes: 5
+    steps:
+      - name: Report browser e2e results
+        env:
+          E2E_RESULT: ${{ needs.browser_e2e.result }}
+        run: |
+          if [ "${E2E_RESULT}" != "success" ]; then
+            echo "One or more browser e2e jobs finished with ${E2E_RESULT}." >&2
+            exit 1
+          fi
+          echo "All browser e2e jobs passed."
