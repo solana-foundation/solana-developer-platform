@@ -5,7 +5,7 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { OrganizationSettings } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
@@ -455,12 +455,17 @@ describe("Organization access settings", () => {
         "x-forwarded-for": "198.51.100.42",
       };
 
-      // Seed the standard tier at its limit so this ordering assertion cannot
-      // cross a real-time rate-limit window while issuing 101 requests.
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, RATE_LIMIT_TIERS.standard);
-      const finalStatus = (await get(headers)).status;
-
-      expect(finalStatus).toBe(429);
+      // Pin both the seeded bucket and the request to one window. A live clock
+      // could roll the seeded bucket into the weighted previous window and
+      // intermittently admit the request below the tier limit.
+      const now = Date.now();
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+      try {
+        await seedRateLimit(env, TEST_CACHED_API_KEY.id, RATE_LIMIT_TIERS.standard);
+        expect((await get(headers)).status).toBe(429);
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
     it("intersects with the API key's own allowlist rather than replacing it", async () => {
