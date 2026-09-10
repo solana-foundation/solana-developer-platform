@@ -149,6 +149,43 @@ describe("detectFigureAnomalies", () => {
     ]);
   });
 
+  it("never coerces malformed provider values into figures", () => {
+    // Number(true) is 1 and Number("") is 0: either would fabricate a collapse.
+    expect(
+      detectFigureAnomalies(
+        [
+          stored("bool", "0.05", 10_000_000),
+          stored("empty", "0.05", 10_000_000),
+          stored("array", "0.05", 10_000_000),
+          stored("nan", "0.05", 10_000_000),
+        ],
+        [
+          { providerReference: "bool", currentApy: "0.05", tvlUsd: true },
+          { providerReference: "empty", currentApy: "", tvlUsd: "" },
+          { providerReference: "array", currentApy: "0.05", tvlUsd: [] },
+          { providerReference: "nan", currentApy: "NaN", tvlUsd: Number.NaN },
+        ]
+      )
+    ).toEqual([]);
+  });
+
+  it("accepts the numeric string shapes providers actually send", () => {
+    const anomalies = detectFigureAnomalies(
+      [stored("a", "0.05"), stored("b", "0.05"), stored("c", "0.05")],
+      [
+        { providerReference: "a", currentApy: " 0.5 " },
+        { providerReference: "b", currentApy: "5e-1" },
+        { providerReference: "c", currentApy: ".5" },
+      ]
+    );
+
+    expect(anomalies.map((a) => [a.providerReference, a.current])).toEqual([
+      ["a", 0.5],
+      ["b", 0.5],
+      ["c", 0.5],
+    ]);
+  });
+
   it("treats a non-numeric incoming TVL as no figure", () => {
     expect(
       detectFigureAnomalies(

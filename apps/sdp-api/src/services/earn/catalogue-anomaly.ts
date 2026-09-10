@@ -210,11 +210,22 @@ export function reportShelfDisappearance(args: {
   });
 }
 
+/**
+ * A figure is a finite number or a non-empty numeric string, and nothing else.
+ * `Number(...)` alone is too generous for provider-controlled input: `true`
+ * reads as 1, `""` and `[]` as 0, and either would fabricate a collapse event
+ * out of malformed data. Anything not shaped like a figure is "no figure".
+ */
 function parseFigure(value: unknown): number | null {
-  if (value === null || value === undefined) return null;
-  const parsed = typeof value === "number" ? value : Number(value);
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "" || !NUMERIC_STRING.test(trimmed)) return null;
+  const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+const NUMERIC_STRING = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
 
 /**
  * A move counts as a jump when it clears BOTH the ratio bound and the absolute
