@@ -3,14 +3,15 @@
 /**
  * The trades list.
  *
- * The status filter lives in the URL (`?status=<group>`, the transactions
- * pattern): the group is pushed with `router.replace` inside a transition, and
- * the server refetches with it mapped to real statuses — the list is capped
- * with no cursor, so a client-side filter would make an older matching trade
- * unfindable.
+ * The filters live in the URL (`?status=<group>&q=<text>`, the transactions
+ * pattern): the group and the debounced search text are pushed with
+ * `router.replace` inside a transition, and the server refetches with them —
+ * the list is capped with no cursor, so a client-side search would make an
+ * older matching trade unfindable.
  *
  * `waiting` stays component state: it swaps in a different endpoint's rows
- * (the inbound list), which the URL has no reason to carry.
+ * (the inbound list), which the URL has no reason to carry, and its search
+ * stays client-side because that list is small and complete.
  */
 
 import {
@@ -46,6 +47,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
@@ -86,13 +88,16 @@ type UrlStatusFilter = Exclude<StatusFilter, "waiting">;
  * What somebody has to hand when hunting for one trade: the counterparty they
  * agreed it with, a symbol, or an address off an explorer. Both parties always,
  * because on an agent trade neither of them is us and either is what somebody
- * would paste in. Client-side over BOTH lists, deliberately: the search is a
- * sieve for what is on screen and never rides the URL or the API query.
+ * would paste in.
  *
- * @param trade - Either list's trade; both carry the searched fields.
+ * Kept for the WAITING list only: that list is small and complete, so the
+ * client answers without a round trip. The project's own list is filtered
+ * server-side, where the whole history is searchable.
+ *
+ * @param trade - The inbound trade under the sieve.
  * @param needle - The query, already trimmed and lowercased ("" matches all).
  */
-function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): boolean {
+function matchesTradeQuery(trade: DvpInboundTrade, needle: string): boolean {
   if (!needle) {
     return true;
   }
@@ -113,9 +118,9 @@ function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): b
 /** Rows per client-side page of the trades table. */
 const TRADES_PER_PAGE = 10;
 
-/** The page path, with the status group serialized onto it. */
-function tradesHref(status: UrlStatusFilter | "waiting"): string {
-  const query = serializeDvpTradesFilters(status);
+/** The page path, with the filters serialized onto it. */
+function tradesHref(status: UrlStatusFilter | "waiting", q: string | null): string {
+  const query = serializeDvpTradesFilters(status, q);
   return `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}${query}`;
 }
 
@@ -411,22 +416,40 @@ export function DvpTradesWorkspace({
   trades,
   inbound,
   error,
+  searchQuery,
   statusFilter,
 }: {
   trades: DvpTrade[];
   /** Trades another organization created that name one of this project's wallets. */
   inbound: DvpInboundTrade[];
   error: string | null;
+  /** The active URL search text ("" when none), not the live input value. */
+  searchQuery: string;
   /** The active URL status group for the trades list. */
   statusFilter: UrlStatusFilter;
 }) {
   const t = useTranslations();
   const router = useRouter();
   const [, startTransition] = useTransition();
-  // The search is a client-side sieve over what is already on screen: it never
-  // rides the URL or the API query, so typing filters instantly and a browser
-  // navigation has nothing to restore.
-  const [query, setQuery] = useState("");
+  // The search input's live value: it stays local so typing never navigates
+  // per keystroke; the debounced copy is what reaches the URL, and the server
+  // filters the full history behind the fetch cap.
+  const [queryInput, setQueryInput] = useState(searchQuery);
+  // The last q THIS component pushed. Distinguishes the echo of our own
+  // router.replace (the prop catching up, which must NOT touch the input —
+  // clobbering it here is how keystrokes typed during the transition were
+  // lost) from an external navigation (Back/Forward, a pasted URL), which is
+  // exactly when the input must adopt the URL's value.
+  const [lastPushedQuery, setLastPushedQuery] = useState(searchQuery);
+  const [syncedSearchQuery, setSyncedSearchQuery] = useState(searchQuery);
+  if (syncedSearchQuery !== searchQuery) {
+    setSyncedSearchQuery(searchQuery);
+    if (searchQuery !== lastPushedQuery) {
+      setQueryInput(searchQuery);
+      setLastPushedQuery(searchQuery);
+    }
+  }
+  const debouncedQuery = useDebounce(queryInput.trim(), 300);
   // Client-side pages over the loaded window; the fetch cap stays the outer
   // bound. Filter changes reset to the first page in their own handlers.
   const [page, setPage] = useState(1);
@@ -442,6 +465,23 @@ export function DvpTradesWorkspace({
     setWaiting(false);
   }, [statusFilter]);
 
+  // The debounced input becomes the URL's q. The API floor is two characters:
+  // shorter text is still in the box but not yet a filter. A flush is written
+  // only while it still matches the live input, so keystrokes superseded by an
+  // external navigation (which resets the input during render) are dropped
+  // instead of undoing that navigation.
+  useEffect(() => {
+    if (debouncedQuery !== queryInput.trim()) {
+      return;
+    }
+    if (debouncedQuery === searchQuery) {
+      return;
+    }
+    const q = debouncedQuery.length >= 2 ? debouncedQuery : null;
+    setLastPushedQuery(q === null ? "" : q);
+    startTransition(() => router.replace(tradesHref(statusFilter, q), { scroll: false }));
+  }, [debouncedQuery, queryInput, router, searchQuery, statusFilter]);
+
   const onStatusChange = (next: StatusFilter) => {
     setPage(1);
     if (next === "waiting") {
@@ -451,28 +491,31 @@ export function DvpTradesWorkspace({
       return;
     }
     setWaiting(false);
-    startTransition(() => router.replace(tradesHref(next), { scroll: false }));
+    const q = searchQuery === "" ? null : searchQuery;
+    startTransition(() => router.replace(tradesHref(next, q), { scroll: false }));
   };
 
-  /** Clear filters resets the search, the page and the URL param — the whole filter state. */
+  /** Clear filters resets the search, the page and the URL params — the whole filter state. */
   const clearFilters = () => {
     setWaiting(false);
-    setQuery("");
+    setQueryInput("");
+    setLastPushedQuery("");
     setPage(1);
-    startTransition(() => router.replace(tradesHref("all"), { scroll: false }));
+    startTransition(() => router.replace(tradesHref("all", null), { scroll: false }));
   };
 
   const showingInbound = waiting;
-  const needle = query.trim().toLowerCase();
-  const visibleTrades = trades.filter((trade) => matchesTradeQuery(trade, needle));
+  // The inbound segment keeps its client-side sieve: that list is small and
+  // complete, so the live input answers without a round trip.
+  const needle = queryInput.trim().toLowerCase();
   const visibleInbound = showingInbound
     ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
     : [];
   // Clamped during render rather than reset by an effect: shrinking the list
   // from a later page lands on the last page that still exists.
-  const pageCount = Math.max(1, Math.ceil(visibleTrades.length / TRADES_PER_PAGE));
+  const pageCount = Math.max(1, Math.ceil(trades.length / TRADES_PER_PAGE));
   const currentPage = Math.min(page, pageCount);
-  const pagedTrades = visibleTrades.slice(
+  const pagedTrades = trades.slice(
     (currentPage - 1) * TRADES_PER_PAGE,
     currentPage * TRADES_PER_PAGE
   );
@@ -486,7 +529,7 @@ export function DvpTradesWorkspace({
   // draws from `inbound` and leaves the trades table empty by design, so
   // counting only `trades` declared "no trades match" over a table that had a
   // row to render.
-  const shownCount = showingInbound ? visibleInbound.length : visibleTrades.length;
+  const shownCount = showingInbound ? visibleInbound.length : trades.length;
 
   const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
 
@@ -523,11 +566,11 @@ export function DvpTradesWorkspace({
               <TradesToolbar
                 inboundCount={inbound.length}
                 onQueryChange={(next) => {
-                  setQuery(next);
+                  setQueryInput(next);
                   setPage(1);
                 }}
                 onStatusChange={onStatusChange}
-                query={query}
+                query={queryInput}
                 status={waiting ? "waiting" : statusFilter}
                 tradeCount={trades.length}
               />

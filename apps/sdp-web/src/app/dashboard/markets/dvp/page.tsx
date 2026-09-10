@@ -29,6 +29,7 @@ export default async function DvpTradesPage({ searchParams }: DvpTradesPageProps
     return (
       <DvpTradesWorkspace
         error={error}
+        searchQuery={filters.q === null ? "" : filters.q}
         inbound={inbound}
         statusFilter={statusFilter}
         trades={trades}

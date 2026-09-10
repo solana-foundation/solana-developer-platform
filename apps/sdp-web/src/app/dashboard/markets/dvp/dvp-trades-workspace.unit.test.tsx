@@ -16,7 +16,7 @@
  * filter strip's presence rules, and the party/leg rendering.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -55,11 +55,13 @@ function renderWorkspace({
   trades,
   inbound,
   error = null,
+  searchQuery = "",
   statusFilter = "all",
 }: {
   trades: DvpTrade[];
   inbound: DvpInboundTrade[];
   error?: string | null;
+  searchQuery?: string;
   statusFilter?: "all" | "open" | "ready" | "closed";
 }): string {
   return renderToStaticMarkup(
@@ -67,6 +69,7 @@ function renderWorkspace({
       <DvpTradesWorkspace
         error={error}
         inbound={inbound}
+        searchQuery={searchQuery}
         statusFilter={statusFilter}
         trades={trades}
       />
@@ -156,26 +159,86 @@ describe("DvpTradesWorkspace", () => {
     expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
   });
 
-  // The search is a client-side sieve: it narrows the rendered rows and never
-  // writes the URL, so there is no query param to restore or race.
-  it("filters the trades client-side without touching the URL", () => {
-    render(
+  // The echo of the workspace's own debounced replace must not clobber the
+  // input: keystrokes typed while the URL catches up were previously lost.
+  it("keeps keystrokes typed while its own URL write is in flight", () => {
+    vi.useFakeTimers();
+    const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
+          searchQuery=""
           statusFilter="all"
           trades={[trade(), trade({ id: "dvp_2" })]}
         />
       </I18nProvider>
     );
 
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "dvp_2" } });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ab" } });
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard/markets/dvp?q=ab", { scroll: false });
 
-    // The id is not rendered as text; the row's detail link carries it.
-    expect(document.querySelector('a[href*="dvp_2"]')).toBeTruthy();
-    expect(document.querySelector('a[href*="dvp_1"]')).toBeNull();
-    expect(replaceMock).not.toHaveBeenCalled();
+    // More typing before the navigation's prop echo arrives…
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abc" } });
+    // …then the echo lands: the input must keep the newer text.
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery="ab"
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("abc");
+    vi.useRealTimers();
+  });
+
+  // An EXTERNAL navigation (Back/Forward, a pasted URL) is exactly when the
+  // input must adopt the URL's value — and any pending flush must not undo it.
+  it("adopts an externally navigated search and drops the superseded flush", () => {
+    vi.useFakeTimers();
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery=""
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abacus" } });
+    // Back/Forward lands before the debounce flushes.
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery="bamboo"
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("bamboo");
+
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    // The stale "abacus" flush was superseded; nothing may write it back.
+    expect(replaceMock).not.toHaveBeenCalledWith("/dashboard/markets/dvp?q=abacus", {
+      scroll: false,
+    });
+    vi.useRealTimers();
   });
 
   // The trigger names what the control filters, not the opaque "All" — the

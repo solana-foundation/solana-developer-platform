@@ -1,7 +1,7 @@
 /**
  * The trades list's URL state.
  *
- * The URL carries `?status=<group>` where `<group>` is the UI grouping
+ * The URL carries `?status=<group>&q=<text>` where `<group>` is the UI grouping
  * key (`open` | `ready` | `closed`; `all` is absent). The server refetches per
  * navigation with the group mapped to the real statuses behind it, the
  * transactions-page pattern: filters in the URL, one parse/serialize pair as
@@ -43,7 +43,8 @@ export type StatusFilter = keyof typeof STATUS_FILTERS;
  *
  * `status` accepts only the group keys — an unknown group is dropped rather
  * than 400'd, because a URL is typed by a person and the page's own control
- * cannot produce it.
+ * cannot produce it. `q` must clear the API's two-character floor to be sent;
+ * shorter text stays in the input and out of the fetch.
  *
  * @param searchParams - The raw page search params.
  * @returns The group plus the filters for the trades API call.
@@ -57,30 +58,41 @@ export function parseDvpTradesFilters(
   const status: StatusFilter =
     rawStatus !== undefined && rawStatus in STATUS_FILTERS ? (rawStatus as StatusFilter) : "all";
 
+  const rawQ = Array.isArray(searchParams.q) ? searchParams.q[0] : searchParams.q;
+  const trimmed = rawQ === undefined ? "" : rawQ.trim();
+  const q = trimmed.length >= 2 ? trimmed.slice(0, 100) : null;
+
   return {
     status,
     filters: {
       statuses: STATUS_FILTERS[status] === null ? null : [...STATUS_FILTERS[status]],
+      q,
     },
   };
 }
 
 /**
- * Serializes the group back into the page's query string.
+ * Serializes the group and search text back into the page's query string.
  *
  * `all` and `waiting` are the absence of the param — `waiting` selects the
- * inbound segment, which the trades query never carries — so the clean URL is
- * the unfiltered one and "clear filters" is a replace with no params.
+ * inbound segment, which the trades query never carries — and an empty search
+ * is the absence of `q`, so the clean URL is the unfiltered one and "clear
+ * filters" is a replace with neither param.
  *
  * @param status - The active status group.
+ * @param q - The trimmed search text, or null for none.
  * @returns The query string with its leading `?`, or "" for the unfiltered URL.
  */
 export function serializeDvpTradesFilters(
-  status: "all" | "waiting" | Exclude<keyof typeof STATUS_FILTERS, "all" | "waiting">
+  status: "all" | "waiting" | Exclude<keyof typeof STATUS_FILTERS, "all" | "waiting">,
+  q: string | null
 ): string {
   const query = new URLSearchParams();
   if (status !== "all" && status !== "waiting") {
     query.set("status", status);
+  }
+  if (q !== null) {
+    query.set("q", q);
   }
   const encoded = query.toString();
   return encoded === "" ? "" : `?${encoded}`;
