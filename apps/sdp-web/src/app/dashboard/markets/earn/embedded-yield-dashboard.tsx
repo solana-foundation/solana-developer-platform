@@ -91,9 +91,7 @@ const PORTFOLIO_CHART_COLORS = [
 function portfolioPositions(summary: EarnExternalWalletPositionSummary) {
   const byId = new Map<string, EarnExternalWalletPosition>();
   for (const strategy of summary.totalsByStrategy) {
-    for (const position of strategy.positions ?? []) {
-      if (position.closedAt === null) byId.set(position.id, position);
-    }
+    for (const position of strategy.positions ?? []) byId.set(position.id, position);
   }
   return [...byId.values()];
 }

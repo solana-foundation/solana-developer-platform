@@ -301,12 +301,12 @@ describe("EmbeddedYieldDashboard", () => {
     expect(within(chart).queryByText("TOKEN_E")).toBeNull();
   });
 
-  it("charts the age of live positions without presenting reconstructed history", () => {
+  it("charts the age of every position included by the live summary", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-10T00:00:00.000Z"));
     mocks.summary = {
-      walletCount: 2,
-      positionCount: 2,
+      walletCount: 3,
+      positionCount: 3,
       unavailablePositionCount: 0,
       totalsByToken: [],
       totalsByStrategy: [
@@ -326,11 +326,12 @@ describe("EmbeddedYieldDashboard", () => {
               id: "closed_position",
               ownerAddress: "33333333333333333333333333333333",
               createdAt: "2026-01-01T00:00:00.000Z",
+              // The API keeps this holding in the live summary while a redeposit is pending.
               closedAt: "2026-02-01T00:00:00.000Z",
             }),
           ],
-          walletCount: 2,
-          positionCount: 2,
+          walletCount: 3,
+          positionCount: 3,
           totalsByToken: [],
         },
       ],
@@ -342,12 +343,12 @@ describe("EmbeddedYieldDashboard", () => {
 
     expect(
       screen.getByRole("img", {
-        name: "Wallets by oldest live position: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 0",
+        name: "Wallets by oldest live position: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 1",
       })
     ).toBeTruthy();
     expect(
       screen.getByRole("img", {
-        name: "Live positions by age: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 0",
+        name: "Live positions by age: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 1",
       })
     ).toBeTruthy();
   });
