@@ -132,7 +132,10 @@ const EXTERNAL_POSITION_PAGE_SIZE = 100;
  * plausible-looking partial total.
  */
 export async function getEarnExternalWalletPositionSummary(c: AppContext) {
-  parseQuery(c, earnExternalWalletPositionSummaryQuerySchema);
+  const { includeOwnerAddresses = true } = parseQuery(
+    c,
+    earnExternalWalletPositionSummaryQuerySchema
+  );
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -149,7 +152,7 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   );
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
-  const summary = summarizeExternalWalletPositions(holdings, live);
+  const summary = summarizeExternalWalletPositions(holdings, live, { includeOwnerAddresses });
   if (summary.unavailablePositionCount > 0) {
     getLogger().warn(
       {
@@ -1061,7 +1064,8 @@ interface MutableStrategyTotal {
 
 function summarizeExternalWalletPositions(
   holdings: readonly ExternalWalletHolding[],
-  live: ReadonlyMap<string, HydratedVaultPositionValue>
+  live: ReadonlyMap<string, HydratedVaultPositionValue>,
+  options: { includeOwnerAddresses: boolean } = { includeOwnerAddresses: true }
 ): EarnExternalWalletPositionSummary {
   const owners = new Set<string>();
   const strategies = new Map<string, MutableStrategyTotal>();
@@ -1103,7 +1107,12 @@ function summarizeExternalWalletPositions(
         provider: strategy.provider,
         providerReference: strategy.providerReference,
         label: strategy.label,
-        ownerAddresses: [...strategy.owners].sort(compareWireStrings),
+        // The address list is the PII-bearing half of this read (EARN-028):
+        // omitted, not emptied, when the caller asked for totals only, so a
+        // consumer cannot mistake "not requested" for "no owners".
+        ...(options.includeOwnerAddresses
+          ? { ownerAddresses: [...strategy.owners].sort(compareWireStrings) }
+          : {}),
         walletCount: strategy.owners.size,
         positionCount: strategy.positionCount,
         totalsByToken: [...strategy.tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),

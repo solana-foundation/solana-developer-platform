@@ -200,7 +200,7 @@ The Treasury surface uses SDP's configured paymaster when Earn sponsorship is en
 - `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns balance and total earned per deposit token. `earned` is stated only when exact; otherwise it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
 - `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`.
 - `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. If live RPC hydration fails, `shares`, `withdrawableShares`, and `tokenValue` are absent, never zero. Show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
-- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token.
+- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token. By default each strategy total carries `ownerAddresses`, the full list of your customers' wallet addresses, which makes any `earn:read` key that can call it a holder of personal data. A key that only needs totals should pass `includeOwnerAddresses=false`, which omits the list and leaves `walletCount`; reserve the default for the surface that actually drives per-customer reads.
 
 ## 5. Withdraw
 

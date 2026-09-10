@@ -136,7 +136,7 @@ function StrategyWalletDrawer({
       refreshing = true;
       try {
         const pages = await Promise.all(
-          currentStrategy.ownerAddresses.map(fetchEarnExternalWalletPositions)
+          (currentStrategy.ownerAddresses ?? []).map(fetchEarnExternalWalletPositions)
         );
         if (!active) return;
         setPositions(

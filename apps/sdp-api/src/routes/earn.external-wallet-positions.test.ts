@@ -272,6 +272,48 @@ describe("external-wallet position reads", () => {
     expect(summary.data.summary.totalsByToken[0]).not.toHaveProperty("tokenValue");
   });
 
+  it("summary omits every owner address when the caller asks for totals only (EARN-028, PRO-1873)", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { summary: { walletCount: number; totalsByStrategy: Array<Record<string, unknown>> } };
+    };
+
+    // Totals survive; the address book does not. Omitted rather than emptied,
+    // so "not requested" can never read as "no owners".
+    expect(body.data.summary.walletCount).toBe(2);
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      walletCount: 2,
+      positionCount: 2,
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(JSON.stringify(body)).not.toContain(OWNER_A);
+    expect(JSON.stringify(body)).not.toContain(OWNER_B);
+  });
+
+  it("summary rejects a malformed includeOwnerAddresses rather than guessing", async () => {
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=maybe"
+    );
+    expect(response.status).toBe(400);
+  });
+
   it("summary excludes a sibling project's positions and never leaks their owner addresses (EARN-028)", async () => {
     // The summary is project-wide, and totalsByStrategy.ownerAddresses returns
     // raw end-user addresses to any earn:read key in the project. Its only

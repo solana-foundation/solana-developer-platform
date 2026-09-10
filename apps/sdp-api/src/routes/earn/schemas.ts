@@ -534,7 +534,21 @@ export const earnExternalWalletPositionsQuerySchema = z
   })
   .strict();
 
-export const earnExternalWalletPositionSummaryQuerySchema = z.object({}).strict();
+/**
+ * `includeOwnerAddresses=false` drops `totalsByStrategy[].ownerAddresses`
+ * (PRO-1873, threat model EARN-028). The default keeps them because the
+ * dashboard drives its per-owner reads off that list; analytics consumers that
+ * need totals should never carry the project's entire end-user address book on
+ * an `earn:read` key.
+ */
+export const earnExternalWalletPositionSummaryQuerySchema = z
+  .object({
+    includeOwnerAddresses: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+  })
+  .strict();
 
 /**
  * One external wallet's activity, newest first (PRO-1772). The owner is a
