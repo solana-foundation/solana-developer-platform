@@ -168,35 +168,63 @@ export interface RotateDbMaterialInput extends KeyStore {
   readonly walletId: string;
 }
 
-/**
- * Stages freshly generated keys for one kind, keeping the blob they replace in
- * the row's previous slot. Falls back to sealing when the wallet holds no key of
- * that kind, which is a re-key of a wallet that never provisioned.
- */
-async function stage(store: KeyStore, walletId: string, kind: KeyKind): Promise<void> {
+/** Freshly generated material for one kind, sealed but not yet stored. */
+async function generateSealed(
+  store: KeyStore,
+  kind: KeyKind
+): Promise<{ ciphertext: string; keyVersion: string }> {
   const ciphertext = await store.cipher.encrypt(
     store.organizationId,
     Buffer.from(generateKeyBytes(kind)).toString("base64")
   );
-  const staged = await store.keyRefs.rotateKeyRef({
-    walletId,
-    kind,
-    ciphertext,
-    keyVersion: keyVersionOf(ciphertext),
-  });
-  if (staged) return;
+  return { ciphertext, keyVersion: keyVersionOf(ciphertext) };
+}
 
-  if (await store.keyRefs.getKeyRef({ walletId, kind })) {
-    // A row exists but would not stage, so its previous slot is already full.
-    // Staging over it would discard the only material that still derives the
-    // published identity.
-    throw new HeliusRingsError(
-      "conflict",
-      `this Rings wallet already has a rotation staged for its ${kind} key; finish or roll that back first`
-    );
+/**
+ * Replaces both kinds in one write, keeping the blobs they replace reachable.
+ *
+ * Staged together rather than one at a time because a wallet's identity comes
+ * from the pair: a process that exited between two writes would leave keys from
+ * different generations and derive an identity nobody published. That window
+ * cannot be closed in application code, so the repository does it in a single
+ * statement.
+ */
+async function stage(store: KeyStore, walletId: string): Promise<void> {
+  const staged = await store.keyRefs.stageKeyRefRotation({
+    walletId,
+    viewing: await generateSealed(store, "viewing"),
+    nullifier: await generateSealed(store, "nullifier"),
+  });
+  if (staged.length > 0) return;
+
+  const existing = await store.keyRefs.listKeyRefsByWallet({ walletId });
+  if (existing.length === 0) {
+    // A re-key of a wallet that never provisioned. Sealing need not be atomic:
+    // there is no earlier generation to be inconsistent with, and a missing kind
+    // is sealed by the next read.
+    await seal(store, walletId, "viewing");
+    await seal(store, walletId, "nullifier");
+    return;
   }
 
-  await seal(store, walletId, kind);
+  if (existing.every((row) => row.previous_ciphertext !== null)) {
+    // A previous attempt staged this material and then died before publishing —
+    // died, because the re-key path holds an exclusive per-wallet lock for the
+    // whole rotation, so a live rotation could not have let this one in. Had it
+    // published, `readIdentity` would have answered `ours` and sent this wallet
+    // to reconciliation instead. So the staged keys are unpublished and safe to
+    // publish, which is better than staging again: it keeps the replaced material
+    // restorable instead of stacking a second generation on top.
+    return;
+  }
+
+  // Either an incomplete pair or a mix of staged and unstaged rows. Neither can
+  // be re-keyed without guessing which generation something published, and an
+  // incomplete pair derives nothing, so it is the provisioning path's to finish.
+  throw new HeliusRingsError(
+    "conflict",
+    "this Rings wallet's stored key material cannot be re-keyed: it must hold one viewing and one nullifier key with no rotation in flight"
+  );
 }
 
 /**
@@ -236,25 +264,14 @@ export async function beginDbMaterialRotation(
   input: RotateDbMaterialInput
 ): Promise<DbMaterialRotation> {
   const { walletId, ...store } = input;
-  const rotation: DbMaterialRotation = {
+  await stage(store, walletId);
+
+  return {
     async commit() {
       await store.keyRefs.commitKeyRefRotation({ walletId });
     },
     async rollback() {
-      await store.keyRefs.restoreKeyRef({ walletId, kind: "viewing" });
-      await store.keyRefs.restoreKeyRef({ walletId, kind: "nullifier" });
+      await store.keyRefs.restoreKeyRefRotation({ walletId });
     },
   };
-
-  await stage(store, walletId, "viewing");
-  try {
-    await stage(store, walletId, "nullifier");
-  } catch (error) {
-    // Half a rotation is worse than none: the two kinds would come from
-    // different generations and derive an identity nobody published.
-    await rotation.rollback();
-    throw error;
-  }
-
-  return rotation;
 }

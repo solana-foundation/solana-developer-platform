@@ -869,6 +869,36 @@ describe("HeliusRingsService", () => {
       }
     });
 
+    it("clears a staged rotation when it adopts an identity the chain already published", async () => {
+      // The tail of a rotation that published without committing: the material it
+      // replaced is still staged, deriving an identity the wallet has abandoned.
+      // Left there, the row reads as mid-rotation and blocks the next re-key.
+      await pause();
+      const keyRefs = await pinToDatabaseAuthority();
+      const staged = await keyRefs.stageKeyRefRotation({
+        walletId,
+        viewing: { ciphertext: "sealed-published-viewing", keyVersion: "v2" },
+        nullifier: { ciphertext: "sealed-published-nullifier", keyVersion: "v2" },
+      });
+      expect(staged).toHaveLength(2);
+
+      const gateway = new InMemoryRingsGateway();
+      vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "ours",
+        derivedShieldedAddress: "rings1rotated",
+        publishedShieldedAddress: "rings1rotated",
+        mismatch: null,
+      });
+
+      expect((await rekey(gateway, "Treasury")).shieldedAddress).toBe("rings1rotated");
+
+      for (const kind of ["viewing", "nullifier"] as const) {
+        const row = await keyRefs.getKeyRef({ walletId, kind });
+        expect(row?.ciphertext).toBe(`sealed-published-${kind}`);
+        expect(row?.previous_ciphertext).toBeNull();
+      }
+    });
+
     it("serializes two genuinely concurrent re-keys into one rotation", async () => {
       // The guard on the row cannot do this alone: a rival claims after the
       // winner's claim commits, so exclusion has to be held across the chain

@@ -51,22 +51,33 @@ export interface HeliusRingsKeyRefRepository {
   getKeyRef(input: { walletId: string; kind: KeyKind }): Promise<HeliusRingsKeyRefRow | null>;
   listKeyRefsByWallet(input: { walletId: string }): Promise<HeliusRingsKeyRefRow[]>;
   /**
-   * Stages new material for a re-key, moving the blob it replaces into the row's
-   * previous slot. Returns null when the wallet holds no key of that kind, which
-   * means there is nothing to rotate and the caller should seal instead.
+   * Stages new material for both kinds at once, moving the blobs they replace
+   * into each row's previous slot. Returns the staged rows, or an empty array
+   * when the wallet is not in a state that can be staged — no keys yet, or a
+   * rotation already staged.
+   *
+   * One statement rather than two, and all-or-nothing: a wallet's identity comes
+   * from the two kinds together, so a process that exited between separate writes
+   * would leave keys from different generations and derive an identity nobody
+   * published. No application-level guard can cover an exit, so the atomicity has
+   * to be the database's.
    *
    * The write-once rule in `createKeyRef` is what makes this a separate method:
    * rotation is the one operation allowed to change sealed material, and it is
-   * only safe because the replaced blob stays reachable until
+   * only safe because the replaced blobs stay reachable until
    * {@link commitKeyRefRotation}.
    */
-  rotateKeyRef(input: RotateHeliusRingsKeyRefInput): Promise<HeliusRingsKeyRefRow | null>;
+  stageKeyRefRotation(input: StageHeliusRingsKeyRotationInput): Promise<HeliusRingsKeyRefRow[]>;
   /**
    * Puts back the material a staged rotation replaced, for a re-key that never
-   * reached the chain. Returns null when nothing is staged, so a repeated
-   * rollback cannot walk the row further backwards.
+   * reached the chain. Returns the restored rows, empty when nothing was staged,
+   * so a repeated rollback cannot walk the rows further backwards.
+   *
+   * One statement for the same reason as staging, and it restores whatever is
+   * staged rather than demanding a matched pair, so it is also the repair for a
+   * wallet left mid-rotation.
    */
-  restoreKeyRef(input: { walletId: string; kind: KeyKind }): Promise<HeliusRingsKeyRefRow | null>;
+  restoreKeyRefRotation(input: { walletId: string }): Promise<HeliusRingsKeyRefRow[]>;
   /**
    * Drops the staged material for a wallet once its new identity is published.
    *
@@ -77,9 +88,13 @@ export interface HeliusRingsKeyRefRepository {
   commitKeyRefRotation(input: { walletId: string }): Promise<number>;
 }
 
-export interface RotateHeliusRingsKeyRefInput {
-  walletId: string;
-  kind: KeyKind;
+export interface StagedHeliusRingsKeyMaterial {
   ciphertext: string;
   keyVersion: string;
+}
+
+export interface StageHeliusRingsKeyRotationInput {
+  walletId: string;
+  viewing: StagedHeliusRingsKeyMaterial;
+  nullifier: StagedHeliusRingsKeyMaterial;
 }

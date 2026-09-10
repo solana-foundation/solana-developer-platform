@@ -154,9 +154,24 @@ is kept in the row's `previous_ciphertext` slot until the outcome is known:
 - The gateway fails → the rotation is **rolled back** and the wallet derives the
   identity it still advertises. It is stale, not broken.
 
-A row with a non-null `previous_ciphertext` is mid-rotation. Staging over one is
-refused, since the slot holds a single blob and overwriting it would discard the
-only material that still matches the published identity.
+Both kinds are staged in a single statement, all-or-nothing. A wallet's identity
+comes from the viewing and nullifier keys together, so a process that exited
+between two separate writes would leave them on different generations and derive
+an identity nobody published — a window no application-level guard can close.
+
+A row with a non-null `previous_ciphertext` is mid-rotation, which resolves one of
+two ways:
+
+- A re-key finds a rotation already fully staged. Because the re-key path holds an
+  exclusive per-wallet lock for the whole rotation, that can only be the leftovers
+  of an attempt that died before publishing, so the staged material is published
+  as-is rather than a second generation being stacked on top.
+- The rotation published but the commit did not run. `readIdentity` then answers
+  `ours` and `reconcileRotatedIdentity` adopts the address and commits the
+  rotation, clearing the slot.
+
+Anything else — an incomplete pair, or a mix of staged and unstaged rows — is
+refused, because finishing it would mean guessing which generation was published.
 
 ## State machine
 

@@ -93,6 +93,28 @@ const NO_ROTATION: KeyAuthorityRotation = {
   async rollback() {},
 };
 
+/**
+ * How each authority accepts a rotation it did not begin, for the reconciliation
+ * that adopts an identity already on chain.
+ *
+ * A rotation whose publish landed but whose commit did not leaves the replaced
+ * blobs staged. They derive an identity the wallet has abandoned, and a row that
+ * keeps its previous slot reads as mid-rotation forever, so adoption has to clear
+ * them.
+ */
+const rotationCommitters = {
+  deterministic: async () => undefined,
+  database: async ({ keyRefs, walletId }: RotationContext) => {
+    await keyRefs.commitKeyRefRotation({ walletId });
+  },
+} satisfies Record<RingsKeyAuthority, (context: RotationContext) => Promise<void>>;
+
+export async function commitKeyAuthorityRotation(
+  context: RotationContext & { readonly keyAuthority: string }
+): Promise<void> {
+  await rotationCommitters[requireKnownAuthority(context.keyAuthority)](context);
+}
+
 export interface RotationContext {
   readonly env: Env;
   readonly organizationId: string;

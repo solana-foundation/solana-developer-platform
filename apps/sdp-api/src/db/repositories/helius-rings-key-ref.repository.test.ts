@@ -107,113 +107,99 @@ describe("HeliusRingsKeyRefRepository / HeliusRingsZoneRepository (postgres)", (
       expect(replay?.key_version).toBe("v1");
     });
 
-    it("stages a re-key by moving the replaced blob into the previous slot", async () => {
-      await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-original",
-        keyVersion: "v1",
-        materialTag: "live",
-      });
+    async function sealBothKinds(scope: string) {
+      for (const kind of ["viewing", "nullifier"] as const) {
+        await keyRefRepo.createKeyRef({
+          walletId: scope,
+          kind,
+          ciphertext: `sealed-original-${kind}`,
+          keyVersion: "v1",
+          materialTag: "live",
+        });
+      }
+    }
 
-      const staged = await keyRefRepo.rotateKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-replacement",
-        keyVersion: "v2",
+    function stageBothKinds(scope: string, generation: string) {
+      return keyRefRepo.stageKeyRefRotation({
+        walletId: scope,
+        viewing: { ciphertext: `sealed-${generation}-viewing`, keyVersion: generation },
+        nullifier: { ciphertext: `sealed-${generation}-nullifier`, keyVersion: generation },
       });
+    }
+
+    it("stages a re-key by moving the replaced blobs into the previous slots", async () => {
+      await sealBothKinds(walletId);
+
+      const staged = await stageBothKinds(walletId, "v2");
 
       // Rotation is the one write allowed to replace sealed material, and it is
       // only safe because what it replaced stays reachable.
-      expect(staged?.ciphertext).toBe("sealed-replacement");
-      expect(staged?.key_version).toBe("v2");
-      expect(staged?.previous_ciphertext).toBe("sealed-original");
-      expect(staged?.previous_key_version).toBe("v1");
+      expect(staged).toHaveLength(2);
+      for (const row of staged) {
+        expect(row.ciphertext).toBe(`sealed-v2-${row.kind}`);
+        expect(row.key_version).toBe("v2");
+        expect(row.previous_ciphertext).toBe(`sealed-original-${row.kind}`);
+        expect(row.previous_key_version).toBe("v1");
+      }
     });
 
-    it("restores the replaced blob for a re-key that never published", async () => {
+    it("stages nothing when only one kind is sealed", async () => {
       await keyRefRepo.createKeyRef({
         walletId,
         kind: "viewing",
-        ciphertext: "sealed-original",
+        ciphertext: "sealed-original-viewing",
         keyVersion: "v1",
         materialTag: "live",
       });
-      await keyRefRepo.rotateKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-replacement",
-        keyVersion: "v2",
-      });
 
-      const restored = await keyRefRepo.restoreKeyRef({ walletId, kind: "viewing" });
-
-      expect(restored?.ciphertext).toBe("sealed-original");
-      expect(restored?.key_version).toBe("v1");
-      expect(restored?.previous_ciphertext).toBeNull();
-      // A second rollback must not walk the row further backwards.
-      expect(await keyRefRepo.restoreKeyRef({ walletId, kind: "viewing" })).toBeNull();
-    });
-
-    it("refuses to stage over a rotation already staged", async () => {
-      await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-original",
-        keyVersion: "v1",
-        materialTag: "live",
-      });
-      await keyRefRepo.rotateKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-replacement",
-        keyVersion: "v2",
-      });
-
-      // Overwriting the slot would discard the only material that still derives
-      // the published identity.
-      expect(
-        await keyRefRepo.rotateKeyRef({
-          walletId,
-          kind: "viewing",
-          ciphertext: "sealed-third",
-          keyVersion: "v3",
-        })
-      ).toBeNull();
-      expect((await keyRefRepo.getKeyRef({ walletId, kind: "viewing" }))?.previous_ciphertext).toBe(
-        "sealed-original"
+      // All-or-nothing in one statement: a process exiting between two writes
+      // would leave the kinds on different generations, deriving an identity
+      // nobody published.
+      expect(await stageBothKinds(walletId, "v2")).toEqual([]);
+      expect((await keyRefRepo.getKeyRef({ walletId, kind: "viewing" }))?.ciphertext).toBe(
+        "sealed-original-viewing"
       );
     });
 
-    it("reports nothing to stage for a wallet holding no blob of that kind", async () => {
-      expect(
-        await keyRefRepo.rotateKeyRef({
-          walletId,
-          kind: "viewing",
-          ciphertext: "sealed-replacement",
-          keyVersion: "v2",
-        })
-      ).toBeNull();
+    it("restores the replaced blobs for a re-key that never published", async () => {
+      await sealBothKinds(walletId);
+      await stageBothKinds(walletId, "v2");
+
+      const restored = await keyRefRepo.restoreKeyRefRotation({ walletId });
+
+      expect(restored).toHaveLength(2);
+      for (const row of restored) {
+        expect(row.ciphertext).toBe(`sealed-original-${row.kind}`);
+        expect(row.key_version).toBe("v1");
+        expect(row.previous_ciphertext).toBeNull();
+      }
+      // A second rollback must not walk the rows further backwards.
+      expect(await keyRefRepo.restoreKeyRefRotation({ walletId })).toEqual([]);
+    });
+
+    it("refuses to stage over a rotation already staged", async () => {
+      await sealBothKinds(walletId);
+      await stageBothKinds(walletId, "v2");
+
+      // Overwriting the slots would discard the only material that still derives
+      // the published identity.
+      expect(await stageBothKinds(walletId, "v3")).toEqual([]);
+      expect((await keyRefRepo.getKeyRef({ walletId, kind: "viewing" }))?.previous_ciphertext).toBe(
+        "sealed-original-viewing"
+      );
+    });
+
+    it("reports nothing to stage for a wallet holding no blobs", async () => {
+      expect(await stageBothKinds(walletId, "v2")).toEqual([]);
     });
 
     it("clears one wallet's staged material on commit without touching another's", async () => {
       for (const scope of [walletId, otherWalletId]) {
-        await keyRefRepo.createKeyRef({
-          walletId: scope,
-          kind: "viewing",
-          ciphertext: `sealed-original-${scope}`,
-          keyVersion: "v1",
-          materialTag: "live",
-        });
-        await keyRefRepo.rotateKeyRef({
-          walletId: scope,
-          kind: "viewing",
-          ciphertext: `sealed-replacement-${scope}`,
-          keyVersion: "v2",
-        });
+        await sealBothKinds(scope);
+        await stageBothKinds(scope, "v2");
       }
 
-      expect(await keyRefRepo.commitKeyRefRotation({ walletId })).toBe(1);
+      expect(await keyRefRepo.commitKeyRefRotation({ walletId })).toBe(2);
 
       expect((await keyRefRepo.getKeyRef({ walletId, kind: "viewing" }))?.previous_ciphertext).toBe(
         null
@@ -221,7 +207,7 @@ describe("HeliusRingsKeyRefRepository / HeliusRingsZoneRepository (postgres)", (
       expect(
         (await keyRefRepo.getKeyRef({ walletId: otherWalletId, kind: "viewing" }))
           ?.previous_ciphertext
-      ).toBe(`sealed-original-${otherWalletId}`);
+      ).toBe("sealed-original-viewing");
     });
 
     it("keeps one blob per kind per wallet", async () => {

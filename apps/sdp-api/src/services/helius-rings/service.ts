@@ -69,6 +69,7 @@ import {
 } from "./gateway";
 import {
   beginKeyAuthorityRotation,
+  commitKeyAuthorityRotation,
   type KeyAuthorityRotation,
   resolveDefaultKeyAuthority,
 } from "./key-authority";
@@ -643,6 +644,18 @@ export class HeliusRingsService {
         "this rings wallet is no longer in a state that can adopt its published identity; read it again and retry"
       );
     }
+
+    // The rotation this is the tail of may have published without committing, in
+    // which case the material it replaced is still staged. Those blobs derive an
+    // identity the wallet has now abandoned, and a row that keeps its previous
+    // slot reads as mid-rotation and would block the next re-key.
+    await commitKeyAuthorityRotation({
+      env: this.env,
+      organizationId: this.tenant.organizationId,
+      keyRefs: createHeliusRingsKeyRefRepository(this.env),
+      walletId: wallet.id,
+      keyAuthority: wallet.key_authority,
+    });
 
     getLogger().warn(
       {

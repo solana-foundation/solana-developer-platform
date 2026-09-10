@@ -51,6 +51,8 @@ function fakeKeyRefs(): HeliusRingsKeyRefRepository & { rows: Map<string, Helius
         ciphertext: input.ciphertext,
         key_version: input.keyVersion,
         material_tag: input.materialTag,
+        previous_ciphertext: null,
+        previous_key_version: null,
         created_at: "2026-01-01T00:00:00.000Z",
       };
       rows.set(key(input.walletId, input.kind), row);
@@ -62,10 +64,15 @@ function fakeKeyRefs(): HeliusRingsKeyRefRepository & { rows: Map<string, Helius
     async listKeyRefsByWallet({ walletId }) {
       return [...rows.values()].filter((row) => row.wallet_id === walletId);
     },
-    async deleteKeyRefsByWallet({ walletId }) {
-      const doomed = [...rows.entries()].filter(([, row]) => row.wallet_id === walletId);
-      for (const [mapKey] of doomed) rows.delete(mapKey);
-      return doomed.length;
+    // The migration never rotates; these exist only to satisfy the port.
+    async stageKeyRefRotation() {
+      throw new Error("the migration must not rotate key material");
+    },
+    async restoreKeyRefRotation() {
+      throw new Error("the migration must not rotate key material");
+    },
+    async commitKeyRefRotation() {
+      throw new Error("the migration must not rotate key material");
     },
   };
 }

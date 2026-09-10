@@ -5,7 +5,7 @@ import {
   generateHeliusRingsKeyRefId,
   type HeliusRingsKeyRefRepository,
   type HeliusRingsKeyRefRow,
-  type RotateHeliusRingsKeyRefInput,
+  type StageHeliusRingsKeyRotationInput,
 } from "./helius-rings-key-ref.repository";
 
 function mapRow(row: Record<string, unknown>): HeliusRingsKeyRefRow {
@@ -65,29 +65,48 @@ export function createPostgresHeliusRingsKeyRefRepository(db: AppDb): HeliusRing
       return result.results.map(mapRow);
     },
 
-    async rotateKeyRef(input: RotateHeliusRingsKeyRefInput) {
-      const row = await db
+    async stageKeyRefRotation(input: StageHeliusRingsKeyRotationInput) {
+      const result = await db
         .prepare(
-          `UPDATE helius_rings_key_refs
-              SET ciphertext = ?,
-                  key_version = ?,
-                  previous_ciphertext = ciphertext,
-                  previous_key_version = key_version
-            WHERE wallet_id = ?
-              AND kind = ?
-              -- Refuse to stage over a staged rotation: the slot holds one blob,
-              -- and overwriting it would discard the only material that still
-              -- derives the published identity.
-              AND previous_ciphertext IS NULL
-          RETURNING *`
+          // A single statement, so a process that dies cannot leave one kind on
+          // the new generation and the other on the old. The count gate makes it
+          // all-or-nothing: unless both rows exist and neither is already staged
+          // it evaluates false for every row and nothing is written.
+          `UPDATE helius_rings_key_refs AS k
+              SET ciphertext = v.ciphertext,
+                  key_version = v.key_version,
+                  previous_ciphertext = k.ciphertext,
+                  previous_key_version = k.key_version
+             FROM (VALUES ('viewing', ?, ?), ('nullifier', ?, ?))
+                    AS v(kind, ciphertext, key_version)
+            WHERE k.wallet_id = ?
+              AND k.kind = v.kind
+              -- Never stage over a staged rotation: each slot holds one blob, and
+              -- overwriting it would discard the only material that still derives
+              -- the published identity.
+              AND k.previous_ciphertext IS NULL
+              AND (
+                SELECT count(*)
+                  FROM helius_rings_key_refs AS g
+                 WHERE g.wallet_id = k.wallet_id
+                   AND g.kind IN ('viewing', 'nullifier')
+                   AND g.previous_ciphertext IS NULL
+              ) = 2
+          RETURNING k.*`
         )
-        .bind(input.ciphertext, input.keyVersion, input.walletId, input.kind)
-        .first<Record<string, unknown>>();
-      return row ? mapRow(row) : null;
+        .bind(
+          input.viewing.ciphertext,
+          input.viewing.keyVersion,
+          input.nullifier.ciphertext,
+          input.nullifier.keyVersion,
+          input.walletId
+        )
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
     },
 
-    async restoreKeyRef(input: { walletId: string; kind: KeyKind }) {
-      const row = await db
+    async restoreKeyRefRotation(input: { walletId: string }) {
+      const result = await db
         .prepare(
           `UPDATE helius_rings_key_refs
               SET ciphertext = previous_ciphertext,
@@ -95,13 +114,12 @@ export function createPostgresHeliusRingsKeyRefRepository(db: AppDb): HeliusRing
                   previous_ciphertext = NULL,
                   previous_key_version = NULL
             WHERE wallet_id = ?
-              AND kind = ?
               AND previous_ciphertext IS NOT NULL
           RETURNING *`
         )
-        .bind(input.walletId, input.kind)
-        .first<Record<string, unknown>>();
-      return row ? mapRow(row) : null;
+        .bind(input.walletId)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
     },
 
     async commitKeyRefRotation(input: { walletId: string }) {
