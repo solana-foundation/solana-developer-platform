@@ -10,6 +10,8 @@ import {
 } from "./schemas";
 
 const ADDRESS = "So11111111111111111111111111111111111111112";
+const SIGNATURE =
+  "2CNiVUkS2FjsZkw2bLksLCxVXsJot5GebHiqorSEzbmFZ4DQ6sJNDg7D438AcKaeQagD2mmdYD7ZTSpsS5YrkwY";
 
 describe("Issuance exact wallet request schemas", () => {
   it("accepts an exact wallet and rejects the legacy selector when creating a token", () => {
@@ -40,7 +42,7 @@ describe("Issuance exact wallet request schemas", () => {
     );
     expect(
       confirmDeploySchema.safeParse({
-        signature: "signature",
+        signature: SIGNATURE,
         mint: ADDRESS,
         signingWalletId: "privy_example",
       }).success

@@ -8,7 +8,9 @@ import type {
 /** Keep rollback and operation identity fields internal to Issuance persistence. */
 export function toPublicToken<T extends Token>(token: T): Omit<T, "signingWalletId"> {
   const { signingWalletId: _signingWalletId, ...publicToken } = token;
-  return publicToken;
+  return String(publicToken.status) === "deploying"
+    ? { ...publicToken, status: "pending" }
+    : publicToken;
 }
 
 export function toPublicTokenTransaction<

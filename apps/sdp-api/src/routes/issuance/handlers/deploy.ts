@@ -11,7 +11,7 @@ import {
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -821,8 +821,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     throw new AppError("CONFLICT", "Token deployment is already in progress");
   }
 
-  const mint = body.mint as Address;
-  const signature = body.signature as Signature;
+  const { mint, signature } = body;
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let deploymentRecorded = false;
