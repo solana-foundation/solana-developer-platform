@@ -453,20 +453,20 @@ export function DvpTradesWorkspace({
   // enters this: it is not a trades-filter state, so the URL keeps the group
   // it had while the inbound segment answers the same text client-side.
   //
-  // searchQuery is deliberately NOT a dependency: a browser navigation changes
-  // the prop without remounting, and re-running here on that change alone would
-  // push the still-stale debounced text back into the URL — the navigation the
-  // input just synced to. The guard above no-ops once the debounced value
-  // converges, which is the only prop-driven run this effect needs.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
+  // A flush is written only while it still matches the live input: a browser
+  // navigation resets the input during render, so keystrokes that were still
+  // waiting to debounce when the navigation happened arrive here already
+  // superseded and are dropped instead of undoing the navigation.
   useEffect(() => {
-    const trimmed = debouncedQuery;
-    if (trimmed === searchQuery) {
+    if (debouncedQuery !== queryInput.trim()) {
       return;
     }
-    const q = trimmed.length >= 2 ? trimmed : null;
+    if (debouncedQuery === searchQuery) {
+      return;
+    }
+    const q = debouncedQuery.length >= 2 ? debouncedQuery : null;
     startTransition(() => router.replace(tradesHref(statusFilter, q), { scroll: false }));
-  }, [debouncedQuery, router, statusFilter]);
+  }, [debouncedQuery, queryInput, router, searchQuery, statusFilter]);
 
   const onStatusChange = (next: StatusFilter) => {
     if (next === "waiting") {
