@@ -8,12 +8,13 @@ import type { OrganizationSettings } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
 import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
 const PROJECT_ID = "prj_access_settings";
@@ -454,11 +455,10 @@ describe("Organization access settings", () => {
         "x-forwarded-for": "198.51.100.42",
       };
 
-      // Standard tier allows 100 requests per window; the 101st must trip it.
-      let finalStatus = 0;
-      for (let request = 0; request < 101; request++) {
-        finalStatus = (await get(headers)).status;
-      }
+      // Seed the standard tier at its limit so this ordering assertion cannot
+      // cross a real-time rate-limit window while issuing 101 requests.
+      await seedRateLimit(env, TEST_CACHED_API_KEY.id, RATE_LIMIT_TIERS.standard);
+      const finalStatus = (await get(headers)).status;
 
       expect(finalStatus).toBe(429);
     });
