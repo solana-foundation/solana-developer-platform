@@ -2,6 +2,7 @@ import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -53,6 +54,7 @@ dvp.post(
   "/trades",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(createDvpTradeSchema),
+  meteredQuota({ name: "dvp-create", actorMax: 2, orgMax: 10 }),
   createTrade
 );
 // Reading a mint so the form can convert an amount. Read-only, and public
@@ -76,6 +78,7 @@ dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(fundDvpTradeSchema),
+  meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: (c) => extractDvpFundPolicyCandidate(c) }),
   fundTrade
 );
@@ -88,12 +91,14 @@ dvp.post(
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),
+  meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle") }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
   requirePermissions("payments:write", "wallets:read"),
+  meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "cancel") }),
   cancelTrade
 );

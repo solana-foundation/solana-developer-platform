@@ -17,9 +17,18 @@
  * exact account to create.
  */
 
-import { getAccountInfo, getMinimumBalanceForRentExemption, type SolanaRpc } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import { getMinimumBalanceForRentExemption, type SolanaRpc } from "@sdp/rpc/solana";
+import { type Address, fetchEncodedAccounts } from "@solana/kit";
+import {
+  type ExtensionArgs,
+  extension,
+  findAssociatedTokenPda,
+  getMintDecoder,
+  getTokenDecoder,
+  getTokenSize,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
+import { badRequest } from "@/lib/errors";
 
 export interface DvpSettleParties {
   userA: Address;
@@ -76,8 +85,6 @@ export const SETTLE_ATA_DESCRIPTIONS: Readonly<Record<keyof DvpSettleAtas, strin
   userBAtaB: "user B's surplus-refund account",
 };
 
-const SETTLE_ATA_KEYS = Object.keys(SETTLE_ATA_DESCRIPTIONS) as (keyof DvpSettleAtas)[];
-
 /**
  * Reports which of Settle's required accounts do not yet exist.
  *
@@ -86,14 +93,51 @@ const SETTLE_ATA_KEYS = Object.keys(SETTLE_ATA_DESCRIPTIONS) as (keyof DvpSettle
  *
  * @param rpc - Solana RPC for the trade's cluster.
  * @param atas - The derived accounts from {@link deriveDvpSettleAtas}.
+ * @param keys - Accounts used by the requested close action.
  * @returns The subset that must be created, empty when all four exist.
  */
 export async function findMissingSettleAtas(
   rpc: SolanaRpc,
-  atas: DvpSettleAtas
+  atas: DvpSettleAtas,
+  parties: DvpSettleParties,
+  keys: readonly (keyof DvpSettleAtas)[]
 ): Promise<ReadonlySet<keyof DvpSettleAtas>> {
-  const accounts = await Promise.all(SETTLE_ATA_KEYS.map((key) => getAccountInfo(rpc, atas[key])));
-  return new Set(SETTLE_ATA_KEYS.filter((_, index) => !accounts[index]));
+  const accounts = await fetchEncodedAccounts(
+    rpc,
+    keys.map((key) => atas[key])
+  );
+  const expected = {
+    userADestinationAtaB: {
+      tokenProgram: parties.tokenProgramB,
+      owner: parties.userASettlementDestination,
+    },
+    userBDestinationAtaA: {
+      tokenProgram: parties.tokenProgramA,
+      owner: parties.userBSettlementDestination,
+    },
+    userAAtaA: { tokenProgram: parties.tokenProgramA, owner: parties.userA },
+    userBAtaB: { tokenProgram: parties.tokenProgramB, owner: parties.userB },
+  } as const satisfies Record<keyof DvpSettleAtas, { tokenProgram: Address; owner: Address }>;
+  const missing = new Set<keyof DvpSettleAtas>();
+  for (const [index, key] of keys.entries()) {
+    const account = accounts[index];
+    if (!account.exists || account.programAddress !== expected[key].tokenProgram) {
+      missing.add(key);
+      continue;
+    }
+    let token: ReturnType<ReturnType<typeof getTokenDecoder>["decode"]>;
+    try {
+      token = getTokenDecoder().decode(account.data);
+    } catch {
+      throw badRequest(`DvP token account ${account.address} cannot be decoded`);
+    }
+    if (token.owner !== expected[key].owner) {
+      throw badRequest(
+        `DvP token account ${account.address} was reassigned and is no longer owned by ${expected[key].owner}`
+      );
+    }
+  }
+  return missing;
 }
 
 /** Names a missing account and what it is for, for an error message. */
@@ -103,23 +147,6 @@ export function describeMissingSettleAta(key: keyof DvpSettleAtas, atas: DvpSett
 
 /** A signature's worth of network fee, added to the rent for any accounts a close creates. */
 const FEE_ALLOWANCE_LAMPORTS = 50_000n;
-
-/**
- * What settling will cost the settlement authority, in lamports.
- *
- * This is a floor, not a quote: the per-account rent is the exemption for a
- * 165-byte account, and Token-2022 ATAs with extensions are slightly larger, so
- * the real cost of creating one may be a few lamports higher. The figure exists
- * to catch an authority holding nothing, which is the state every freshly
- * provisioned one is in — not to predict the exact fee.
- *
- * @param accountsToCreate - How many token accounts this close has to open.
- * @param rentPerAccount - The rent-exempt minimum for a 165-byte account, read
- *   from the chain at preflight time.
- */
-function estimateSettlementCostLamports(accountsToCreate: number, rentPerAccount: bigint): bigint {
-  return BigInt(accountsToCreate) * rentPerAccount + FEE_ALLOWANCE_LAMPORTS;
-}
 
 /**
  * Whether the settlement authority can pay for the close it is about to sign.
@@ -137,6 +164,7 @@ function estimateSettlementCostLamports(accountsToCreate: number, rentPerAccount
  *
  * @param rpc - Solana RPC for the trade's cluster.
  * @param authority - The settlement authority that signs and pays.
+ * @param parties - Both leg mints and token programs.
  * @param accountsToCreate - Token accounts this close has to open.
  * @returns The authority's balance, the required floor, and the shortfall —
  *   `0n` when the balance is sufficient.
@@ -144,13 +172,44 @@ function estimateSettlementCostLamports(accountsToCreate: number, rentPerAccount
 export async function findSettlementFundingShortfall(
   rpc: SolanaRpc,
   authority: Address,
-  accountsToCreate: number
+  parties: Pick<DvpSettleParties, "mintA" | "mintB" | "tokenProgramA" | "tokenProgramB">,
+  accountsToCreate: ReadonlySet<keyof DvpSettleAtas>
 ): Promise<{ balance: bigint; required: bigint; shortfall: bigint }> {
-  // 165 bytes is the base SPL token account size. Token-2022 ATAs with
-  // extensions are slightly larger, so this is a floor — the real rent for one
-  // may be a few lamports higher, and the floor semantics are deliberate.
-  const rentPerAccount = await getMinimumBalanceForRentExemption(rpc, 165);
-  const required = estimateSettlementCostLamports(accountsToCreate, rentPerAccount);
+  const mints = await fetchEncodedAccounts(rpc, [parties.mintA, parties.mintB]);
+  const sizes = mints.map((mint, index) => {
+    const tokenProgram = index === 0 ? parties.tokenProgramA : parties.tokenProgramB;
+    if (!mint.exists || mint.programAddress !== tokenProgram) {
+      throw badRequest(`DvP mint ${mint.address} cannot be read from its token program`);
+    }
+    if (tokenProgram !== TOKEN_2022_PROGRAM_ADDRESS) {
+      return 165;
+    }
+    let decoded: ReturnType<ReturnType<typeof getMintDecoder>["decode"]>;
+    try {
+      decoded = getMintDecoder().decode(mint.data);
+    } catch {
+      throw badRequest(`DvP mint ${mint.address} cannot be read`);
+    }
+    const mintExtensions = decoded.extensions.__option === "Some" ? decoded.extensions.value : [];
+    const accountExtensions: ExtensionArgs[] = [extension("ImmutableOwner", {})];
+    for (const mintExtension of mintExtensions) {
+      if (mintExtension.__kind === "TransferHook") {
+        accountExtensions.push(extension("TransferHookAccount", { transferring: false }));
+      } else if (mintExtension.__kind === "PausableConfig") {
+        accountExtensions.push(extension("PausableAccount", {}));
+      }
+    }
+    return getTokenSize(accountExtensions);
+  });
+  const rent = await Promise.all(
+    [...accountsToCreate].map((key) =>
+      getMinimumBalanceForRentExemption(
+        rpc,
+        key === "userADestinationAtaB" || key === "userBAtaB" ? sizes[1] : sizes[0]
+      )
+    )
+  );
+  const required = rent.reduce((sum, amount) => sum + amount, FEE_ALLOWANCE_LAMPORTS);
   // A missing account reads as 0n, which is exactly the case this check exists
   // for: a freshly provisioned authority holds nothing.
   const balance = (await rpc.getBalance(authority, { commitment: "confirmed" }).send()).value;

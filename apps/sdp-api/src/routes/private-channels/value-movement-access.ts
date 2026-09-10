@@ -30,6 +30,7 @@ import {
 } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, walletNotFound } from "@/lib/errors";
+import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -41,9 +42,6 @@ import {
 import { requireActiveInstance } from "./helpers";
 
 const SYSTEM_PROGRAM_ADDRESS = "11111111111111111111111111111111";
-// biome-ignore lint/security/noSecrets: This is the public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
-
 /**
  * Program, system and connected-instance addresses, which must never be an
  * endpoint of a value movement.

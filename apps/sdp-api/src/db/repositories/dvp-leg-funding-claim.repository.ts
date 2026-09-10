@@ -8,6 +8,8 @@
  * ordinary tenant isolation.
  */
 
+import { internalError } from "@/lib/errors";
+import { assertRepositoryNullableString, assertRepositoryString } from "./assertions";
 import type { RepositoryDbClient } from "./base";
 
 export interface DvpLegFundingClaim {
@@ -86,15 +88,35 @@ export interface DvpLegFundingClaimRepository {
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
+  const side = assertRepositoryString(row.side, "DvP leg funding claim", "side");
+  if (side !== "a" && side !== "b") {
+    throw internalError(`DvP leg funding claim side is invalid: ${side}`);
+  }
   return {
-    tradeId: row.trade_id as string,
-    side: row.side as "a" | "b",
-    organizationId: row.organization_id as string,
-    projectId: row.project_id as string,
-    custodyWalletId: row.custody_wallet_id as string,
-    signature: row.signature as string,
-    expiryHeight: row.expiry_height as string,
-    fundingTx: (row.funding_tx as string | null) ?? null,
+    tradeId: assertRepositoryString(row.trade_id, "DvP leg funding claim", "trade_id"),
+    side,
+    organizationId: assertRepositoryString(
+      row.organization_id,
+      "DvP leg funding claim",
+      "organization_id"
+    ),
+    projectId: assertRepositoryString(row.project_id, "DvP leg funding claim", "project_id"),
+    custodyWalletId: assertRepositoryString(
+      row.custody_wallet_id,
+      "DvP leg funding claim",
+      "custody_wallet_id"
+    ),
+    signature: assertRepositoryString(row.signature, "DvP leg funding claim", "signature"),
+    expiryHeight: assertRepositoryString(
+      row.expiry_height,
+      "DvP leg funding claim",
+      "expiry_height"
+    ),
+    fundingTx: assertRepositoryNullableString(
+      row.funding_tx,
+      "DvP leg funding claim",
+      "funding_tx"
+    ),
   };
 }
 

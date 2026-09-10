@@ -696,7 +696,12 @@ async function readSettlementReadiness(
     }
     const rpc = solanaRpc.createRpc(c.env);
     // Settlement's worst case (4 accounts) is the number worth quoting: the ceiling once beats more mid-flow.
-    const funding = await findSettlementFundingShortfall(rpc, settlement.address, 4);
+    const funding = await findSettlementFundingShortfall(
+      rpc,
+      settlement.address,
+      trade,
+      new Set(["userADestinationAtaB", "userBDestinationAtaA", "userAAtaA", "userBAtaB"])
+    );
     return {
       address: settlement.address,
       balance: funding.balance.toString(),

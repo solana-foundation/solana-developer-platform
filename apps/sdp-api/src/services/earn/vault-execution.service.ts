@@ -30,6 +30,7 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
+import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./execution-registry";
 import type { VaultDeadline } from "./vault-deadline";
@@ -57,9 +58,6 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
     data: Uint8Array.from(Buffer.from(instruction.data, "base64")),
   } as unknown as Instruction;
 }
-
-// biome-ignore lint/security/noSecrets: public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /**
  * Bind the caller's idempotency key into the transaction plan.

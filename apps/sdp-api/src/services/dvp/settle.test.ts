@@ -42,6 +42,35 @@ vi.mock("@sdp/rpc/solana", () => ({
   }),
   sendTransaction,
 }));
+vi.mock("./settle-preflight", async (importOriginal) => ({
+  ...(await importOriginal()),
+  findMissingSettleAtas: async (
+    rpc: unknown,
+    atas: Record<string, string>,
+    _parties: unknown,
+    keys: readonly string[]
+  ) =>
+    new Set(
+      (
+        await Promise.all(
+          keys.map(async (key) => ({ key, account: await getAccountInfo(rpc, atas[key]) }))
+        )
+      )
+        .filter(({ account }) => account === null)
+        .map(({ key }) => key)
+    ),
+  findSettlementFundingShortfall: async (
+    _rpc: unknown,
+    _authority: unknown,
+    _parties: unknown,
+    accounts: ReadonlySet<string>
+  ) => {
+    const rent = await getMinimumBalanceForRentExemption(undefined, 165);
+    const required = BigInt(accounts.size) * rent + 50_000n;
+    const balance = getBalanceValue();
+    return { balance, required, shortfall: balance >= required ? 0n : required - balance };
+  },
+}));
 
 const { closeDvpTrade } = await import("./settle");
 

@@ -7,7 +7,7 @@ import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
 
 const TEST_ORG = { id: "org_dvp_test", name: "DvP Test Org", slug: "dvp-test-org" };
@@ -505,6 +505,23 @@ describe("DvP routes", () => {
   it("requires authentication", async () => {
     const res = await app.request("/v1/dvp/trades", {}, env);
     expect(res.status).toBe(401);
+  });
+
+  it("429s a DvP create once the actor's metered quota is exhausted", async () => {
+    await seedRateLimit(env, `metered:dvp-create:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 2);
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(createBody()),
+      },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
   });
 
   // Every documented family answers in the { data, meta } envelope. DvP returned

@@ -120,14 +120,14 @@ export async function closeDvpTrade(
   });
 
   const rpc = solanaRpc.createRpc(env);
-  const missing = await resolveMissingAtas(rpc, atas, action);
+  const missing = await resolveMissingAtas(rpc, atas, trade, action);
 
   // Before a signature is spent. The settlement authority pays the fee and the
   // rent for every account this close creates, and it is provisioned empty — so
   // the first settle in a project failed in simulation with an error that named
   // neither the account nor the amount, and surfaced as "An internal error
   // occurred". Saying it plainly is the whole fix.
-  const funding = await findSettlementFundingShortfall(rpc, signer.address, missing.size);
+  const funding = await findSettlementFundingShortfall(rpc, signer.address, trade, missing);
   if (funding.shortfall > 0n) {
     throw badRequest(
       `DvP trade ${trade.id}: the settlement authority ${signer.address} holds ${funding.balance} lamports but needs about ${funding.required} to ${action} this trade — it pays the network fee and the rent for ${missing.size} token account(s) this close has to create. Send it at least ${funding.shortfall} more lamports and try again.`
@@ -174,14 +174,12 @@ export async function closeDvpTrade(
 async function resolveMissingAtas(
   rpc: solanaRpc.SolanaRpc,
   atas: DvpSettleAtas,
+  trade: DvpTradeRow,
   action: DvpCloseAction
 ): Promise<ReadonlySet<keyof DvpSettleAtas>> {
-  const missing = await findMissingSettleAtas(rpc, atas);
-
   const relevant: ReadonlyArray<keyof DvpSettleAtas> =
     action === "settle"
       ? ["userADestinationAtaB", "userBDestinationAtaA", "userAAtaA", "userBAtaB"]
       : ["userAAtaA", "userBAtaB"];
-
-  return new Set(relevant.filter((key) => missing.has(key)));
+  return findMissingSettleAtas(rpc, atas, trade, relevant);
 }

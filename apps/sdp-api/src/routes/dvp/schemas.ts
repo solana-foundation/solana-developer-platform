@@ -63,7 +63,7 @@ const dvpPartySchema = z.union([
 ]);
 
 /** Terms shared by every trade. Only the parties differ. */
-const dvpTradeTermsShape = {
+const dvpTradeTermsFields = {
   mintA: dvpAddressSchema,
   tokenProgramA: dvpAddressSchema,
   mintB: dvpAddressSchema,
@@ -100,7 +100,7 @@ export const createDvpTradeSchema = z.object({
   partyB: dvpPartySchema,
   /** Fee/rent signer; omitted means the settlement wallet pays. Not a term of the trade. */
   payerWalletId: z.string().min(1).nullish(),
-  ...dvpTradeTermsShape,
+  ...dvpTradeTermsFields,
 });
 
 /**

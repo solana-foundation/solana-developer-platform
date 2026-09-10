@@ -187,7 +187,7 @@ async function reconcileTrade(
   observation.closeResolution =
     observation.tradeAccountExists || closeIsKnown(trade)
       ? null
-      : await resolveDvpClose(rpc, trade.swapDvp);
+      : await resolveDvpClose(rpc, trade.swapDvp, trade.id, trade.createSignature);
 
   const derived = deriveDvpTradeState(observation, trade, Date.now());
 

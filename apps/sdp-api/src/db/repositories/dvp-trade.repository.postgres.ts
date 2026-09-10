@@ -1,5 +1,8 @@
+import { DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
+import { internalError } from "@/lib/errors";
+import { assertRepositoryString } from "./assertions";
 import type {
   DvpTradeInsert,
   DvpTradeListFilters,
@@ -19,10 +22,22 @@ import type {
  * and must fail loudly, not flow.
  */
 function assertString(value: unknown, field: string): string {
-  if (typeof value !== "string") {
-    throw new Error(`DvP trade ${field} is missing`);
+  return assertRepositoryString(value, "DvP trade", field);
+}
+
+/**
+ * Validates a status read from the open-text database column.
+ *
+ * @param value - Untrusted status returned by the database driver.
+ * @returns A supported DvP trade status.
+ */
+function assertDvpTradeStatus(value: unknown): DvpTradeStatus {
+  for (const status of DVP_TRADE_STATUSES) {
+    if (value === status) {
+      return status;
+    }
   }
-  return value;
+  throw internalError(`DvP trade status is invalid: ${String(value)}`);
 }
 
 /** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
@@ -76,7 +91,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     counterpartyAccountIdB:
       typeof row.counterparty_account_id_b === "string" ? row.counterparty_account_id_b : null,
 
-    status: row.status as DvpTradeStatus,
+    status: assertDvpTradeStatus(row.status),
     observedAt: typeof row.observed_at === "string" ? row.observed_at : null,
     idempotencyKey: typeof row.idempotency_key === "string" ? row.idempotency_key : null,
     idempotencyFingerprint:

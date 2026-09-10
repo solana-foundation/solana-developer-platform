@@ -66,7 +66,7 @@ export async function observeDvpTradeNow(
     observation.closeResolution =
       observation.tradeAccountExists || closeIsKnown(trade)
         ? null
-        : await resolveDvpClose(rpc, trade.swapDvp);
+        : await resolveDvpClose(rpc, trade.swapDvp, trade.id, trade.createSignature);
 
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
@@ -138,7 +138,7 @@ export async function observeDvpTradeWithoutRecording(
     observation.closeResolution =
       observation.tradeAccountExists || closeIsKnown(trade)
         ? null
-        : await resolveDvpClose(rpc, trade.swapDvp);
+        : await resolveDvpClose(rpc, trade.swapDvp, trade.id, trade.createSignature);
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
     return {

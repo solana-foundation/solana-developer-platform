@@ -7,18 +7,11 @@
  */
 
 import { getCancelDvpInstruction, getSettleDvpInstruction } from "@sdp/dvp";
-import { type Address, address, type Instruction, type TransactionSigner } from "@solana/kit";
+import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import type { DvpTradeRow } from "@/db/repositories";
+import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import type { DvpSettleAtas } from "./settle-preflight";
-
-/**
- * SPL Memo. Settle passes it so a destination with MemoTransfer enabled can be
- * paid — without it, a transfer to such an account reverts, which would be a
- * silent denial of service on an otherwise valid trade.
- */
-// biome-ignore lint/security/noSecrets: the SPL Memo program id, a public constant.
-export const MEMO_PROGRAM_ADDRESS = address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 /**
  * Creates any of Settle's four required token accounts that are missing.
