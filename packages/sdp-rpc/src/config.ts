@@ -1,9 +1,20 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { OrganizationRpcProvider, SolanaCluster } from "@sdp/types";
+import { rpcNotConfigured } from "./errors";
 import type { RpcEnv } from "./types";
 
 export interface SolanaConfig {
   rpcUrl: string;
-  network: "devnet" | "mainnet-beta";
+  network: SolanaCluster;
+}
+
+/**
+ * Resolve the deployment's configured Solana cluster.
+ *
+ * @param env - RPC environment whose deployment default is required.
+ * @returns The configured cluster, defaulting to devnet when it is absent.
+ */
+export function resolveDefaultCluster(env: RpcEnv): SolanaCluster {
+  return env.SOLANA_NETWORK ?? "devnet";
 }
 
 const API_KEY_TEMPLATE = ["$", "{API_KEY}"].join("");
@@ -148,12 +159,19 @@ export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
   return resolveSolanaRpcProviderUrls(env)[0] ?? null;
 }
 
+/**
+ * Resolve the active cluster and its preferred RPC endpoint.
+ *
+ * @param env - RPC environment to resolve.
+ * @returns The configured cluster and preferred endpoint.
+ * @throws {SdpRpcError} When the active cluster has no configured endpoint.
+ */
 export function getSolanaConfig(env: RpcEnv): SolanaConfig {
   const rpcUrl = resolveDefaultSolanaRpcUrl(env);
-  const network = env.SOLANA_NETWORK ?? "devnet";
+  const network = resolveDefaultCluster(env);
 
   if (!rpcUrl) {
-    throw new Error("No Solana RPC endpoint is configured");
+    throw rpcNotConfigured(`No Solana RPC endpoint is configured for ${network}`);
   }
 
   return { rpcUrl, network };

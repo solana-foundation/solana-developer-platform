@@ -9,12 +9,16 @@ import {
   type SponsorshipNetwork,
   type SponsorshipReconciliationReservation,
 } from "@/db/repositories/sponsorship-budget.repository";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
 import { getManagedSponsorshipProviderConfiguration } from "../sponsorship.service";
-import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
+import {
+  resolveNetwork,
+  sponsorshipProviderConfigFingerprint,
+} from "../sponsorship-budget.service";
 
 const RECONCILIATION_DELAY_MS = 2 * 60_000;
 const RECONCILIATION_BATCH_SIZE = 250;
@@ -77,8 +81,12 @@ export async function reconcileSponsorshipBudgets(
 ): Promise<void> {
   const repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
   const budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
+  const network = resolveNetwork(env);
+  const rpcEnv = scopeEnvToCluster(env, network === "mainnet" ? "mainnet-beta" : "devnet");
   const rpc =
-    dependencies.getTransaction || dependencies.isBlockhashValid ? null : solanaRpc.createRpc(env);
+    dependencies.getTransaction || dependencies.isBlockhashValid
+      ? null
+      : solanaRpc.createRpc(rpcEnv);
   const getTransaction =
     dependencies.getTransaction ??
     ((signature: Signature) => solanaRpc.getTransaction(assertRpc(rpc), signature));
@@ -89,7 +97,6 @@ export async function reconcileSponsorshipBudgets(
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const updatedBefore = new Date(now.getTime() - RECONCILIATION_DELAY_MS).toISOString();
-  const network = env.SOLANA_NETWORK === "mainnet-beta" ? "mainnet" : "devnet";
   const reservations = await repository.listReconciliationCandidates(
     network,
     updatedBefore,

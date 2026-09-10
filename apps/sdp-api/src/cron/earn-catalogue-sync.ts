@@ -40,7 +40,12 @@ import type {
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  SDP_ENVIRONMENTS,
+  type SdpEnvironment,
+  type SolanaCluster,
+} from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { KVStore } from "@/runtime/kv";
@@ -94,7 +99,6 @@ export const EARN_CATALOGUE_SYNC_DEADLINE_SECONDS = 600;
 // devnet mints, production rows mainnet mints), so each provider syncs once per
 // environment — plus, in every non-production environment, the mirrored
 // production mainnet shelf (PRO-1742).
-const SYNCED_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox", "production"];
 
 // Expected steady states, not incidents: stub integrations report
 // NOT_IMPLEMENTED and environments without credentials report
@@ -140,7 +144,7 @@ async function syncProviderCatalogue(
     });
   }
 
-  for (const environment of SYNCED_ENVIRONMENTS) {
+  for (const environment of SDP_ENVIRONMENTS) {
     if (environment === "production") {
       continue;
     }

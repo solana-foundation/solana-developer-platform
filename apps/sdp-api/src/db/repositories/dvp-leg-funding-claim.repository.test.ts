@@ -225,12 +225,29 @@ describe("DvpLegFundingClaimRepository", () => {
    * are swept for exactly this reason and this table was not, at first.
    */
   describe("releasing claims that can no longer land", () => {
+    it("leaves a production trade's claim untouched during a sandbox sweep", async () => {
+      await getDb(env)
+        .prepare("UPDATE projects SET environment = 'production' WHERE id = ?")
+        .bind(`prj_${AGENT_ORG}`)
+        .run();
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_mainnet"), expiryHeight: "500" })
+      );
+
+      expect(await repo.releaseExpired(900n, "sandbox")).toBe(0);
+      await expect(
+        runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+          repo.listForTrade(TRADE_ID)
+        )
+      ).resolves.toHaveLength(1);
+    });
+
     it("frees a leg whose claim is past its last-valid height", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
         repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_dead"), expiryHeight: "500" })
       );
 
-      const released = await repo.releaseExpired(900n);
+      const released = await repo.releaseExpired(900n, "sandbox");
       expect(released).toBe(1);
 
       const retried = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
@@ -246,7 +263,7 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_live"), expiryHeight: "5000" })
       );
 
-      expect(await repo.releaseExpired(900n)).toBe(0);
+      expect(await repo.releaseExpired(900n, "sandbox")).toBe(0);
     });
 
     // A broadcast claim is a receipt. Sweeping it would invite a second
@@ -257,7 +274,7 @@ describe("DvpLegFundingClaimRepository", () => {
         await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
       });
 
-      expect(await repo.releaseExpired(900n)).toBe(0);
+      expect(await repo.releaseExpired(900n, "sandbox")).toBe(0);
     });
   });
 
@@ -287,7 +304,7 @@ describe("DvpLegFundingClaimRepository", () => {
         });
       });
 
-      const listed = await repo.listExpiredBroadcast(900n);
+      const listed = await repo.listExpiredBroadcast(900n, "sandbox");
 
       expect(listed.map((claim) => claim.signature)).toEqual(["sig_brd_dead"]);
     });

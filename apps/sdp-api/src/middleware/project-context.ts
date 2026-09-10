@@ -1,5 +1,7 @@
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { badRequest, forbidden, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
@@ -11,6 +13,7 @@ export function projectContextMiddleware() {
     if (apiKey) {
       c.set("projectId", apiKey.projectId);
       c.set("projectEnvironment", apiKey.environment);
+      c.env = scopeEnvToCluster(c.env, CLUSTER_BY_SDP_ENVIRONMENT[apiKey.environment]);
       return next();
     }
 
@@ -32,6 +35,7 @@ export function projectContextMiddleware() {
     const project = await assertProjectMembership(c, orgId, userId, requested);
     c.set("projectId", project.id);
     c.set("projectEnvironment", project.environment);
+    c.env = scopeEnvToCluster(c.env, CLUSTER_BY_SDP_ENVIRONMENT[project.environment]);
     await next();
   };
 }
@@ -41,7 +45,7 @@ async function assertProjectMembership(
   organizationId: string,
   userId: string,
   projectId: string
-): Promise<{ id: string; environment: "sandbox" | "production" }> {
+): Promise<{ id: string; environment: SdpEnvironment }> {
   const row = await getDb(c.env)
     .prepare(
       `SELECT p.id, p.environment
@@ -51,7 +55,7 @@ async function assertProjectMembership(
        LIMIT 1`
     )
     .bind(projectId, organizationId, userId)
-    .first<{ id: string; environment: "sandbox" | "production" }>();
+    .first<{ id: string; environment: SdpEnvironment }>();
 
   if (!row) {
     throw forbidden("Requested project is not accessible");

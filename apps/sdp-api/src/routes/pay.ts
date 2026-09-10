@@ -2,7 +2,7 @@ import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { getSdpDocsOrigin, SOL_DECIMALS } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, getSdpDocsOrigin, SOL_DECIMALS } from "@sdp/types";
 import {
   type AccountMeta,
   AccountRole,
@@ -22,13 +22,16 @@ import { encodeURL } from "@solana/pay";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { badRequest, notFound, rateLimited } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
+import { projectEnvironment } from "@/services/project.service";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { solanaAddressSchema } from "./payments/schemas";
@@ -52,7 +55,14 @@ pay.get("/:token", async (c) => {
   if (!existing) {
     throw notFound("Payment request");
   }
-  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: true });
+  if (existing.project_id === null) {
+    throw badRequest("Payment request is not associated with a project");
+  }
+  const env = scopeEnvToCluster(
+    c.env,
+    CLUSTER_BY_SDP_ENVIRONMENT[await projectEnvironment(getDb(c.env), existing.project_id)]
+  );
+  const request = await reconcilePaymentRequest(env, existing, { bestEffort: true });
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
@@ -73,7 +83,7 @@ pay.get("/:token", async (c) => {
     reference: request.reference,
     status,
     expiresAt: request.expires_at,
-    network: getSolanaConfig(c.env).network,
+    network: getSolanaConfig(env).network,
     solanaPayUrl,
   });
 });
@@ -93,19 +103,23 @@ pay.post(
     if (!existing) {
       throw notFound("Payment request");
     }
-    const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: false });
+    if (existing.project_id === null) {
+      throw badRequest("Payment request is not associated with a project");
+    }
+    const projectId = existing.project_id;
+    const env = scopeEnvToCluster(
+      c.env,
+      CLUSTER_BY_SDP_ENVIRONMENT[await projectEnvironment(getDb(c.env), projectId)]
+    );
+    const request = await reconcilePaymentRequest(env, existing, { bestEffort: false });
     if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
       throw badRequest("Payment request is no longer payable");
     }
-    if (!request.project_id) {
-      throw badRequest("Payment request is not eligible for sponsored fees");
-    }
-
     const payer = assertValidAddress(c.req.valid("json").account, "account");
     const recipient = assertValidAddress(request.destination_address, "destinationAddress");
     const reference = assertValidAddress(request.reference, "reference");
 
-    const rpc = solanaRpc.createRpc(c.env);
+    const rpc = solanaRpc.createRpc(env);
     const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
 
     // One sponsored transaction per blockhash window, claimed on the request
@@ -140,9 +154,9 @@ pay.post(
     let feePaymentInstance: Awaited<ReturnType<typeof createProjectSponsorshipFeePayment>> | null =
       null;
     const getFeePayment = async () => {
-      feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
+      feePaymentInstance ??= await createProjectSponsorshipFeePayment(env, {
         organizationId: request.organization_id,
-        projectId: request.project_id as string,
+        projectId,
         actor: { type: "wallet", id: request.wallet_id },
       });
       return feePaymentInstance;

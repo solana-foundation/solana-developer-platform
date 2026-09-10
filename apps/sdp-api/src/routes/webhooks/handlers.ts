@@ -6,12 +6,13 @@ import type {
   UserJSON,
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
-import type { SdpEnvironment } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { AppError, badRequest } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
@@ -488,6 +489,7 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     requestUrl: c.req.url,
   });
   const event = processor.parse(payload);
+  c.env = scopeEnvToCluster(c.env, CLUSTER_BY_SDP_ENVIRONMENT[environment]);
 
   // Signature is verified, so ack with 200 immediately and settle in the background: a
   // slow DB write must not delay the 2xx the provider expects.

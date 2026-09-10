@@ -35,6 +35,7 @@ function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
     c.json({
       projectId: c.get("projectId"),
       projectEnvironment: c.get("projectEnvironment"),
+      solanaNetwork: c.env.SOLANA_NETWORK,
     })
   );
 
@@ -110,9 +111,11 @@ describe("projectContextMiddleware", () => {
     const body = (await res.json()) as {
       projectId: string;
       projectEnvironment: string;
+      solanaNetwork: string;
     };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
     expect(body.projectEnvironment).toBe("sandbox");
+    expect(body.solanaNetwork).toBe("devnet");
   });
 
   it("rejects an x-project-id header for a project in the same org the user does not belong to", async () => {
@@ -166,6 +169,26 @@ describe("projectContextMiddleware", () => {
     };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
     expect(body.projectEnvironment).toBe("sandbox");
+  });
+
+  it("scopes an API-key production request to mainnet-beta", async () => {
+    const app = buildApp((c) =>
+      c.set("apiKey", {
+        id: "key_project_context_production",
+        organizationId: ORG_ID,
+        projectId: MEMBER_PROJECT_ID,
+        role: "api_admin",
+        permissions: ["*"],
+        environment: "production",
+        signingWalletId: null,
+      })
+    );
+
+    const res = await app.request("/probe", {}, env);
+    const body = (await res.json()) as { solanaNetwork: string };
+
+    expect(res.status).toBe(200);
+    expect(body.solanaNetwork).toBe("mainnet-beta");
   });
 
   it("returns 401 when neither API key nor session is present", async () => {

@@ -29,15 +29,6 @@ export type FeePaymentProviderType = "kora" | "native";
 // Default URLs
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Default Kora RPC URLs by network.
- * These may need to be updated based on Solana Foundation's deployment.
- */
-const DEFAULT_KORA_URLS: Record<string, string> = {
-  devnet: "https://kora-devnet.solana.com",
-  "mainnet-beta": "https://kora.solana.com",
-};
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Factory Functions
 // ═══════════════════════════════════════════════════════════════════════════
@@ -70,12 +61,11 @@ export function createFeePaymentAdapter(env: FeePaymentEnv, userId?: string): Fe
  * fallback bucket rather than bypassing Kora usage tracking.
  */
 export function createKoraAdapter(env: FeePaymentEnv, userId?: string): KoraAdapter {
-  // Get RPC URL from env or use default based on network
-  const rpcUrl = env.KORA_RPC_URL ?? getDefaultKoraUrl(env);
+  const rpcUrl = env.KORA_RPC_URL;
 
   if (!rpcUrl) {
     throw new FeePaymentError(
-      "KORA_RPC_URL not configured and no default URL for network",
+      "Kora fee sponsorship is not configured for this cluster: set KORA_RPC_URL",
       "PROVIDER_NOT_AVAILABLE"
     );
   }
@@ -101,11 +91,6 @@ export function createNativeAdapter(env: FeePaymentEnv): NativeAdapter {
 // ═══════════════════════════════════════════════════════════════════════════
 // Utilities
 // ═══════════════════════════════════════════════════════════════════════════
-
-function getDefaultKoraUrl(env: FeePaymentEnv): string | undefined {
-  const network = env.SOLANA_NETWORK ?? "devnet";
-  return DEFAULT_KORA_URLS[network];
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Re-exports

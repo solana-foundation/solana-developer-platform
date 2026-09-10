@@ -5,6 +5,7 @@
  * using the modern @solana/kit.
  */
 
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
   type Address,
   airdropFactory,
@@ -25,8 +26,8 @@ import {
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getSolanaConfig, resolveSolanaRpcProviderUrls } from "./config";
-import { solanaRpcError } from "./errors";
+import { getSolanaConfig, resolveDefaultCluster, resolveSolanaRpcProviderUrls } from "./config";
+import { rpcNotConfigured, solanaRpcError } from "./errors";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
@@ -151,6 +152,97 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
 
 const lastGoodTransportIndex = new Map<string, number>();
 
+export const CLUSTER_ENDPOINT_PROOF_TTL_MS = 30_000;
+
+interface ClusterEndpointProof {
+  promise: Promise<string>;
+  expiresAt: number | null;
+}
+
+const clusterEndpointProofs = new Map<string, ClusterEndpointProof>();
+
+async function observeGenesisHash(transport: RpcTransport): Promise<string> {
+  const response: unknown = await transport<unknown>({
+    payload: { jsonrpc: "2.0", method: "getGenesisHash", params: [] },
+  });
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("result" in response) ||
+    typeof response.result !== "string"
+  ) {
+    throw solanaRpcError("Solana RPC returned a malformed getGenesisHash response");
+  }
+  return response.result;
+}
+
+async function proveMainnetEndpoint(transport: RpcTransport, url: string): Promise<void> {
+  const cluster = "mainnet-beta";
+  const key = `${cluster}\n${url}`;
+  let proof = clusterEndpointProofs.get(key);
+  if (proof !== undefined && proof.expiresAt !== null && proof.expiresAt <= Date.now()) {
+    clusterEndpointProofs.delete(key);
+    proof = undefined;
+  }
+  if (proof === undefined) {
+    proof = { promise: observeGenesisHash(transport), expiresAt: null };
+    clusterEndpointProofs.set(key, proof);
+  }
+
+  let observed: string;
+  try {
+    observed = await proof.promise;
+    if (clusterEndpointProofs.get(key) === proof && proof.expiresAt === null) {
+      proof.expiresAt = Date.now() + CLUSTER_ENDPOINT_PROOF_TTL_MS;
+    }
+  } catch (cause) {
+    if (clusterEndpointProofs.get(key) === proof) {
+      clusterEndpointProofs.delete(key);
+    }
+    throw solanaRpcError(
+      `Could not verify that the configured ${cluster} RPC endpoint serves ${cluster}: ${cause instanceof Error ? cause.message : String(cause)}`
+    );
+  }
+
+  const expected = GENESIS_HASH_BY_CLUSTER[cluster];
+  if (observed !== expected) {
+    throw solanaRpcError(
+      `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. Set SOLANA_MAINNET_RPC_URL to a ${cluster} endpoint.`
+    );
+  }
+}
+
+function withMainnetEndpointProof(transport: RpcTransport, url: string): RpcTransport {
+  return async <TResponse>(request: Parameters<RpcTransport>[0]): Promise<TResponse> => {
+    await proveMainnetEndpoint(transport, url);
+    return await transport<TResponse>(request);
+  };
+}
+
+/**
+ * Prove that `rpcUrl` serves the cluster `env` names before handing the bare URL
+ * to a client that builds its own transport (the Earn provider SDKs), where the
+ * proof inside `createRpc` cannot run. Mainnet only, like `createRpc`.
+ *
+ * @param env - Cluster-scoped RPC environment naming the cluster the URL must serve.
+ * @param rpcUrl - Endpoint about to be handed to a foreign client.
+ * @returns Resolves once the endpoint has proved its genesis; rejects on mismatch.
+ */
+export async function assertClusterRpcUrl(env: RpcEnv, rpcUrl: string): Promise<void> {
+  if (resolveDefaultCluster(env) !== "mainnet-beta") return;
+  await proveMainnetEndpoint(
+    withRequestTimeout(createDefaultRpcTransport({ url: rpcUrl }), DEFAULT_RPC_REQUEST_TIMEOUT_MS),
+    rpcUrl
+  );
+}
+
+/**
+ * Forget cached mainnet endpoint proofs for deterministic tests.
+ */
+export function resetClusterEndpointProofs(): void {
+  clusterEndpointProofs.clear();
+}
+
 /**
  * Wrap an ordered set of provider transports in per-request failover: a
  * transient failure (429/5xx/transport error) advances to the next provider,
@@ -195,38 +287,50 @@ export function createFailoverTransport(
 }
 
 /**
- * Create a configured Solana RPC client from environment
+ * Create a timeout-bounded Solana RPC client from environment or an explicit endpoint.
+ *
+ * @param env - RPC environment that selects the cluster and managed endpoints.
+ * @param options - Optional explicit endpoint, headers, and request timeout.
+ * @param options.rpcUrl - Explicit endpoint that bypasses managed endpoint selection.
+ * @param options.headers - Headers attached to requests for the explicit or managed endpoint.
+ * @param options.requestTimeoutMs - Deadline applied to each provider request.
+ * @returns A configured Solana RPC client.
  */
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
+  const network = resolveDefaultCluster(env);
 
   const buildTransport = (url: string): RpcTransport => {
+    let transport: RpcTransport;
     if (options?.headers && Object.keys(options.headers).length > 0) {
       assertAllowedRpcHeaders(options.headers);
-      return createDefaultRpcTransport({ headers: options.headers, url });
+      transport = createDefaultRpcTransport({ headers: options.headers, url });
+    } else {
+      transport = createDefaultRpcTransport({ url });
     }
-    return createDefaultRpcTransport({ url });
+    const timedTransport = withRequestTimeout(transport, timeoutMs);
+    // ponytail: genesis proof guards the funds-bearing cluster only — devnet envs include surfpool/localnet whose genesis differs. Add a devnet proof if sandbox ever carries value.
+    return network === "mainnet-beta"
+      ? withMainnetEndpointProof(timedTransport, url)
+      : timedTransport;
   };
 
   // An explicit URL is already the complete endpoint selection. Do not force
   // callers with a per-request/per-cluster URL to also configure the legacy
   // process default merely to construct a client for that explicit endpoint.
   if (options?.rpcUrl) {
-    return createRpcFromTransport(buildTransport(options.rpcUrl), {
-      requestTimeoutMs: timeoutMs,
-    });
+    return createSolanaRpcFromTransport(buildTransport(options.rpcUrl));
   }
 
   const urls = resolveSolanaRpcProviderUrls(env);
   if (urls.length === 0) {
-    // Preserves the single-URL error message callers have always seen.
-    getSolanaConfig(env);
+    throw rpcNotConfigured(`No Solana RPC endpoint is configured for ${network}`);
   }
   // The deadline sits on each provider attempt, not around the whole failover:
   // an outer deadline lets one stalled provider consume the entire budget and
   // hands every later attempt an already-aborted signal. A stall costs at most
   // timeoutMs per provider before the hop.
-  const transports = urls.map((url) => withRequestTimeout(buildTransport(url), timeoutMs));
+  const transports = urls.map((url) => buildTransport(url));
   return createSolanaRpcFromTransport(
     createFailoverTransport(transports, { stickyKey: urls.join("|") })
   );

@@ -1,8 +1,8 @@
 import { createServer, type Server } from "node:http";
+import { resetClusterEndpointProofs } from "@sdp/rpc/solana";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { resetClusterEndpointProofs } from "./execution-registry";
 import { readOwnerMintBalance } from "./owner-token-balance";
 
 const OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";

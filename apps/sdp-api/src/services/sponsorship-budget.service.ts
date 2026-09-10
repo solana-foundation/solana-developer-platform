@@ -102,7 +102,13 @@ type AdmissionContext = {
   dayBucket: string;
 };
 
-function resolveNetwork(env: Pick<Env, "SOLANA_NETWORK">): SponsorshipNetwork {
+/**
+ * Translate the Solana cluster vocabulary into sponsorship's persisted network vocabulary.
+ *
+ * @param env - Environment containing the scoped Solana cluster.
+ * @returns The corresponding sponsorship network.
+ */
+export function resolveNetwork(env: Pick<Env, "SOLANA_NETWORK">): SponsorshipNetwork {
   return env.SOLANA_NETWORK === "mainnet-beta" ? "mainnet" : "devnet";
 }
 

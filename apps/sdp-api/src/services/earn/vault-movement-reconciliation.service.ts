@@ -10,13 +10,10 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { earnClusterFor, resolveClusterRpcUrl } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import { describeVaultSimulationError } from "@/services/earn/vault-simulation-error";
@@ -112,9 +109,9 @@ async function observeEarnVaultMovement(
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const cluster = earnClusterFor(movement.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
+  const scopedEnv = scopeEnvToCluster(env, cluster);
+  const rpc = createRpc(scopedEnv, { rpcUrl, requestTimeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
 
-  await assertClusterEndpoint(env, cluster, rpcUrl);
   const [status] = await getSignatureStatuses(rpc, [movement.signature as Signature], {
     searchTransactionHistory: true,
     retryDelaysMs: [],
@@ -123,7 +120,7 @@ async function observeEarnVaultMovement(
   // A detail GET may observe and record chain truth, but it must not turn a read
   // into a rebroadcast or expiry decision. Passing no block height makes the
   // shared transition function leave an unknown signature for the durable job.
-  await reconcileMovement(env, ledger, movement, status ?? null, {
+  await reconcileMovement(scopedEnv, ledger, movement, status ?? null, {
     cluster,
     rpcUrl,
     currentBlockHeight: null,
@@ -223,10 +220,10 @@ async function reconcileEnvironment(
   const stats = emptyStats(rows.length);
   const cluster = earnClusterFor(environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl });
+  const scopedEnv = scopeEnvToCluster(env, cluster);
+  const rpc = createRpc(scopedEnv, { rpcUrl });
   let statuses: Array<SignatureStatusInfo | null>;
   try {
-    await assertClusterEndpoint(env, cluster, rpcUrl);
     statuses = await getSignatureStatuses(
       rpc,
       rows.map((row) => row.signature as Signature),
@@ -284,11 +281,17 @@ async function reconcileEnvironment(
   for (const [index, movement] of rows.entries()) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
-      const outcome = await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
-        cluster,
-        rpcUrl,
-        currentBlockHeight,
-      });
+      const outcome = await reconcileMovement(
+        scopedEnv,
+        ledger,
+        movement,
+        statuses[index] ?? null,
+        {
+          cluster,
+          rpcUrl,
+          currentBlockHeight,
+        }
+      );
       if (outcome === "settled") stats.settled += 1;
       else if (outcome === "failed") stats.failed += 1;
       else if (outcome === "confirmed") stats.confirmed += 1;

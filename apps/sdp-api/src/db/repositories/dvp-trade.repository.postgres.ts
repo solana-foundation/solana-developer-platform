@@ -234,7 +234,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async listOpenForReconciliation(limit: number) {
+    async listOpenForReconciliation(limit: number, environment) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("listOpenForReconciliation limit must be an integer from 1 to 256");
       }
@@ -242,16 +242,17 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       // starve the trades nothing is known about.
       const result = await db
         .prepare(
-          `SELECT ${SELECT_COLUMNS}
-             FROM dvp_trades
-            WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-               OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                   AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
-            ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
-                     observed_at ASC NULLS FIRST, created_at ASC, id ASC
+          `SELECT t.*
+             FROM dvp_trades t
+             JOIN projects p ON p.id = t.project_id AND p.environment = ?
+            WHERE t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+               OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                   AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+            ORDER BY CASE WHEN t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
+                     t.observed_at ASC NULLS FIRST, t.created_at ASC, t.id ASC
             LIMIT ?`
         )
-        .bind(limit)
+        .bind(environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

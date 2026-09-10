@@ -6,7 +6,7 @@
 // derives a different SwapDvp address than the one a counterparty was told to
 // fund. Callers convert to bigint at the edge, never number.
 
-import type { DvpTradeStatus } from "@sdp/types";
+import type { DvpTradeStatus, SdpEnvironment } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { RepositoryDbClient } from "./base";
 
@@ -173,15 +173,19 @@ export interface DvpTradeRepository {
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: Address): Promise<DvpTradeRow | null>;
   /**
-   * Open trades and recently closed trades across every project, stalest
+   * Open trades and recently closed trades in one project environment, stalest
    * observation first. Closed trades remain eligible for seven days from the
    * first time their closed status was recorded.
    *
    * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
    * for a caller — it is a background sweep, and scoping it to a project would
    * mean a trade only advances while someone happens to be looking at it.
+   *
+   * @param limit - Maximum number of trades to return.
+   * @param environment - Project environment whose cluster is being reconciled.
+   * @returns Eligible trades belonging to projects in the environment.
    */
-  listOpenForReconciliation(limit: number): Promise<DvpTradeRow[]>;
+  listOpenForReconciliation(limit: number, environment: SdpEnvironment): Promise<DvpTradeRow[]>;
   /**
    * Writes an observation and the status derived from it.
    *

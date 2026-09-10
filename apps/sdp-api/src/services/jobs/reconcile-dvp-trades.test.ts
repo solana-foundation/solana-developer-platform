@@ -8,12 +8,13 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getBlockHeight = vi.hoisted(() => vi.fn());
+const createRpcMock = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
 const getSignatureStatusesMock = vi.hoisted(() => vi.fn());
 const resolveDvpClose = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  createRpc: createRpcMock,
   getSignatureStatuses: getSignatureStatusesMock,
 }));
 vi.mock("@/services/dvp/read-chain", () => ({ readDvpTradeObservation }));
@@ -100,6 +101,14 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
     .run();
 }
 
+async function seedTradeForProject(id: string, status: string, projectId: string): Promise<void> {
+  await seedTrade(id, status);
+  await getDb(env)
+    .prepare("UPDATE dvp_trades SET project_id = ? WHERE id = ?")
+    .bind(projectId, id)
+    .run();
+}
+
 async function statusOf(id: string): Promise<Record<string, unknown> | null> {
   return getDb(env)
     .prepare(
@@ -115,6 +124,9 @@ describe("reconcileDvpTrades", () => {
     env.MARKETS_ENABLED = "true";
     env.DVP_ENABLED = "true";
     getBlockHeight.mockResolvedValue(1_000n);
+    createRpcMock.mockImplementation(() => ({
+      getBlockHeight: () => ({ send: getBlockHeight }),
+    }));
     // Default: broadcast claims check out on chain as landed, so existing
     // receipt rows survive. Tests that exercise a dead broadcast override.
     getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
@@ -171,6 +183,27 @@ describe("reconcileDvpTrades", () => {
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
     await expect(statusOf("dvp_flagged_off")).resolves.toMatchObject({ observed_at: null });
     env.DVP_ENABLED = "true";
+  });
+
+  it("creates one cluster-scoped RPC for each environment with open trades", async () => {
+    const productionProjectId = "prj_dvp_job_production";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Production Project', ?, 'production', 'active', ?)`
+      )
+      .bind(productionProjectId, TEST_ORG.id, productionProjectId, TEST_USER.id)
+      .run();
+    await seedTrade("dvp_sandbox_trade", "created");
+    await seedTradeForProject("dvp_production_trade", "created", productionProjectId);
+
+    await reconcileDvpTrades({ ...env, SOLANA_MAINNET_RPC_URL: "https://mainnet.example.test" });
+
+    expect(createRpcMock).toHaveBeenCalledTimes(2);
+    expect(createRpcMock.mock.calls.map(([rpcEnv]) => rpcEnv.SOLANA_NETWORK)).toEqual([
+      "devnet",
+      "mainnet-beta",
+    ]);
   });
 
   it("records the observed balances and advances the status", async () => {

@@ -11,6 +11,7 @@ import type {
   ProjectMember,
   ProjectRole,
   ProjectSettings,
+  SdpEnvironment,
 } from "@sdp/types";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { badRequest, internalError, notFound } from "@/lib/errors";
@@ -19,6 +20,27 @@ export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
   settings?: ProjectSettings | null;
+}
+
+/**
+ * Read the environment that determines a project's Solana cluster.
+ *
+ * @param db - Database connection used for the project lookup.
+ * @param projectId - Project whose environment is required.
+ * @returns The project's SDP environment.
+ */
+export async function projectEnvironment(
+  db: DatabaseClient,
+  projectId: string
+): Promise<SdpEnvironment> {
+  const row = await db
+    .prepare("SELECT environment FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ environment: SdpEnvironment }>();
+  if (!row) {
+    throw notFound("Project");
+  }
+  return row.environment;
 }
 
 export class ProjectService {

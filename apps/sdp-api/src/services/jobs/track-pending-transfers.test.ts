@@ -22,11 +22,25 @@ const TEST_SIG_4 =
   "7hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
 
 const TEST_ORG_ID = "org_job_test_001";
+const TEST_PROJECT_ID = "prj_job_test_001";
+const TEST_USER_ID = "usr_job_test_001";
 
 async function seedOrg(): Promise<void> {
   await getDb(env)
     .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
     .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "individual", "active")
+    .run();
+  await getDb(env)
+    .prepare(
+      "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'job-test@example.com', 1, 'active') ON CONFLICT (id) DO NOTHING"
+    )
+    .bind(TEST_USER_ID)
+    .run();
+  await getDb(env)
+    .prepare(
+      "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES (?, ?, ?, ?, 'production', 'active', ?)"
+    )
+    .bind(TEST_PROJECT_ID, TEST_ORG_ID, "Job Test Project", "job-test-project", TEST_USER_ID)
     .run();
 }
 
@@ -45,14 +59,15 @@ async function insertTransfer(params: {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers
-       (id, organization_id, wallet_id, source_address, destination_address,
+       (id, organization_id, project_id, wallet_id, source_address, destination_address,
         token, amount, type, direction, status, signature, signed_transaction,
         last_valid_block_height, submission_started_at, confirmed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
       TEST_ORG_ID,
+      TEST_PROJECT_ID,
       "wal_test",
       "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
@@ -137,6 +152,21 @@ describe("trackPendingTransfers", () => {
   });
 
   describe("syncProcessingTransfersOnChain", () => {
+    it("passes a mainnet-scoped env to createRpc for a production project", async () => {
+      await insertTransfer({
+        id: "xfr_production_rpc_scope",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await trackPendingTransfers(env);
+
+      expect(createRpcMock).toHaveBeenCalledWith(
+        expect.objectContaining({ SOLANA_NETWORK: "mainnet-beta" })
+      );
+    });
     it("updates processing transfer to confirmed when signature is confirmed on-chain", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([
         {
@@ -314,7 +344,7 @@ describe("trackPendingTransfers", () => {
             flow: "reconciler",
             reason: "history_absent",
             organization_id: TEST_ORG_ID,
-            project_id: null,
+            project_id: TEST_PROJECT_ID,
             transfer_id: "xfr_started_outbox_not_found",
             transfer_type: "transfer",
             signature: TEST_SIG_1,

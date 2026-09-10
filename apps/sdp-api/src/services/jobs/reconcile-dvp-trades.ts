@@ -12,10 +12,12 @@
  */
 
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
+import { CLUSTER_BY_SDP_ENVIRONMENT, SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { type Address, assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
@@ -40,12 +42,23 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   }
 
   const repository = createDvpTradeRepository(env);
-  const trades = await repository.listOpenForReconciliation(BATCH_SIZE);
+  for (const environment of SDP_ENVIRONMENTS) {
+    await reconcileDvpEnvironment(env, repository, environment);
+  }
+}
+
+async function reconcileDvpEnvironment(
+  env: Env,
+  repository: ReturnType<typeof createDvpTradeRepository>,
+  environment: SdpEnvironment
+): Promise<void> {
+  const trades = await repository.listOpenForReconciliation(BATCH_SIZE, environment);
   if (trades.length === 0) {
     return;
   }
 
-  const rpc = createRpc(env);
+  const scoped = scopeEnvToCluster(env, CLUSTER_BY_SDP_ENVIRONMENT[environment]);
+  const rpc = createRpc(scoped);
 
   // Read once for the whole batch. Every trade's create-expiry decision is made
   // against the same height, which also keeps the sweep internally consistent:
@@ -69,7 +82,8 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
     // used to release alongside are gone, and one table now carries every
     // funder — creator and party alike.
     const released = await createPostgresDvpLegFundingClaimRepository(getDb(env)).releaseExpired(
-      blockHeight
+      blockHeight,
+      environment
     );
     if (released > 0) {
       getLogger().info(
@@ -91,7 +105,7 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   // decides a DB deletion — the chain's answer is final here.
   try {
     const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
-    const expiredBroadcast = await claims.listExpiredBroadcast(blockHeight);
+    const expiredBroadcast = await claims.listExpiredBroadcast(blockHeight, environment);
     for (const claim of expiredBroadcast) {
       try {
         assertIsSignature(claim.signature);

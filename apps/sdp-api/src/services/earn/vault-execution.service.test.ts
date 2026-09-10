@@ -1,7 +1,6 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
   AccountRole,
   type Address,
@@ -24,7 +23,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
-import { resetClusterEndpointProofs } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   broadcastVaultTransaction,
@@ -57,12 +55,10 @@ const plan: EarnVaultTransactionPlan = {
   },
 };
 
-const genesisSend = vi.fn();
 const simulateSend = vi.fn();
 /** Base64 wire transactions handed to `simulateTransaction`, newest last. */
 const simulatedWire: string[] = [];
 const rpc = {
-  getGenesisHash: () => ({ send: genesisSend }),
   simulateTransaction: (wire: string) => {
     simulatedWire.push(wire);
     return { send: simulateSend };
@@ -102,8 +98,6 @@ function planForOwner(owner: Address): EarnVaultTransactionPlan {
 
 beforeEach(() => {
   simulatedWire.length = 0;
-  resetClusterEndpointProofs();
-  genesisSend.mockReset().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
   simulateSend.mockReset().mockResolvedValue({ value: { err: null, logs: [] } });
   vi.spyOn(solanaRpc, "createRpc").mockReturnValue(rpc as never);
   vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValue({
@@ -241,46 +235,6 @@ describe("vault execution validation", () => {
         fee: { kind: "caller-provided", feePayer: feePayerAddress },
       })
     ).rejects.toThrow("compile the transaction unsigned");
-  });
-
-  it("blocks every raw execution path before RPC or signing on wrong genesis", async () => {
-    genesisSend.mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
-    const owner = createNoopSigner(ownerAddress);
-
-    await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan,
-        owner,
-        rpcUrl,
-        fee: { kind: "wallet-pays" },
-      })
-    ).rejects.toThrow(/reports genesis/);
-    await expect(
-      simulateVaultPlan(env, {
-        cluster: "devnet",
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan,
-        owner: ownerAddress,
-        rpcUrl,
-        fee: { kind: "wallet-pays" },
-      })
-    ).rejects.toThrow(/reports genesis/);
-    await expect(
-      broadcastVaultTransaction(env, {
-        cluster: "devnet",
-        deadline: createVaultDeadline(),
-        bytes: new Uint8Array(),
-        rpcUrl,
-      })
-    ).rejects.toThrow(/reports genesis/);
-
-    expect(solanaRpc.getRecentBlockhash).not.toHaveBeenCalled();
-    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
-    expect(simulateSend).not.toHaveBeenCalled();
   });
 
   it("rejects a provider plan that disagrees with the environment-derived cluster", async () => {
@@ -489,7 +443,6 @@ describe("vault signing lifecycle", () => {
       prepared: simulation.prepared,
     });
 
-    expect(genesisSend).toHaveBeenCalledTimes(1);
     expect(solanaRpc.getRecentBlockhash).toHaveBeenCalledTimes(1);
   });
 

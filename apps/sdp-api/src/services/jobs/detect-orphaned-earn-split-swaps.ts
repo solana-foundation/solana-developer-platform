@@ -8,12 +8,9 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
+import { scopeEnvToCluster } from "@/lib/cluster-env";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { earnClusterFor } from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
@@ -137,9 +134,7 @@ export async function detectOrphanedEarnSplitSwaps(
     let blockHeight: bigint | null = null;
     try {
       const cluster = earnClusterFor(environment);
-      const rpcUrl = resolveClusterRpcUrl(env, cluster);
-      await assertClusterEndpoint(env, cluster, rpcUrl);
-      blockHeight = await createRpc(env, { rpcUrl })
+      blockHeight = await createRpc(scopeEnvToCluster(env, cluster))
         .getBlockHeight({ commitment: "confirmed" })
         .send();
     } catch (error) {

@@ -1,10 +1,11 @@
 export {
   getSolanaConfig,
+  resolveDefaultCluster,
   resolveDefaultSolanaRpcUrl,
   resolveSolanaRpcProviderUrls,
   type SolanaConfig,
 } from "./config";
-export { SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";
+export { rpcNotConfigured, SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";
 export {
   isForbiddenRpcError,
   isTransientRpcError,

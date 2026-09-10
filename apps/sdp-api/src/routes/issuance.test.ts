@@ -4391,6 +4391,30 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.error.code).toBe("SOLANA_RPC_ERROR");
     });
+
+    it("returns 503 for a production project without a mainnet RPC URL", async () => {
+      await seedCachedApiKey(env, apiKeyHash, {
+        ...TEST_PROJECT_CACHED_KEY,
+        environment: "production",
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        { ...env, SOLANA_MAINNET_RPC_URL: undefined }
+      );
+
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toMatchObject({
+        error: {
+          code: "RPC_NOT_CONFIGURED",
+          message: "No Solana RPC endpoint is configured for mainnet-beta",
+        },
+      });
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@
  * ordinary tenant isolation.
  */
 
+import type { SdpEnvironment } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export interface DvpLegFundingClaim {
@@ -64,8 +65,12 @@ export interface DvpLegFundingClaimRepository {
    *
    * Never touches a claim that was broadcast: `funding_tx` set means the row is
    * a receipt rather than a lock.
+   *
+   * @param blockHeight - Current block height for the environment's cluster.
+   * @param environment - Project environment whose claims may be released.
+   * @returns Number of released claims.
    */
-  releaseExpired(blockHeight: bigint): Promise<number>;
+  releaseExpired(blockHeight: bigint, environment: SdpEnvironment): Promise<number>;
   /**
    * Lists broadcast claims whose signed transaction can no longer be accepted.
    *
@@ -73,8 +78,15 @@ export interface DvpLegFundingClaimRepository {
    * on the wire means possibly landed. Past the last-valid height only the
    * chain can say which, so resolution belongs to the reconciler's RPC read,
    * never to the sweep.
+   *
+   * @param blockHeight - Current block height for the environment's cluster.
+   * @param environment - Project environment whose claims may be listed.
+   * @returns Expired broadcast claims in that environment.
    */
-  listExpiredBroadcast(blockHeight: bigint): Promise<DvpLegFundingClaim[]>;
+  listExpiredBroadcast(
+    blockHeight: bigint,
+    environment: SdpEnvironment
+  ): Promise<DvpLegFundingClaim[]>;
   /**
    * Deletes one broadcast claim whose transfer the chain confirmed never landed.
    *
@@ -150,15 +162,18 @@ export function createPostgresDvpLegFundingClaimRepository(
         .run();
     },
 
-    async releaseExpired(blockHeight) {
+    async releaseExpired(blockHeight, environment) {
       const result = await db
         .prepare(
-          `DELETE FROM dvp_leg_funding_claims
-            WHERE funding_tx IS NULL
-              AND CAST(expiry_height AS NUMERIC) < ?
-            RETURNING trade_id`
+          `DELETE FROM dvp_leg_funding_claims c
+           USING dvp_trades t
+           JOIN projects p ON p.id = t.project_id AND p.environment = ?
+            WHERE c.trade_id = t.id
+              AND c.funding_tx IS NULL
+              AND CAST(c.expiry_height AS NUMERIC) < ?
+            RETURNING c.trade_id`
         )
-        .bind(blockHeight.toString())
+        .bind(environment, blockHeight.toString())
         .all<{ trade_id: string }>();
       return result.results.length;
     },
@@ -176,7 +191,7 @@ export function createPostgresDvpLegFundingClaimRepository(
       return result.results.map(toDvpLegFundingClaim);
     },
 
-    async listExpiredBroadcast(blockHeight) {
+    async listExpiredBroadcast(blockHeight, environment) {
       // Open trades only: a closed trade's leg can never be funded again, so
       // its claims are history — without this bound every landed receipt would
       // be re-checked on chain every tick forever.
@@ -186,11 +201,12 @@ export function createPostgresDvpLegFundingClaimRepository(
                   c.signature, c.expiry_height, c.funding_tx
              FROM dvp_leg_funding_claims c
              JOIN dvp_trades t ON t.id = c.trade_id
+             JOIN projects p ON p.id = t.project_id AND p.environment = ?
             WHERE c.funding_tx IS NOT NULL
               AND CAST(c.expiry_height AS NUMERIC) < ?
               AND t.status IN ('created', 'partially_funded', 'funded')`
         )
-        .bind(blockHeight.toString())
+        .bind(environment, blockHeight.toString())
         .all<Record<string, unknown>>();
       return result.results.map(toDvpLegFundingClaim);
     },

@@ -47,6 +47,10 @@ vi.mock("@/db", () => ({
   }),
 }));
 
+vi.mock("@/services/project.service", () => ({
+  projectEnvironment: () => Promise.resolve("sandbox"),
+}));
+
 vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
     findOperationalWalletById = mocks.findOperationalWalletById;

@@ -1,5 +1,6 @@
 import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories";
+import { createProjectEnvResolver } from "@/lib/cluster-env";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -244,6 +245,7 @@ export async function collectDueRecurringPayments(
   now = new Date()
 ): Promise<CollectDueRecurringPaymentsResult> {
   const result = emptyResult();
+  const envForProject = createProjectEnvResolver(env);
   const limit = batchSize(env);
   const dueBefore = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
@@ -261,7 +263,11 @@ export async function collectDueRecurringPayments(
     limit
   );
   for (const row of staleLifecyclePayments) {
-    addOutcome(result, await recoverLifecycleRow(env, row), "recovered");
+    addOutcome(
+      result,
+      await recoverLifecycleRow(await envForProject(row.project_id), row),
+      "recovered"
+    );
   }
 
   // Report only. Retrying the same update recovers it; automatic replay is
@@ -335,7 +341,7 @@ export async function collectDueRecurringPayments(
     limit
   );
   for (const row of staleCollectionPayments) {
-    addOutcome(result, await collectRow(env, row), "recovered");
+    addOutcome(result, await collectRow(await envForProject(row.project_id), row), "recovered");
   }
 
   const duePayments = await rowsForQuery(
@@ -371,7 +377,7 @@ export async function collectDueRecurringPayments(
     limit
   );
   for (const row of duePayments) {
-    addOutcome(result, await collectRow(env, row), "collected");
+    addOutcome(result, await collectRow(await envForProject(row.project_id), row), "collected");
   }
 
   return result;

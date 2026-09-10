@@ -1,7 +1,13 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { FeePaymentError } from "@sdp/payments/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
-import { type Permission, type PolicyDefaultAction, type PolicyRule, SOL_MINT } from "@sdp/types";
+import {
+  type Permission,
+  type PolicyDefaultAction,
+  type PolicyRule,
+  SOL_MINT,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -69,6 +75,7 @@ const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_payments_duplicate_test";
 
 const TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID = "cwlt_payments_alias_authorized_test";
 
+const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 
 const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
@@ -2127,6 +2134,82 @@ describe("Payments routes — transfers", () => {
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
+  });
+
+  it("resolves mainnet USDC and a Kora-less env for a production project transfer", async () => {
+    await seedCachedKey({ environment: "production" });
+    const requestEnv = { ...env, SOLANA_MAINNET_RPC_URL: "https://mainnet.example.invalid" };
+    mockRecurringActivationRpc({
+      tokenAccounts: [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: MAINNET_USDC_MINT,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ],
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "USDC",
+          amount: "1",
+        }),
+      },
+      requestEnv
+    );
+
+    // Managed sponsorship has no production scope yet, so the mainnet leg fails
+    // closed after the row is created; the cluster resolution is what this proves.
+    expect(res.ok).toBe(false);
+    const transfer = await getDb(env)
+      .prepare("SELECT token, status FROM payment_transfers ORDER BY created_at DESC LIMIT 1")
+      .first<{ token: string; status: string }>();
+    expect(transfer).toMatchObject({ token: MAINNET_USDC_MINT, status: "failed" });
+    expect(createRpcMock).toHaveBeenCalledWith(
+      expect.objectContaining({ SOLANA_NETWORK: "mainnet-beta" })
+    );
+    const feePaymentEnv = createFeePaymentAdapterMock.mock.calls[0]?.[0];
+    expect(feePaymentEnv).toMatchObject({ SOLANA_NETWORK: "mainnet-beta" });
+    expect(feePaymentEnv?.KORA_RPC_URL).toBeUndefined();
+  });
+
+  it("returns 503 when a production project has no mainnet RPC URL", async () => {
+    await seedCachedKey({ environment: "production" });
+    const requestEnv = { ...env, SOLANA_MAINNET_RPC_URL: undefined };
+
+    const res = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "USDC",
+          amount: "1",
+        }),
+      },
+      requestEnv
+    );
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "RPC_NOT_CONFIGURED" },
+    });
   });
 
   describe("execute transfer — happy path", () => {

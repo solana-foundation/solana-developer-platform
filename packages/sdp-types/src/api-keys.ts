@@ -7,6 +7,12 @@ import type { ApiKeyWalletPolicyBindingScope } from "./policy";
 
 export type SdpEnvironment = "sandbox" | "production";
 
+/** Every supported SDP project environment. */
+export const SDP_ENVIRONMENTS = [
+  "sandbox",
+  "production",
+] as const satisfies readonly SdpEnvironment[];
+
 export type ApiKeyEnvironment = SdpEnvironment;
 
 export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";

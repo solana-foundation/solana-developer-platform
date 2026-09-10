@@ -31,6 +31,7 @@ import type {
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
+import { createProjectEnvResolver } from "@/lib/cluster-env";
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -51,6 +52,30 @@ type PaymentTransferWithSignedSubmission = PaymentTransferWithSignature & {
   signed_transaction: string;
   last_valid_block_height: string;
 };
+
+async function groupTransfersByProjectEnv<TTransfer extends PaymentTransferRow>(
+  env: Env,
+  transfers: readonly TTransfer[]
+): Promise<Array<{ env: Env; transfers: TTransfer[] }>> {
+  const envForProject = createProjectEnvResolver(env);
+  const byProject = new Map<string, TTransfer[]>();
+  for (const transfer of transfers) {
+    if (transfer.project_id === null) {
+      throw internalError(`On-chain transfer ${transfer.id} is missing a project`);
+    }
+    const group = byProject.get(transfer.project_id);
+    if (group === undefined) {
+      byProject.set(transfer.project_id, [transfer]);
+    } else {
+      group.push(transfer);
+    }
+  }
+  const groups: Array<{ env: Env; transfers: TTransfer[] }> = [];
+  for (const [projectId, group] of byProject) {
+    groups.push({ env: await envForProject(projectId), transfers: group });
+  }
+  return groups;
+}
 
 function hasValidStoredSignature(
   transfer: PaymentTransferRow
@@ -264,6 +289,17 @@ async function finalizeConfirmedTransfers(
     return;
   }
 
+  for (const group of await groupTransfersByProjectEnv(env, confirmedTransfers)) {
+    await finalizeConfirmedTransferGroup(repo, group.env, group.transfers, nowIso);
+  }
+}
+
+async function finalizeConfirmedTransferGroup(
+  repo: PaymentsRepository,
+  env: Env,
+  confirmedTransfers: PaymentTransferWithSignature[],
+  nowIso: string
+): Promise<void> {
   const signatures = confirmedTransfers.map((transfer) => transfer.signature);
 
   let statuses: Array<SignatureStatusInfo | null>;
@@ -416,6 +452,17 @@ async function syncProcessingTransfersOnChain(
     return;
   }
 
+  for (const group of await groupTransfersByProjectEnv(env, processingWithSig)) {
+    await syncProcessingTransferGroup(repo, group.env, group.transfers, nowIso);
+  }
+}
+
+async function syncProcessingTransferGroup(
+  repo: PaymentsRepository,
+  env: Env,
+  processingWithSig: PaymentTransferWithSignature[],
+  nowIso: string
+): Promise<void> {
   const signatures = processingWithSig.map((transfer) => transfer.signature);
 
   let statuses: Array<SignatureStatusInfo | null>;

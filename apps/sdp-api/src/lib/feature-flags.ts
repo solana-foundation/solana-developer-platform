@@ -97,6 +97,12 @@ export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "DVP_ENABLED">):
 const EARN_VAULT_SPONSORSHIP_CLUSTERS: readonly SolanaCluster[] = ["devnet"];
 
 /**
+ * Clusters on which the deployment's Kora service may sponsor transactions.
+ * Mainnet remains wallet-paid until its Kora policy and sponsorship budgets are opened safely.
+ */
+export const KORA_FEE_SPONSORSHIP_CLUSTERS: readonly SolanaCluster[] = ["devnet"];
+
+/**
  * Whether Kora sponsors an Earn vault movement on `cluster`: both the network
  * fee and the share-ATA rent a first deposit needs.
  *

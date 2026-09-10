@@ -15,7 +15,7 @@ import {
   VedaVaultDirectClient,
 } from "@sdp/veda";
 import type { Env } from "@/types/env";
-import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
+import { resolveProvenClusterRpcUrl } from "./earn/execution-registry";
 import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
@@ -29,10 +29,7 @@ async function resolveProvenRpcUrl(
 ): Promise<string> {
   // The API constructs this runtime from `Env`; the shared provider contract
   // deliberately narrows it to a dependency-free string record.
-  const env = ctx.env as unknown as Env;
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
-  return rpcUrl;
+  return resolveProvenClusterRpcUrl(ctx.env as unknown as Env, cluster);
 }
 
 /** One fresh deadline per operation, since these clients are process singletons. */

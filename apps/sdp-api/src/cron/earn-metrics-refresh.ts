@@ -38,7 +38,7 @@ import type {
   EarnRuntimeContext,
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types";
+import { SDP_ENVIRONMENTS } from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
 import { getLogger } from "@/runtime/logger";
@@ -73,7 +73,6 @@ export const EARN_METRICS_REFRESH_CRON = "*/5 * * * *";
 // five-minute-fresh production twin, fine for a browse-only, fundable:false
 // review shelf. (A provider whose catalogue snapshots omit the optional
 // currentApy would mirror with no rate at all; none does today.)
-const REFRESHED_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox", "production"];
 
 // Expected steady states, not incidents — same taxonomy as the catalogue sync.
 const SKIPPABLE_REFRESH_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -130,7 +129,7 @@ export async function refreshEarnStrategyMetrics(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   const providerEnv = env;
 
-  for (const environment of REFRESHED_ENVIRONMENTS) {
+  for (const environment of SDP_ENVIRONMENTS) {
     for (const client of Object.values(EARN_PROVIDER_CLIENTS)) {
       // Capability, not a provider list: a provider joins this pass by
       // implementing `listStrategyMetrics`.

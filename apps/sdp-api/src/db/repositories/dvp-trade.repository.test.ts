@@ -364,7 +364,7 @@ describe("DvpTradeRepository (postgres)", () => {
       )
       .run();
 
-    const listed = await repo.listOpenForReconciliation(10);
+    const listed = await repo.listOpenForReconciliation(10, "sandbox");
 
     expect(listed.map((trade) => trade.id).sort()).toEqual(["dvp_closed_recent", "dvp_open_old"]);
   });

@@ -71,9 +71,9 @@ export const refreshTokenSupply = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token must be deployed before refreshing supply");
   }
 
+  const { rpcUrl } = getSolanaConfig(c.env);
   let supplyBaseUnits: string;
   try {
-    const { rpcUrl } = getSolanaConfig(c.env);
     supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
   } catch (error) {
     throw new AppError(
