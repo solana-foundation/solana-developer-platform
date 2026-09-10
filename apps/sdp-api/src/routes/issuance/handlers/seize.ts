@@ -153,6 +153,7 @@ interface SeizePolicyResolved {
   tokenService: TokenService;
   mosaicAmount: number;
   permanentDelegateRaw: string;
+  discoveredPermanentDelegate: string | null;
   cachedPermanentDelegate: string | null;
   walletId: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
@@ -189,11 +190,16 @@ export async function extractSeizePolicyCandidate(
     isOnControlList,
   });
 
-  const permanentDelegateRaw =
-    body.seize.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token, {
-      persistDiscovery: false,
-    }));
+  // Only a delegate read off the mint is worth caching. A caller-supplied one
+  // is an assertion about the chain, not an observation of it, so it never
+  // reaches the token record.
+  const discoveredPermanentDelegate =
+    body.seize.delegateAuthority === undefined || body.seize.delegateAuthority === null
+      ? await resolvePermanentDelegateAuthority(c.env, tokenService, token, {
+          persistDiscovery: false,
+        })
+      : null;
+  const permanentDelegateRaw = body.seize.delegateAuthority ?? discoveredPermanentDelegate;
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -229,6 +235,7 @@ export async function extractSeizePolicyCandidate(
       tokenService,
       mosaicAmount,
       permanentDelegateRaw,
+      discoveredPermanentDelegate,
       cachedPermanentDelegate: token.extensions?.permanentDelegate ?? null,
       walletId,
       mintAddress,
@@ -257,6 +264,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       tokenService,
       mosaicAmount,
       permanentDelegateRaw,
+      discoveredPermanentDelegate,
       cachedPermanentDelegate,
       walletId,
       mintAddress,
@@ -274,12 +282,14 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     currentAuthority: permanentDelegateRaw,
   });
 
-  await persistDiscoveredPermanentDelegate(
-    tokenService,
-    tokenId,
-    cachedPermanentDelegate,
-    permanentDelegateRaw
-  );
+  if (discoveredPermanentDelegate !== null) {
+    await persistDiscoveredPermanentDelegate(
+      tokenService,
+      tokenId,
+      cachedPermanentDelegate,
+      discoveredPermanentDelegate
+    );
+  }
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,

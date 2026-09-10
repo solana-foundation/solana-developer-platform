@@ -852,6 +852,169 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("does not cache a caller-supplied permanent delegate", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_seize_delegate",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_seize_delegate",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const updateAuthoritiesSpy = vi.spyOn(TokenService.prototype, "updateTokenAuthorities");
+      const forceTransferSpy = vi
+        .spyOn(MosaicService.prototype, "forceTransfer")
+        .mockResolvedValue({ signature: "sig_seize_delegate", slot: 654n });
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValue(createNoopSigner(address(policyMintAuthority)));
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/seize`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              seize: {
+                source: TEST_SOLANA_ADDRESSES.wallet2,
+                destination: TEST_SOLANA_ADDRESSES.wallet1,
+                amount: "1",
+                delegateAuthority: policyMintAuthority,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(forceTransferSpy).toHaveBeenCalledTimes(1);
+        expect(updateAuthoritiesSpy).not.toHaveBeenCalled();
+      } finally {
+        updateAuthoritiesSpy.mockRestore();
+        forceTransferSpy.mockRestore();
+        createOrgSignerSpy.mockRestore();
+      }
+    });
+
+    it("governs a burn that signs with the organization's effective custody wallet", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_burn_effective",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_burn_effective",
+        signingWalletId: null,
+        mintAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-burn-effective", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+      const effectiveWalletSpy = vi
+        .spyOn(SolanaServices, "resolveEffectiveSigningWalletId")
+        .mockResolvedValue(wallet.walletId);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/burn`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              burn: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        effectiveWalletSpy.mockRestore();
+      }
+    });
+
+    it("governs a mint that signs with the organization's effective custody wallet", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_mint_effective",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_mint_effective",
+        signingWalletId: null,
+        mintAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-mint-effective", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+      const effectiveWalletSpy = vi
+        .spyOn(SolanaServices, "resolveEffectiveSigningWalletId")
+        .mockResolvedValue(wallet.walletId);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        effectiveWalletSpy.mockRestore();
+      }
+    });
+
     it("allows an ungoverned mint dry-run and executes without policy enforcement", async () => {
       const token = await seedIssuedToken({
         id: "tok_issuance_ungoverned_mint",

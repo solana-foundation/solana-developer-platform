@@ -12,7 +12,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
-import { createOrgSigner } from "@/services/solana";
+import { createOrgSigner, resolveEffectiveSigningWalletId } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import {
   assertTokenAllowsOperation,
@@ -285,20 +285,25 @@ export async function extractBurnPolicyCandidate(
     body.burn.amount,
     token.decimals
   );
+  // The handler signs through `createOrgSigner`, which falls back to the
+  // organization's effective custody wallet when no wallet is named. Naming it
+  // here keeps the wallet policy judges the wallet that signs; only a target
+  // that carries no wallet at all leaves the operation ungoverned.
+  const policyWalletId =
+    signingWalletId ??
+    (await resolveEffectiveSigningWalletId(c.env, auth.organizationId, auth.projectId));
   const policyWallet =
-    signingWalletId === null
-      ? null
-      : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
+    policyWalletId === null ? null : await resolvePolicyCustodyWallet(c.env, auth, policyWalletId);
 
   return {
     candidate:
-      signingWalletId === null
+      policyWalletId === null
         ? null
         : buildIssuancePolicyCandidate({
             auth,
             token,
             custodyWalletId: policyWallet === null ? null : policyWallet.id,
-            walletId: signingWalletId,
+            walletId: policyWalletId,
             operationType: "issuance_burn_execute",
             amount: body.burn.amount,
             destination: null,

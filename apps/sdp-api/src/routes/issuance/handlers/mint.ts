@@ -19,7 +19,7 @@ import {
   reserveMintSupplyAtApprovedEffectBoundary,
 } from "@/services/policy/approved-operation-replay";
 import { resolvePolicyCustodyWallet } from "@/services/policy/enforcement.service";
-import { createOrgSigner } from "@/services/solana";
+import { createOrgSigner, resolveEffectiveSigningWalletId } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
@@ -507,20 +507,25 @@ export async function extractMintPolicyCandidate(
   ]);
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(input.mint.destination, "destination");
+  // The handler signs through `createOrgSigner`, which falls back to the
+  // organization's effective custody wallet when no wallet is named. Naming it
+  // here keeps the wallet policy judges the wallet that signs; only a target
+  // that carries no wallet at all leaves the operation ungoverned.
+  const policyWalletId =
+    signingWalletId ??
+    (await resolveEffectiveSigningWalletId(c.env, auth.organizationId, auth.projectId));
   const policyWallet =
-    signingWalletId === null
-      ? null
-      : await resolvePolicyCustodyWallet(c.env, auth, signingWalletId);
+    policyWalletId === null ? null : await resolvePolicyCustodyWallet(c.env, auth, policyWalletId);
 
   return {
     candidate:
-      signingWalletId === null
+      policyWalletId === null
         ? null
         : buildIssuancePolicyCandidate({
             auth,
             token,
             custodyWalletId: policyWallet === null ? null : policyWallet.id,
-            walletId: signingWalletId,
+            walletId: policyWalletId,
             operationType: "issuance_mint_execute",
             amount: input.mint.amount,
             destination: input.mint.destination,

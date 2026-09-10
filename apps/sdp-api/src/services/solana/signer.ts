@@ -115,6 +115,21 @@ export async function createOrgSigner(
   return signingService.getTransactionSigner(orgId, projectId ?? undefined, walletId ?? undefined);
 }
 
+/**
+ * Name the wallet `createOrgSigner` would use when the caller names none,
+ * without loading signing material. Policy extractors run before the gate
+ * decides, so they resolve the signer's identity this way rather than treating
+ * an absent wallet id as an ungoverned operation.
+ */
+export async function resolveEffectiveSigningWalletId(
+  env: Env,
+  orgId: string,
+  projectId?: string | null
+): Promise<string | null> {
+  const signingService = createSigningService(env);
+  return signingService.getEffectiveSigningWalletId(orgId, projectId ?? undefined);
+}
+
 /** Resolve the signer for one already-authorized custody-wallet database row. */
 export async function createOrgSignerForCustodyWallet(
   env: Env,

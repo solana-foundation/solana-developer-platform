@@ -27,5 +27,6 @@ export {
   createSignerFromBase58,
   getSignerAddress,
   type KeyPairSigner,
+  resolveEffectiveSigningWalletId,
   signerControlsAddress,
 } from "./signer";

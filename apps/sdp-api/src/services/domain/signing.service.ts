@@ -1611,6 +1611,22 @@ export class SigningService {
     );
   }
 
+  /**
+   * Name the wallet a signer request without an explicit wallet would use,
+   * without loading signing material. Callers that must evaluate policy before
+   * they are allowed to sign resolve through the same effective target
+   * `getTransactionSigner` does, so the wallet policy judges is the wallet that
+   * signs. Null means the target carries no wallet.
+   */
+  async getEffectiveSigningWalletId(orgId: string, projectId?: string): Promise<string | null> {
+    const target = await this.runtimeTargets.resolve({
+      kind: "effective",
+      organizationId: orgId,
+      projectId,
+    });
+    return target?.wallet?.walletId ?? null;
+  }
+
   async admitRuntimeExecution(
     orgId: string,
     projectId: string | undefined,
