@@ -8,8 +8,6 @@ interface GoldenEndpoint {
   path: string;
   scope: "org" | "project";
   query?: Record<string, string>;
-  /** Feature-flag env var (from smoke-flags.json) that must be "true" for the route to exist on the target. */
-  flag?: string;
 }
 
 const FIRST_PAGE = { page: "1", pageSize: "20" };
@@ -32,14 +30,11 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
   { domain: "policies", path: "/v1/policies", scope: "project" },
-  // Gated server-side by EARN_ENABLED (403 when off). The workflow pins the
-  // posture from smoke-flags.json, so a flagged-off target skips instead of failing.
-  {
-    domain: "earn-strategies",
-    path: "/v1/earn/strategies",
-    scope: "project",
-    flag: "EARN_ENABLED",
-  },
+  // Earn answers 403 wherever EARN_ENABLED is off (stage and prod today); the smoke pins the
+  // flag off in smoke-flags.json, so the row is only meaningful when the posture turns it on.
+  ...(process.env.EARN_ENABLED === "true"
+    ? [{ domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project" as const }]
+    : []),
 ];
 
 test.describe("GCP dev API golden endpoints", () => {
@@ -66,11 +61,6 @@ test.describe("GCP dev API golden endpoints", () => {
 
   for (const endpoint of GOLDEN_ENDPOINTS) {
     test(`${endpoint.domain} responds to an authed read`, async () => {
-      const flagValue = endpoint.flag ? process.env[endpoint.flag] : undefined;
-      test.skip(
-        endpoint.flag !== undefined && flagValue !== "true",
-        `${endpoint.domain} is flagged off on this target (${endpoint.flag}=${flagValue ?? "unset"})`
-      );
       const api = endpoint.scope === "project" ? projectApi : orgApi;
       const path = endpoint.query
         ? `${endpoint.path}?${new URLSearchParams(endpoint.query)}`
