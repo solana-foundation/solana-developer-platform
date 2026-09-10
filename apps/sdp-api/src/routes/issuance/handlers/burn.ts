@@ -28,7 +28,7 @@ import {
 } from "../helpers";
 import type { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertSignerMatchesJudgedWallet, buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -248,6 +248,7 @@ interface BurnPolicyResolved {
   tokenSymbol: string;
   supplyBaselineUpdatedAt: string | null;
   signingWalletId: string | null;
+  judgedWalletPublicKey: string | null;
   mintAddress: ReturnType<typeof assertValidAddress>;
   source: ReturnType<typeof assertValidAddress>;
   amountBaseUnits: bigint;
@@ -318,6 +319,7 @@ export async function extractBurnPolicyCandidate(
       tokenSymbol: token.symbol,
       supplyBaselineUpdatedAt: token.totalSupplyUpdatedAt ?? null,
       signingWalletId,
+      judgedWalletPublicKey: policyWallet === null ? null : policyWallet.publicKey,
       mintAddress,
       source,
       amountBaseUnits,
@@ -345,6 +347,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       tokenSymbol,
       supplyBaselineUpdatedAt,
       signingWalletId,
+      judgedWalletPublicKey,
       mintAddress,
       source,
       amountBaseUnits,
@@ -410,6 +413,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       auth.projectId,
       signingWalletId
     );
+    assertSignerMatchesJudgedWallet(signer, judgedWalletPublicKey);
     const normalizedSource = await resolveValidatedBurnSource(
       c.env,
       signer.address,

@@ -35,7 +35,7 @@ import {
   getOnChainAllowlistMutationForMint,
 } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertSignerMatchesJudgedWallet, buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransaction,
   persistSettledTransactionThenOutcome,
@@ -57,6 +57,7 @@ interface MintPolicyResolved {
   amountBaseUnits: MintOperationAmount["amountBaseUnits"];
   ablListAddress: string | null;
   signingWalletId: string | null;
+  judgedWalletPublicKey: string | null;
 }
 
 interface SettledMintEvidence {
@@ -542,6 +543,7 @@ export async function extractMintPolicyCandidate(
       amountBaseUnits,
       ablListAddress,
       signingWalletId,
+      judgedWalletPublicKey: policyWallet === null ? null : policyWallet.publicKey,
     },
     rawPayload: {
       tokenId: token.id,
@@ -568,6 +570,7 @@ export const executeMint = async (c: AppContext) => {
       amountBaseUnits,
       ablListAddress,
       signingWalletId,
+      judgedWalletPublicKey,
     },
   } = getPolicyGateContext<MintBody, MintPolicyResolved, WalletOperationPolicyEnforcement | null>(
     c
@@ -583,6 +586,7 @@ export const executeMint = async (c: AppContext) => {
   // (`isWalletOnList` returns true) since the original call drove the
   // wallet on-chain.
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+  assertSignerMatchesJudgedWallet(signer, judgedWalletPublicKey);
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({

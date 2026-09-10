@@ -852,6 +852,46 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("refuses to mint when the signer no longer matches the wallet policy judged", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_mint_signer_drift",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_mint_signer_drift",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      // Policy judged the seeded wallet; custody hands back a different one.
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValue(createNoopSigner(address(TEST_SOLANA_ADDRESSES.wallet2)));
+      const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/mint`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(409);
+        expect(mintToSpy).not.toHaveBeenCalled();
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        mintToSpy.mockRestore();
+      }
+    });
+
     it("does not cache a caller-supplied permanent delegate", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_seize_delegate",
