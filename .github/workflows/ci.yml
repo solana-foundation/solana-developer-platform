@@ -1048,7 +1048,7 @@ jobs:
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
           if [ -n "${{ matrix.issuance_group }}" ]; then
-            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance -- ${{ matrix.issuance_group }}
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance ${{ matrix.issuance_group }}
           else
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
           fi
