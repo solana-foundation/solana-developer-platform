@@ -371,6 +371,8 @@
       "payoutAddressB": "Buyer payout address",
       "payoutDefaultToggle": "Pay proceeds to each side’s funding address",
       "payoutDefaultToggleHint": "Turn off to choose different payout addresses.",
+      "receivesAtA": "First party receives at",
+      "receivesAtB": "Second party receives at",
       "refundedLabel": "Deposits returned",
       "reviewDelivers": "Delivers",
       "reviewPaidAt": "Paid at",

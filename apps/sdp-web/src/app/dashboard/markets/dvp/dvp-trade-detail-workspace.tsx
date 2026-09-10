@@ -495,6 +495,10 @@ function OnChainDetails({ cluster, trade }: { cluster: SolanaCluster; trade: Dvp
     },
     { role: t("DashboardMarkets.dvp.escrowA"), address: trade.legs.a.escrow },
     { role: t("DashboardMarkets.dvp.escrowB"), address: trade.legs.b.escrow },
+    // Where each party's proceeds land at settlement. Usually the party itself;
+    // an execution desk may name another account, and a forged trade will.
+    { role: t("DashboardMarkets.dvp.receivesAtA"), address: trade.legs.a.settlementDestination },
+    { role: t("DashboardMarkets.dvp.receivesAtB"), address: trade.legs.b.settlementDestination },
   ];
   const transactions = [
     { role: t("DashboardMarkets.dvp.txCreate"), signature: trade.createSignature },
