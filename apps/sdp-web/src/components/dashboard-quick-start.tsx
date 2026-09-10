@@ -166,6 +166,53 @@ function QuickStartSettingsLauncher({
   );
 }
 
+function QuickStartDismissButton({
+  compact = false,
+  onDismiss,
+}: {
+  compact?: boolean;
+  onDismiss: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <AlertDialog.Root>
+      <AlertDialog.Trigger asChild>
+        <button
+          type="button"
+          aria-label={t("Shared.quickStart.skip")}
+          title={t("Shared.quickStart.skip")}
+          className={
+            compact
+              ? "absolute right-1 top-1 flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+              : "-mr-2 -mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
+          }
+        >
+          <X className={compact ? "size-3.5" : "size-4"} aria-hidden />
+        </button>
+      </AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+        <AlertDialog.Content className={dialogClassName}>
+          <AlertDialog.Title className="text-base font-medium">
+            {t("Shared.quickStart.dismissTitle")}
+          </AlertDialog.Title>
+          <AlertDialog.Description className="mt-2 text-sm leading-5 text-secondary">
+            {t("Shared.quickStart.dismissDescription")}
+          </AlertDialog.Description>
+          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <AlertDialog.Cancel asChild>
+              <Button variant="secondary">{t("Shared.quickStart.dismissCancel")}</Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action asChild>
+              <Button onClick={onDismiss}>{t("Shared.quickStart.dismissConfirm")}</Button>
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
 export function DashboardQuickStart({
   collapsed = false,
   variant = "sidebar",
@@ -179,7 +226,6 @@ export function DashboardQuickStart({
   const eligible = isQuickStartEligible(workspace);
   const storageKey = quickStartKey(dashboardCacheScope);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [dismissKey, setDismissKey] = useState<string | null>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const step = useSyncExternalStore(
     subscribeQuickStart,
@@ -199,6 +245,10 @@ export function DashboardQuickStart({
   const stepNumber = current.number;
   const isModal = canShowGuide && expandedKey === storageKey;
   const minimize = () => setExpandedKey(null);
+  const dismiss = () => {
+    minimize();
+    dismissQuickStart(storageKey);
+  };
   const canCreateWallet = flags.custody && dashboardAccess.capabilities.canManageCustody;
   const title = t(current.title);
   const description = t(current.description);
@@ -256,42 +306,7 @@ export function DashboardQuickStart({
           )}
         </button>
         {collapsed ? null : (
-          <AlertDialog.Root
-            open={dismissKey === storageKey}
-            onOpenChange={(open) => setDismissKey(open ? storageKey : null)}
-          >
-            <AlertDialog.Trigger asChild>
-              <button
-                type="button"
-                aria-label={t("Shared.quickStart.skip")}
-                title={t("Shared.quickStart.skip")}
-                className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-              >
-                <X className="size-3.5" aria-hidden />
-              </button>
-            </AlertDialog.Trigger>
-            <AlertDialog.Portal>
-              <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-              <AlertDialog.Content className={dialogClassName}>
-                <AlertDialog.Title className="text-base font-medium">
-                  {t("Shared.quickStart.dismissTitle")}
-                </AlertDialog.Title>
-                <AlertDialog.Description className="mt-2 text-sm leading-5 text-secondary">
-                  {t("Shared.quickStart.dismissDescription")}
-                </AlertDialog.Description>
-                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                  <AlertDialog.Cancel asChild>
-                    <Button variant="secondary">{t("Shared.quickStart.dismissCancel")}</Button>
-                  </AlertDialog.Cancel>
-                  <AlertDialog.Action asChild>
-                    <Button onClick={() => dismissQuickStart(storageKey)}>
-                      {t("Shared.quickStart.dismissConfirm")}
-                    </Button>
-                  </AlertDialog.Action>
-                </div>
-              </AlertDialog.Content>
-            </AlertDialog.Portal>
-          </AlertDialog.Root>
+          <QuickStartDismissButton key={storageKey} compact onDismiss={dismiss} />
         )}
       </aside>
     );
@@ -306,15 +321,7 @@ export function DashboardQuickStart({
           steps={Object.values(stepCopy).map((step) => t(step.title))}
           className="min-w-0 shrink flex-wrap gap-x-3 gap-y-2"
         />
-        <button
-          type="button"
-          onClick={minimize}
-          aria-label={t("Shared.quickStart.minimize")}
-          title={t("Shared.quickStart.minimize")}
-          className="-mr-2 -mt-2 flex size-9 shrink-0 items-center justify-center rounded-full text-tertiary hover:bg-fill hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          <X className="size-4" aria-hidden />
-        </button>
+        <QuickStartDismissButton key={storageKey} onDismiss={dismiss} />
       </div>
       <h2 className="mt-4 text-base font-medium" aria-live="polite">
         {title}
@@ -334,9 +341,6 @@ export function DashboardQuickStart({
         >
           {t(current.skip)}
         </button>
-      </div>
-      <div className="mt-4 flex justify-end">
-        <Button onClick={minimize}>{t("Shared.quickStart.later")}</Button>
       </div>
     </>
   );

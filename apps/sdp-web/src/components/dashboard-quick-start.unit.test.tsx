@@ -72,12 +72,14 @@ describe("dashboard quick start", () => {
     const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
     fireEvent.click(launcher);
     expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(readQuickStart(key())).toBe("api-key");
-    await waitFor(() => expect(document.activeElement).toBe(launcher));
-    fireEvent.click(launcher);
-    fireEvent.click(view.getByRole("button", { name: "Continue later" }));
+    expect(view.queryByRole("button", { name: "Continue later" })).toBeNull();
+    const close = view.getByRole("button", { name: "Dismiss SDP quick start" });
+    fireEvent.click(close);
+    expect(view.getByRole("alertdialog")).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
+    expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(view.queryByRole("dialog")).toBeNull();
     expect(readQuickStart(key())).toBe("api-key");
     await waitFor(() => expect(document.activeElement).toBe(launcher));
@@ -167,7 +169,13 @@ describe("dashboard quick start", () => {
       within(restored.getByRole("dialog")).getByRole("heading", { name: "Set up a wallet" })
     ).toBeTruthy();
     expect(isQuickStartDismissed(key())).toBe(false);
-    fireEvent.click(restored.getByRole("button", { name: "Minimize SDP quick start" }));
+    fireEvent.click(restored.getByRole("button", { name: "Dismiss SDP quick start" }));
+    fireEvent.click(restored.getByRole("button", { name: "Dismiss quick start" }));
+    expect(restored.queryByRole("dialog")).toBeNull();
+    expect(restored.queryByRole("complementary")).toBeNull();
+    fireEvent.click(resume);
+    expect(restored.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(restored.getByRole("button", { name: "SDP quick start · 2/3" })).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(resume));
   });
@@ -268,14 +276,18 @@ describe("dashboard quick start", () => {
     await waitFor(() => expect(document.activeElement).toBe(launcher));
   });
 
-  it("minimizes to the compact launcher and preserves saved progress when reopened", () => {
+  it("can cancel expanded dismissal with a collapsed sidebar and keep saved progress", () => {
     setQuickStart(key(), "wallet");
     const view = render(ui(true));
     const launcher = view.getByRole("button", { name: "SDP quick start · 2/3" });
     expect(launcher.getAttribute("title")).toBe("SDP quick start · 2/3");
     fireEvent.click(launcher);
     expect(view.getByRole("dialog")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
+    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
+    expect(view.getByRole("alertdialog")).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
+    expect(view.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(view.queryByRole("dialog")).toBeNull();
     expect(view.getByRole("complementary")).toBeTruthy();
     expect(window.localStorage.getItem(key())).toBe("wallet");
@@ -301,7 +313,6 @@ describe("dashboard quick start", () => {
     const view = renderGuide();
     fireEvent.click(view.getByRole("button", { name: "I already have an API key" }));
     expect(view.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Minimize SDP quick start" }));
     expect(readQuickStart(key())).toBe("wallet");
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
