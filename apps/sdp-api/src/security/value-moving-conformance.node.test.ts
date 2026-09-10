@@ -349,11 +349,13 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
-  // DvP signs from the project's settlement-authority custody wallet. Both
-  // sinks return fully signed bytes without sending, so the signature is known
-  // before anything reaches the network — which is what lets create record the
-  // trade, and settle cross the approved-operation fence, before broadcasting.
-  "apps/sdp-api/src/services/dvp/create.ts": ["signTransactionMessageWithSigners"],
+  // DvP create is Kora-sponsored: the paymaster signs as fee payer and rent
+  // payer and returns bytes without sending, so the signature is known before
+  // the trade is recorded. Fund and settle still sign from the project's
+  // custody wallets; those sinks likewise return fully signed bytes without
+  // sending, which is what lets settle cross the approved-operation fence
+  // before broadcasting.
+  "apps/sdp-api/src/services/dvp/create.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/dvp/fund.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/dvp/settle.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],

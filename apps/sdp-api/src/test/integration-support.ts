@@ -3,6 +3,7 @@
  * Keep this facade intentionally small and integration-test specific.
  */
 
+import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
@@ -60,6 +61,7 @@ export const apiTestSupport = {
   createVaultDeadline,
   depositIntoVault,
   CustodyConfigStore,
+  DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,

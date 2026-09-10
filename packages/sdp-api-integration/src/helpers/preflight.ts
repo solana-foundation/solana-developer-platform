@@ -1,11 +1,10 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { probeGatewayHealth } from "@sdp/private-channels";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
 import { privateChannelProbeTransport } from "./private-channels";
 
-const { KoraClient } = apiTestSupport;
+const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraClient } = apiTestSupport;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }

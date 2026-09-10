@@ -518,9 +518,6 @@ importers:
 
   packages/sdp-api-integration:
     dependencies:
-      '@sdp/dvp':
-        specifier: workspace:*
-        version: link:../sdp-dvp
       '@sdp/private-channels':
         specifier: workspace:*
         version: link:../sdp-private-channels
