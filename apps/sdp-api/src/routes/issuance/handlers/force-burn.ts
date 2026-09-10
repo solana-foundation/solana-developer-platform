@@ -364,11 +364,11 @@ export async function extractForceBurnPolicyCandidate(
         tokenService,
         tokenId,
         type: "force_burn",
-        idempotencyKey: c.req.header("Idempotency-Key"),
+        idempotencyKey,
         requestedCustodyWalletId: body.signingCustodyWalletId,
         requiredWalletPermissions: ["tokens:admin"],
         fingerprintForCustodyWalletId: (custodyWalletId) =>
-          buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+          buildIdempotencyMetadata(idempotencyKey, {
             tokenId,
             operation: "force_burn",
             mode: "execute",
@@ -382,6 +382,8 @@ export async function extractForceBurnPolicyCandidate(
 
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
+
+  parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {

@@ -377,11 +377,11 @@ export async function extractSeizePolicyCandidate(
         tokenService,
         tokenId,
         type: "seize",
-        idempotencyKey: c.req.header("Idempotency-Key"),
+        idempotencyKey,
         requestedCustodyWalletId: body.signingCustodyWalletId,
         requiredWalletPermissions: ["tokens:admin"],
         fingerprintForCustodyWalletId: (custodyWalletId) =>
-          buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+          buildIdempotencyMetadata(idempotencyKey, {
             tokenId,
             operation: "seize",
             mode: "execute",

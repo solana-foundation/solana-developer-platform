@@ -481,11 +481,11 @@ export async function extractBurnPolicyCandidate(
         tokenService,
         tokenId,
         type: "burn",
-        idempotencyKey: c.req.header("Idempotency-Key"),
+        idempotencyKey,
         requestedCustodyWalletId: body.signingCustodyWalletId,
         requiredWalletPermissions: ["tokens:write"],
         fingerprintForCustodyWalletId: (custodyWalletId) =>
-          buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+          buildIdempotencyMetadata(idempotencyKey, {
             tokenId,
             operation: "burn",
             mode: "execute",
@@ -499,6 +499,8 @@ export async function extractBurnPolicyCandidate(
 
   assertTokenAllowsOperation(token, "burn");
   assertTokenIsDeployed(token);
+
+  parsePositiveTokenAmount(body.burn.amount, token.decimals);
 
   const wallet = await resolveIssuanceWallet({
     env: c.env,
