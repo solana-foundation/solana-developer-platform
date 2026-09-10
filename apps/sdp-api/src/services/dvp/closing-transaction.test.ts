@@ -14,15 +14,20 @@ const SIGNATURE = signature(
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
 );
 
-/** Creates the parsed transaction wrapper for one DvP discriminator. */
-function transaction(discriminator: number) {
+const OTHER_SWAP = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+/**
+ * Creates the parsed transaction wrapper for one DvP discriminator, closing
+ * `swapDvp` (account index 1, as in Settle, Cancel and Reject).
+ */
+function transaction(discriminator: number, swapDvp: string = SWAP) {
   return {
     slot: 1n,
     err: null,
     instructions: [
       {
         programId: DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
-        accounts: [],
+        accounts: ["AuthorityOrSigner", swapDvp],
         data: getBase58Decoder().decode(new Uint8Array([discriminator])),
         parsedType: null,
         info: null,
@@ -60,6 +65,14 @@ describe("resolveDvpClose", () => {
     });
     expect(getTransaction).toHaveBeenCalledTimes(1);
   });
+
+  it.each([2, 3, 4])(
+    "ignores a closing instruction (discriminator %s) aimed at another trade",
+    async (discriminator) => {
+      getTransaction.mockResolvedValue(transaction(discriminator, OTHER_SWAP));
+      await expect(resolveDvpClose(RPC, SWAP)).resolves.toBeNull();
+    }
+  );
 
   it("returns null for create-only history", async () => {
     getTransaction.mockResolvedValue(transaction(0));

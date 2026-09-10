@@ -7,6 +7,9 @@ import { getSignaturesForAddress, getTransaction, type SolanaRpc } from "@sdp/rp
 import { type Address, getBase58Encoder, type Signature } from "@solana/kit";
 import { internalError } from "@/lib/errors";
 
+/** Position of `swap_dvp` in every SettleDvp, CancelDvp and RejectDvp account list. */
+const SWAP_DVP_ACCOUNT_INDEX = 1;
+
 export interface DvpCloseResolution {
   status: "settled" | "cancelled" | "rejected";
   signature: Signature;
@@ -50,13 +53,26 @@ export async function resolveDvpClose(
         // close we recognise, so keep scanning older history.
         continue;
       }
+      // A transaction touching this trade may also close another one, so a
+      // closing instruction only counts when its `swap_dvp` account IS this
+      // trade. Settle, Cancel and Reject all place it at index 1.
+      const closesThisTrade = instruction.accounts[SWAP_DVP_ACCOUNT_INDEX] === swapDvp;
       switch (identified) {
         case DvpSwapProgramInstruction.SettleDvp:
-          return { status: "settled", signature: entry.signature };
+          if (closesThisTrade) {
+            return { status: "settled", signature: entry.signature };
+          }
+          break;
         case DvpSwapProgramInstruction.CancelDvp:
-          return { status: "cancelled", signature: entry.signature };
+          if (closesThisTrade) {
+            return { status: "cancelled", signature: entry.signature };
+          }
+          break;
         case DvpSwapProgramInstruction.RejectDvp:
-          return { status: "rejected", signature: entry.signature };
+          if (closesThisTrade) {
+            return { status: "rejected", signature: entry.signature };
+          }
+          break;
         case DvpSwapProgramInstruction.CreateDvp:
         case DvpSwapProgramInstruction.ReclaimDvp:
         case DvpSwapProgramInstruction.RecoverDvp:

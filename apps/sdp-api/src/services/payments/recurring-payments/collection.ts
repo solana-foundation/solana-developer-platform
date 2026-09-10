@@ -186,7 +186,6 @@ function matchesRecurringTransferInstruction(input: {
   const { instruction } = input;
   if (
     instruction.programId !== subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS ||
-    !instruction.accounts ||
     instruction.accounts.length !== 10 ||
     !instruction.data
   ) {
