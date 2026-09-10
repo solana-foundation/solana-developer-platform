@@ -29,6 +29,7 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
@@ -108,6 +109,9 @@ function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): b
     .filter(Boolean)
     .some((value) => matchesAddressQuery(String(value), needle));
 }
+
+/** Rows per client-side page of the trades table. */
+const TRADES_PER_PAGE = 10;
 
 /** The page path, with the status group serialized onto it. */
 function tradesHref(status: UrlStatusFilter | "waiting"): string {
@@ -423,6 +427,9 @@ export function DvpTradesWorkspace({
   // rides the URL or the API query, so typing filters instantly and a browser
   // navigation has nothing to restore.
   const [query, setQuery] = useState("");
+  // Client-side pages over the loaded window; the fetch cap stays the outer
+  // bound. Filter changes reset to the first page in their own handlers.
+  const [page, setPage] = useState(1);
 
   // The URL is the filter state for the trades list; `waiting` selects the
   // inbound segment instead and lives here only, because it answers from a
@@ -436,6 +443,7 @@ export function DvpTradesWorkspace({
   }, [statusFilter]);
 
   const onStatusChange = (next: StatusFilter) => {
+    setPage(1);
     if (next === "waiting") {
       // The inbound segment swaps the table's rows rather than filtering the
       // trades list, so it never reaches the URL or the trades API.
@@ -446,10 +454,11 @@ export function DvpTradesWorkspace({
     startTransition(() => router.replace(tradesHref(next), { scroll: false }));
   };
 
-  /** Clear filters resets the search and the URL param, the whole filter state. */
+  /** Clear filters resets the search, the page and the URL param — the whole filter state. */
   const clearFilters = () => {
     setWaiting(false);
     setQuery("");
+    setPage(1);
     startTransition(() => router.replace(tradesHref("all"), { scroll: false }));
   };
 
@@ -459,6 +468,14 @@ export function DvpTradesWorkspace({
   const visibleInbound = showingInbound
     ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
     : [];
+  // Clamped during render rather than reset by an effect: shrinking the list
+  // from a later page lands on the last page that still exists.
+  const pageCount = Math.max(1, Math.ceil(visibleTrades.length / TRADES_PER_PAGE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedTrades = visibleTrades.slice(
+    (currentPage - 1) * TRADES_PER_PAGE,
+    currentPage * TRADES_PER_PAGE
+  );
 
   // A project whose only DvP activity is a trade somebody else set up for it has
   // none of its own, and treating that as an empty page rendered "No trades yet"
@@ -505,7 +522,10 @@ export function DvpTradesWorkspace({
                   action on the right, table flush below. */}
               <TradesToolbar
                 inboundCount={inbound.length}
-                onQueryChange={setQuery}
+                onQueryChange={(next) => {
+                  setQuery(next);
+                  setPage(1);
+                }}
                 onStatusChange={onStatusChange}
                 query={query}
                 status={waiting ? "waiting" : statusFilter}
@@ -527,11 +547,21 @@ export function DvpTradesWorkspace({
                   message={t("DashboardMarkets.dvp.filterNoMatches")}
                 />
               ) : (
-                <TradesTable
-                  inbound={visibleInbound}
-                  showingInbound={showingInbound}
-                  trades={showingInbound ? [] : visibleTrades}
-                />
+                <>
+                  <TradesTable
+                    inbound={visibleInbound}
+                    showingInbound={showingInbound}
+                    trades={showingInbound ? [] : pagedTrades}
+                  />
+                  {!showingInbound && pageCount > 1 ? (
+                    <ArrowPagination
+                      className="border-border-default border-t p-3"
+                      onPageChange={setPage}
+                      page={currentPage}
+                      pageCount={pageCount}
+                    />
+                  ) : null}
+                </>
               )}
             </>
           )}
