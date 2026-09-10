@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 /**
  * The trades list.
  *
@@ -14,8 +16,9 @@
  * filter strip's presence rules, and the party/leg rendering.
  */
 
+import { render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
@@ -100,6 +103,10 @@ function inboundTrade(): DvpInboundTrade {
     createdAt: "2026-09-07T00:00:00.000Z",
   };
 }
+
+afterEach(() => {
+  replaceMock.mockClear();
+});
 
 describe("DvpTradesWorkspace", () => {
   // The status dropdown is the only path to an inbound trade, so the filter
@@ -348,5 +355,38 @@ describe("DvpTradesWorkspace", () => {
     const html = renderList([trade()]);
 
     expect(html).not.toContain("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
+  });
+
+  // A browser Back/Forward changes the URL's q without remounting the
+  // workspace, so the input must adopt the new prop during render — and the
+  // just-synced render must not push the debounced OLD text back into the
+  // URL, which would undo the navigation.
+  it("follows a changed searchQuery prop without writing the old query back", () => {
+    const { rerender } = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery="abacus"
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+
+    rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          searchQuery="bamboo"
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("bamboo");
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 });

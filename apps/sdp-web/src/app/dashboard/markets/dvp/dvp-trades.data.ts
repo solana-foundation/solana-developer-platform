@@ -76,7 +76,10 @@ export async function fetchDvpTrades(
 ): Promise<DvpTradesResult> {
   try {
     const query = new URLSearchParams({ limit: String(DVP_TRADES_PAGE_SIZE) });
-    if (filters.statuses !== null) {
+    // An EMPTY group must serialize to the absence of the param: the API
+    // rejects an empty `status=`, and the `waiting` URL filter (which carries
+    // no statuses of its own) parses to one.
+    if (filters.statuses !== null && filters.statuses.length > 0) {
       query.set("status", filters.statuses.join(","));
     }
     if (filters.q !== null) {

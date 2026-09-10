@@ -15,6 +15,7 @@ import {
   isNotFound,
   UNFILTERED_DVP_TRADES,
 } from "./dvp-trades.data";
+import { parseDvpTradesFilters } from "./dvp-trades-query";
 
 /**
  * The minimum a trade must carry to be renderable, which is what these
@@ -77,6 +78,26 @@ describe("fetchDvpTrades", () => {
     await fetchDvpTrades(request, { statuses: null, q: null });
 
     expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
+  });
+
+  // The `waiting` URL filter parses to an EMPTY statuses group — it carries no
+  // trade statuses of its own — and an empty array must serialize to the
+  // absence of the param, never the `status=` the API rejects.
+  it("serializes the waiting URL filter to no status param at all", async () => {
+    const request = ok({ data: { trades: [] } });
+    const { filters } = parseDvpTradesFilters({ status: "waiting" });
+
+    await fetchDvpTrades(request, filters);
+
+    expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
+  });
+
+  it("keeps the search param company when the statuses group is empty", async () => {
+    const request = ok({ data: { trades: [] } });
+
+    await fetchDvpTrades(request, { statuses: [], q: "USDC" });
+
+    expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&q=USDC`);
   });
 
   it("carries the API's message out on a failure", async () => {

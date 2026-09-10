@@ -427,6 +427,14 @@ export function DvpTradesWorkspace({
   // The search input's live value: it stays local so typing never navigates
   // per keystroke, and the debounced copy is what reaches the URL.
   const [queryInput, setQueryInput] = useState(searchQuery);
+  const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
+  // A browser Back/Forward changes the URL's q (the prop) without remounting
+  // the workspace, so the input is adjusted during render to follow it —
+  // an effect doing this would write the STALE input back into the URL.
+  if (prevSearchQuery !== searchQuery) {
+    setPrevSearchQuery(searchQuery);
+    setQueryInput(searchQuery);
+  }
   const debouncedQuery = useDebounce(queryInput.trim(), 300);
 
   // The URL is the filter state for the trades list; `waiting` selects the
@@ -444,6 +452,13 @@ export function DvpTradesWorkspace({
   // shorter text is still in the box but not yet a filter. `waiting` never
   // enters this: it is not a trades-filter state, so the URL keeps the group
   // it had while the inbound segment answers the same text client-side.
+  //
+  // searchQuery is deliberately NOT a dependency: a browser navigation changes
+  // the prop without remounting, and re-running here on that change alone would
+  // push the still-stale debounced text back into the URL — the navigation the
+  // input just synced to. The guard above no-ops once the debounced value
+  // converges, which is the only prop-driven run this effect needs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
   useEffect(() => {
     const trimmed = debouncedQuery;
     if (trimmed === searchQuery) {
@@ -451,7 +466,7 @@ export function DvpTradesWorkspace({
     }
     const q = trimmed.length >= 2 ? trimmed : null;
     startTransition(() => router.replace(tradesHref(statusFilter, q), { scroll: false }));
-  }, [debouncedQuery, router, searchQuery, statusFilter]);
+  }, [debouncedQuery, router, statusFilter]);
 
   const onStatusChange = (next: StatusFilter) => {
     if (next === "waiting") {
