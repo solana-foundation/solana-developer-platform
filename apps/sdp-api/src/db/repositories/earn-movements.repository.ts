@@ -176,6 +176,12 @@ export interface EarnMovementRow {
   creates_share_account: boolean;
   /** Who this movement charged that rent to. Null means the custody wallet. */
   share_ata_rent_funder: string | null;
+  /**
+   * When the sweep first saw this SUBMITTED movement's signature unknown to
+   * RPC after its blockhash window closed (migration 0092, PRO-1904). One
+   * observation parks the row; a second on a later tick expires it.
+   */
+  unknown_signature_observed_at: string | null;
 }
 
 /**
@@ -535,6 +541,18 @@ export interface EarnMovementsRepository {
    */
   advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
   /**
+   * The sweep's first piece of evidence that a SUBMITTED vault movement did not
+   * land (PRO-1904): its signature came back unknown after the blockhash window
+   * closed. Idempotent (COALESCE) and status-guarded, so a burst of ticks
+   * records one observation and a row that has since moved on is untouched.
+   * Returns the row when the mark was written or already present, null when
+   * the row is no longer `submitted`.
+   */
+  recordUnknownSignatureObservation(input: {
+    movementId: string;
+    organizationId: string;
+  }): Promise<EarnMovementRow | null>;
+  /**
    * Insert-at-intent for a custodial movement: the row exists before the provider
    * accepts. Always returns the row — a missing holding heals then retries, and a
    * missing program wallet throws rather than letting money move unrecorded.
@@ -815,6 +833,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     updated_at: row.updated_at as string,
     creates_share_account: row.creates_share_account === true,
     share_ata_rent_funder: row.share_ata_rent_funder as string | null,
+    unknown_signature_observed_at: row.unknown_signature_observed_at as string | null,
   };
 }
 
@@ -1752,6 +1771,23 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
         return movement;
       });
+    },
+
+    async recordUnknownSignatureObservation(input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET unknown_signature_observed_at = COALESCE(unknown_signature_observed_at, sdp_iso_now()),
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status = 'submitted'
+            RETURNING *`
+        )
+        .bind(input.movementId, input.organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
     },
 
     async createCustodialMovement(input) {

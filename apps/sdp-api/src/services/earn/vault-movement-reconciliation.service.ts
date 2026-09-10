@@ -350,6 +350,23 @@ async function reconcileMovement(
     chain.currentBlockHeight !== null &&
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
+    // A `requested` row was never broadcast, so past its blockhash it genuinely
+    // cannot land: expire it on the first observation. A `submitted` row is
+    // different (PRO-1904): RPC history is not complete, and the `confirmed`
+    // guard above exists for exactly that reason, so one null answer is not
+    // proof the transaction did not land. Expiring a landed movement is a
+    // terminal false `failed` with the shares sitting in the vault, so the
+    // sweep parks the row on the first null observation and expires it only
+    // when a LATER tick sees the signature unknown again. A tick that finds
+    // the signature in between moves the row forward through the branches
+    // above and the mark becomes inert.
+    if (movement.status === "submitted" && movement.unknown_signature_observed_at === null) {
+      await ledger.recordUnknownSignatureObservation({
+        movementId: movement.id,
+        organizationId: movement.organization_id,
+      });
+      return "unchanged";
+    }
     await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
     return "failed";
   }

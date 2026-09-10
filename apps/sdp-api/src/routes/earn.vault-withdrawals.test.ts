@@ -269,6 +269,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     updated_at: new Date().toISOString(),
     creates_share_account: false,
     share_ata_rent_funder: null,
+    unknown_signature_observed_at: null,
     ...overrides,
   };
 }
