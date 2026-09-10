@@ -25,18 +25,18 @@ export function TokenLogo({
   symbol: string;
   className?: string;
 }) {
-  const [failed, setFailed] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   return (
     <div
       aria-hidden="true"
       className={cn("shrink-0 overflow-hidden rounded-full border border-border-subtle", className)}
     >
-      {imageUrl && !failed ? (
+      {imageUrl !== null && imageUrl !== failedUrl ? (
         // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
         <img
           src={imageUrl}
           alt=""
-          onError={() => setFailed(true)}
+          onError={() => setFailedUrl(imageUrl)}
           className="h-full w-full object-cover"
         />
       ) : (
