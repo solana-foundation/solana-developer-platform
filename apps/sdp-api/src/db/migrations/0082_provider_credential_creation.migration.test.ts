@@ -34,7 +34,7 @@ describe("0082 Provider Credential creation", () => {
     ).resolves.toBe(1);
   });
 
-  it("does not permit cleanup markers on unrelated deactivated GCP roots", async () => {
+  it("permits deactivated GCP root cleanup after the 0085 expansion", async () => {
     await expect(
       getDb(env).execute(
         `INSERT INTO provider_credentials (
@@ -46,7 +46,7 @@ describe("0082 Provider Credential creation", () => {
            'deactivated', sdp_iso_now(), sdp_iso_now()
          )`
       )
-    ).rejects.toThrow(/provider_credentials_secret_retention_check/);
+    ).resolves.toBe(1);
   });
 
   it.each([

@@ -128,7 +128,7 @@ describe("0080 provider Credential secret retention", () => {
   });
 
   it.each(["failed_validation", "deactivated"] as const)(
-    "permits an immediate cleanup marker only for a GCP rotation candidate that ends %s",
+    "permits terminal GCP rotation cleanup and preserves the latest root policy for %s",
     async (status) => {
       const predecessorId = `pcred_${status}_predecessor`;
       await insertCredential({
@@ -156,14 +156,18 @@ describe("0080 provider Credential secret retention", () => {
         })
       ).rejects.toThrow(/provider_credentials_secret_retention_check/);
 
-      await expect(
-        insertCredential({
-          id: `pcred_unrotated_gcp_${status}`,
-          status,
-          backend: "gcp_secret_manager",
-          retentionExpiresAt: "2026-09-04T10:00:00.000Z",
-        })
-      ).rejects.toThrow(/provider_credentials_secret_retention_check/);
+      const root = insertCredential({
+        id: `pcred_unrotated_gcp_${status}`,
+        status,
+        backend: "gcp_secret_manager",
+        retentionExpiresAt: "2026-09-04T10:00:00.000Z",
+      });
+      // The test database includes 0085's explicit root deactivation expansion.
+      if (status === "deactivated") {
+        await expect(root).resolves.toBeUndefined();
+      } else {
+        await expect(root).rejects.toThrow(/provider_credentials_secret_retention_check/);
+      }
     }
   );
 });
