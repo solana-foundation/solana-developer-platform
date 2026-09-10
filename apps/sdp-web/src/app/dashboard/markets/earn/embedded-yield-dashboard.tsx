@@ -175,14 +175,17 @@ function AgeDistributionChart({
           const barHeight = (value / maxValue) * 44;
           return (
             <m.rect
-              animate={{ height: barHeight, opacity: 0.78, y: baseline - barHeight }}
+              animate={{ opacity: 0.78, scaleY: 1 }}
               fill={color}
-              initial={reduceMotion ? false : { height: 0, opacity: 0, y: baseline }}
+              height={barHeight}
+              initial={reduceMotion ? false : { opacity: 0, scaleY: 0 }}
               key={id}
               rx="4"
+              style={{ transformBox: "fill-box", transformOrigin: "center bottom" }}
               transition={reduceMotion ? { duration: 0 } : { delay: index * 0.06, duration: 0.35 }}
               width={slotWidth * 0.58}
               x={index * slotWidth + slotWidth * 0.21}
+              y={baseline - barHeight}
             />
           );
         })}
