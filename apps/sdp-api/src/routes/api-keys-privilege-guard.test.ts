@@ -259,6 +259,78 @@ describe("API key privilege guards", () => {
     }
   });
 
+  it("refuses a wallet-scoped key rotating a key with broader wallet access", async () => {
+    await seedKeyRow(READONLY_TARGET_KEY, "api_readonly", null);
+    await getDb(env)
+      .prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?")
+      .bind("wal_scope_other", READONLY_TARGET_KEY.id)
+      .run();
+    const scopedHash = await hashString("sk_test_privilege_scoped4", env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, scopedHash, {
+      ...WRITER_CACHED,
+      id: "key_privilege_scoped4",
+      walletScope: "selected",
+      signingWalletIds: ["wal_scope_own"],
+      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
+    });
+
+    const res = await app.request(
+      `/v1/api-keys/${READONLY_TARGET_KEY.id}/rotate`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer sk_test_privilege_scoped4",
+        },
+        body: JSON.stringify({}),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("outside your own wallet scope");
+    const replacement = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM api_keys WHERE rotated_from = ?")
+      .bind(READONLY_TARGET_KEY.id)
+      .first<{ count: number }>();
+    expect(replacement).toEqual({ count: 0 });
+  });
+
+  it("refuses a wallet-scoped key provisioning a wallet", async () => {
+    const scopedHash = await hashString("sk_test_privilege_scoped5", env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, scopedHash, {
+      ...WRITER_CACHED,
+      id: "key_privilege_scoped5",
+      permissions: [...WRITER_CACHED.permissions, "custody:admin"],
+      walletScope: "selected",
+      signingWalletIds: ["wal_scope_own"],
+      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
+    });
+
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer sk_test_privilege_scoped5",
+        },
+        body: JSON.stringify({
+          name: "Provisioned escape",
+          role: "api_readonly",
+          walletScope: "selected",
+          provisionWallet: true,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("Cannot provision a wallet");
+  });
+
   it("refuses a key updating its own record", async () => {
     await reseedActor();
     const res = await app.request(

@@ -12,6 +12,7 @@ import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
+  isWalletScopedActor,
   resolveCreateWalletScope,
   resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
@@ -162,6 +163,12 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
   if (provisionWalletRequested) {
     if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    }
+    if (actorApiKey && isWalletScopedActor(actorApiKey)) {
+      throw new AppError(
+        "INSUFFICIENT_PERMISSIONS",
+        "Cannot provision a wallet from an API key with a selected wallet scope"
+      );
     }
 
     try {

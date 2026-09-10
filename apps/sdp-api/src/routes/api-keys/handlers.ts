@@ -27,6 +27,7 @@ import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
+  isWalletScopedActor,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
   resolveWalletBindingsInScope,
@@ -34,6 +35,7 @@ import {
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
 import {
   type ExactApiKeyWalletBinding,
+  listApiKeyWalletBindings,
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
@@ -294,6 +296,12 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   if (provisionWalletRequested) {
     if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    }
+    if (actorApiKey && isWalletScopedActor(actorApiKey)) {
+      throw new AppError(
+        "INSUFFICIENT_PERMISSIONS",
+        "Cannot provision a wallet from an API key with a selected wallet scope"
+      );
     }
 
     try {
@@ -743,6 +751,28 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
       "SERVICE_UNAVAILABLE",
       "Rotation is unavailable right now because cached credentials cannot be invalidated; nothing was changed, so retry shortly"
     );
+  }
+
+  const rotatingActorKey = c.get("apiKey");
+  if (rotatingActorKey && isWalletScopedActor(rotatingActorKey)) {
+    const target = await getDb(c.env)
+      .prepare(
+        `SELECT signing_wallet_id
+         FROM api_keys
+         WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'`
+      )
+      .bind(keyId, actor.organizationId, projectId)
+      .first<{ signing_wallet_id: string | null }>();
+    if (target) {
+      const targetBindings = await listApiKeyWalletBindings(getDb(c.env), keyId);
+      const targetScope =
+        target.signing_wallet_id !== null || targetBindings.length > 0 ? "selected" : "all";
+      assertBindingsWithinActorWalletScope(
+        rotatingActorKey,
+        [target.signing_wallet_id, ...targetBindings.map((binding) => binding.walletId)],
+        targetScope
+      );
+    }
   }
 
   const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));

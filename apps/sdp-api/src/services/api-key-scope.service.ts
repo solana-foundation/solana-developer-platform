@@ -466,6 +466,18 @@ export function resolveApiKeySigningWalletId(
  * scope escape: the minted key outlives every restriction placed on its
  * author. Non-key actors and all-wallet keys are unconstrained here.
  */
+export function isWalletScopedActor(actor: {
+  walletScope?: ApiKeyWalletScope;
+  signingWalletId?: string | null;
+  walletBindings?: ApiKeyWalletBinding[];
+}): boolean {
+  return (
+    actor.walletScope === "selected" ||
+    (actor.walletScope === undefined &&
+      ((actor.walletBindings?.length ?? 0) > 0 || actor.signingWalletId != null))
+  );
+}
+
 export function assertBindingsWithinActorWalletScope(
   actor: {
     walletScope?: ApiKeyWalletScope;
@@ -475,11 +487,7 @@ export function assertBindingsWithinActorWalletScope(
   walletIds: Array<string | null | undefined>,
   requestedWalletScope?: ApiKeyWalletScope
 ): void {
-  const scoped =
-    actor.walletScope === "selected" ||
-    (actor.walletScope === undefined &&
-      ((actor.walletBindings?.length ?? 0) > 0 || actor.signingWalletId != null));
-  if (!scoped) {
+  if (!isWalletScopedActor(actor)) {
     return;
   }
   if (requestedWalletScope === "all") {
