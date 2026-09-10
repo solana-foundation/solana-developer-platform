@@ -66,17 +66,17 @@ function setup(ctx: DvpCreateContext = context) {
 }
 
 describe("useDvpCreateForm", () => {
-  // The asset and both parties are the trade's whole point, so they start
-  // unselected; only the cash leg preselects the cluster's first stablecoin,
-  // which is almost always the answer.
-  it("starts with both parties and the asset unselected, only the cash mint preset", () => {
+  // Every choice is the trade's whole point, so nothing preselects: both
+  // parties, the asset and the cash all start empty.
+  it("starts with both parties and both mints unselected", () => {
     const { result } = setup();
 
     expect(result.current.values.partyA).toEqual({ mode: "address", address: "" });
     expect(result.current.values.partyB).toEqual({ mode: "address", address: "" });
     expect(result.current.asset.token).toBeNull();
     expect(result.current.asset.mint).toBe("");
-    expect(result.current.cash.token).not.toBeNull();
+    expect(result.current.cash.token).toBeNull();
+    expect(result.current.cash.mint).toBe("");
   });
 
   it("offers stablecoins for the cash leg on this cluster", () => {
@@ -133,6 +133,7 @@ describe("useDvpCreateForm", () => {
     fillParties(result);
     act(() => result.current.asset.setChoice(ASSET_MINT));
     act(() => result.current.asset.setAmount("10"));
+    act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
     act(() => result.current.cash.setAmount("25"));
 
     expect(result.current.ready).toBe(true);
@@ -155,6 +156,7 @@ describe("useDvpCreateForm", () => {
     act(() => result.current.asset.setCustom("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"));
     fillParties(result);
     act(() => result.current.asset.setAmount("1000"));
+    act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
     act(() => result.current.cash.setAmount("25"));
 
     expect(result.current.asset.pendingLookup).toBe(true);
@@ -230,6 +232,7 @@ describe("useDvpCreateForm", () => {
 
       act(() => result.current.setParty("a", { mode: "address", address: PARTY_B }));
       act(() => result.current.setParty("b", { mode: "wallet", walletId: "cwlt_1" }));
+      act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
 
       expect(result.current.assetBalance).toBeNull();
       expect(result.current.cashBalance).not.toBeNull();

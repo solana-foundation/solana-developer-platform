@@ -169,11 +169,9 @@ function resolveWalletBalance(
 
 export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
-  // The asset starts unselected — the trade's whole point is choosing it. The
-  // cash leg preselects the cluster's first stablecoin, which is almost always
-  // the answer.
+  // Both legs start unselected — the trade's whole point is choosing them.
   const asset = useDvpLeg(context.tokens, false);
-  const cash = useDvpLeg(cashOptions, true);
+  const cash = useDvpLeg(cashOptions, false);
   const { error, submit: send, submitting } = useDvpCreateSubmit();
 
   const { values, setField } = useZodForm(createFormSchema, {

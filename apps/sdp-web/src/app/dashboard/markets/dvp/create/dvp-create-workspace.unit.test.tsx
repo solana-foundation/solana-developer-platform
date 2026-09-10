@@ -92,6 +92,12 @@ function fillAssetMint() {
   fireEvent.click(screen.getByText("TBOND"));
 }
 
+/** Picks the first stablecoin in the cash slot, which also starts unselected. */
+function fillCashMint() {
+  fireEvent.click(screen.getByRole("button", { name: /^cash/i }));
+  fireEvent.click(screen.getByText("USDC"));
+}
+
 /** Fills both legs' amounts, the last input the legs step gates on. */
 function fillAmounts() {
   fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10" } });
@@ -107,6 +113,7 @@ function advanceToReview() {
   fillPartyA();
   fillPartyB();
   fillAssetMint();
+  fillCashMint();
   fillAmounts();
   fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 }
