@@ -21,10 +21,9 @@ const OUTBOX_BATCH_SIZE = 256;
  *
  * A completed tick emits `sdp_api_earn_vault_reconciliation_tick` (PRO-1863,
  * the `sdp_api_sponsorship_reconciliation_tick` precedent): claimed/settled/
- * failed counts plus the post-tick backlog and ages. Those are what a backlog
- * or movement-age rule needs to key on; no such rule exists yet (SDP's alerts
- * live as code in the sdp-infra repo, and PRO-1863 tracks writing them).
- * A chain read failure or a
+ * failed counts plus the post-tick backlog and ages. The backlog, movement-age
+ * and health rules that key on them live as code in the sdp-infra repo
+ * (`kora/alert-rules/sdp-earn-*.json`, PRO-1903). A chain read failure or a
  * per-movement failure still emits the tick (at error level, with the failure
  * counts) and then THROWS, so the cron run reads failed instead of ok while
  * nothing settles (EARN-006: an RPC outage used to be swallowed into an ok

@@ -526,6 +526,32 @@ refresh is update-only.
   production skip), so orphaned mirror rows never outlive their truth source;
   fundable own shelves keep the absolute empty-keep-set refusal.
 
+### Figure anomaly check (`services/earn/catalogue-anomaly.ts`)
+
+Both passes take provider-reported APY and TVL at face value; this is the
+one check between a provider's number and the comparison table (PRO-1867,
+threat model EARN-010).
+
+- **What it does:** before either pass writes, it reads the stored figures for
+  the (provider, environment) it is about to write (`listStrategyFigures`,
+  the sync scoped to its lane's cluster sub-shelf) and diffs the incoming
+  figures against them. Every APY or TVL move past a bound, or an APY above
+  the absolute ceiling, is one `sdp_api_earn_catalogue_figure_anomaly` warn
+  event; a lane that held rows and reliably received an empty catalogue is
+  one `sdp_api_earn_catalogue_shelf_disappeared` error event, whether or not
+  the lane then delists. New rows are exempt from the diff, never from the
+  ceiling. A missing or unparseable figure on either side is skipped, not
+  guessed.
+- **What it never does:** block or alter a write. The write paths' own
+  invariants (update-only refresh, gated admission, the empty-keep-set
+  refusal) are untouched, and a failure reading the stored figures costs the
+  pass its diff, not its write.
+- **Bounds** live in `EARN_FIGURE_BOUNDS` (3x ratio with an absolute floor
+  for both metrics, 100% APY ceiling) and are starting points, pinned by a
+  test so a change is a deliberate diff. The Grafana rules
+  (`sdp-infra/kora/alert-rules/sdp-earn-catalogue-*.json`) key on the event
+  names, not the numbers.
+
 ## Invariants (do not break)
 
 1. **Money out beats money off.** Money-in gates on environment, strategy,

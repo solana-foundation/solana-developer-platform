@@ -1250,6 +1250,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   (`src/cron/earn-metrics-refresh.ts`) runs every 5 minutes and is UPDATE-only,
   so it can never admit a row. Cadence and failure behaviour:
   `packages/sdp-earn/README.md` → "Catalogue data".
+- **Provider-reported figures are diffed, never trusted silently** (PRO-1867,
+  EARN-010). Both passes read the stored shelf first and emit
+  `sdp_api_earn_catalogue_figure_anomaly` for an APY/TVL move past
+  `EARN_FIGURE_BOUNDS`, and `sdp_api_earn_catalogue_shelf_disappeared` when a
+  lane that held rows reliably lists none (`services/earn/catalogue-anomaly.ts`).
+  Events only: the check never blocks a write, and a failed figures read costs
+  the pass its diff, not its write. Do not "fix" an anomaly by clamping the
+  write; the alert exists so a human looks at the provider.
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** Ground is the
