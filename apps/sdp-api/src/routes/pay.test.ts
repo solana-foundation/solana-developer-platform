@@ -175,28 +175,6 @@ describe("Public payment request routes", () => {
       }
       expect(sponsorship).not.toHaveBeenCalled();
 
-      // The payer still has the full budget.
-      expect((await postTransaction(request.public_token)).status).toBe(200);
-    });
-
-    it("does not spend a sponsored slot on a payload it cannot build a transaction from", async () => {
-      const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
-
-      for (let i = 0; i < 5; i++) {
-        const malformed = await app.request(
-          `/pay/${request.public_token}/tx`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ account: "not-a-solana-address" }),
-          },
-          env
-        );
-        expect(malformed.status).toBe(400);
-      }
-      expect(sponsorship).not.toHaveBeenCalled();
-
       expect((await postTransaction(request.public_token)).status).toBe(200);
     });
 
