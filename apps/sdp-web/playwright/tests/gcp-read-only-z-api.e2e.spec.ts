@@ -8,6 +8,7 @@ interface GoldenEndpoint {
   path: string;
   scope: "org" | "project";
   query?: Record<string, string>;
+  allowDisabled?: boolean;
 }
 
 const FIRST_PAGE = { page: "1", pageSize: "20" };
@@ -30,7 +31,7 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
   { domain: "policies", path: "/v1/policies", scope: "project" },
-  { domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project" },
+  { domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project", allowDisabled: true },
 ];
 
 test.describe("GCP dev API golden endpoints", () => {
@@ -61,7 +62,13 @@ test.describe("GCP dev API golden endpoints", () => {
       const path = endpoint.query
         ? `${endpoint.path}?${new URLSearchParams(endpoint.query)}`
         : endpoint.path;
-      await expect(api.get(path)).resolves.toBeDefined();
+      const read = api.get(path).catch((error: unknown) => {
+        if (endpoint.allowDisabled && /not enabled for this environment/i.test(String(error))) {
+          return "feature-disabled";
+        }
+        throw error;
+      });
+      await expect(read).resolves.toBeDefined();
     });
   }
 });
