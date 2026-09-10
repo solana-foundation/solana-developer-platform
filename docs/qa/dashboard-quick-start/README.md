@@ -2,6 +2,13 @@
 
 The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress and opens the guide on click. The expanded guide's X minimizes it back to the card and preserves progress, just like Escape or Continue later. The sidebar card's X asks for confirmation before hiding the guide, with a reminder that it can be resumed in Settings → Onboarding. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
 
+## Expanded guide layout — September 10
+
+- Removed the visible SDP quick start label inside the guide. The dialog retains its accessible name.
+- Reused `WizardStepProgress` from the counterparty form, replacing the full-width progress bar with segmented step indicators and the step count in the header.
+- Continue later is a primary button aligned to the right. It still minimizes the guide and preserves progress.
+- Verified the actual component in dark mode at desktop width and 390 × 700, including the optional wallet step and returning focus to Settings. All 28 focused guide, storage, and home tests passed; web typecheck, Biome, module boundaries, and diff checks passed.
+
 ## Dismissal and Settings verification — September 10
 
 - Settings has an Onboarding section with the saved step and a Continue quick start action. Resuming restores the sidebar card and opens the guide at the saved step. Older previews that stored dismissal as completion can restart explicitly from Settings. Existing organization setup still suppresses the guide.

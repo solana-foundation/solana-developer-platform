@@ -7,6 +7,7 @@ import { AlertDialog, Dialog } from "radix-ui";
 import { type RefObject, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -299,13 +300,12 @@ export function DashboardQuickStart({
   const content = (
     <>
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="text-xs font-medium text-secondary">{t("Shared.quickStart.title")}</p>
-          <p className="text-xs text-tertiary">
-            {t("Shared.quickStart.progress", { current: stepNumber, total: 3 })}
-            {step === "wallet" ? ` · ${t("Shared.quickStart.optional")}` : null}
-          </p>
-        </div>
+        <WizardStepProgress
+          currentStep={stepNumber - 1}
+          progressLabel={`${t("Shared.quickStart.progress", { current: stepNumber, total: 3 })}${step === "wallet" ? ` · ${t("Shared.quickStart.optional")}` : ""}`}
+          steps={Object.values(stepCopy).map((step) => t(step.title))}
+          className="min-w-0 shrink flex-wrap gap-x-3 gap-y-2"
+        />
         <button
           type="button"
           onClick={minimize}
@@ -316,24 +316,10 @@ export function DashboardQuickStart({
           <X className="size-4" aria-hidden />
         </button>
       </div>
-      <h2 className="mt-1 text-base font-medium" aria-live="polite">
+      <h2 className="mt-4 text-base font-medium" aria-live="polite">
         {title}
       </h2>
       <p className="mt-2 text-sm leading-5 text-secondary">{description}</p>
-      <div
-        role="progressbar"
-        aria-label={t("Shared.quickStart.title")}
-        aria-valuemin={1}
-        aria-valuemax={3}
-        aria-valuenow={stepNumber}
-        aria-valuetext={t("Shared.quickStart.progress", { current: stepNumber, total: 3 })}
-        className="mt-5 h-1.5 overflow-hidden rounded-full bg-fill"
-      >
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
-          style={{ width: `${(stepNumber / 3) * 100}%` }}
-        />
-      </div>
       <div className="mt-4">
         <StepAction
           step={activeStep}
@@ -349,9 +335,9 @@ export function DashboardQuickStart({
           {t(current.skip)}
         </button>
       </div>
-      <Button variant="ghost" className="mt-2 w-full" onClick={minimize}>
-        {t("Shared.quickStart.later")}
-      </Button>
+      <div className="mt-4 flex justify-end">
+        <Button onClick={minimize}>{t("Shared.quickStart.later")}</Button>
+      </div>
     </>
   );
   return (

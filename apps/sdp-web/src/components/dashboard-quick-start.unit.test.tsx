@@ -88,7 +88,7 @@ describe("dashboard quick start", () => {
     expect(view.getByRole("link", { name: "Create API key" }).getAttribute("href")).toBe(
       "/dashboard/api-keys/new"
     );
-    expect(view.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1");
+    expect(view.getByRole("status").textContent).toBe("Step 1 of 3");
     expect(readQuickStart(key())).toBe("api-key");
     act(() => completeQuickStartStep(key(), "api-key"));
     expect(view.getByText("Step 2 of 3 · Optional")).toBeTruthy();
