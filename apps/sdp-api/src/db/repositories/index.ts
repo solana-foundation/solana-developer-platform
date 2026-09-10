@@ -111,14 +111,7 @@ export type {
 } from "./helius-rings-health.repository";
 export { mapHeliusRingsHealthRows } from "./helius-rings-health.repository";
 export { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
-export type {
-  CreateHeliusRingsKeyRefInput,
-  HeliusRingsKeyRefRepository,
-  HeliusRingsKeyRefRepositoryContext,
-  HeliusRingsKeyRefRow,
-} from "./helius-rings-key-ref.repository";
-export { generateHeliusRingsKeyRefId } from "./helius-rings-key-ref.repository";
-export { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
+export type {} from "./helius-rings-key-ref.repository";
 export type {
   FailHeliusRingsOperationInput,
   HeliusRingsOperationRepository,
@@ -468,7 +461,6 @@ export {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
-  createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,

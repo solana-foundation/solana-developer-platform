@@ -36,13 +36,6 @@ export interface ProofArtifact {
   createdAt: string;
 }
 
-export interface KeyRef {
-  kind: KeyKind;
-  material: SecretRef<Uint8Array>;
-  materialTag: MaterialTag;
-  keyVersion: string;
-}
-
 export interface PrivateWallet {
   id: string;
   sdpWalletId: string;

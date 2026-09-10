@@ -6,6 +6,7 @@ import {
   canonicalShieldedIdentity,
   createShieldedMaterial,
   isValidViewingKeyBytes,
+  publishedHalves,
   RingsIdentityMismatchError,
   type ShieldedMaterialInput,
 } from "./material.js";
@@ -51,10 +52,12 @@ describe("createShieldedMaterial", () => {
     const second = await createShieldedMaterial({ ...INPUT, owner: OTHER_OWNER });
 
     try {
-      // Identical secrets under different addresses, which is what lets custody
-      // hold the Ed25519 secret while these keys are produced elsewhere.
-      expect(second.viewingKey.secretBytes()).toStrictEqual(first.viewingKey.secretBytes());
-      expect(second.nullifierKey.secretBytes()).toStrictEqual(first.nullifierKey.secretBytes());
+      // Identical published halves under different addresses, which is what lets
+      // custody hold the Ed25519 secret while these keys are produced elsewhere.
+      // Read off the address: the secrets never leave the material.
+      expect(publishedHalves(second.shieldedAddress)).toStrictEqual(
+        publishedHalves(first.shieldedAddress)
+      );
       expect(second.shieldedAddress.ownerHash()).not.toStrictEqual(
         first.shieldedAddress.ownerHash()
       );
@@ -80,12 +83,13 @@ describe("createShieldedMaterial", () => {
     await expect(createShieldedMaterial({ ...INPUT, owner: "not-an-address" })).rejects.toThrow();
   });
 
-  it("leaves both keys unusable after destroy", async () => {
+  it("cannot produce keys after destroy", async () => {
     const material = await createShieldedMaterial(INPUT);
     material.destroy();
 
-    expect(() => material.viewingKey.publicKey()).toThrow();
-    expect(() => material.nullifierKey.publicKey()).toThrow();
+    // The factories copy from the destroyed originals, so both refuse rather
+    // than handing back a zeroed key that would derive a wrong identity.
+    expect(() => material.readKeys()).toThrow();
   });
 });
 

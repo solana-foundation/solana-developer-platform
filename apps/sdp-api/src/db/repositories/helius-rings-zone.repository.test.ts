@@ -3,8 +3,6 @@ import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { HeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository";
-import { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
 import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
 import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
 import { mapHeliusRingsZoneRow } from "./helius-rings-zone.repository";
@@ -13,12 +11,11 @@ import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.rep
 const TEST_PROJECT_ID = "prj_hrk_repo_test";
 const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
-let keyRefRepo: HeliusRingsKeyRefRepository;
 let zoneRepo: HeliusRingsZoneRepository;
 let walletId: string;
 let otherWalletId: string;
 
-describe("HeliusRingsKeyRefRepository / HeliusRingsZoneRepository (postgres)", () => {
+describe("HeliusRingsZoneRepository (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
@@ -62,86 +59,7 @@ describe("HeliusRingsKeyRefRepository / HeliusRingsZoneRepository (postgres)", (
     walletId = wallet.id;
     otherWalletId = other.id;
 
-    keyRefRepo = createPostgresHeliusRingsKeyRefRepository(db);
     zoneRepo = createPostgresHeliusRingsZoneRepository(db);
-  });
-
-  describe("key refs", () => {
-    it("stores a sealed blob without interpreting it", async () => {
-      const keyRef = await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-blob",
-        keyVersion: "v1",
-        materialTag: "simulated",
-      });
-
-      expect(keyRef).toMatchObject({
-        wallet_id: walletId,
-        kind: "viewing",
-        ciphertext: "sealed-blob",
-        key_version: "v1",
-      });
-    });
-
-    it("does not re-seal on a replay, because the first blob owns the identity", async () => {
-      const first = await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-first",
-        keyVersion: "v1",
-        materialTag: "simulated",
-      });
-      const replay = await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-second",
-        keyVersion: "v2",
-        materialTag: "simulated",
-      });
-
-      expect(replay?.id).toBe(first?.id);
-      // Overwriting would strand the blob the shielded identity was derived
-      // from and make the wallet unreachable.
-      expect(replay?.ciphertext).toBe("sealed-first");
-      expect(replay?.key_version).toBe("v1");
-    });
-
-    it("keeps one blob per kind per wallet", async () => {
-      await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-viewing",
-        keyVersion: "v1",
-        materialTag: "simulated",
-      });
-      await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "nullifier",
-        ciphertext: "sealed-nullifier",
-        keyVersion: "v1",
-        materialTag: "simulated",
-      });
-
-      const listed = await keyRefRepo.listKeyRefsByWallet({ walletId });
-      expect(listed.map((keyRef) => keyRef.kind)).toEqual(["nullifier", "viewing"]);
-      expect(await keyRefRepo.getKeyRef({ walletId, kind: "viewing" })).toMatchObject({
-        ciphertext: "sealed-viewing",
-      });
-    });
-
-    it("does not leak another wallet's blobs", async () => {
-      await keyRefRepo.createKeyRef({
-        walletId,
-        kind: "viewing",
-        ciphertext: "sealed-viewing",
-        keyVersion: "v1",
-        materialTag: "simulated",
-      });
-
-      expect(await keyRefRepo.getKeyRef({ walletId: otherWalletId, kind: "viewing" })).toBeNull();
-      expect(await keyRefRepo.listKeyRefsByWallet({ walletId: otherWalletId })).toEqual([]);
-    });
   });
 
   describe("zones", () => {

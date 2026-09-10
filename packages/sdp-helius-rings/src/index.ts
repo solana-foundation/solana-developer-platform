@@ -56,7 +56,6 @@ export type {
   AssetBalance,
   FailureCode,
   KeyKind,
-  KeyRef,
   MaterialTag,
   OperationEvent,
   OperationFailure,
