@@ -98,6 +98,19 @@ balance with a live one.
   integration guide is derived from the strategy catalogue and persists
   nothing.
 
+- **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
+  model EARN-027). `registerPublicEarnPaths` decides what partners see, and
+  the public/preview split is a PUBLICATION boundary only: every `/v1/earn`
+  route accepts every auth mode at runtime, and both surfaces are the same
+  Hono router under the same `/v1/*` tracing and rate-limit middleware. So
+  moving a route into the public document changes the partner-facing scope
+  without changing any enforcement, which is why it needs a human gate. The
+  pinned operation list in `../../openapi/spec.test.ts` ("publishes the
+  caller-signed money routes") is that gate: growing it requires a security
+  sign-off named in the PR (who reviewed, and the threat-model row the route
+  lands under), and the threat model's revisit trigger fires. Never widen the
+  list just to make the test pass.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
@@ -813,6 +826,30 @@ Three details that look like bugs and are not:
 Pinned by the "sweep telemetry" describe in
 `../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
 `runWithCronRunEvent` test composes the real wrapper.
+
+**Expiring a `submitted` movement takes TWO unknown-signature observations**
+(PRO-1904, migration 0092). The evidence bar differs by status because the
+statuses carry different facts:
+
+- `requested` is unbroadcast. Past its blockhash it cannot land, so one null
+  status past the window expires it on that tick (the pre-existing rule).
+- `confirmed` demonstrably landed. A null status is RPC history forgetting, so
+  it is never expired (PRO-1716).
+- `submitted` was broadcast and MAY have landed. RPC history is not complete
+  (the `confirmed` rule exists for exactly that reason), so one null answer is
+  evidence, not proof, and a false `failed` is terminal with the shares still
+  in the vault. The first null observation past the window writes
+  `unknown_signature_observed_at` and returns `unchanged`; only a LATER tick
+  that sees the signature unknown again fails the row. A tick that finds the
+  signature in between advances it normally and the mark becomes inert.
+
+The mark is written only by the sweep (the interactive read-through passes no
+block height and can neither park nor expire), only on a `submitted` row, and
+only once (COALESCE), so a burst of ticks cannot count as two observations. An
+unavailable block-height read is not an observation either: the row is left for
+the next tick (ADR 0002 exit safety). Cost: a genuinely dead submitted
+movement fails one tick later than before. Pinned by the "expiring a SUBMITTED
+movement" describe in the same test file.
 
 ### Vault withdrawals — the exit half (PRO-1702)
 

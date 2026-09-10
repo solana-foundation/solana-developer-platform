@@ -90,6 +90,51 @@ describe("OpenAPI spec", () => {
     }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
+    // ── SECURITY REVIEW GATE (PRO-1872, threat model EARN-027) ──────────────
+    // The public/preview split is a PUBLICATION boundary, not an auth boundary:
+    // every /v1/earn route accepts every auth mode at runtime, so the public
+    // document is the whole partner-facing contract. Promoting a preview route
+    // into it is a security-relevant scope change and a threat-model revisit
+    // trigger. This list is the gate: a PR that grows it must carry security
+    // sign-off (routes/earn/CLAUDE.md, "Public OpenAPI promotion"). Do not
+    // widen the list to make a red test pass.
+    const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
+      .filter(([path]) => path.startsWith("/v1/earn"))
+      .flatMap(([path, item]) =>
+        Object.keys(item ?? {})
+          .filter((method) => ["get", "post", "put", "patch", "delete"].includes(method))
+          .map((method) => `${method.toUpperCase()} ${path}`)
+      )
+      .sort();
+    expect(publicEarnOperations).toEqual(
+      [
+        "GET /v1/earn/strategies",
+        "GET /v1/earn/strategies/{strategyId}",
+        "POST /v1/earn/vault-deposit-previews",
+        "GET /v1/earn/external-wallet/positions/summary",
+        "GET /v1/earn/external-wallet/positions",
+        "GET /v1/earn/external-wallet/movements",
+        "GET /v1/earn/external-wallet/movements/{movementId}",
+        "GET /v1/earn/external-wallet/earnings",
+        "POST /v1/earn/external-wallet/deposit-transactions",
+        "POST /v1/earn/external-wallet/deposits",
+        "POST /v1/earn/external-wallet/withdrawal-previews",
+        "POST /v1/earn/external-wallet/withdrawal-transactions",
+        "POST /v1/earn/external-wallet/withdrawals",
+      ].sort()
+    );
+    // Coverage parity across the boundary: every published operation is the
+    // same registered route as its internal twin (same operationId), so the
+    // app-level request tracing and rate limiting that wrap `/v1/*` apply to
+    // both by construction; there is no public-only mount to fall outside them.
+    for (const operation of publicEarnOperations) {
+      const [method, path] = operation.split(" ") as [string, string];
+      const key = method.toLowerCase() as "get" | "post";
+      expect(internal.paths?.[path]?.[key]?.operationId).toBe(
+        publicDocument.paths?.[path]?.[key]?.operationId
+      );
+    }
+
     for (const path of [
       "/v1/earn/vault-deposit-previews",
       "/v1/earn/external-wallet/deposit-transactions",
