@@ -9,7 +9,7 @@ vi.mock("./sdp-api", () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.projects.mockResolvedValue([{ id: "sandbox_project" }, { id: "production_project" }]);
-  mocks.fetch.mockResolvedValue({ wallets: [] }).mockResolvedValueOnce({
+  mocks.fetch.mockResolvedValue({ wallets: [], apiKeys: [] }).mockResolvedValueOnce({
     linked: true,
     setup: { status: "not_started", canManage: true, custodyProvider: null },
   });
@@ -30,20 +30,48 @@ describe("onboarding eligibility from organization state", () => {
     expect(await loadQuickStartStep()).toBe("done");
     expect(mocks.projects).not.toHaveBeenCalled();
   });
-  it("starts a synced, incomplete organization only when all accessible projects have no wallets", async () => {
+  it("starts a synced organization only when all accessible projects have no wallets or API keys", async () => {
     expect(await loadQuickStartStep()).toBe("api-key");
     for (const projectId of ["sandbox_project", "production_project"]) {
       expect(mocks.fetch).toHaveBeenCalledWith(
         "/v1/wallets?includeAllProviders=true&includeBalances=false&view=summary",
         { headers: { "x-project-id": projectId }, signal: expect.any(AbortSignal) }
       );
+      expect(mocks.fetch).toHaveBeenCalledWith("/v1/api-keys", {
+        headers: { "x-project-id": projectId },
+        signal: expect.any(AbortSignal),
+      });
     }
+  });
+  it("skips key creation when an API key exists without a wallet binding in another project", async () => {
+    mocks.fetch
+      .mockResolvedValueOnce({ wallets: [] })
+      .mockResolvedValueOnce({ wallets: [] })
+      .mockResolvedValueOnce({ apiKeys: [] })
+      .mockResolvedValueOnce({ apiKeys: [{ id: "existing_key", walletBindings: [] }] });
+    expect(await loadQuickStartStep()).toBe("wallet");
+  });
+  it("does not mistake an unavailable API-key list for a new organization", async () => {
+    mocks.fetch
+      .mockResolvedValueOnce({ wallets: [] })
+      .mockResolvedValueOnce({ wallets: [] })
+      .mockRejectedValueOnce(new Error("API-key service unavailable"));
+    expect(await loadQuickStartStep()).toBeNull();
+  });
+  it("keeps known key-creation progress when another project's key lookup fails", async () => {
+    mocks.fetch
+      .mockResolvedValueOnce({ wallets: [] })
+      .mockResolvedValueOnce({ wallets: [] })
+      .mockRejectedValueOnce(new Error("API-key service unavailable"))
+      .mockResolvedValueOnce({ apiKeys: [{ id: "existing_key" }] });
+    expect(await loadQuickStartStep()).toBe("wallet");
   });
   it("suppresses the guide when a wallet exists outside the default sandbox", async () => {
     mocks.fetch.mockResolvedValueOnce({ wallets: [] }).mockResolvedValueOnce({
       wallets: [{ id: "existing_production_wallet" }],
     });
     expect(await loadQuickStartStep()).toBe("done");
+    expect(mocks.fetch).not.toHaveBeenCalledWith("/v1/api-keys", expect.anything());
   });
   it("does not mistake an unavailable wallet list for a new organization", async () => {
     mocks.fetch.mockRejectedValueOnce(new Error("wallet service unavailable"));

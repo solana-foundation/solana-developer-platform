@@ -57,13 +57,11 @@ const stepCopy = {
 
 function StepAction({
   step,
-  onFollow,
-  onBack,
+  onClose,
   canCreateWallet,
 }: {
   step: keyof typeof stepCopy;
-  onFollow: () => void;
-  onBack: () => void;
+  onClose: () => void;
   canCreateWallet: boolean;
 }) {
   const t = useTranslations();
@@ -71,7 +69,7 @@ function StepAction({
   const current = stepCopy[step];
   if (pathname === current.href) {
     return (
-      <Button className="w-full rounded-full" onClick={onBack}>
+      <Button className="w-full rounded-full" onClick={onClose}>
         {t("Shared.quickStart.backToForm")}
       </Button>
     );
@@ -80,7 +78,7 @@ function StepAction({
   return (
     <Button asChild className="w-full rounded-full">
       <Link
-        onClick={onFollow}
+        onClick={onClose}
         href={current.href}
         target={step === "faucet" ? "_blank" : undefined}
         rel={step === "faucet" ? "noopener noreferrer" : undefined}
@@ -214,6 +212,72 @@ function QuickStartDismissButton({
   );
 }
 
+function QuickStartSidebarLauncher({
+  step,
+  collapsed,
+  expanded,
+  launcherRef,
+  onOpen,
+  onDismiss,
+}: {
+  step: keyof typeof stepCopy;
+  collapsed: boolean;
+  expanded: boolean;
+  launcherRef: RefObject<HTMLButtonElement | null>;
+  onOpen: () => void;
+  onDismiss: () => void;
+}) {
+  const t = useTranslations();
+  const current = stepCopy[step];
+  const stepNumber = current.number;
+  const title = t(current.title);
+  const launcherLabel = `${t("Shared.quickStart.title")} · ${stepNumber}/3`;
+  return (
+    <aside
+      aria-label={t("Shared.quickStart.title")}
+      data-quick-start-sidebar
+      className="relative shrink-0 rounded-xl border border-border-default bg-fill-subtle text-primary"
+    >
+      <button
+        type="button"
+        aria-label={launcherLabel}
+        aria-haspopup="dialog"
+        aria-expanded={expanded}
+        title={collapsed ? launcherLabel : undefined}
+        ref={launcherRef}
+        onClick={onOpen}
+        className={
+          collapsed
+            ? "flex h-10 w-full items-center justify-center rounded-xl hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
+            : "block w-full rounded-xl p-3 text-left hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
+        }
+      >
+        {collapsed ? (
+          <ListChecks className="size-4 text-secondary" aria-hidden />
+        ) : (
+          <>
+            <span className="block pr-6 text-sm font-medium">{t("Shared.quickStart.title")}</span>
+            <span className="mt-3 flex items-center justify-between gap-3 text-xs text-secondary">
+              <span className="truncate">{title}</span>
+              <span className="shrink-0 text-tertiary">{stepNumber}/3</span>
+            </span>
+            <span
+              className="mt-2 block h-1 overflow-hidden rounded-full bg-fill-strong"
+              aria-hidden
+            >
+              <span
+                className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
+                style={{ width: `${(stepNumber / 3) * 100}%` }}
+              />
+            </span>
+          </>
+        )}
+      </button>
+      {collapsed ? null : <QuickStartDismissButton compact onDismiss={onDismiss} />}
+    </aside>
+  );
+}
+
 export function DashboardQuickStart({
   collapsed = false,
   variant = "sidebar",
@@ -253,7 +317,6 @@ export function DashboardQuickStart({
   const canCreateWallet = flags.custody && dashboardAccess.capabilities.canManageCustody;
   const title = t(current.title);
   const description = t(current.description);
-  const launcherLabel = `${t("Shared.quickStart.title")} · ${stepNumber}/3`;
   const launcher =
     variant === "settings" ? (
       <QuickStartSettingsLauncher
@@ -266,50 +329,15 @@ export function DashboardQuickStart({
         }}
       />
     ) : (
-      <aside
-        aria-label={t("Shared.quickStart.title")}
-        data-quick-start-sidebar
-        className="relative shrink-0 rounded-xl border border-border-default bg-fill-subtle text-primary"
-      >
-        <button
-          type="button"
-          aria-label={launcherLabel}
-          aria-haspopup="dialog"
-          aria-expanded={Boolean(isModal)}
-          title={collapsed ? launcherLabel : undefined}
-          ref={launcherRef}
-          onClick={() => setExpandedKey(storageKey)}
-          className={
-            collapsed
-              ? "flex h-10 w-full items-center justify-center rounded-xl hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
-              : "block w-full rounded-xl p-3 text-left hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2"
-          }
-        >
-          {collapsed ? (
-            <ListChecks className="size-4 text-secondary" aria-hidden />
-          ) : (
-            <>
-              <span className="block pr-6 text-sm font-medium">{t("Shared.quickStart.title")}</span>
-              <span className="mt-3 flex items-center justify-between gap-3 text-xs text-secondary">
-                <span className="truncate">{title}</span>
-                <span className="shrink-0 text-tertiary">{stepNumber}/3</span>
-              </span>
-              <span
-                className="mt-2 block h-1 overflow-hidden rounded-full bg-fill-strong"
-                aria-hidden
-              >
-                <span
-                  className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
-                  style={{ width: `${(stepNumber / 3) * 100}%` }}
-                />
-              </span>
-            </>
-          )}
-        </button>
-        {collapsed ? null : (
-          <QuickStartDismissButton key={storageKey} compact onDismiss={dismiss} />
-        )}
-      </aside>
+      <QuickStartSidebarLauncher
+        key={storageKey}
+        step={activeStep}
+        collapsed={collapsed}
+        expanded={Boolean(isModal)}
+        launcherRef={launcherRef}
+        onOpen={() => setExpandedKey(storageKey)}
+        onDismiss={dismiss}
+      />
     );
   if (!isModal) return launcher;
 
@@ -329,12 +357,7 @@ export function DashboardQuickStart({
       </h2>
       <p className="mt-2 text-sm leading-5 text-secondary">{description}</p>
       <div className="mt-4">
-        <StepAction
-          step={activeStep}
-          onFollow={minimize}
-          onBack={minimize}
-          canCreateWallet={canCreateWallet}
-        />
+        <StepAction step={activeStep} onClose={minimize} canCreateWallet={canCreateWallet} />
         <button
           type="button"
           onClick={() => setQuickStart(storageKey, current.next)}

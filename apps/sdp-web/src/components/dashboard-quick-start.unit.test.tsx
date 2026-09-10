@@ -295,6 +295,11 @@ describe("dashboard quick start", () => {
     const restored = render(ui(true));
     fireEvent.click(restored.getByRole("button", { name: "SDP quick start · 2/3" }));
     expect(restored.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
+    fireEvent.click(restored.getByRole("button", { name: "Dismiss SDP quick start" }));
+    fireEvent.click(restored.getByRole("button", { name: "Dismiss quick start" }));
+    expect(restored.queryByRole("complementary")).toBeNull();
+    expect(isQuickStartDismissed(key())).toBe(true);
+    expect(readQuickStart(key())).toBe("wallet");
   });
 
   it("keeps the optional step skippable when custody is unavailable", () => {

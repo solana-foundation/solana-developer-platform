@@ -630,7 +630,7 @@ export function HomeWorkspace({
         {heroState.kind !== "populated" &&
         sdpEnvironment === "sandbox" &&
         !quickStartFinished &&
-        initialQuickStartStep !== null &&
+        initialQuickStartStep === "api-key" &&
         dashboardAccess.capabilities.canManageApiKeys ? null : (
           <BalanceHero
             {...balancePresentation}

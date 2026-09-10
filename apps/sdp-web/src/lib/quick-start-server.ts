@@ -1,4 +1,4 @@
-import type { CustodyWalletsResponse } from "@sdp/types";
+import type { CustodyWalletsResponse, ListApiKeysResponse } from "@sdp/types";
 import { cache } from "react";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import type { QuickStartStep } from "./dashboard-quick-start";
@@ -29,6 +29,18 @@ export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null>
     if (wallets.some((result) => result.status === "fulfilled" && result.value.wallets.length > 0))
       return "done";
     if (wallets.some((result) => result.status === "rejected")) return null;
+    const keys = await Promise.allSettled(
+      projects.map((project) =>
+        client.fetch<ListApiKeysResponse>("/v1/api-keys", {
+          headers: { [PROJECT_HEADER_NAME]: project.id },
+          signal,
+        })
+      )
+    );
+    // Key creation is already complete, even without a wallet binding or browser history.
+    if (keys.some((result) => result.status === "fulfilled" && result.value.apiKeys.length > 0))
+      return "wallet";
+    if (keys.some((result) => result.status === "rejected")) return null;
     return "api-key";
   } catch {
     // Unknown is not new: don't flash an onboarding modal on a status failure.

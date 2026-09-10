@@ -74,11 +74,7 @@ export function resumeQuickStart(key: string): void {
 }
 
 export function completeQuickStartStep(key: string, completed: "api-key" | "wallet"): void {
-  if (completed === "wallet") {
-    setQuickStart(key, "done");
-  } else if (readQuickStart(key) === completed) {
-    setQuickStart(key, "wallet");
-  }
+  setQuickStart(key, completed === "wallet" ? "done" : "wallet");
 }
 
 export function subscribeQuickStart(onChange: () => void): () => void {

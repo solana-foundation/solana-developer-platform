@@ -34,6 +34,7 @@ vi.mock("./wallets/section-entry", () => ({
 let progressKey: string;
 let orgSequence = 0;
 beforeEach(() => {
+  workspace.initialQuickStartStep = "api-key";
   workspace.dashboardCacheScope.orgId = `home_org_${++orgSequence}`;
   progressKey = quickStartKey(workspace.dashboardCacheScope);
 });
@@ -57,6 +58,13 @@ afterEach(() => {
 });
 
 describe("home after quick start", () => {
+  it("preserves balances for an organization with existing API keys on a fresh browser", () => {
+    workspace.initialQuickStartStep = "wallet";
+    const view = render(ui());
+    expect(view.getByText("Total Balance")).toBeTruthy();
+    expect(view.getByRole("link", { name: "Create a wallet" })).toBeTruthy();
+  });
+
   it("shows balances while the guide is dismissed and restores onboarding when resumed", () => {
     setQuickStart(progressKey, "wallet");
     const view = render(ui());

@@ -39,6 +39,18 @@ describe("browser quick-start progress", () => {
     expect(guide.readQuickStart(key)).toBe("done");
   });
 
+  it("does not regress progress or reopen dismissal when API-key creation finishes late", async () => {
+    const guide = await import("./dashboard-quick-start");
+    guide.setQuickStart(key, "faucet");
+    guide.dismissQuickStart(key);
+    guide.completeQuickStartStep(key, "api-key");
+    expect(guide.readQuickStart(key)).toBe("faucet");
+    expect(guide.isQuickStartDismissed(key)).toBe(true);
+    guide.completeQuickStartStep(key, "wallet");
+    guide.completeQuickStartStep(key, "api-key");
+    expect(guide.readQuickStart(key)).toBe("done");
+  });
+
   it("falls back to session progress when browser storage is unavailable", async () => {
     const guide = await import("./dashboard-quick-start");
     for (const method of ["getItem", "setItem"] as const) {

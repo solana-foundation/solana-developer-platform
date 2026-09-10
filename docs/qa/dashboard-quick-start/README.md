@@ -2,6 +2,18 @@
 
 The current guide is a compact sidebar card immediately above the account/email menu, on both desktop and the mobile navigation drawer. It shows the current step and progress and opens the guide on click. Both the expanded guide's X and the sidebar card's X ask for confirmation before hiding the guide, with a reminder that it can be resumed in Settings → Onboarding. Cancel returns to the current step without changing progress. Escape or following the step's action still minimizes the guide. A collapsed desktop sidebar uses an icon launcher. The guide no longer opens automatically or occupies a form-footer row.
 
+## Review follow-up and simplification — September 10
+
+- Synced the branch with main. Next.js checks existing API-key records after ruling out wallets. An organization with an API key starts at wallet setup and retains its normal balance panel on a fresh browser; failed key lookups do not classify it as new. Wallet setup or explicit dismissal still hides the guide.
+- Separated the sidebar launcher markup from guide state, combined identical action-close callbacks, and reused monotonic progress updates for creation completion.
+- All 52 focused guide, storage, eligibility, home, and loading tests passed. Web typecheck, scoped Biome, and module boundaries passed.
+- Browser checks used the real guide and home components with synthetic workspace data in an isolated fixture. Verified the existing-key balance panel, step 2, dark-mode confirmation, and collapsed-sidebar dismissal at 1280 × 720 and 390 × 700.
+
+![Existing API-key organization keeps its balance panel](desktop-existing-api-key.png)
+![Dark-mode wallet step](desktop-dark-guide.png)
+![Dark-mode dismissal confirmation](desktop-dark-confirmation.png)
+![Mobile wallet step](mobile-dark-guide.png)
+
 ## Dark-mode separation — September 10
 
 - The guide and dismissal confirmation use the existing darker panel surface in dark mode, with a stronger shadow and a 60% black, lightly blurred backdrop. Light mode retains the existing surface and backdrop.
@@ -54,7 +66,7 @@ September 10 verification: 50 focused web tests passed, along with the web typec
 
 ## Web-only eligibility and persistence
 
-The guide uses existing organization state: legacy completion, a configured default custody wallet, or any wallet in an accessible project suppresses it. Wallet checks include all providers and omit balances. Unknown organization or wallet state does not show the guide. Creating a wallet also dismisses the guide immediately; skipping wallet setup still leads to the test USDC faucet.
+The guide uses existing organization state: legacy completion, a configured default custody wallet, or any wallet in an accessible project suppresses it. Wallet checks include all providers and omit balances. Unknown organization or wallet state does not show the guide. When no wallets exist, existing API-key records seed the wallet step and preserve the normal balance panel. Only organizations with no wallets or API-key records start at API-key creation; an unavailable key list does not count as empty. Creating a wallet also dismisses the guide immediately; skipping wallet setup still leads to the test USDC faucet.
 
 Progress and dismissal live separately in browser storage, scoped to the user and organization, so hiding the guide preserves the current step and changing projects does not reopen it. Settings → Onboarding can clear dismissal and resume progress. Dismissal is not shared with teammates or other browsers and resets when browser data is cleared. Existing wallets still suppress the guide on a new device.
 
