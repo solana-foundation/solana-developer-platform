@@ -67,11 +67,7 @@ export function useUrlTableFilters<State extends object>({
   const [isPending, startTransition] = useTransition();
   const hrefRef = useRef(href);
   const queryRef = useRef(query);
-  hrefRef.current = href;
-  queryRef.current = query;
-
   const returnedStateRef = useRef(returnedState);
-  returnedStateRef.current = returnedState;
   const resultKey = href(returnedState);
 
   const desiredStateRef = useRef(returnedState);
@@ -81,6 +77,12 @@ export function useUrlTableFilters<State extends object>({
   const [queryInput, setQueryInputState] = useState(initialQuery);
   const browserNavigationRef = useRef(false);
   const debouncedQuery = useDebounce(normalizeQuery(queryInput, query), debounceMs);
+
+  useEffect(() => {
+    hrefRef.current = href;
+    queryRef.current = query;
+    returnedStateRef.current = returnedState;
+  }, [href, query, returnedState]);
 
   const setQueryInput = useCallback((input: string) => {
     queryInputRef.current = input;
