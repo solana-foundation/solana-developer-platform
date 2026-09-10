@@ -1,0 +1,19 @@
+# CI-only overlay: share BuildKit layers through the GitHub Actions cache.
+# Requires a docker-container builder and the Actions runtime env (see ci.yml).
+services:
+  sdp-migrate:
+    build:
+      cache_from: [type=gha,scope=sdp-api]
+      cache_to: [type=gha,scope=sdp-api,mode=max]
+  sdp-api:
+    build:
+      cache_from: [type=gha,scope=sdp-api]
+      cache_to: [type=gha,scope=sdp-api,mode=max]
+  sdp-web:
+    build:
+      cache_from: [type=gha,scope=sdp-web]
+      cache_to: [type=gha,scope=sdp-web,mode=max]
+  sdp-docs:
+    build:
+      cache_from: [type=gha,scope=sdp-docs]
+      cache_to: [type=gha,scope=sdp-docs,mode=max]
