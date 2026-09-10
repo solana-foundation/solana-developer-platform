@@ -4629,6 +4629,70 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("refuses a wallet-scoped key that does not hold the list authority wallet", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+        await db
+          .prepare(
+            `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (id) DO NOTHING`
+          )
+          .bind(
+            "akw_issuance_allowlist_scope",
+            TEST_PROJECT_API_KEY.id,
+            "wal_other",
+            JSON.stringify(["tokens:write"])
+          )
+          .run();
+        await seedCachedApiKey(env, apiKeyHash, {
+          ...TEST_PROJECT_CACHED_KEY,
+          walletScope: "selected",
+          signingWalletIds: ["wal_other"],
+          walletBindings: [{ walletId: "wal_other", permissions: ["tokens:write"] }],
+        });
+
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { message: string } };
+          expect(body.error.message).toContain("not authorized for the requested wallet");
+          expect(signerSpy).not.toHaveBeenCalled();
+          expect(addToListSpy).not.toHaveBeenCalled();
+          const row = await db
+            .prepare("SELECT id FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string }>();
+          expect(row).toBeNull();
+        } finally {
+          addToListSpy.mockRestore();
+          await db
+            .prepare("DELETE FROM api_key_wallet_permissions WHERE id = ?")
+            .bind("akw_issuance_allowlist_scope")
+            .run();
+          await seedCachedApiKey(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
+        }
+      });
+
       it("stops a denied on-chain add before signer, provider, or pending row", async () => {
         const db = getDb(env);
         await db
