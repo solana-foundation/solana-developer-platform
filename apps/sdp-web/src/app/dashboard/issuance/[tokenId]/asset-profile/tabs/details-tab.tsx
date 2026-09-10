@@ -1,7 +1,6 @@
 "use client";
 
 import type { Token } from "@sdp/types";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -12,9 +11,18 @@ import { ReadOnlyField, TextField } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 
-export function DetailsTab({ token, form }: { token: Token; form: AssetProfileForm }) {
+export function DetailsTab({
+  token,
+  form,
+  editing,
+  onEdit,
+}: {
+  token: Token;
+  form: AssetProfileForm;
+  editing: boolean;
+  onEdit: () => void;
+}) {
   const t = useTranslations();
-  const [editing, setEditing] = useState(false);
   const { dashboardAccess } = useDashboardWorkspace();
   const rows = [
     [t("DashboardIssuance.forms.name"), form.draft.name],
@@ -30,15 +38,10 @@ export function DetailsTab({ token, form }: { token: Token; form: AssetProfileFo
   ].filter(([, value]) => value);
   return (
     <div className="space-y-4">
-      {dashboardAccess.capabilities.canManageTokenAdmin ? (
+      {dashboardAccess.capabilities.canManageTokenAdmin && !editing ? (
         <div className="flex justify-end">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={form.saving || (editing && form.dirty)}
-            onClick={() => setEditing(!editing)}
-          >
-            {t(editing ? "DashboardIssuance.ux.done" : "DashboardIssuance.ux.editSettings")}
+          <Button variant="secondary" size="sm" disabled={form.saving} onClick={onEdit}>
+            {t("DashboardIssuance.ux.editSettings")}
           </Button>
         </div>
       ) : null}

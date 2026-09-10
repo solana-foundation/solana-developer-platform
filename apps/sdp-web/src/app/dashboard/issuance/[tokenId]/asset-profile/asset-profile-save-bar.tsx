@@ -6,8 +6,19 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
-// Sticky footer bar shown while the edit form has unsaved changes.
+function UnsavedChangesMessage({ dirty, errorCount }: { dirty: boolean; errorCount: number }) {
+  const t = useTranslations();
+  if (!dirty) return null;
+  if (errorCount === 0) return t("DashboardIssuance.saveBar.unsaved");
+  return t("DashboardIssuance.saveBar.unsavedWithErrors", {
+    count: errorCount,
+    suffix: errorCount === 1 ? "" : "s",
+  });
+}
+
+// Settings editing and unsaved permission changes share the same footer.
 export function AssetProfileSaveBar({
+  editing,
   dirty,
   saving,
   errorCount,
@@ -15,6 +26,7 @@ export function AssetProfileSaveBar({
   onDiscard,
   children,
 }: {
+  editing: boolean;
   dirty: boolean;
   saving: boolean;
   errorCount: number;
@@ -28,7 +40,7 @@ export function AssetProfileSaveBar({
   return (
     <LazyMotion features={domAnimation}>
       <AnimatePresence initial={false}>
-        {dirty ? (
+        {editing || dirty ? (
           <m.div
             key="save-bar"
             initial={{ opacity: 0, y: reducedMotion ? 0 : 8 }}
@@ -41,12 +53,7 @@ export function AssetProfileSaveBar({
               {children}
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm text-secondary">
-                  {errorCount > 0
-                    ? t("DashboardIssuance.saveBar.unsavedWithErrors", {
-                        count: errorCount,
-                        suffix: errorCount === 1 ? "" : "s",
-                      })
-                    : t("DashboardIssuance.saveBar.unsaved")}
+                  <UnsavedChangesMessage dirty={dirty} errorCount={errorCount} />
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
@@ -62,7 +69,7 @@ export function AssetProfileSaveBar({
                     type="button"
                     size="sm"
                     onClick={onSave}
-                    disabled={saving || errorCount > 0}
+                    disabled={!dirty || saving || errorCount > 0}
                   >
                     {saving ? (
                       <div className="flex items-center gap-2">

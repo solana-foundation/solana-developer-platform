@@ -26,6 +26,7 @@ export function IssuanceCreateSkeleton() {
             </div>
             <SkeletonBlock className="h-3 w-[68px]" />
           </div>
+          <SkeletonBlock className="mt-5 h-7 w-48" />
         </div>
       </div>
 

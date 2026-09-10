@@ -7,21 +7,16 @@ import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
 } from "@/app/dashboard/custody/actions";
-import {
-  type KnownCustodyProvider,
-  WALLET_PROVIDER_CATEGORIES,
-  WALLET_PROVIDER_CATEGORY_DETAILS,
-} from "@/app/dashboard/custody/provider-catalog";
+import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/custody/provider-display-status";
 import { PrivyCredentialForm } from "@/app/dashboard/custody/setup/privy-credential-form";
-import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { WalletProviderChoices } from "@/app/dashboard/custody/wallet-provider-choices";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
 
@@ -96,96 +91,6 @@ function getInitialSelection(input: {
     provider: null,
     step: "provider",
   };
-}
-
-function ProviderStep({
-  availability,
-  onSelect,
-  selectedProvider,
-}: {
-  availability: CustodyProviderAvailability[];
-  onSelect: (provider: KnownCustodyProvider) => void;
-  selectedProvider: KnownCustodyProvider | null;
-}) {
-  const t = useTranslations();
-  const hasSelectableProvider = availability.some((provider) => provider.isSelectable);
-
-  return (
-    <div className="grid gap-8">
-      {hasSelectableProvider ? null : (
-        <p
-          role="status"
-          className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
-        >
-          {t("DashboardCustody.walletCreationAvailable")}
-        </p>
-      )}
-
-      {WALLET_PROVIDER_CATEGORIES.map((category) => {
-        const providers = availability.filter((provider) => provider.entry.category === category);
-        if (providers.length === 0) {
-          return null;
-        }
-        const details = WALLET_PROVIDER_CATEGORY_DETAILS[category];
-
-        return (
-          <section key={category} className="grid gap-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-primary">{t(details.labelKey)}</h3>
-              <p className="text-sm leading-5 text-tertiary">{t(details.descriptionKey)}</p>
-            </div>
-
-            {providers.map((provider) => {
-              const isSelected = selectedProvider === provider.entry.id;
-
-              return (
-                <ProviderSelectionCard
-                  key={provider.entry.id}
-                  onSelect={() => onSelect(provider.entry.id)}
-                  isSelected={isSelected}
-                  isSelectable={provider.isSelectable}
-                  advanceOnEnter={isSelected}
-                  icon={<WalletProviderMark provider={provider.entry.id} size="sm" />}
-                  title={provider.entry.label}
-                  description={t(provider.entry.descriptionKey)}
-                  badge={
-                    provider.status === "active" ? (
-                      <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
-                        {t("DashboardCustody.active")}
-                      </span>
-                    ) : provider.status === "request_access" ? (
-                      // Visible but not self-serve installable (HOO-772): the
-                      // pill says why the card cannot be selected.
-                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
-                        {t("Shared.integrations.statusRequestAccess")}
-                      </span>
-                    ) : provider.status === "not_configured" ? (
-                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-tertiary">
-                        {t("Shared.integrations.statusNotConfigured")}
-                      </span>
-                    ) : undefined
-                  }
-                  action={
-                    provider.requestAccessUrl ? (
-                      <Button asChild variant="secondary">
-                        <a
-                          href={provider.requestAccessUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >
-                          {t("DashboardCustody.providerRequestAccess")}
-                        </a>
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              );
-            })}
-          </section>
-        );
-      })}
-    </div>
-  );
 }
 
 export function WalletSetupFlow({
@@ -419,7 +324,7 @@ export function WalletSetupFlow({
 
             {currentStep === "provider" ? (
               <form id={PROVIDER_FORM_ID} onSubmit={handleProviderSubmit}>
-                <ProviderStep
+                <WalletProviderChoices
                   availability={availability}
                   onSelect={(provider) => {
                     setSelectedProvider(provider);
