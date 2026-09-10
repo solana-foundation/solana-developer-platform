@@ -1,10 +1,16 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -27,8 +33,10 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -188,6 +196,10 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       transaction: earlyReplay,
       action: "seize",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved seize execution is incomplete and requires manual reconciliation");
+    }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
@@ -226,6 +238,9 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   const source = assertValidAddress(body.seize.source, "source");
   const destination = assertValidAddress(body.seize.destination, "destination");
 
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
+
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
   await admitIssuanceRuntimeExecution({
@@ -261,6 +276,10 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       transaction: tx,
       action: "seize",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved seize execution is incomplete and requires manual reconciliation");
+    }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
@@ -289,6 +308,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.forceTransfer({
       mint: mintAddress,
       source,
@@ -339,3 +359,100 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     throw error;
   }
 };
+
+export async function extractSeizePolicyCandidate(
+  c: ValidatedBodyContext<typeof seizeSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "seize",
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: "seize",
+        idempotencyKey,
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:admin"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(idempotencyKey, {
+            tokenId,
+            operation: "seize",
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  assertTokenAllowsOperation(token, "seize");
+  assertTokenIsDeployed(token);
+
+  parsePositiveTokenAmount(body.seize.amount, token.decimals);
+
+  const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
+  assertDestinationAllowedByControlList({
+    token,
+    destination: body.seize.destination,
+    isOnControlList,
+  });
+
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  if (!permanentDelegateRaw) {
+    throw badRequest("Permanent delegate is not configured for this token");
+  }
+  if (
+    body.seize.delegateAuthority !== undefined &&
+    body.seize.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
+
+  const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId,
+      walletId: providerWalletId,
+      operationType: "issuance_seize_execute",
+      amount: body.seize.amount,
+      destination: body.seize.destination,
+    }),
+  };
+}

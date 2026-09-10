@@ -1,10 +1,16 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -26,8 +32,10 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -177,6 +185,12 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       transaction: earlyReplay,
       action: "force_burn",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved force-burn execution is incomplete and requires manual reconciliation"
+      );
+    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.forceBurn.amount);
     }
@@ -209,6 +223,9 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
+
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
@@ -245,6 +262,12 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       transaction: tx,
       action: "force_burn",
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved force-burn execution is incomplete and requires manual reconciliation"
+      );
+    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
     }
@@ -276,6 +299,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.forceBurn({
       mint: mintAddress,
       source,
@@ -327,3 +351,92 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     throw error;
   }
 };
+
+export async function extractForceBurnPolicyCandidate(
+  c: ValidatedBodyContext<typeof forceBurnSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "force_burn",
+      source: body.forceBurn.source,
+      amount: body.forceBurn.amount,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: "force_burn",
+        idempotencyKey,
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:admin"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(idempotencyKey, {
+            tokenId,
+            operation: "force_burn",
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  assertTokenAllowsOperation(token, "force_burn");
+  assertTokenIsDeployed(token);
+
+  parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
+
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  if (!permanentDelegateRaw) {
+    throw badRequest("Permanent delegate is not configured for this token");
+  }
+  if (
+    body.forceBurn.delegateAuthority !== undefined &&
+    body.forceBurn.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
+
+  const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId,
+      walletId: providerWalletId,
+      operationType: "issuance_force_burn_execute",
+      amount: body.forceBurn.amount,
+      destination: null,
+    }),
+  };
+}

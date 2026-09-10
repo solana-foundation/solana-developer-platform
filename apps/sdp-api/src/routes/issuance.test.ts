@@ -692,6 +692,217 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("stops a denied burn before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_burn_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_burn_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-burn", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/burn`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            burn: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+            signingCustodyWalletId: `cwlt_issuance_activity_${"wal_issuance_burn_denied"}`,
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(403);
+      expect(signerSpy).not.toHaveBeenCalled();
+      const transactionCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+        .first<{ count: number }>();
+      expect(transactionCount).toEqual({ count: 0 });
+      const operationCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>();
+      expect(operationCount).toEqual({ count: 1 });
+    });
+
+    it("stops a denied seize before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_seize_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_seize_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        template: "arcade",
+      });
+      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint").mockResolvedValue({
+        exists: true,
+        data: {
+          mintAuthority: { __option: "None" },
+          freezeAuthority: { __option: "None" },
+          extensions: {
+            __option: "Some",
+            value: [{ __kind: "PermanentDelegate", delegate: policyMintAuthority }],
+          },
+        },
+      } as never);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-seize", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const effectSpy = vi.spyOn(MosaicService.prototype, "forceTransfer");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/seize`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              seize: {
+                source: TEST_SOLANA_ADDRESSES.wallet2,
+                destination: TEST_SOLANA_ADDRESSES.wallet1,
+                amount: "1",
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(effectSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        effectSpy.mockRestore();
+        mintRead.mockRestore();
+      }
+    });
+
+    it("stops a denied force-burn before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_force_burn_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_force_burn_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        template: "arcade",
+      });
+      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint").mockResolvedValue({
+        exists: true,
+        data: {
+          mintAuthority: { __option: "None" },
+          freezeAuthority: { __option: "None" },
+          extensions: {
+            __option: "Some",
+            value: [{ __kind: "PermanentDelegate", delegate: policyMintAuthority }],
+          },
+        },
+      } as never);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-force-burn", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const effectSpy = vi.spyOn(MosaicService.prototype, "forceBurn");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/force-burn`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              forceBurn: { source: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(effectSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        effectSpy.mockRestore();
+        mintRead.mockRestore();
+      }
+    });
+
     it("stops a denied mint before signer and issuance side effects", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_mint_denied",
@@ -1347,6 +1558,61 @@ describe("Issuance Routes", () => {
         expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
         expect(await replay.json()).toMatchObject({
           data: { transaction: { id: "ttx_direct_seize_replay", status: "finalized" } },
+        });
+        expect(authoritySpy).not.toHaveBeenCalled();
+        expect(admitSpy).not.toHaveBeenCalled();
+      } finally {
+        authoritySpy.mockRestore();
+        admitSpy.mockRestore();
+      }
+    });
+
+    it("replays force-burn without resolving the current permanent delegate", async () => {
+      const token = await seedIssuedToken({ id: "tok_direct_force_burn_replay" });
+      const idempotencyKey = "direct-force-burn-replay";
+      const body = {
+        forceBurn: {
+          source: TEST_SOLANA_ADDRESSES.wallet1,
+          amount: "1",
+        },
+      };
+      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+        tokenId: token.id,
+        operation: "force_burn",
+        mode: "execute",
+        params: {
+          ...body,
+          signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        },
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_direct_force_burn_replay",
+        tokenId: token.id,
+        type: "force_burn",
+        status: "finalized",
+        custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        idempotencyKey,
+        idempotencyFingerprint: idempotency.idempotencyFingerprint,
+        signature: "sig_direct_force_burn_replay",
+        slot: 12,
+        params: body.forceBurn,
+      });
+      const authoritySpy = vi
+        .spyOn(AuthorityResolution, "resolvePermanentDelegateAuthority")
+        .mockRejectedValue(new Error("authority unavailable"));
+      const admitSpy = vi
+        .spyOn(SigningService.prototype, "admitRuntimeExecution")
+        .mockRejectedValue(new Error("runtime unavailable"));
+
+      try {
+        const replay = await app.request(
+          `/v1/issuance/tokens/${token.id}/force-burn`,
+          { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
+          env
+        );
+        expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
+        expect(await replay.json()).toMatchObject({
+          data: { transaction: { id: "ttx_direct_force_burn_replay", status: "finalized" } },
         });
         expect(authoritySpy).not.toHaveBeenCalled();
         expect(admitSpy).not.toHaveBeenCalled();

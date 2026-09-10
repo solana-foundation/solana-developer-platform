@@ -21,14 +21,18 @@ import {
   findUpdateAuthorityIdempotentKeyReplay,
   prepareUpdateAuthority,
 } from "./handlers/authority";
-import { executeBurn, prepareBurn } from "./handlers/burn";
+import { executeBurn, extractBurnPolicyCandidate, prepareBurn } from "./handlers/burn";
 import {
   confirmDeploy,
   deployToken,
   prepareDeploy,
   prepareDeployMetadata,
 } from "./handlers/deploy";
-import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
+import {
+  executeForceBurn,
+  extractForceBurnPolicyCandidate,
+  prepareForceBurn,
+} from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
 import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
@@ -40,7 +44,7 @@ import {
   prepareMint,
 } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
-import { executeSeize, prepareSeize } from "./handlers/seize";
+import { executeSeize, extractSeizePolicyCandidate, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
@@ -190,6 +194,7 @@ issuance.post(
   "/tokens/:tokenId/burn",
   requirePermissions("tokens:write"),
   validateBody(burnSchema),
+  policyGate({ extract: extractBurnPolicyCandidate }),
   executeBurn
 );
 
@@ -204,6 +209,7 @@ issuance.post(
   "/tokens/:tokenId/seize",
   requirePermissions("tokens:admin"),
   validateBody(seizeSchema),
+  policyGate({ extract: extractSeizePolicyCandidate }),
   executeSeize
 );
 
@@ -218,6 +224,7 @@ issuance.post(
   "/tokens/:tokenId/force-burn",
   requirePermissions("tokens:admin"),
   validateBody(forceBurnSchema),
+  policyGate({ extract: extractForceBurnPolicyCandidate }),
   executeForceBurn
 );
 
