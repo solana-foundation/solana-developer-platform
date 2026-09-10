@@ -32,7 +32,7 @@ import {
   resolveIssuanceWallet,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   isSettledIssuanceTransaction,
@@ -319,6 +319,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     token.decimals
   );
 
+  assertJudgedCustodyWallet(c, wallet.custodyWalletId);
   await assertApprovedWalletOperationCustodyWallet(c, wallet.custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(wallet.custodyWalletId);
@@ -528,6 +529,7 @@ export async function extractBurnPolicyCandidate(
 
   return {
     ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
     candidate: buildIssuancePolicyCandidate({
       auth,
       token,

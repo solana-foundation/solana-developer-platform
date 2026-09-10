@@ -126,7 +126,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "stops a denied seize before signer and issuance side effects",
+        evidence: "replays seize without resolving the current permanent delegate",
       },
     ],
   },
@@ -146,7 +146,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "stops a denied force-burn before signer and issuance side effects",
+        evidence: "replays force-burn without resolving the current permanent delegate",
       },
     ],
   },
@@ -166,7 +166,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "stops a denied burn before signer and issuance side effects",
+        evidence: "replays burn before runtime checks and rejects a different exact wallet",
       },
     ],
   },

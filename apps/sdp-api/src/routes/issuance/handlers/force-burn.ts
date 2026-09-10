@@ -32,7 +32,7 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   isSettledIssuanceTransaction,
@@ -224,6 +224,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
 
+  assertJudgedCustodyWallet(c, custodyWalletId);
   await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -427,6 +428,7 @@ export async function extractForceBurnPolicyCandidate(
 
   return {
     ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: custodyWalletId },
     candidate: buildIssuancePolicyCandidate({
       auth,
       token,

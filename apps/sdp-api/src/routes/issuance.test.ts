@@ -743,6 +743,10 @@ describe("Issuance Routes", () => {
         .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
         .first<{ count: number }>();
       expect(transactionCount).toEqual({ count: 0 });
+      const operationCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>();
+      expect(operationCount).toEqual({ count: 1 });
     });
 
     it("stops a denied seize before signer and issuance side effects", async () => {
@@ -1554,6 +1558,61 @@ describe("Issuance Routes", () => {
         expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
         expect(await replay.json()).toMatchObject({
           data: { transaction: { id: "ttx_direct_seize_replay", status: "finalized" } },
+        });
+        expect(authoritySpy).not.toHaveBeenCalled();
+        expect(admitSpy).not.toHaveBeenCalled();
+      } finally {
+        authoritySpy.mockRestore();
+        admitSpy.mockRestore();
+      }
+    });
+
+    it("replays force-burn without resolving the current permanent delegate", async () => {
+      const token = await seedIssuedToken({ id: "tok_direct_force_burn_replay" });
+      const idempotencyKey = "direct-force-burn-replay";
+      const body = {
+        forceBurn: {
+          source: TEST_SOLANA_ADDRESSES.wallet1,
+          amount: "1",
+        },
+      };
+      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+        tokenId: token.id,
+        operation: "force_burn",
+        mode: "execute",
+        params: {
+          ...body,
+          signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        },
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_direct_force_burn_replay",
+        tokenId: token.id,
+        type: "force_burn",
+        status: "finalized",
+        custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        idempotencyKey,
+        idempotencyFingerprint: idempotency.idempotencyFingerprint,
+        signature: "sig_direct_force_burn_replay",
+        slot: 12,
+        params: body.forceBurn,
+      });
+      const authoritySpy = vi
+        .spyOn(AuthorityResolution, "resolvePermanentDelegateAuthority")
+        .mockRejectedValue(new Error("authority unavailable"));
+      const admitSpy = vi
+        .spyOn(SigningService.prototype, "admitRuntimeExecution")
+        .mockRejectedValue(new Error("runtime unavailable"));
+
+      try {
+        const replay = await app.request(
+          `/v1/issuance/tokens/${token.id}/force-burn`,
+          { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
+          env
+        );
+        expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
+        expect(await replay.json()).toMatchObject({
+          data: { transaction: { id: "ttx_direct_force_burn_replay", status: "finalized" } },
         });
         expect(authoritySpy).not.toHaveBeenCalled();
         expect(admitSpy).not.toHaveBeenCalled();

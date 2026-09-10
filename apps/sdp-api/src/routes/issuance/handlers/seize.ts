@@ -33,7 +33,7 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   isSettledIssuanceTransaction,
@@ -238,6 +238,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   const source = assertValidAddress(body.seize.source, "source");
   const destination = assertValidAddress(body.seize.destination, "destination");
 
+  assertJudgedCustodyWallet(c, custodyWalletId);
   await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -443,6 +444,7 @@ export async function extractSeizePolicyCandidate(
 
   return {
     ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: custodyWalletId },
     candidate: buildIssuancePolicyCandidate({
       auth,
       token,
