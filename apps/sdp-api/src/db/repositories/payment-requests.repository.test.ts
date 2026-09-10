@@ -518,20 +518,24 @@ describe("PaymentRequestsRepository (postgres)", () => {
         currentBlockHeight: 1_001n,
       });
 
-      await repo.storeSponsoredTransactionSignature({
-        requestId: request.id,
-        account: ACCOUNT_A,
-        unsignedTransaction: "dHhPbGQ=",
-        signedTransaction: "c2lnT2xk",
-      });
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhPbGQ=",
+          signedTransaction: "c2lnT2xk",
+        })
+      ).toBe(false);
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
 
-      await repo.storeSponsoredTransactionSignature({
-        requestId: request.id,
-        account: ACCOUNT_A,
-        unsignedTransaction: "dHhOZXc=",
-        signedTransaction: "c2lnTmV3",
-      });
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhOZXc=",
+          signedTransaction: "c2lnTmV3",
+        })
+      ).toBe(true);
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
         "c2lnTmV3"
       );

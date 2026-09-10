@@ -153,12 +153,24 @@ pay.post(
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
       const signedBase64 = getBase64Decoder().decode(sponsored);
-      await repository.storeSponsoredTransactionSignature({
+      const stored = await repository.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: payer,
         unsignedTransaction: unsignedBase64,
         signedTransaction: signedBase64,
       });
+      if (!stored) {
+        const superseding = await repository.getSponsoredTransactionClaim(request.id);
+        if (
+          superseding !== null &&
+          superseding.lastValidBlockHeight >= currentBlockHeight &&
+          superseding.account === payer &&
+          superseding.signedTransaction !== null
+        ) {
+          return respondWithClaim(superseding.signedTransaction);
+        }
+        throw rateLimited("This payment request's sponsored transaction was superseded; retry");
+      }
       return respondWithClaim(signedBase64);
     };
 

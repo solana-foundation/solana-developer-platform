@@ -105,6 +105,6 @@ export interface PaymentRequestsRepository {
     account: string;
     unsignedTransaction: string;
     signedTransaction: string;
-  }): Promise<void>;
+  }): Promise<boolean>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }

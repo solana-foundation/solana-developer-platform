@@ -221,7 +221,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     },
 
     async storeSponsoredTransactionSignature(params) {
-      await db
+      const changed = await db
         .prepare(
           `UPDATE payment_requests
              SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
@@ -229,8 +229,14 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              AND sponsored_tx_account = ?
              AND sponsored_tx_unsigned = ?`
         )
-        .bind(params.signedTransaction, params.requestId, params.account, params.unsignedTransaction)
+        .bind(
+          params.signedTransaction,
+          params.requestId,
+          params.account,
+          params.unsignedTransaction
+        )
         .run();
+      return changed > 0;
     },
 
     async getPaymentRequestByPublicToken(publicToken) {
