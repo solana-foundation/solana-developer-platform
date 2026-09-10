@@ -1093,8 +1093,12 @@ whose second test exhausts both counters and asserts the payout still lands.
 
 Every earn money write also lands a hash-chained `audit_logs` event: action
 `deposit`/`withdraw`, resourceType `earn_movement`, resourceId the movement id,
-actor identical to the movement's `created_by`/`initiated_by_key_id` (passed
-explicitly, so the two records cannot disagree). Helpers live in
+actor matching the movement's `created_by`/`initiated_by_key_id`. The actor is
+sourced by direction: withdrawals read it off the movement row (post-effect,
+the row exists); deposits are admitted before any row exists, so their intent
+carries the request's own auth, the same values the service writes into the
+row. Passed explicitly in both cases so `log()` never falls back to a context
+naming someone else. Helpers live in
 `handlers/movement-audit.ts`; the five seams are the two custody vault routes,
 the two external-wallet submits, and the program withdrawal.
 
