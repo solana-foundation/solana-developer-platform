@@ -19,7 +19,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
-import { deriveDvpTradeState } from "@/services/dvp/observe";
+import { closeIsKnown, deriveDvpTradeState } from "@/services/dvp/observe";
 import { readDvpTradeObservation } from "@/services/dvp/read-chain";
 import type { Env } from "@/types/env";
 
@@ -173,10 +173,11 @@ async function reconcileTrade(
     blockHeight
   );
   // Two RPC reads per vanished trade, so only while the close is still unknown:
-  // once a close signature is on the row (ours or decoded) the answer is final,
-  // and closed trades stay in this sweep for a week to catch late deposits.
+  // once a close signature is on the row AND the status names the close, the
+  // answer is final. A `closed_unknown` row keeps decoding for its week in the
+  // sweep, because the decode is what lifts it to settled/cancelled/rejected.
   observation.closeResolution =
-    observation.tradeAccountExists || trade.closeSignature !== null
+    observation.tradeAccountExists || closeIsKnown(trade)
       ? null
       : await resolveDvpClose(rpc, trade.swapDvp);
 

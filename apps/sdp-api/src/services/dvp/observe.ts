@@ -46,6 +46,22 @@ export interface DvpTradeExpectation {
   createLastValidBlockHeight: string | null;
 }
 
+/**
+ * Whether a trade's close needs no further decoding.
+ *
+ * True once a close signature is stored AND the status says which close it was.
+ * A `closed_unknown` row with a signature is not done: the decode is what lifts
+ * it to settled, cancelled or rejected.
+ *
+ * @param trade - The stored status and close signature.
+ * @returns True when `resolveDvpClose` would add nothing.
+ */
+export function closeIsKnown(
+  trade: Pick<DvpTradeExpectation, "status"> & { closeSignature: string | null }
+): boolean {
+  return trade.closeSignature !== null && trade.status !== "closed_unknown";
+}
+
 export interface DvpTradeDerivation {
   status: DvpTradeStatus;
   /** True when an escrow holds MORE than its target. See `surplus` below. */
@@ -98,9 +114,13 @@ export function deriveDvpTradeState(
   if (!observation.tradeAccountExists) {
     // Nothing at the address. Two very different reasons, and the row's own
     // status is what tells them apart.
+    // A decoded close is the most informed answer there is, so it also lifts
+    // a `closed_unknown` written by an earlier tick that found no history yet.
     if (
       observation.closeResolution !== null &&
-      (trade.status === "creating" || CLOSABLE.has(trade.status))
+      (trade.status === "creating" ||
+        trade.status === "closed_unknown" ||
+        CLOSABLE.has(trade.status))
     ) {
       return { status: observation.closeResolution.status, ...flags };
     }

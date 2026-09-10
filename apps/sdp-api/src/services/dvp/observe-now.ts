@@ -19,7 +19,7 @@ import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from 
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { resolveDvpClose } from "./closing-transaction";
-import { deriveDvpTradeState } from "./observe";
+import { closeIsKnown, deriveDvpTradeState } from "./observe";
 import { readDvpTradeObservation } from "./read-chain";
 
 /**
@@ -64,7 +64,7 @@ export async function observeDvpTradeNow(
       blockHeight
     );
     observation.closeResolution =
-      observation.tradeAccountExists || trade.closeSignature !== null
+      observation.tradeAccountExists || closeIsKnown(trade)
         ? null
         : await resolveDvpClose(rpc, trade.swapDvp);
 
@@ -136,7 +136,7 @@ export async function observeDvpTradeWithoutRecording(
       blockHeight
     );
     observation.closeResolution =
-      observation.tradeAccountExists || trade.closeSignature !== null
+      observation.tradeAccountExists || closeIsKnown(trade)
         ? null
         : await resolveDvpClose(rpc, trade.swapDvp);
     const derived = deriveDvpTradeState(observation, trade, Date.now());

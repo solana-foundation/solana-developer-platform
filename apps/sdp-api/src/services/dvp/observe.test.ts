@@ -174,6 +174,23 @@ describe("deriveDvpTradeState", () => {
       expect(result.status).toBe(status);
     });
 
+    // The sweep may find no history on the tick the account vanishes and write
+    // closed_unknown; the decode on a later tick is strictly better informed.
+    it.each(["settled", "cancelled", "rejected"] as const)(
+      "lifts closed_unknown to a decoded %s close",
+      (status) => {
+        const result = deriveDvpTradeState(
+          observation({
+            tradeAccountExists: false,
+            closeResolution: { status, signature: CLOSE_SIGNATURE },
+          }),
+          trade({ status: "closed_unknown" }),
+          NOW_MS
+        );
+        expect(result.status).toBe(status);
+      }
+    );
+
     it("reports closed_unknown for a trade whose account has gone", () => {
       for (const status of ["created", "partially_funded", "funded", "expired"] as const) {
         const result = deriveDvpTradeState(
