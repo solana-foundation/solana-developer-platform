@@ -1,7 +1,10 @@
 # Helius Rings — operations reference
 
-Devnet-only shielded wallets bound to SDP custody. Shield (deposit) and withdraw
-(SOL spend) are built; transfer and merge are not.
+Devnet-only shielded wallets bound to SDP custody. Shield (deposit), withdraw
+and private transfer are built for the default ring and for custom rings, merge
+is built for the default ring, and ring moves (`ring_exit` / `ring_entry`)
+carry a wallet's own funds between a custom ring and the default ring.
+Anonymous transfers, zones and timelocks are not.
 
 The SDK runs in-process behind `RingsGatewayPort`. No adapter switch, no sidecar.
 
@@ -17,21 +20,32 @@ routes (/v1/helius-rings)
 
 ## Configuration
 
+Rings upstreams are project-owned database connections. Open the Helius Rings
+dashboard for a project and save a named connection containing the Solana RPC,
+Photon indexer, prover, and optional custom Ring RPC URLs. The first active
+connection becomes the project default. URLs are encrypted through the shared
+provider-credential store; API and dashboard responses expose origins only.
+
+The project default is shared by the default ring and every custom ring in the
+project. Custom-ring records contain ring-specific on-chain metadata, not
+upstream URLs or a connection selector.
+
+Each operation records the connection selected when it is prepared. Retries and
+background settlement therefore keep using the same upstream bundle even if an
+administrator later changes the project default. The optional custom Ring RPC
+field is stored now so custom-ring support can use the same project-wide
+configuration without changing this schema.
+
 | Variable | Meaning |
 | --- | --- |
 | `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
-| `HELIUS_RINGS_RPC_URL` | Solana RPC (API key in URL). Required when enabled. |
-| `HELIUS_RINGS_INDEXER_URL` | Photon indexer. Required when enabled. |
-| `HELIUS_RINGS_PROVER_URL` | Proving service. Required when enabled. |
-| `HELIUS_RINGS_RING_RPC_URL` | Helius ring RPC that mints custom-ring auditor keys. Optional: absent, recording a custom ring fails `config_error` while everything else keeps working. |
-| `HELIUS_RINGS_ALLOW_INSECURE_HTTP` | Opt-in plain HTTP for devnet upstreams. |
 | `SOLANA_NETWORK` | Must be `devnet`. |
 
 > **The seed is public.** Identities derive from `INSECURE_TEST_SEED_DEVNET_ONLY!!`
 > in `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`. Devnet only.
 
-Missing upstreams → health red, port methods fail with `config_error` (not a throw at
-construction).
+Missing setup → the dashboard shows the configuration form; direct port methods
+fail with `config_error`.
 
 ## State machine
 
@@ -93,12 +107,65 @@ signature. The row then offers two actions:
 
 Never void a signature the chain confirms; wait the indexer out instead.
 
-## SPL follow-up
+## Assets a spend can name
 
-This PR is SOL-only. SPL withdraw is reachable: `WithdrawalTarget.spl` and
-`getSplAssetVaultAddress(mint)` are exported; re-derive the vault PDA with seeds
-`["spl_asset_vault", mint]` and assert it equals the exported address to recover
-the bump. SPL also needs an idempotent create-ATA instruction.
+Two, on either rail: native SOL and devnet USDC
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`). The pair is
+`PROTOCOL_SPEND_MINTS` in the SDK, and the route schema, the builders and the
+wire policy each assert it independently. It is narrower than the
+`helius_rings_assets` catalogue on purpose: a spend needs a settlement path
+this code can both assemble and re-derive, and only these two have one.
+
+A **USDC withdraw** is the only operation whose outer transaction changes
+shape, on the default ring and on a custom ring alike.
+`resolveWithdrawalSettlement` derives the mint's vault PDA
+(`getSplAssetVaultAddress`, with the bump recovered by re-deriving over
+`["spl_asset_vault", mint]` and asserting equality) and the recipient's
+associated token account, then emits three instructions instead of two: the
+compute limit, an **unconditional idempotent** create for that token account,
+and the pool transact. Unconditional because the builder makes no chain read —
+one fixed wire shape is what lets custody's policy verify it. Settlement
+accounts are the pool's CPI authority, the mint, the vault, the recipient's
+token account and the Token program — never `SOL_INTERFACE` and never the
+recipient's system address.
+
+A **ring** USDC withdraw carries the same three instructions and the same five
+settlement accounts: zolana derives both rails from one `settlementAccounts`.
+The one difference is where the accounts live in the message. A ring transact
+is compressed over the ring's lookup table, which holds the pool's CPI
+authority and both Token programs, so those arrive as lookups; the mint, the
+vault and the recipient's token account, which no table names, stay static.
+`validateRingSpend` splits the two groups on the table's contents rather than
+on the asset, so an account that changes sides is a mismatch either way.
+
+One ring cannot do this: a ring whose lookup table was rented before zolana
+0.1.6 appended the settlement group. SOL spends over such a table still work,
+but a USDC withdraw would have to name the CPI authority and the Token program
+as static keys, and custody refuses that shape. Bring-up is what rents a table
+and custody signs no second extend, so an affected ring stays SOL-only.
+
+Watch the packet limit here. A ring transact verifies two proofs and is the
+largest transaction this build emits; a USDC withdraw adds an instruction and
+three static keys the table cannot absorb. Zolana's `checkedTransactionSize`
+refuses an oversized build rather than emitting one, so the failure would be a
+build error on a wide note selection, not a broken signature.
+
+**USDC merge and USDC private transfer** keep the SOL wire shape: a merge
+publishes no mint and a registered transfer settles nothing publicly, so the
+asset is visible only in the approved intent and in the proof the circuit
+checks, never in an account the policy could bind it to.
+
+Out of scope: mainnet USDC (a different mint, and nothing has exercised the
+pool's SPL interface there) and Token-2022 mints. Nothing narrows by rail: the
+same two mints shield, merge, transfer and withdraw on the default ring and on
+a custom ring.
+
+If a USDC shield fails with `InvalidSettlementAccounts` (custom 7009), the
+pool's `splAssetRegistry`/`splAssetVault` PDAs for that mint do not exist on
+the cluster. Confirm with
+`pnpm exec tsx packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts`; it
+is a deployment gap, not an SDP bug, and withdraw cannot land until it is
+closed.
 
 ## Broadcast ambiguity (shield)
 
@@ -181,10 +248,10 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 | Provisioning | 503, wallet `pending` | On-chain register, wallet `ready` |
 | Sync | 503 | On-demand from dashboard |
 | Shield | `failed:config_error` or `gateway_unavailable` | Build, sign, broadcast, index |
-| Shield (custom ring) | same; also needs `HELIUS_RINGS_RING_RPC_URL` and an active ring | Ring-bound deposit through the ring program |
+| Shield (custom ring) | same; also needs a Ring RPC URL in project setup and an active ring | Ring-bound deposit through the ring program |
 | Withdraw (SOL) | same | Note selection, prove, outbox, sign, broadcast, index |
-| Withdraw / transfer (custom ring, SOL) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed |
-| Merge | not exposed | not exposed |
+| Withdraw / transfer (custom ring) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed; a USDC withdraw adds the token-account create |
+| Merge (SOL, default ring) | same | Clears the on-chain merge gate, selects 2–5 notes, proves, signs, broadcasts, indexes |
 
 ## Custom rings
 
@@ -238,8 +305,8 @@ does.
 3. Hand the program id to the project admin. They enter it with a name in the
    dashboard's *Custom rings* card (or `POST /v1/helius-rings/rings`).
 
-SDP then completes bring-up through the SDK: an auditor key from the ring RPC
-(`HELIUS_RINGS_RING_RPC_URL`), the ring's create-config instruction, its
+SDP then completes bring-up through the SDK: an auditor key from the Ring RPC
+saved in project setup, the ring's create-config instruction, its
 shielded-pool registration, a read grant naming the config authority as the
 ring's initial reader, and the ring's address lookup table — each signed
 through custody and confirmed on chain. The table holds exactly
@@ -263,6 +330,20 @@ failure recorded on the row.
   approval granted days later — and any retry — runs against the ring the
   reviewer saw. The pinned ring also joins the intent key: the same operation
   aimed at a different ring is a second operation, not a replay.
+- **Ring moves (`ring_exit` / `ring_entry`).** The wallet's own shielded SOL
+  crosses between a named custom ring and the default ring in one transact:
+  `ring_exit` spends ring-bound notes into the wallet's own default-ring note,
+  `ring_entry` spends default-ring notes into a ring-bound one. `ring` is
+  required and never `"default"` — the other side of every move is the default
+  ring. Self-only by construction: entry's recipient is hardcoded to the
+  sender inside the SDK builder, and exit's recipient is the wallet's own
+  shielded address lifted from the material scope already open for the build.
+  Both are spends and share the one-in-flight-spend-per-wallet slot. Value
+  stays shielded the whole way — no hop through the public custody address.
+  `ring_entry` is the first operation consuming default-ring notes through a
+  one-call builder, so the pinned-input/prepared-intent contract of default
+  spends does not apply to it; it carries the same rebuild posture as ring
+  spends (empty `input_notes`, signed bytes immutable).
 - **Ring spends have no pinned-input contract.** The SDK's one-call ring
   builders select same-ring notes internally on every build, so `input_notes`
   persists empty and a pre-sign rebuild may spend different notes than the
@@ -272,13 +353,15 @@ failure recorded on the row.
 - **What custody's wire gate can and cannot prove on a ring spend.** It proves
   the right ring program, the right tree, the ring's pinned lookup table, the
   exact account universe, a single owner signature, and the public settlement
-  (none on a transfer; exactly the approved recipient and amount on a
-  withdraw). On a ring TRANSFER the recipient and amount live inside encrypted
-  outputs and cannot be re-derived from the wire — the pre-encryption
-  prepared-intent check that binds them on default spends is bypassed because
-  the one-call builders never expose the prepared transfer. Accepted because
-  the transaction is built in-process against the approved persisted intent
-  and the recipient is a same-tenant wallet's shielded address.
+  (none on a transfer or a ring move; exactly the approved recipient and
+  amount on a withdraw). On a ring TRANSFER — and on a ring move, whose wire
+  is transfer-shaped — the recipient, amount, and destination pool live inside
+  encrypted outputs and cannot be re-derived from the wire — the
+  pre-encryption prepared-intent check that binds them on default spends is
+  bypassed because the one-call builders never expose the prepared transfer.
+  Accepted because the transaction is built in-process against the approved
+  persisted intent and the recipient is a same-tenant wallet's shielded
+  address (on a move, the wallet's own).
 - **Resume, never re-key.** Bring-up is idempotent against on-chain state:
   re-submitting the same name and program id resumes from whatever already
   landed. An existing on-chain config is adopted as it stands — re-keying a
@@ -301,22 +384,69 @@ failure recorded on the row.
   holds, grouped by `ringProgramId` (`null` = the default ring). The
   groups never merge into one number: value cannot cross a ring boundary
   inside a spend, so a merged figure would overstate what any single operation
-  can move.
+  can move. Each group also carries a `noteCount`, which is what tells an
+  operator a position is fragmented and a merge would help.
 - **Auditor key.** Held by the Helius ring RPC, never by SDP; the config's
   public half is recorded on the ring row and echoed by `GET /rings`.
+- **Merge consolidates, it does not move.** A merge spends 2–5 of a wallet's
+  own notes for one asset and writes back a single note worth their sum. It
+  takes no amount and no recipient: the value is whatever the notes already
+  held. Fragmentation matters because a spend can only reach as much as its
+  own input cap allows, so a balance spread over many small notes is not
+  fully spendable in one operation until it is consolidated.
+  - **Why 5 and not 8.** The circuit pads to eight inputs
+    (`MERGE_INPUT_COUNT`), but the deployed prover refuses more than five, so
+    SDP selects its own inputs (`MERGE_MAX_INPUTS`) rather than letting the
+    SDK's auto-selector reach for eight and fail at proving. Selection is
+    smallest-first — the opposite of a spend, because the point is to retire
+    the dust that a spend's change keeps producing.
+  - **Merging is gated on chain, and SDP clears the gate.** The owner's
+    user-registry record carries a `mergingEnabled` flag, and
+    `buildRegistrationTransaction` cannot set it, so a freshly registered record
+    refuses merges with `WALLET_MERGE_DISABLED`. Turning it on is its own
+    custody-signed transaction. Provisioning sends it, so new wallets can merge
+    immediately; the merge path also reads the record first and sends it if
+    needed, so wallets registered before merge shipped heal on their next merge
+    instead of needing a migration. There is no SDP toggle for it: a merge moves
+    no value and reveals no amount, so the flag is a protocol precondition
+    rather than a policy decision.
+  - **Default ring only, for want of a builder.** The program implements a ring
+    merge — `InstructionTag.ringMergeTransact` is 16, beside the default ring's
+    `mergeTransact` at 13 — but 0.1.6-alpha exposes no builder for it: the tag
+    appears only in the tag table, the ring builders all move value (deposit,
+    entry, exit, transfer, withdrawal), and `buildMergeTransaction` takes no
+    `ringProgramId`. So the merge route accepts no `ring` and the SDK refuses a
+    ring-pinned merge. Sync still reports ring positions with their own
+    `noteCount`, so ring fragmentation is visible but not yet actionable.
+    Unblocking it is a Helius SDK ask, not program work.
+    A ring transfer to the wallet's own shielded address would consolidate, but
+    it is not the same operation: every ring transfer carries an auditor
+    message, so it would reach the ring's audit as a self-transfer, and it
+    verifies two proofs at 1.4M CU rather than the merge circuit.
+  - **What the wire policy can prove.** Less than for a spend, and by nature: a
+    merge publishes no amount and no recipient, so there is no public effect to
+    bind an approved figure to. Custody instead proves the bytes are a merge
+    (tag 13, the protocol's fixed-width 8-in/1-out layout), for this owner,
+    against this owner's locally derived user-registry record, on the expected
+    tree, with no other account reachable. Conservation of value is the
+    circuit's job, not custody's.
 
-Follow-up work, deliberately out of scope: ring → default-ring exits (the SDK
-exposes only a low-level `sendDefaultRing`), cross-ring transfers (impossible
+Follow-up work, deliberately out of scope: cross-ring transfers (impossible
 in one transaction at the protocol level — value routes through the default
-ring in two hops), SPL ring spends (the withdrawal builder is SOL-only in
-0.1.2-alpha), audit reads and grants to further readers (bring-up's initial
-grant makes the custody-held config authority the ring's only reader, so
-serving decrypted reads or granting a third-party reader needs a future
+ring in two hops; ring ↔ default moves ship as `ring_exit`/`ring_entry`, so
+the follow-up is server-side orchestration of the two moves, which the Move
+tab's From/To pair already expresses), USDC ring moves (a move settles
+shielded, so nothing about its wire resists USDC, but `requireProtocolSol`
+and the wire gate hold both arms to SOL until one has been proved against the
+pool's SPL interface), audit reads and grants to further readers (bring-up's
+initial grant makes the custody-held config authority the ring's only reader,
+so serving decrypted reads or granting a third-party reader needs a future
 custody-signed endpoint), and `GET /rings/:name` point reads.
 
 ## Diagnostics
 
 - `GET /v1/helius-rings/health` — component probes in `helius_rings_runtime_health`.
-- Dashboard — health board, balances, composer (shield + withdraw), and Activity
+- Dashboard — health board, balances with per-position note counts, composer
+  (shield, withdraw, private transfer, merge, move), and Activity
   with each row's action inline: execute, retry, or recheck and void for
   `manual_reconciliation_required`.

@@ -110,6 +110,14 @@ const earnStrategySchema = z
         "must also be `active` and the organization entitled to the provider — so branch on " +
         "it rather than assuming a listed strategy takes deposits.",
     }),
+    feeSponsored: z.boolean().openapi({
+      description:
+        "Whether SDP's treasury vault flow would use its configured paymaster for a movement on " +
+        "this strategy from your environment: the same gate execution applies, derived per " +
+        "request. Read it for fee copy instead of the deposit preview's flag: providers with " +
+        "no quote-derived floor never need a preview. Always `false` when not `fundable`. A " +
+        "swap-funded deposit is wallet-pays regardless.",
+    }),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })
@@ -602,7 +610,7 @@ const earnExternalWalletDepositSwapSplitSchema = z
   .openapi({
     description:
       "Answered instead of a built transaction when the composed swap + deposit cannot fit " +
-      "one Solana packet (1,232 bytes) even on a compact route. Nothing was persisted.",
+      "one Solana packet (1,232 bytes) even on a compact route. No submit-capable build or movement was persisted; SDP retained only a recovery advisory.",
   });
 
 export const earnExternalWalletDepositTransactionResponse = successResponseSchema(

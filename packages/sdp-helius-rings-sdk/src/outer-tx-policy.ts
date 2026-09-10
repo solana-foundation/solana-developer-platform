@@ -2,11 +2,13 @@ import { CUSTOM_RING_PROOF_LENGTH } from "@heliuslabs/zolana/client";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   DEFAULT_TREE_ADDRESS,
+  MERGE_INPUT_COUNT,
   SHIELDED_POOL_CPI_AUTHORITY,
   SHIELDED_POOL_PROGRAM_ID,
   SOL_INTERFACE,
   SPL_TOKEN_2022_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
+  USER_REGISTRY_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import {
@@ -26,15 +28,36 @@ import {
   getSetComputeUnitLimitInstruction,
   MAX_COMPUTE_UNIT_LIMIT,
 } from "@solana-program/compute-budget";
-import { PROTOCOL_NATIVE_MINT, protocolMint } from "./flows/mint.js";
+import { PROTOCOL_NATIVE_MINT, PROTOCOL_SPEND_MINTS, protocolMint } from "./flows/mint.js";
 
 const SAFE_MESSAGE = "the unsigned Rings transaction does not match the approved operation";
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const DEPOSIT_TAG = 11;
 const RING_DEPOSIT_TAG = 14;
 const TRANSACT_TAG = 12;
+const MERGE_TRANSACT_TAG = 13;
+/**
+ * A merge's instruction data is fixed width: the 8-in/1-out circuit shape is
+ * baked into the layout, so every field including the three root-index vectors
+ * has a constant length. Tag byte plus `encodeMergeTransactInstructionData`'s
+ * 492. A unit test pins this against the encoder.
+ */
+const MERGE_DATA_LENGTH = 1 + 492;
+/** Offsets of the three length prefixes inside that layout, tag included. */
+const MERGE_COUNT_OFFSETS = [202, 459, 476] as const;
+/** Seed of the user registry's record PDA, mirroring zolana's `RECORD_SEED`. */
+const USER_RECORD_SEED = "zolana/registry/v0";
 /** Byte 0 of a ring program's transact instruction (its own dispatch, not the pool's). */
 const RING_TRANSACT_TAG = 3;
+/**
+ * Interface-transfer kinds inside a transact body, in Zolana's encoding order:
+ * `solDeposit`, `solWithdrawal`, `splDeposit`, `splWithdrawal`. Only the two
+ * withdrawal tags can appear on a spend this SDK builds.
+ */
+const SOL_WITHDRAWAL_TAG = 1;
+const SPL_WITHDRAWAL_TAG = 3;
+/** The associated token program's `createIdempotent` discriminator, its whole data. */
+const CREATE_ASSOCIATED_TOKEN_IDEMPOTENT_DATA = Uint8Array.of(1);
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
 const ZERO_32 = new Uint8Array(32);
 const COMPUTE_LIMIT = getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT });
@@ -72,6 +95,30 @@ export type OuterTransactionPolicyIntent =
       to: string;
       /** Same contract as the transfer arm's `ring`. */
       ring?: Readonly<{ programId: string; lookupTable: string }>;
+    }>
+  | Readonly<{
+      /**
+       * Consolidating the owner's own notes. No amount and no recipient: a
+       * merge names only the asset, and the value it moves is whatever the
+       * notes it consumes already held.
+       */
+      opType: "merge";
+      mint: string;
+    }>
+  /**
+   * A ring move: the wallet's own funds cross between the named ring and the
+   * default pool, ring_exit out of it, ring_entry into it. Always ring-bound,
+   * so `ring` is required. The wire is transfer-shaped — no public settlement;
+   * amount, recipient, and destination pool live in encrypted outputs and are
+   * bound by construction in the SDK (entry is self-only in the builder, an
+   * exit's recipient is the wallet's own lifted shielded address), not proved
+   * here. See docs/ops/helius-rings.md, "Semantics worth knowing".
+   */
+  | Readonly<{
+      opType: "ring_exit" | "ring_entry";
+      mint: string;
+      amountRaw: string;
+      ring: Readonly<{ programId: string; lookupTable: string }>;
     }>;
 
 /** Kit-neutral DTO accepted at the SDK/API major-version boundary. */
@@ -132,6 +179,8 @@ interface ParsedRingDeposit {
 interface ParsedInterfaceTransfer {
   readonly tag: number;
   readonly amount: bigint;
+  /** Present on the two SPL tags only; the vault PDA's bump seed. */
+  readonly splInterfaceBump?: number;
 }
 
 function mismatch(): never {
@@ -323,8 +372,14 @@ function parseTransactBody(reader: StrictReader): readonly ParsedInterfaceTransf
     if (tag > 3) mismatch();
     const amount = reader.u64();
     if (amount === 0n) mismatch();
-    if (tag === 2 || tag === 3) reader.u8();
-    interfaceTransfers.push({ tag, amount });
+    // The SPL tags carry the vault bump; it is a public input to the proof, so
+    // the settlement check binds it rather than skipping past it.
+    const isSpl = tag === 2 || tag === 3;
+    interfaceTransfers.push({
+      tag,
+      amount,
+      ...(isSpl ? { splInterfaceBump: reader.u8() } : {}),
+    });
   }
 
   // Custody's parsing boundary ends at the public settlement section. Expiry,
@@ -479,20 +534,24 @@ function validateEnvelope(
   return lookup;
 }
 
+/**
+ * The two SPL accounts a settlement reaches, for whichever side holds the
+ * tokens: the depositor's on a shield, the recipient's on a withdrawal.
+ */
 async function splAccounts(
-  owner: Address,
+  tokenOwner: Address,
   mint: Address
 ): Promise<
   Readonly<{
-    sourceTokenAccount: Address;
+    associatedTokenAccount: Address;
     splInterface: Address;
     bump: number;
   }>
 > {
-  const [sourceTokenAccount] = await getProgramDerivedAddress({
+  const [associatedTokenAccount] = await getProgramDerivedAddress({
     programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
     seeds: [
-      addressEncoder.encode(owner),
+      addressEncoder.encode(tokenOwner),
       addressEncoder.encode(SPL_TOKEN_PROGRAM_ID),
       addressEncoder.encode(mint),
     ],
@@ -501,7 +560,7 @@ async function splAccounts(
     programAddress: SHIELDED_POOL_PROGRAM_ID,
     seeds: [textEncoder.encode("spl_asset_vault"), addressEncoder.encode(mint)],
   });
-  return { sourceTokenAccount, splInterface, bump };
+  return { associatedTokenAccount, splInterface, bump };
 }
 
 /**
@@ -529,9 +588,14 @@ async function derivedRingAuthAddress(ringProgramId: Address): Promise<Address> 
  * unit test pins the two together so upstream drift breaks the build instead
  * of custody.
  *
- * A table rented before 0.1.6 holds only the first group and still spends: the
- * settlement group is appended, so an index into the shorter table resolves to
- * the same address, and a SOL-only ring transact never names those three.
+ * A table rented before 0.1.6 holds only the first group and still spends SOL:
+ * the settlement group is appended, so an index into the shorter table
+ * resolves to the same address, and a SOL ring transact never names those
+ * three. An SPL ring withdrawal does name two of them, and over a short table
+ * the builder can only emit them as statics — which this list says should have
+ * been compressed, so the spend is refused rather than signed. Such a ring
+ * cannot withdraw USDC; bring-up is what rents a table, and custody signs no
+ * second extend.
  */
 export async function expectedRingTable(ring: Address, tree: Address): Promise<readonly string[]> {
   const [ringConfig] = await getProgramDerivedAddress({
@@ -579,52 +643,174 @@ function expectRingLookups(
 
 type SpendPolicyIntent = Extract<
   OuterTransactionPolicyIntent,
-  { opType: "transfer_registered" } | { opType: "withdraw" }
+  | { opType: "transfer_registered" }
+  | { opType: "withdraw" }
+  | { opType: "ring_exit" | "ring_entry" }
 >;
 
+/** What a settlement appends to the transact's account and static lists. */
+interface ExpectedSettlement {
+  readonly extraAccounts: readonly AccountExpectation[];
+  readonly extraStatics: readonly string[];
+  /**
+   * The recipient's token account an SPL withdrawal must also have created
+   * ahead of the transact. Absent on the two settlements that need no setup.
+   */
+  readonly createAssociatedTokenAccount?: Readonly<{
+    mint: string;
+    recipient: Address;
+    tokenAccount: Address;
+  }>;
+}
+
 /**
- * The public settlement a spend's wire must carry: none on a transfer,
- * exactly the approved recipient and amount on a withdraw. Returns what the
- * settlement appends to the transact's common account and static lists. A
- * transfer's recipient and amount are encrypted in the wire and only checked
- * for well-formedness here; where they ARE bound differs by rail (see
- * docs/ops/helius-rings.md, "Semantics worth knowing").
+ * The public settlement a spend's wire must carry: exactly the approved
+ * recipient and amount on a withdraw, none on anything else (transfers and
+ * ring moves settle shielded). Returns what the settlement appends to the
+ * transact's common account and static lists. A shielded spend's recipient and
+ * amount are encrypted in the wire and only checked for well-formedness here;
+ * where they ARE bound differs by rail (see docs/ops/helius-rings.md,
+ * "Semantics worth knowing").
+ *
+ * A withdraw settles one of two ways. SOL reaches the pool's native interface
+ * and credits the recipient's system account directly. An SPL asset reaches
+ * that mint's vault PDA and credits the recipient's associated token account,
+ * whose derivations are redone here from the approved mint and recipient — the
+ * builder's addresses are never taken on trust.
  */
-function expectPublicSettlement(
+async function expectPublicSettlement(
   intent: SpendPolicyIntent,
   interfaceTransfers: readonly ParsedInterfaceTransfer[]
-): Readonly<{
-  extraAccounts: readonly AccountExpectation[];
-  extraStatics: readonly string[];
-}> {
-  if (intent.opType === "transfer_registered") {
-    requiredAddress(intent.mint);
+): Promise<ExpectedSettlement> {
+  if (intent.opType !== "withdraw") {
+    // A ring move settles shielded like a registered transfer, but its gate is
+    // still SOL-only in the builders, so the bytes assert the narrower set.
+    if (intent.opType === "ring_exit" || intent.opType === "ring_entry") {
+      requiredNativeMint(intent.mint);
+    } else {
+      requiredSpendMint(intent.mint);
+    }
     requiredAmount(intent.amountRaw);
     if (interfaceTransfers.length !== 0) mismatch();
     return { extraAccounts: [], extraStatics: [] };
   }
 
+  const protocolAsset = requiredSpendMint(intent.mint);
   const amount = requiredAmount(intent.amountRaw);
   const recipient = requiredAddress(intent.to);
   const settlement = interfaceTransfers[0];
-  if (interfaceTransfers.length !== 1 || settlement?.tag !== 1 || settlement.amount !== amount) {
+  if (interfaceTransfers.length !== 1 || settlement === undefined || settlement.amount !== amount) {
+    mismatch();
+  }
+
+  if (protocolAsset === PROTOCOL_NATIVE_MINT) {
+    if (settlement.tag !== SOL_WITHDRAWAL_TAG) mismatch();
+    return {
+      extraAccounts: [
+        { address: SOL_INTERFACE, signer: false, writable: true },
+        // If recipient === owner, Solana correctly merges this with the signer role.
+        { address: recipient, writable: true },
+      ],
+      extraStatics: [SOL_INTERFACE, recipient],
+    };
+  }
+
+  const mint = address(protocolAsset);
+  const derived = await splAccounts(recipient, mint);
+  if (settlement.tag !== SPL_WITHDRAWAL_TAG || settlement.splInterfaceBump !== derived.bump) {
     mismatch();
   }
   return {
     extraAccounts: [
-      { address: SOL_INTERFACE, signer: false, writable: true },
-      // If recipient === owner, Solana correctly merges this with the signer role.
-      { address: recipient, writable: true },
+      { address: SHIELDED_POOL_CPI_AUTHORITY, signer: false, writable: false },
+      { address: mint, signer: false, writable: false },
+      { address: derived.splInterface, signer: false, writable: true },
+      { address: derived.associatedTokenAccount, signer: false, writable: true },
+      { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
     ],
-    extraStatics: [SOL_INTERFACE, recipient],
+    extraStatics: [
+      SHIELDED_POOL_CPI_AUTHORITY,
+      mint,
+      derived.splInterface,
+      derived.associatedTokenAccount,
+      SPL_TOKEN_PROGRAM_ID,
+    ],
+    createAssociatedTokenAccount: {
+      mint: protocolAsset,
+      recipient,
+      tokenAccount: derived.associatedTokenAccount,
+    },
   };
 }
 
 /**
+ * The mint as the protocol spells it, refused unless it is one this build
+ * settles. The wire policy asserts the SDK's spend gate independently: an SPL
+ * asset with no vault this file can derive has no settlement to verify.
+ */
+function requiredSpendMint(mint: string): string {
+  requiredAddress(mint);
+  const protocolAsset = protocolMint(mint);
+  if (!PROTOCOL_SPEND_MINTS.includes(protocolAsset)) mismatch();
+  return protocolAsset;
+}
+
+/** The narrower gate the ring moves keep, asserted on the bytes. */
+function requiredNativeMint(mint: string): void {
+  requiredAddress(mint);
+  if (protocolMint(mint) !== PROTOCOL_NATIVE_MINT) mismatch();
+}
+
+/**
+ * The idempotent associated-token create an SPL withdrawal puts ahead of the
+ * transact, so the vault has somewhere to send the tokens. Its accounts are
+ * re-derived, not read: this is the only instruction in the message whose
+ * program is not the shielded pool, and it names the recipient's system
+ * address, which nothing else in an SPL withdraw does.
+ *
+ * `loaded` is empty on the pool rail and the ring's table on the ring rail,
+ * where the system and Token programs this instruction names arrive
+ * compressed rather than static.
+ */
+function validateCreateAssociatedTokenInstruction(
+  message: DecodedMessage,
+  instruction: DecodedInstruction,
+  expected: NonNullable<ExpectedSettlement["createAssociatedTokenAccount"]>,
+  owner: Address,
+  loaded: readonly ResolvedAccount[] = []
+): void {
+  const resolved = resolvedInstruction(message, instruction, loaded);
+  const programRole = accountRole(message, instruction.programAddressIndex);
+  if (
+    resolved.program !== ASSOCIATED_TOKEN_PROGRAM_ID ||
+    programRole.signer ||
+    programRole.writable ||
+    !equalBytes(resolved.data, CREATE_ASSOCIATED_TOKEN_IDEMPOTENT_DATA)
+  ) {
+    mismatch();
+  }
+  expectAccounts(resolved.accounts, [
+    { address: owner, signer: true, writable: true },
+    { address: expected.tokenAccount, signer: false, writable: true },
+    // Readonly here and absent from the transact, so an SPL withdrawal never
+    // makes a third party's system account writable. Withdrawing to one's own
+    // address is the exception the wire forces: the create names the owner,
+    // Solana merges that meta with the fee payer's, and the merged entry is
+    // writable — a role the owner already holds as the signer.
+    { address: expected.recipient, writable: expected.recipient === owner },
+    { address: expected.mint, signer: false, writable: false },
+    { address: SYSTEM_PROGRAM, signer: false, writable: false },
+    { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
+  ]);
+}
+
+/**
  * A ring-bound spend: one compute instruction, then the ring program's own
- * tag-3 transact, ALT-compressed over the ring's persisted lookup table. For
- * what this gate can and cannot prove (notably a ring transfer's recipient
- * and amount), see docs/ops/helius-rings.md, "Semantics worth knowing".
+ * tag-3 transact — with one idempotent associated-token create in between when
+ * the withdrawal settles an SPL asset — ALT-compressed over the ring's
+ * persisted lookup table. For what this gate can and cannot prove (notably a
+ * ring transfer's recipient and amount), see docs/ops/helius-rings.md,
+ * "Semantics worth knowing".
  */
 async function validateRingSpend(
   intent: SpendPolicyIntent & { ring: Readonly<{ programId: string; lookupTable: string }> },
@@ -643,18 +829,19 @@ async function validateRingSpend(
   });
   if (!lookup) mismatch();
 
-  if (message.instructions.length !== 2) mismatch();
+  const transactIndex = message.instructions.length - 1;
+  if (transactIndex < 1) mismatch();
   const computeProgram = validateComputeInstruction(
     message,
     message.instructions[0] as DecodedInstruction
   );
+  const loaded = loadedAccounts(lookup, expectedTable);
   const instruction = resolvedInstruction(
     message,
-    message.instructions[1] as DecodedInstruction,
-    loadedAccounts(lookup, expectedTable)
+    message.instructions[transactIndex] as DecodedInstruction,
+    loaded
   );
   if (instruction.program !== ring) mismatch();
-  if (protocolMint(intent.mint) !== PROTOCOL_NATIVE_MINT) mismatch();
   const interfaceTransfers = parseRingTransact(instruction.data);
 
   const ringConfig = expectedTable[0] as string;
@@ -671,14 +858,49 @@ async function validateRingSpend(
     { address: ringAuth, signer: false, writable: false },
   ];
 
-  const settlement = expectPublicSettlement(intent, interfaceTransfers);
+  const settlement = await expectPublicSettlement(intent, interfaceTransfers);
+  const setup = settlement.createAssociatedTokenAccount;
+  if (message.instructions.length !== (setup ? 3 : 2)) mismatch();
+  if (setup) {
+    validateCreateAssociatedTokenInstruction(
+      message,
+      message.instructions[1] as DecodedInstruction,
+      setup,
+      owner,
+      loaded
+    );
+  }
+
+  // The one difference from the pool rail: a settlement account the ring's
+  // table already holds arrives as a lookup, not a static. Splitting on the
+  // table rather than on the asset keeps this true if the table's contents
+  // change — and it is the safe direction, since an account expected static
+  // that arrives compressed (or the reverse) is a mismatch either way. The
+  // table holds no mint-specific entry, so the vault and the recipient's
+  // token account, the two writable ones, always stay static.
+  const heldByTable = (candidate: string) => expectedTable.includes(candidate);
+
   expectAccounts(instruction.accounts, [...commonAccounts, ...settlement.extraAccounts]);
-  expectStaticAccounts(message, [owner, ...settlement.extraStatics, ring, computeProgram]);
+  expectStaticAccounts(message, [
+    owner,
+    ...settlement.extraStatics.filter((entry) => !heldByTable(entry)),
+    ...(setup ? [ASSOCIATED_TOKEN_PROGRAM_ID as string, setup.recipient as string] : []),
+    ring,
+    computeProgram,
+  ]);
   expectRingLookups(
     lookup,
     expectedTable,
     [tree as string],
-    [ringConfig, SHIELDED_POOL_PROGRAM_ID as string, SYSTEM_PROGRAM, ringAuth]
+    [
+      ringConfig,
+      SHIELDED_POOL_PROGRAM_ID as string,
+      SYSTEM_PROGRAM,
+      ringAuth,
+      ...settlement.extraAccounts
+        .filter((account) => !account.writable && heldByTable(account.address))
+        .map((account) => account.address),
+    ]
   );
 }
 
@@ -735,7 +957,7 @@ async function expectDepositAccounts(
     { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
     { address: SPL_TOKEN_PROGRAM_ID, signer: false, writable: false },
     { address: protocolAsset, signer: false, writable: false },
-    { address: derived.sourceTokenAccount, signer: false, writable: true },
+    { address: derived.associatedTokenAccount, signer: false, writable: true },
     { address: derived.splInterface, signer: false, writable: true },
   ]);
   expectStaticAccounts(message, [
@@ -745,7 +967,7 @@ async function expectDepositAccounts(
     SHIELDED_POOL_PROGRAM_ID,
     SPL_TOKEN_PROGRAM_ID,
     protocolAsset,
-    derived.sourceTokenAccount,
+    derived.associatedTokenAccount,
     derived.splInterface,
   ]);
 }
@@ -831,22 +1053,103 @@ function validateComputeInstruction(
   return resolved.program;
 }
 
-function validateSpend(
-  intent: SpendPolicyIntent,
+/**
+ * The user registry's record for an owner. Derived locally with no RPC and no
+ * zolana import, like `derivedRingAuthAddress` — this file's independent read
+ * of the wire is the point, and this is the account that decides whose notes a
+ * merge is allowed to consume.
+ */
+async function derivedUserRecordAddress(owner: Address): Promise<Address> {
+  const [derived] = await getProgramDerivedAddress({
+    programAddress: USER_REGISTRY_PROGRAM_ID,
+    seeds: [textEncoder.encode(USER_RECORD_SEED), addressEncoder.encode(owner)],
+  });
+  return derived;
+}
+
+/**
+ * A merge: one compute instruction, then the pool's own tag-13 transact.
+ *
+ * What this can prove is narrower than a spend's, and deliberately so. A merge
+ * publishes no amount and no recipient — every value in its data is a
+ * commitment, a nullifier or a proof point — so there is no public effect to
+ * bind an approved figure to. What custody gets instead is that these bytes are
+ * a merge, for this owner, against this owner's registry record, on the
+ * expected tree, in the protocol's fixed 8-in/1-out shape, with no other
+ * account reachable. Conservation of value is the circuit's job. See
+ * docs/ops/helius-rings.md, "Semantics worth knowing".
+ */
+async function validateMerge(
+  intent: Extract<OuterTransactionPolicyIntent, { opType: "merge" }>,
   message: DecodedMessage,
   owner: Address,
   tree: Address
-): void {
+): Promise<void> {
   if (message.instructions.length !== 2) mismatch();
+  // A merge publishes no mint, so this only holds the approved intent to an
+  // asset the build can spend at all — the wire has nothing to bind it to.
+  requiredSpendMint(intent.mint);
+
   const computeProgram = validateComputeInstruction(
     message,
     message.instructions[0] as DecodedInstruction
   );
   const instruction = resolvedInstruction(message, message.instructions[1] as DecodedInstruction);
   if (instruction.program !== SHIELDED_POOL_PROGRAM_ID) mismatch();
-  if (intent.opType === "withdraw" && protocolMint(intent.mint) !== PROTOCOL_NATIVE_MINT) {
-    mismatch();
+
+  const data = instruction.data;
+  if (data.length !== MERGE_DATA_LENGTH || data[0] !== MERGE_TRANSACT_TAG) mismatch();
+  // Nullifiers and both root-index vectors, each pinned to the circuit's
+  // padded width. Redundant with the fixed length above, and cheap: it is the
+  // shape that makes a merge a merge.
+  for (const offset of MERGE_COUNT_OFFSETS) {
+    if (data[offset] !== MERGE_INPUT_COUNT) mismatch();
   }
+
+  const userRecord = await derivedUserRecordAddress(owner);
+  // Input and output tree are the same account twice, as the builder emits it.
+  expectAccounts(instruction.accounts, [
+    { address: tree, signer: false, writable: true },
+    { address: tree, signer: false, writable: true },
+    { address: owner, signer: true, writable: true },
+    { address: userRecord, signer: false, writable: false },
+    { address: SYSTEM_PROGRAM, signer: false, writable: false },
+    { address: SHIELDED_POOL_PROGRAM_ID, signer: false, writable: false },
+  ]);
+  expectStaticAccounts(message, [
+    owner,
+    tree,
+    userRecord,
+    SHIELDED_POOL_PROGRAM_ID,
+    SYSTEM_PROGRAM,
+    computeProgram,
+  ]);
+}
+
+/**
+ * A default-pool spend: one compute instruction, then the pool's tag-12
+ * transact — with one idempotent associated-token create in between when the
+ * withdrawal settles an SPL asset. Nothing else may ride along, so the
+ * instruction count is pinned to what the resolved settlement implies rather
+ * than left open.
+ */
+async function validateSpend(
+  intent: SpendPolicyIntent,
+  message: DecodedMessage,
+  owner: Address,
+  tree: Address
+): Promise<void> {
+  const transactIndex = message.instructions.length - 1;
+  if (transactIndex < 1) mismatch();
+  const computeProgram = validateComputeInstruction(
+    message,
+    message.instructions[0] as DecodedInstruction
+  );
+  const instruction = resolvedInstruction(
+    message,
+    message.instructions[transactIndex] as DecodedInstruction
+  );
+  if (instruction.program !== SHIELDED_POOL_PROGRAM_ID) mismatch();
   const interfaceTransfers = parsePublicInterfaceTransfers(instruction.data);
 
   const commonAccounts: AccountExpectation[] = [
@@ -857,7 +1160,18 @@ function validateSpend(
     { address: SYSTEM_PROGRAM, signer: false, writable: false },
   ];
 
-  const settlement = expectPublicSettlement(intent, interfaceTransfers);
+  const settlement = await expectPublicSettlement(intent, interfaceTransfers);
+  const setup = settlement.createAssociatedTokenAccount;
+  if (message.instructions.length !== (setup ? 3 : 2)) mismatch();
+  if (setup) {
+    validateCreateAssociatedTokenInstruction(
+      message,
+      message.instructions[1] as DecodedInstruction,
+      setup,
+      owner
+    );
+  }
+
   expectAccounts(instruction.accounts, [...commonAccounts, ...settlement.extraAccounts]);
   expectStaticAccounts(message, [
     owner,
@@ -865,6 +1179,7 @@ function validateSpend(
     SHIELDED_POOL_PROGRAM_ID,
     SYSTEM_PROGRAM,
     ...settlement.extraStatics,
+    ...(setup ? [ASSOCIATED_TOKEN_PROGRAM_ID as string, setup.recipient as string] : []),
     computeProgram,
   ]);
 }
@@ -911,6 +1226,11 @@ async function validate(input: OuterTransactionPolicyInput): Promise<void> {
     }
     return;
   }
+  if (intent.opType === "merge") {
+    validateEnvelope(message, transaction.signatures, owner);
+    await validateMerge(intent, message, owner, tree);
+    return;
+  }
   if (intent.ring !== undefined) {
     await validateRingSpend(
       { ...intent, ring: intent.ring },
@@ -922,7 +1242,7 @@ async function validate(input: OuterTransactionPolicyInput): Promise<void> {
     return;
   }
   validateEnvelope(message, transaction.signatures, owner);
-  validateSpend(intent, message, owner, tree);
+  await validateSpend(intent, message, owner, tree);
 }
 
 /**

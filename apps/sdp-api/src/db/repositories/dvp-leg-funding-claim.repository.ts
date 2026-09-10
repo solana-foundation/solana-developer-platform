@@ -66,6 +66,36 @@ export interface DvpLegFundingClaimRepository {
    * a receipt rather than a lock.
    */
   releaseExpired(blockHeight: bigint): Promise<number>;
+  /**
+   * Lists broadcast claims whose signed transaction can no longer be accepted.
+   *
+   * `releaseExpired` deliberately never touches a row with `funding_tx` set:
+   * on the wire means possibly landed. Past the last-valid height only the
+   * chain can say which, so resolution belongs to the reconciler's RPC read,
+   * never to the sweep.
+   */
+  listExpiredBroadcast(blockHeight: bigint): Promise<DvpLegFundingClaim[]>;
+  /**
+   * Deletes one broadcast claim whose transfer the chain confirmed never landed.
+   *
+   * Guarded on the signature AND `funding_tx IS NOT NULL`, so the reconciler
+   * can only ever remove the exact row it checked on chain — never an
+   * unbroadcast lock, which only `releaseExpired` may release.
+   */
+  deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
+}
+
+function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
+  return {
+    tradeId: row.trade_id as string,
+    side: row.side as "a" | "b",
+    organizationId: row.organization_id as string,
+    projectId: row.project_id as string,
+    custodyWalletId: row.custody_wallet_id as string,
+    signature: row.signature as string,
+    expiryHeight: row.expiry_height as string,
+    fundingTx: (row.funding_tx as string | null) ?? null,
+  };
 }
 
 export function createPostgresDvpLegFundingClaimRepository(
@@ -143,16 +173,39 @@ export function createPostgresDvpLegFundingClaimRepository(
         )
         .bind(tradeId)
         .all<Record<string, unknown>>();
-      return result.results.map((row) => ({
-        tradeId: row.trade_id as string,
-        side: row.side as "a" | "b",
-        organizationId: row.organization_id as string,
-        projectId: row.project_id as string,
-        custodyWalletId: row.custody_wallet_id as string,
-        signature: row.signature as string,
-        expiryHeight: row.expiry_height as string,
-        fundingTx: (row.funding_tx as string | null) ?? null,
-      }));
+      return result.results.map(toDvpLegFundingClaim);
+    },
+
+    async listExpiredBroadcast(blockHeight) {
+      // Open trades only: a closed trade's leg can never be funded again, so
+      // its claims are history — without this bound every landed receipt would
+      // be re-checked on chain every tick forever.
+      const result = await db
+        .prepare(
+          `SELECT c.trade_id, c.side, c.organization_id, c.project_id, c.custody_wallet_id,
+                  c.signature, c.expiry_height, c.funding_tx
+             FROM dvp_leg_funding_claims c
+             JOIN dvp_trades t ON t.id = c.trade_id
+            WHERE c.funding_tx IS NOT NULL
+              AND CAST(c.expiry_height AS NUMERIC) < ?
+              AND t.status IN ('created', 'partially_funded', 'funded')`
+        )
+        .bind(blockHeight.toString())
+        .all<Record<string, unknown>>();
+      return result.results.map(toDvpLegFundingClaim);
+    },
+
+    async deleteBroadcastClaim(tradeId, side, signature) {
+      // `funding_tx IS NOT NULL` keeps this from ever releasing an unbroadcast
+      // lock: the caller decided on chain that THIS signature never landed,
+      // and an unbroadcast claim was never checked against the chain at all.
+      await db
+        .prepare(
+          `DELETE FROM dvp_leg_funding_claims
+            WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NOT NULL`
+        )
+        .bind(tradeId, side, signature)
+        .run();
     },
   };
 }

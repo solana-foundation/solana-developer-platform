@@ -212,6 +212,7 @@ export interface TokenOverrides {
   id?: string;
   projectId?: string;
   organizationId?: string;
+  signingCustodyWalletId?: string | null;
   mintAddress?: string | null;
   mintAuthority?: string | null;
   freezeAuthority?: string | null;
@@ -243,6 +244,7 @@ export function createToken(overrides: TokenOverrides = {}): Token {
     id: `tok_factory_${n.toString().padStart(8, "0")}`,
     projectId: `prj_factory_${n.toString().padStart(8, "0")}`,
     organizationId: `org_factory_${n.toString().padStart(8, "0")}`,
+    signingCustodyWalletId: null,
     signingWalletId: null,
     mintAddress: null,
     mintAuthority: null,
@@ -295,6 +297,7 @@ export interface TokenTransactionOverrides {
   id?: string;
   tokenId?: string;
   organizationId?: string;
+  custodyWalletId?: string | null;
   type?: TokenTransaction["type"];
   status?: TokenTransaction["status"];
   idempotencyKey?: string | null;
@@ -319,6 +322,7 @@ export function createTokenTransaction(
     id: `ttx_factory_${n.toString().padStart(8, "0")}`,
     tokenId: `tok_factory_${n.toString().padStart(8, "0")}`,
     organizationId: `org_factory_${n.toString().padStart(8, "0")}`,
+    custodyWalletId: null,
     type: "mint",
     status: "pending",
     idempotencyKey: null,

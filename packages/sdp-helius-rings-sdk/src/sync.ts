@@ -153,7 +153,7 @@ function perRingBalances(
   wallet: Wallet,
   labels: Map<string, KnownAsset>
 ): { balances: AssetBalance[]; unspentNotes: number } {
-  const perRing = new Map<string | null, Map<string, bigint>>();
+  const perRing = new Map<string | null, Map<string, Position>>();
   let unspentNotes = 0;
   for (const entry of wallet.utxos()) {
     if (entry.spent) {
@@ -163,10 +163,16 @@ function perRingBalances(
     const ring = entry.utxo.ringProgramId ?? null;
     let perMint = perRing.get(ring);
     if (!perMint) {
-      perMint = new Map<string, bigint>();
+      perMint = new Map<string, Position>();
       perRing.set(ring, perMint);
     }
-    perMint.set(entry.utxo.asset, (perMint.get(entry.utxo.asset) ?? 0n) + entry.utxo.amount);
+    const position = perMint.get(entry.utxo.asset);
+    perMint.set(entry.utxo.asset, {
+      amount: (position?.amount ?? 0n) + entry.utxo.amount,
+      // Fragmentation is only visible per position: the wallet-wide
+      // `storedNotes` cannot say which balance a merge would help.
+      notes: (position?.notes ?? 0) + 1,
+    });
   }
 
   const balances = [...perRing.entries()]
@@ -174,14 +180,20 @@ function perRingBalances(
     .flatMap(([ring, perMint]) =>
       [...perMint.entries()]
         .sort(([left], [right]) => byString(left, right))
-        .map(([mint, amount]) => toAssetBalance(mint, amount, labels, ring))
+        .map(([mint, position]) => toAssetBalance(mint, position, labels, ring))
     );
   return { balances, unspentNotes };
 }
 
+/** One (ring, mint) position: what it holds and across how many notes. */
+interface Position {
+  readonly amount: bigint;
+  readonly notes: number;
+}
+
 function toAssetBalance(
   reportedMint: string,
-  amount: bigint,
+  position: Position,
   labels: Map<string, KnownAsset>,
   ringProgramId: string | null
 ): AssetBalance {
@@ -192,8 +204,9 @@ function toAssetBalance(
     mint,
     symbol: label?.symbol ?? "UNKNOWN",
     decimals: label?.decimals ?? 0,
-    amountRaw: amount.toString(),
+    amountRaw: position.amount.toString(),
     ringProgramId,
+    noteCount: position.notes,
   };
 }
 

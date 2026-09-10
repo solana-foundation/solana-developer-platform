@@ -29,8 +29,8 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { profileToDraftState } from "./[tokenId]/asset-profile/asset-profile-mapping";
 import {
   classifyAuthorityControl,
+  findWalletByCustodyWalletId,
   findWalletByPublicKey,
-  findWalletByWalletId,
   formatDate as formatDateLong,
   getDisplayedAuthorityAddress,
 } from "./[tokenId]/token-management-workspace.utils";
@@ -75,7 +75,7 @@ export interface IssuanceTokenView {
   requiresAllowlist: boolean;
   description: string | null;
   uri: string | null;
-  signingWalletId: string | null;
+  signingCustodyWalletId: string | null;
   mintAuthority: string | null;
   metadataAuthority: string | null;
   freezeAuthority: string | null;
@@ -273,7 +273,8 @@ function viewAsToken(view: IssuanceTokenView): Token {
     id: view.id,
     projectId: "",
     organizationId: "",
-    signingWalletId: view.signingWalletId,
+    signingCustodyWalletId: view.signingCustodyWalletId,
+    signingWalletId: null,
     mintAddress: view.mintAddress,
     mintAuthority: view.mintAuthority,
     metadataAuthority: view.metadataAuthority,
@@ -489,19 +490,19 @@ function buildCategoryTiles(
 }
 
 export function buildWalletIdentityForSigner(
-  signingWalletId: string | null | undefined,
+  signingCustodyWalletId: string | null | undefined,
   authorityWallets: PaymentsDashboardWallet[],
   t: Translate
 ): WalletIdentity | null {
-  if (!signingWalletId) {
+  if (!signingCustodyWalletId) {
     return { state: "default" };
   }
   if (authorityWallets.length === 0) {
     return null;
   }
-  const wallet = findWalletByWalletId(authorityWallets, signingWalletId);
+  const wallet = findWalletByCustodyWalletId(authorityWallets, signingCustodyWalletId);
   if (!wallet) {
-    return { state: "unresolved", walletId: signingWalletId };
+    return { state: "unresolved", walletId: signingCustodyWalletId };
   }
   return {
     state: "managed",
@@ -597,7 +598,7 @@ export function buildOverviewHeroData(
     authorityRows: buildAuthorityGlyphRows(token, authorityWallets, controlKnown, t),
     accessMode: resolveAccessMode(token, draft),
     verifiedHolders: resolveVerifiedHolders(draft),
-    signerWallet: buildWalletIdentityForSigner(view.signingWalletId, authorityWallets, t),
+    signerWallet: buildWalletIdentityForSigner(view.signingCustodyWalletId, authorityWallets, t),
     issuer: draft?.issuerName.trim() || null,
     categoryTiles: draft ? buildCategoryTiles(view, draft, t) : [],
   };

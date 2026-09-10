@@ -9,15 +9,21 @@
 
 import type { ReactNode } from "react";
 import { TokenMark } from "@/components/token-mark";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { fromBaseUnits, toBaseUnits } from "./dvp-amount";
-import type { DvpCreateOption } from "./dvp-create.data";
+import { shortenAddress } from "../../../payments/payments-overview.utils";
+import { toBaseUnits } from "./dvp-amount";
+import type { DvpCreateCounterpartyAccount, DvpCreateOption } from "./dvp-create.data";
 import { CUSTOM } from "./use-dvp-create-form";
+import type { DvpPayout } from "./use-dvp-destinations";
+import type { DvpPartySlot } from "./use-dvp-parties";
+
+/** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
+const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** Mirrors MAX_REF_STRING_BYTES in `services/dvp/validate.ts`. */
 const MAX_REF_BYTES = 64;
@@ -73,231 +79,180 @@ export function Field({
 }
 
 /**
- * A mint: pick from a list, or paste one.
+ * A mint, as one searchable combobox: pick from the list, or paste an address.
  *
  * The asset and cash legs differ only in where their list comes from, so they
- * share this rather than each keeping its own copy of the select-plus-paste
- * pairing and drifting apart.
+ * share this rather than each keeping its own copy and drifting apart. A
+ * pasted base58 mint surfaces as an option of its own — the token, and
+ * nothing else, no "(6 decimals)" suffix: the scale is stated where it can
+ * act on the number, in the amount field's conversion line.
  */
 export function MintField({
   choice,
   custom,
-  emptyHint,
-  hint,
   id,
   label,
   onChoiceChange,
   onCustomChange,
   options,
-  placeholder,
 }: {
   choice: string;
   custom: string;
-  emptyHint?: string;
-  hint: ReactNode;
   id: string;
   label: string;
   onChoiceChange: (next: string) => void;
   onCustomChange: (next: string) => void;
   options: DvpCreateOption[];
-  placeholder: string;
 }) {
   const t = useTranslations();
   const isCustom = choice === CUSTOM || options.length === 0;
 
+  const comboOptions: ComboboxOption[] = [
+    ...options.map((option) => ({
+      value: option.mint,
+      label: option.label,
+      icon: <TokenMark mint={option.mint} size="xs" symbol={option.label} />,
+    })),
+    // The pasted mint stays in the list so the trigger can name it; it is
+    // otherwise synthesized from the search text below.
+    ...(isCustom && custom
+      ? [
+          {
+            value: custom,
+            label: shortenAddress(custom),
+            description: t("DashboardMarkets.dvp.mintUseAddress"),
+          },
+        ]
+      : []),
+  ];
+
   return (
-    <Field hint={options.length === 0 && emptyHint ? emptyHint : hint} htmlFor={id} label={label}>
-      {options.length > 0 ? (
-        <Select
-          ariaLabel={label}
-          onValueChange={(next) => onChoiceChange(next ?? CUSTOM)}
-          value={choice}
-        >
-          {options.map((option) => (
-            <SelectItem key={option.mint} value={option.mint}>
-              {/* The token, and nothing else. This read "ATD (6 decimals)",
-                  which is a fact about how the chain stores the amount and not
-                  a reason to pick one token over another — and with both legs
-                  usually at six it was the same suffix on every option, so the
-                  only varying part was pushed left by a constant. The scale is
-                  already stated where it can act on the number: the amount
-                  field's own hint says how you write it, and the conversion
-                  line under it says what will be sent. It is left over from
-                  when this field took base units. */}
-              <span className="flex items-center gap-2">
-                <TokenMark mint={option.mint} size="xs" symbol={option.label} />
-                {option.label}
-              </span>
-            </SelectItem>
-          ))}
-          <SelectItem value={CUSTOM}>{t("DashboardMarkets.dvp.cashOther")}</SelectItem>
-        </Select>
-      ) : null}
-      {isCustom ? (
-        <Input
-          className="font-mono text-xs"
-          id={id}
-          onChange={(event) => onCustomChange(event.target.value)}
-          placeholder={placeholder}
-          required
-          spellCheck={false}
-          value={custom}
-        />
-      ) : null}
-    </Field>
+    <div className="flex min-w-0 flex-col gap-1.5" id={id}>
+      <Combobox
+        label={label}
+        onChange={(next) => {
+          if (options.some((option) => option.mint === next)) {
+            onChoiceChange(next);
+            return;
+          }
+          onChoiceChange(CUSTOM);
+          onCustomChange(next);
+        }}
+        options={comboOptions}
+        placeholder={t("DashboardMarkets.dvp.mintSlotPlaceholder")}
+        queryOption={(query) =>
+          BASE58_ADDRESS.test(query)
+            ? {
+                value: query,
+                label: shortenAddress(query),
+                description: t("DashboardMarkets.dvp.mintUseAddress"),
+              }
+            : null
+        }
+        searchPlaceholder={t("DashboardMarkets.dvp.mintSlotSearchPlaceholder")}
+        value={isCustom ? (custom ? custom : null) : choice ? choice : null}
+      />
+    </div>
   );
 }
 
 /**
- * Compares two u64 base-unit strings. Never `Number`: a u64 exceeds 2^53.
- *
- * @returns negative, zero or positive, like any comparator.
- */
-function compareBaseUnits(left: string, right: string): number {
-  const a = left.replace(/^0+(?=\d)/, "");
-  const b = right.replace(/^0+(?=\d)/, "");
-  if (a.length !== b.length) {
-    return a.length - b.length;
-  }
-  return a === b ? 0 : a < b ? -1 : 1;
-}
-
-/**
- * One amount field, in whichever unit the mint allows.
- *
- * Where decimals are known it takes the amount as a person would write it and
- * shows the base units it resolves to, so the conversion is visible rather than
- * magic. Where they are not, it says so and takes base units, because guessing
- * a scale would move the wrong quantity.
- */
-/**
- * What the balance line offers: how much you hold, and a way to spend all of it.
- *
- * Its own component because it was an inline conditional inside a prop, which
- * is where a chunk of `AmountField`'s branching lived.
- */
-function BalanceWithMax({
-  balance,
-  onChange,
-}: {
-  balance: { amount: string; decimals: number };
-  onChange: (next: string) => void;
-}) {
-  const t = useTranslations();
-  const max = fromBaseUnits(balance.amount, balance.decimals);
-
-  return (
-    <span className="flex items-center gap-2">
-      <span className="text-tertiary text-xs tabular-nums">
-        {t("DashboardMarkets.dvp.balanceAvailable", { amount: max })}
-      </span>
-      <button
-        className="rounded text-primary text-xs underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-        onClick={() => onChange(max)}
-        type="button"
-      >
-        {t("DashboardMarkets.dvp.balanceUseMax")}
-      </button>
-    </span>
-  );
-}
-
-/**
- * Which of the four things this field can say about the number you typed.
- *
- * They are mutually exclusive and were written as a ternary nested four deep,
- * which reads as one expression and is four decisions. Early returns say the
- * same thing in the order the cases actually rank: no scale known, then too
- * precise to send, then the conversion, then how to write it.
+ * What this field can say about the number you typed. Base-unit conversion is
+ * the platform's job and is never surfaced; the only hints left are the
+ * unknown-scale case and the one precision refusal typing cannot prevent.
  */
 function amountHintKey(
   decimals: number | null,
-  tooPrecise: boolean,
-  converted: ReturnType<typeof toBaseUnits> | null
-): { key: MessageKey; values?: Record<string, string> } {
+  tooPrecise: boolean
+): { key: MessageKey; values?: Record<string, string> } | null {
   if (decimals === null) {
     return { key: "DashboardMarkets.dvp.fieldAmountHintRaw" };
   }
+  // Reachable only when a custom-mint lookup resolves decimals AFTER a finer
+  // value was already typed — live typing is blocked at the input.
   if (tooPrecise) {
     return { key: "DashboardMarkets.dvp.amountTooPrecise" };
   }
-  if (converted?.ok) {
-    return {
-      key: "DashboardMarkets.dvp.baseUnits",
-      values: { value: converted.baseUnits },
-    };
-  }
-  return {
-    key: "DashboardMarkets.dvp.fieldAmountHintDecimals",
-    values: { decimals: String(decimals) },
-  };
+  return null;
+}
+
+/** Whether the text carries more fraction digits than the mint can represent. */
+function exceedsScale(value: string, decimals: number): boolean {
+  const fraction = value.split(".")[1];
+  return fraction !== undefined && fraction.length > decimals;
 }
 
 export function AmountField({
-  balance,
   decimals,
+  disabled,
   id,
   label,
   onChange,
   symbol,
+  tokenName,
   value,
 }: {
-  /**
-   * What the spending wallet holds of this mint, in base units. Null when the
-   * leg is not SDP's, or the balance is not known.
-   *
-   * Shown because this field asks someone to commit a quantity, and it used to
-   * ask without ever saying how much they had — so committing more than the
-   * wallet holds looked fine until funding failed for insufficient funds, well
-   * after the trade was on chain and its escrows published.
-   */
-  balance: { amount: string; decimals: number } | null;
   decimals: number | null;
+  /** No mint chosen yet: the field is inert and carries no hint, because there is nothing to scale against. */
+  disabled: boolean;
   id: string;
   label: string;
   onChange: (next: string) => void;
   symbol: string;
+  /** The token's human name, shown beside the symbol in the suffix; null when no metadata names it. */
+  tokenName: string | null;
   value: string;
 }) {
   const t = useTranslations();
   const converted = decimals === null || value.trim() === "" ? null : toBaseUnits(value, decimals);
   const tooPrecise = converted?.ok === false && converted.reason === "too-precise";
 
-  // Compared in BASE UNITS, as strings of equal length, never as numbers: a
-  // u64 exceeds 2^53 and a float comparison would call an over-commitment fine.
-  const exceedsBalance =
-    balance !== null && converted?.ok === true
-      ? compareBaseUnits(converted.baseUnits, balance.amount) > 0
-      : false;
-
-  const hint = amountHintKey(decimals, tooPrecise, converted);
+  const hint = disabled ? null : amountHintKey(decimals, tooPrecise);
 
   return (
     <Field
-      hint={t(hint.key, { symbol, ...hint.values })}
+      hint={hint === null ? null : t(hint.key, { symbol, ...hint.values })}
       htmlFor={id}
       label={label}
-      labelTrailing={balance ? <BalanceWithMax balance={balance} onChange={onChange} /> : null}
       tone={tooPrecise ? "danger" : "muted"}
-      warning={exceedsBalance ? t("DashboardMarkets.dvp.amountExceedsBalance") : null}
     >
       <div className="relative">
         {/* inputMode, never type="number": these resolve to u64 base units and a
             number input rounds above 2^53. */}
         <Input
-          className={cn("tabular-nums", symbol && "pr-20")}
+          className={cn("tabular-nums", symbol && (tokenName === null ? "pr-20" : "pr-48"))}
+          disabled={disabled}
           id={id}
           inputMode="decimal"
-          onChange={(event) => onChange(event.target.value)}
+          size="xl"
+          // Enforced at the keystroke: anything but digits and one dot never
+          // lands, and neither does a digit the mint cannot represent — which
+          // is what makes the "N decimals" explainer hint unnecessary.
+          onChange={(event) => {
+            const next = event.target.value;
+            if (!/^\d*\.?\d*$/.test(next)) {
+              return;
+            }
+            if (decimals !== null && exceedsScale(next, decimals)) {
+              return;
+            }
+            onChange(next);
+          }}
           placeholder={decimals === null ? "1000" : "10"}
           required
           value={value}
         />
-        {/* Symbol only. The mark sits on the picker one line above, and a
-            monogram fallback beside its own symbol reads as "TBO TBOND". */}
+        {/* Name and symbol only. The mark sits on the picker one line above,
+            and a monogram fallback beside its own symbol reads as "TBO TBOND". */}
         {symbol ? (
-          <span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 max-w-[4.5rem] truncate text-tertiary text-xs">
-            {symbol}
+          <span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 flex max-w-[11rem] items-center gap-1.5 text-tertiary text-xs">
+            {tokenName === null ? null : (
+              <>
+                <span className="truncate">{tokenName}</span>
+                <span aria-hidden className="h-3 w-px shrink-0 bg-border-default" />
+              </>
+            )}
+            <span className="shrink-0">{symbol}</span>
           </span>
         ) : null}
       </div>
@@ -305,177 +260,171 @@ export function AmountField({
   );
 }
 
+/** The combobox value for a slot: the reference kind, a colon, its id. Base58 never contains a colon, so the first one always splits cleanly. */
+function slotValue(slot: DvpPartySlot): string | null {
+  switch (slot.mode) {
+    case "wallet":
+      return slot.walletId ? `wallet:${slot.walletId}` : null;
+    case "counterparty":
+      return slot.counterpartyAccountId ? `counterparty:${slot.counterpartyAccountId}` : null;
+    case "address":
+      return slot.address ? `address:${slot.address}` : null;
+    default: {
+      const exhausted: never = slot;
+      return exhausted;
+    }
+  }
+}
+
 /**
- * Which leg you deliver, as two cards rather than a dropdown.
+ * One party slot, as a single searchable combobox.
  *
- * It is the one choice on this form that reverses the direction of everything
- * else, and a collapsed dropdown shows the consequence of only the option you
- * already picked. Both are on screen, and each says what it means for you.
+ * The three reference kinds live in one list: custody wallets and registered
+ * counterparties are searchable options, and a pasted base58 address surfaces
+ * as an option of its own — an invalid paste simply never becomes selectable,
+ * so the slot cannot hold a malformed address.
+ *
+ * Controlled: the slot value comes from the form's zod values and every change
+ * replaces the whole slot object, so a slot never holds a value from a
+ * reference kind it is not currently showing.
  */
-/**
- * Whether this organization is a party to the trade, or only setting it up.
- *
- * An execution agent setting up the on-chain swap details and having two
- * counterparties do the swaps is the more common arrangement, and the program
- * always allowed it — CreateDvp's only signer is the payer — so this exposes a
- * shape that was already there rather than adding one.
- *
- * Same card grammar as the side chooser directly below it, because the two
- * questions are asked one after the other and reading as one control is the
- * point.
- */
-export function TradeKindChoice({
+export function PartySlotPicker({
+  counterpartyAccounts,
+  error,
+  id,
+  label,
   onChange,
-  value,
+  slot,
 }: {
-  onChange: (next: "principal" | "agent") => void;
-  value: "principal" | "agent";
+  counterpartyAccounts: DvpCreateCounterpartyAccount[];
+  /** A correction shown under the picker, or null when the slot is fine. */
+  error: string | null;
+  id: string;
+  label: string;
+  onChange: (next: DvpPartySlot) => void;
+  slot: DvpPartySlot;
 }) {
   const t = useTranslations();
-  const options = [
-    {
-      kind: "principal" as const,
-      title: t("DashboardMarkets.dvp.kindPrincipalTitle"),
-      detail: t("DashboardMarkets.dvp.kindPrincipalDetail"),
-    },
-    {
-      kind: "agent" as const,
-      title: t("DashboardMarkets.dvp.kindAgentTitle"),
-      detail: t("DashboardMarkets.dvp.kindAgentDetail"),
-    },
+
+  const options: ComboboxOption[] = [
+    ...counterpartyAccounts.map((account) => ({
+      value: `counterparty:${account.counterpartyAccountId}`,
+      label: account.name,
+      description: shortenAddress(account.address),
+    })),
+    // The selected pasted address stays in the list so the trigger can name
+    // it; the option is otherwise synthesized from the search text below.
+    ...(slot.mode === "address" && slot.address
+      ? [
+          {
+            value: `address:${slot.address}`,
+            label: shortenAddress(slot.address),
+            description: t("DashboardMarkets.dvp.partyUseAddress"),
+          },
+        ]
+      : []),
   ];
 
+  // No Field wrapper: the combobox renders its own label, and stacking the
+  // two showed every slot titled twice.
+  // min-w-0 lets a grid column shrink this below the trigger's content width,
+  // so the trigger truncates instead of overflowing its neighbor.
   return (
-    <fieldset className="grid gap-1.5">
-      <legend className="mb-1.5 font-medium text-primary text-sm">
-        {t("DashboardMarkets.dvp.fieldTradeKind")}
-      </legend>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {options.map((option) => {
-          const selected = value === option.kind;
-          return (
-            <label
-              className={cn(
-                "flex cursor-pointer gap-3 rounded-2xl border p-4 transition-colors",
-                "focus-within:ring-2 focus-within:ring-border-strong",
-                selected
-                  ? "border-primary bg-fill-subtle"
-                  : "border-border-default bg-surface-raised hover:bg-fill-subtle"
-              )}
-              key={option.kind}
-            >
-              <input
-                checked={selected}
-                className="sr-only"
-                name="dvp-trade-kind"
-                onChange={() => onChange(option.kind)}
-                type="radio"
-                value={option.kind}
-              />
-              <span
-                aria-hidden
-                className={cn(
-                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
-                  selected ? "border-primary" : "border-border-strong"
-                )}
-              >
-                {selected ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-medium text-primary text-sm">{option.title}</span>
-                <span className="mt-0.5 block text-tertiary text-xs leading-relaxed">
-                  {option.detail}
-                </span>
-              </span>
-            </label>
+    <div className="flex min-w-0 flex-col gap-1.5" id={id}>
+      <Combobox
+        label={label}
+        onChange={(next) => {
+          const separator = next.indexOf(":");
+          const kind = next.slice(0, separator);
+          const reference = next.slice(separator + 1);
+          onChange(
+            kind === "counterparty"
+              ? { mode: "counterparty", counterpartyAccountId: reference }
+              : { mode: "address", address: reference }
           );
-        })}
-      </div>
-    </fieldset>
+        }}
+        options={options}
+        placeholder={t("DashboardMarkets.dvp.partySlotPlaceholder")}
+        queryOption={(query) =>
+          BASE58_ADDRESS.test(query)
+            ? {
+                value: `address:${query}`,
+                label: shortenAddress(query),
+                description: t("DashboardMarkets.dvp.partyUseAddress"),
+              }
+            : null
+        }
+        searchPlaceholder={t("DashboardMarkets.dvp.partySlotSearchPlaceholder")}
+        value={slotValue(slot)}
+      />
+      {error === null ? null : <p className="text-error text-xs leading-relaxed">{error}</p>}
+    </div>
   );
 }
 
-export function SideChoice({
-  assetSymbol,
-  cashSymbol,
-  onChange,
-  value,
+/**
+ * One payout destination, as a single searchable combobox.
+ *
+ * The value is a plain address either way: picking a registered counterparty
+ * fills its address, and a pasted base58 address surfaces as an option of its
+ * own — an invalid paste never becomes selectable.
+ *
+ * @param props - The picker's wiring.
+ * @param props.counterpartyAccounts - The registered accounts offered as destinations.
+ * @param props.id - The DOM id for the picker.
+ * @param props.label - The picker's label.
+ * @param props.payout - The side's payout state; its address is the value.
+ * @returns The payout picker.
+ */
+export function PayoutAddressPicker({
+  counterpartyAccounts,
+  id,
+  label,
+  payout,
 }: {
-  assetSymbol: string;
-  cashSymbol: string;
-  onChange: (next: "a" | "b") => void;
-  value: "a" | "b";
+  counterpartyAccounts: DvpCreateCounterpartyAccount[];
+  id: string;
+  label: string;
+  payout: DvpPayout;
 }) {
   const t = useTranslations();
-  const options = [
-    {
-      side: "a" as const,
-      title: t("DashboardMarkets.dvp.sideAssetTitle"),
-      detail: t("DashboardMarkets.dvp.sideAssetDetail", {
-        deliver: assetSymbol || t("DashboardMarkets.dvp.sideAsset"),
-        receive: cashSymbol || t("DashboardMarkets.dvp.sideCash"),
-      }),
-    },
-    {
-      side: "b" as const,
-      title: t("DashboardMarkets.dvp.sideCashTitle"),
-      detail: t("DashboardMarkets.dvp.sideCashDetail", {
-        deliver: cashSymbol || t("DashboardMarkets.dvp.sideCash"),
-        receive: assetSymbol || t("DashboardMarkets.dvp.sideAsset"),
-      }),
-    },
+
+  const options: ComboboxOption[] = [
+    ...counterpartyAccounts.map((account) => ({
+      value: account.address,
+      label: account.name,
+      description: shortenAddress(account.address),
+    })),
+    ...(payout.address && !counterpartyAccounts.some((a) => a.address === payout.address)
+      ? [
+          {
+            value: payout.address,
+            label: shortenAddress(payout.address),
+            description: t("DashboardMarkets.dvp.partyUseAddress"),
+          },
+        ]
+      : []),
   ];
 
   return (
-    <fieldset className="grid gap-1.5">
-      <legend className="mb-1.5 font-medium text-primary text-sm">
-        {t("DashboardMarkets.dvp.fieldSide")}
-      </legend>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {options.map((option) => {
-          const selected = value === option.side;
-          return (
-            <label
-              className={cn(
-                "flex cursor-pointer gap-3 rounded-2xl border p-4 transition-colors",
-                "focus-within:ring-2 focus-within:ring-border-strong",
-                selected
-                  ? "border-primary bg-fill-subtle"
-                  : "border-border-default bg-surface-raised hover:bg-fill-subtle"
-              )}
-              key={option.side}
-            >
-              <input
-                checked={selected}
-                className="sr-only"
-                name="dvp-side"
-                onChange={() => onChange(option.side)}
-                type="radio"
-                value={option.side}
-              />
-              {/* A drawn radio, not just a tinted background. Which card is
-                  chosen has to survive a glance, and a fill this subtle does
-                  not read as "selected" on its own. */}
-              <span
-                aria-hidden
-                className={cn(
-                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
-                  selected ? "border-primary" : "border-border-strong"
-                )}
-              >
-                {selected ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-medium text-primary text-sm">{option.title}</span>
-                <span className="mt-1 block text-secondary text-xs leading-relaxed">
-                  {option.detail}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
+    <div className="flex min-w-0 flex-col gap-1.5" id={id}>
+      <Combobox
+        label={label}
+        onChange={payout.setAddress}
+        options={options}
+        queryOption={(query) =>
+          BASE58_ADDRESS.test(query)
+            ? {
+                value: query,
+                label: shortenAddress(query),
+                description: t("DashboardMarkets.dvp.partyUseAddress"),
+              }
+            : null
+        }
+        searchPlaceholder={t("DashboardMarkets.dvp.partySlotSearchPlaceholder")}
+        value={payout.address === "" ? null : payout.address}
+      />
+    </div>
   );
 }
 
@@ -528,6 +477,7 @@ export function ReferenceField({
         id={id}
         onChange={(event) => onChange(event.target.value)}
         placeholder={t("DashboardMarkets.dvp.fieldRefPlaceholder")}
+        size="xl"
         value={value}
       />
     </Field>

@@ -8,6 +8,7 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PAYMENT_TRANSFER_STATUSES,
   type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
@@ -521,18 +522,7 @@ export const createTransferSchema = z.strictObject({
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 
-export const transferStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "finalized",
-  "failed",
-  "awaiting_payment",
-  "settling",
-  "completed",
-  "canceled",
-  "expired",
-]);
+export const transferStatusSchema = z.enum(PAYMENT_TRANSFER_STATUSES);
 
 const transferFilterTimestampSchema = z
   .string()

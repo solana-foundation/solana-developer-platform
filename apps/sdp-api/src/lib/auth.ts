@@ -145,6 +145,24 @@ export function requireProjectId(c: Context<{ Bindings: Env }>): string {
   return projectId;
 }
 
+/**
+ * Whether a dashboard identity may manage organization-wide credentials.
+ *
+ * Clerk contexts carry both the normalized organization role and its derived
+ * permissions. Accepting either admin representation keeps capability hints
+ * aligned with the authenticated membership while session contexts continue
+ * to authorize through their freshly resolved permissions. API keys are
+ * deliberately excluded from human credential-administration surfaces.
+ */
+export function canManageOrganizationCredentials(auth: ApiKeyContext): boolean {
+  if (auth.authType === "api_key") return false;
+  return (
+    auth.role === "admin" ||
+    auth.permissions.includes("org:admin") ||
+    auth.permissions.includes("*")
+  );
+}
+
 export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {
   const auth = c.get("clerk");
   if (!auth) {

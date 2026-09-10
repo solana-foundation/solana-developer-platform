@@ -160,6 +160,7 @@ const strategy: EarnStrategy = {
   withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
+  feeSponsored: false,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
@@ -936,33 +937,31 @@ describe("slippage-floored providers", () => {
     return user;
   }
 
-  it("switches the confirm note to sponsored copy when the quote says SDP pays", async () => {
-    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
-      kind: "quoted",
-      preview: {
-        strategyId: vedaStrategy.id,
-        sharesOut: "0.99999",
-        shareDecimals: 6,
-        blockingIssues: [],
-        feeSponsored: true,
-      },
-    });
+  it("reads the confirm note from the strategy, not the quote", async () => {
+    // The quote does not claim sponsorship; the strategy does. The strategy
+    // wins: it is the per-request answer of the execution gate, while a quote is
+    // only ever fetched for floor-declaring providers.
+    primeQuote("0.99999");
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...vedaStrategy, feeSponsored: true }}
+        onClose={vi.fn()}
+      />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
     await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
 
-    await screen.findByText("SDP covers the network fee.", undefined, { timeout: 3000 });
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(screen.getByText("SDP covers the network fee.")).toBeTruthy();
     expect(
       screen.queryByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeNull();
   });
 
-  it("keeps the wallet-pays note while no quote claims sponsorship", async () => {
-    // `feeSponsored` absent (an older API, or sponsorship off) reads wallet-pays.
+  it("keeps the wallet-pays note while the strategy is not sponsored", async () => {
     primeQuote("0.99999");
     render(
       <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
@@ -977,7 +976,6 @@ describe("slippage-floored providers", () => {
       screen.getByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeTruthy();
   });
-
   it("derives the floor from the LIVE quote, not the amount", async () => {
     // A rate the amount-arithmetic would get wrong: 1 USDC quotes 0.99999
     // shares, so a 10 bps floor is 0.99899 — not the 0.999 the amount implies.
@@ -1276,5 +1274,65 @@ describe("slippage-floored providers", () => {
     await vi.waitFor(() => {
       expect(mocks.fetchEarnVaultDepositPreview.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
+  });
+});
+
+describe("fee sponsorship copy", () => {
+  it("names SDP as the fee payer for a sponsored Kamino deposit that never quotes", async () => {
+    // The regression: Kamino declares no deposit floor, so no quote is ever
+    // fetched, and a flag riding on the quote left the note on wallet-pays for
+    // every sponsored Kamino deposit.
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...strategy, feeSponsored: true }}
+        onClose={vi.fn()}
+      />
+    );
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+
+    expect(screen.getByText("SDP covers the network fee.")).toBeTruthy();
+    expect(mocks.fetchEarnVaultDepositPreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps the wallet-pays note for an unsponsored Kamino deposit", async () => {
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+  });
+
+  it("falls back to wallet-pays for a swap-funded deposit even when the strategy is sponsored", async () => {
+    const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        fundingWallet([
+          { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
+          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+        ]),
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    const user = userEvent.setup();
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...strategy, feeSponsored: true }}
+        onClose={vi.fn()}
+      />
+    );
+    await screen.findByRole("dialog");
+    expect(screen.getByText("SDP covers the network fee.")).toBeTruthy();
+
+    // Sponsorship refuses swap routes, so the copy follows the funding choice.
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.click(screen.getByRole("radio", { name: "USDG" }));
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+    expect(screen.queryByText("SDP covers the network fee.")).toBeNull();
   });
 });

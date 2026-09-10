@@ -164,10 +164,10 @@ describe("wallet-scoped route coverage inventory", () => {
     ]);
   });
 
-  // Every DvP route that touches a TRADE is wallet-scoped: a trade names the
-  // custody wallet holding SDP's leg, so both the write and the reads are bound
-  // to it. Behaviour is covered in dvp.test.ts; this list exists so a new route
-  // cannot be added without someone deciding which it is.
+  // Every DvP route that touches a TRADE is wallet-scoped: every route resolves
+  // custody wallets against the caller, and both the writes and the reads are
+  // bound to them. Behaviour is covered in dvp.test.ts; this list exists so a
+  // new route cannot be added without someone deciding which it is.
   it("tracks every wallet-scoped DvP route", () => {
     // Mint inspection is the exception, and deliberately so: it reads public
     // chain state about an address the caller already has, to answer the create
@@ -175,11 +175,10 @@ describe("wallet-scoped route coverage inventory", () => {
     // question that has nothing to do with one.
     const nonWalletScopedRoutes = new Set(["GET /mints/:mint"]);
 
-    // The two party routes are scoped the same way, by a different question:
-    // the others ask who owns the trade, these ask who holds the key to the
-    // address a leg names. Both answers resolve to custody wallets this caller
-    // holds, so both are wallet-scoped, and `inbound` deliberately takes no
-    // party parameter so it cannot be used to enumerate anyone else's.
+    // Funding is one route for every funder now: the wallet scoping is the
+    // custody lookup itself — the caller's wallet must hold the named side's
+    // party address. `inbound` deliberately takes no party parameter so it
+    // cannot be used to enumerate anyone else's.
     expect(extractRoutes(dvpRoutes).filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       "GET /trades",
       "GET /trades/:tradeId",
@@ -187,7 +186,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /trades",
       "POST /trades/:tradeId/cancel",
       "POST /trades/:tradeId/fund",
-      "POST /trades/:tradeId/fund-as-party",
       "POST /trades/:tradeId/settle",
     ]);
   });

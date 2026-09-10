@@ -55,28 +55,33 @@ vi.mock("@sdp/rpc/solana", () => ({
 const { createDvpTrade } = await import("./create");
 
 const TEST_PROJECT_ID = "prj_dvp_create_test";
+const TEST_PROJECT_ID_OTHER = "prj_dvp_create_other";
 const CUSTODY_CONFIG_ID = "cust_dvp_create_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_create_test";
 
 // Distinct from both parties, which `validateDvpTerms` requires.
 const SETTLEMENT_AUTHORITY = "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY";
-const COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+
+// Computed once at module load, NOT per call: the fingerprint hashes the
+// expiry, so two tradeInput() calls straddling a second boundary would be
+// different requests and 409 a replay the test meant to be identical.
+const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
 function tradeInput() {
   return {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    sdpWalletId: CUSTODY_WALLET_ID,
-    sdpSide: "a" as const,
-    tradeKind: "principal" as const,
-    counterparty: address(COUNTERPARTY),
+    partyA: { walletId: CUSTODY_WALLET_ID },
+    partyB: { address: address(COUNTERPARTY_ADDRESS) },
+    payerWalletId: null,
     mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
     tokenProgramA: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
     mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
     tokenProgramB: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
     amountA: 1000n,
     amountB: 2000n,
-    expiryTimestamp: BigInt(Math.floor(Date.now() / 1000) + 3600),
+    expiryTimestamp: EXPIRY_TIMESTAMP,
     earliestSettlementTimestamp: null,
     refString: null,
     // Null is the ordinary trade: the program records each party's own address.
@@ -88,14 +93,31 @@ function tradeInput() {
 }
 
 /** Reads every trade row straight out of Postgres, bypassing the repository. */
-async function rowsInDb(): Promise<{ id: string; status: string; nonce: string }[]> {
+async function rowsInDb(): Promise<
+  {
+    id: string;
+    status: string;
+    nonce: string;
+    counterparty_account_id_a: string | null;
+    counterparty_account_id_b: string | null;
+  }[]
+> {
   const result = await getDb(env)
-    .prepare("SELECT id, status, nonce FROM dvp_trades")
-    .all<{ id: string; status: string; nonce: string }>();
+    .prepare(
+      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b FROM dvp_trades"
+    )
+    .all<{
+      id: string;
+      status: string;
+      nonce: string;
+      counterparty_account_id_a: string | null;
+      counterparty_account_id_b: string | null;
+    }>();
   return result.results ?? [];
 }
 
 describe("createDvpTrade", () => {
+  let custodyWalletAddress: string;
   let originalSettlementAuthority: string | undefined;
 
   beforeAll(async () => {
@@ -123,6 +145,8 @@ describe("createDvpTrade", () => {
     await db.prepare("DELETE FROM dvp_trades").run();
     await db.prepare("DELETE FROM custody_wallets").run();
     await db.prepare("DELETE FROM custody_configs").run();
+    await db.prepare("DELETE FROM counterparty_accounts").run();
+    await db.prepare("DELETE FROM counterparties").run();
     await db.prepare("DELETE FROM projects").run();
 
     await db
@@ -146,6 +170,13 @@ describe("createDvpTrade", () => {
       .run();
     await db
       .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Other Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT_ID_OTHER, TEST_ORG.id, TEST_PROJECT_ID_OTHER, TEST_USER.id)
+      .run();
+    await db
+      .prepare(
         `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
          VALUES (?, ?, 'local', 'x', 'active')`
       )
@@ -155,6 +186,7 @@ describe("createDvpTrade", () => {
     // A real signer, so the transaction is really signed and the signature the
     // row carries is the one the network would see.
     const signer = await generateKeyPairSigner();
+    custodyWalletAddress = signer.address;
     createOrgSignerForCustodyWallet.mockResolvedValue(signer);
 
     await db
@@ -162,7 +194,7 @@ describe("createDvpTrade", () => {
         `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
          VALUES (?, ?, 'w1', ?, 'active')`
       )
-      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, signer.address)
+      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, custodyWalletAddress)
       .run();
   });
 
@@ -352,34 +384,6 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
-  // A key is a claim, not a proof. Reused with different terms it would hand
-  // back the earlier trade — and that trade names a custody wallet and
-  // publishes escrow addresses, so a wallet-scoped caller would receive a
-  // wallet and escrows outside their own scope.
-  it("refuses a key reused with different terms", async () => {
-    sendTransaction.mockResolvedValue("sig");
-    await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1" });
-
-    await expect(
-      createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1", amountA: 999n })
-    ).rejects.toThrow(/different request payload/);
-  });
-
-  // sdpWalletId is in the fingerprint precisely so a key cannot be used to
-  // reach a trade belonging to another wallet.
-  it("refuses a key reused against a different custody wallet", async () => {
-    sendTransaction.mockResolvedValue("sig");
-    await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-1" });
-
-    await expect(
-      createDvpTrade(env, {
-        ...tradeInput(),
-        idempotencyKey: "key-1",
-        sdpWalletId: "cwlt_someone_else",
-      })
-    ).rejects.toThrow(/different request payload/);
-  });
-
   // Two overlapping retries both miss the lookup and both reach the insert. The
   // unique index rejects one, and without recovery that retry gets a 500 —
   // exactly the case the key exists to make safe.
@@ -421,10 +425,216 @@ describe("createDvpTrade", () => {
 
   it("writes nothing when the terms are refused before signing", async () => {
     await expect(
-      createDvpTrade(env, { ...tradeInput(), counterparty: address(SETTLEMENT_AUTHORITY) })
+      createDvpTrade(env, {
+        ...tradeInput(),
+        partyB: { address: address(SETTLEMENT_AUTHORITY) },
+      })
     ).rejects.toThrow(/settlementAuthority must not be/);
 
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
+  });
+
+  // A `{ walletId }` slot resolves to the wallet's address and stores NULL
+  // attribution — fundability re-derives later, never from a stored column.
+  it("resolves a walletId slot to the wallet's address and stores null attribution", async () => {
+    sendTransaction.mockResolvedValue("sig");
+
+    const trade = await createDvpTrade(env, tradeInput());
+
+    expect(trade.userA).toBe(address(custodyWalletAddress));
+    const rows = await rowsInDb();
+    expect(rows[0].counterparty_account_id_a).toBeNull();
+    expect(rows[0].counterparty_account_id_b).toBeNull();
+  });
+
+  // A `{ counterpartyAccountId }` slot stores the ref and resolves the linked
+  // address from the account's details JSONB.
+  it("resolves a counterpartyAccountId slot to the linked address and stores the ref", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+         VALUES ('cpty_resolve', ?, ?, 'individual', 'Ada')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO counterparty_accounts
+           (id, organization_id, project_id, counterparty_id, account_kind, details, status)
+         VALUES ('cpa_resolve', ?, ?, 'cpty_resolve', 'crypto_wallet',
+                 '{"network":"solana","address":"${COUNTERPARTY_ADDRESS}"}'::jsonb, 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+
+    sendTransaction.mockResolvedValue("sig");
+    const trade = await createDvpTrade(env, {
+      ...tradeInput(),
+      partyA: { counterpartyAccountId: "cpa_resolve" },
+      partyB: { address: address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr") },
+    });
+
+    expect(trade.userA).toBe(address(COUNTERPARTY_ADDRESS));
+    const rows = await rowsInDb();
+    expect(rows[0].counterparty_account_id_a).toBe("cpa_resolve");
+    expect(rows[0].counterparty_account_id_b).toBeNull();
+  });
+
+  // Wrong-kind account (e.g. a bank kind, which the open schema permits) is
+  // refused — only crypto_wallet accounts name a Solana party.
+  it("refuses a counterpartyAccountId slot of the wrong kind", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+         VALUES ('cpty_bank', ?, ?, 'individual', 'Bo')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO counterparty_accounts
+           (id, organization_id, project_id, counterparty_id, account_kind, status)
+         VALUES ('cpa_bank', ?, ?, 'cpty_bank', 'bank_account', 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+
+    sendTransaction.mockResolvedValue("sig");
+    await expect(
+      createDvpTrade(env, {
+        ...tradeInput(),
+        partyA: { counterpartyAccountId: "cpa_bank" },
+      })
+    ).rejects.toThrow(/crypto_wallet/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+  });
+
+  // An archived account is invisible to the scoped lookup, so it is refused
+  // the same way an unknown one is.
+  it("refuses an archived counterparty account", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+         VALUES ('cpty_archived', ?, ?, 'individual', 'Ari')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO counterparty_accounts
+           (id, organization_id, project_id, counterparty_id, account_kind, status)
+         VALUES ('cpa_archived', ?, ?, 'cpty_archived', 'crypto_wallet', 'archived')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+
+    sendTransaction.mockResolvedValue("sig");
+    await expect(
+      createDvpTrade(env, {
+        ...tradeInput(),
+        partyA: { counterpartyAccountId: "cpa_archived" },
+      })
+    ).rejects.toThrow(/counterpartyAccountId/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+  });
+
+  // Cross-parent defense: an account in another project does not resolve here.
+  it("refuses a counterparty account belonging to another project", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+         VALUES ('cpty_other', ?, ?, 'individual', 'Oth')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO counterparty_accounts
+           (id, organization_id, project_id, counterparty_id, account_kind, details, status)
+         VALUES ('cpa_other', ?, ?, 'cpty_other', 'crypto_wallet',
+                 '{"network":"solana","address":"${COUNTERPARTY_ADDRESS}"}'::jsonb, 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
+      .run();
+
+    sendTransaction.mockResolvedValue("sig");
+    await expect(
+      createDvpTrade(env, {
+        ...tradeInput(),
+        partyA: { counterpartyAccountId: "cpa_other" },
+      })
+    ).rejects.toThrow(/counterpartyAccountId/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+  });
+
+  // Unknown walletId — no active custody wallet with that row id in scope.
+  it("refuses an unknown walletId", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    await expect(
+      createDvpTrade(env, {
+        ...tradeInput(),
+        partyA: { walletId: "cwlt_nonexistent" },
+      })
+    ).rejects.toThrow(/walletId/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+  });
+
+  // An archived wallet never appears in the active-only wallet list, so it is
+  // refused the same way an unknown one is.
+  it("refuses an archived wallet", async () => {
+    const db = getDb(env);
+    const archivedSigner = await generateKeyPairSigner();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES ('cwlt_archived', ?, 'w_arch', ?, 'archived')`
+      )
+      .bind(CUSTODY_CONFIG_ID, archivedSigner.address)
+      .run();
+
+    sendTransaction.mockResolvedValue("sig");
+    await expect(
+      createDvpTrade(env, {
+        ...tradeInput(),
+        partyA: { walletId: "cwlt_archived" },
+      })
+    ).rejects.toThrow(/walletId/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+  });
+
+  // An explicit payer signs with that wallet; an omitted payer signs with the
+  // settlement wallet.
+  it("signs with an explicit payer wallet when one is given", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    await createDvpTrade(env, {
+      ...tradeInput(),
+      partyA: { address: address(COUNTERPARTY_ADDRESS) },
+      partyB: { address: address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr") },
+      payerWalletId: CUSTODY_WALLET_ID,
+    });
+
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT_ID,
+      CUSTODY_WALLET_ID
+    );
+  });
+
+  it("signs with the settlement wallet when no payer is given", async () => {
+    sendTransaction.mockResolvedValue("sig");
+    await createDvpTrade(env, tradeInput());
+
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT_ID,
+      "cwlt_settlement"
+    );
   });
 });

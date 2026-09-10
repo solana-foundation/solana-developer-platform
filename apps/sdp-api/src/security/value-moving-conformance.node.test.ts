@@ -99,7 +99,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/authority",',
-      before: "policyGate({ extract: extractUpdateAuthorityPolicyCandidate })",
+      before: "extract: extractUpdateAuthorityPolicyCandidate",
       after: "executeUpdateAuthority",
     },
     replay: [
@@ -169,7 +169,7 @@ const contracts: ValueMovingContract[] = [
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/policy.ts",
-      evidence: "const settlement = await getOrCreateDvpSettlementWallet(c.env, {",
+      evidence: "const settlement = await readDvpSettlementWallet(c.env, {",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",

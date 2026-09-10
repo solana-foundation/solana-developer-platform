@@ -6,6 +6,7 @@ export {
 } from "./config";
 export { SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";
 export {
+  isForbiddenRpcError,
   isTransientRpcError,
   isUnauthorizedRpcError,
   withTransientRpcRetry,

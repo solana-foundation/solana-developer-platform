@@ -31,7 +31,7 @@ export async function saveIssuanceDraft(
       view: "summary",
       includeBalances: false,
     });
-    const allowedIds = new Set((wallets.data ?? []).map((wallet) => wallet.walletId));
+    const allowedIds = new Set((wallets.data ?? []).map((wallet) => wallet.id));
     const required = isStablecoin
       ? Object.values(draft.authorities)
       : [draft.authorities["mint-authority"], draft.authorities["metadata-authority"]];

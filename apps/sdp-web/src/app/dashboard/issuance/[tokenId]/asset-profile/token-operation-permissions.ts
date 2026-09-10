@@ -53,9 +53,8 @@ export function getTokenOperationPermissions({
     withWalletLoadError(
       getSignerSelectionForAction({ action, token, authorityWallets, metadataAuthority, t })
     );
-  // Deploy needs no signer picker (the server resolves the signing wallet), only
-  // the yes/no gate that at least one custody wallet exists to sign the mint.
-  const deployDisabledReason = signerSelectionFor("deploy").unavailableReason;
+  const deploySignerSelection = signerSelectionFor("deploy");
+  const deployDisabledReason = deploySignerSelection.unavailableReason;
   const mintSignerSelection = signerSelectionFor("mint");
   const burnSignerSelection = signerSelectionFor("burn");
   const seizeSignerSelection = signerSelectionFor("seize");
@@ -145,6 +144,7 @@ export function getTokenOperationPermissions({
     pauseDisabledReason,
     metadataAuthority,
     withWalletLoadError,
+    deploySignerSelection,
     deployDisabledReason,
     mintSignerSelection,
     burnSignerSelection,

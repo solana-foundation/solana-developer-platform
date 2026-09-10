@@ -35,6 +35,7 @@ import {
 } from "./handlers/program";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
+  admitEarnVaultRuntimeExecution,
   assertEarnVaultWithdrawalFloor,
   createEarnVaultDeposit,
   createEarnVaultDepositPreview,
@@ -168,6 +169,7 @@ earn.post(
   policyGate({
     extract: extractEarnVaultDepositPolicyCandidate,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
+    beforeEnforce: admitEarnVaultRuntimeExecution,
   }),
   createEarnVaultDeposit
 );
@@ -217,7 +219,10 @@ earn.post(
     findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
     // Floor policy runs AFTER the completed-replay exit so a recorded
     // floor-less withdrawal stays replayable if the provider's policy flips.
-    beforeEnforce: assertEarnVaultWithdrawalFloor,
+    beforeEnforce: async (c, extraction) => {
+      await assertEarnVaultWithdrawalFloor(c, extraction);
+      await admitEarnVaultRuntimeExecution(c, extraction);
+    },
   }),
   createEarnVaultWithdrawal
 );

@@ -114,7 +114,7 @@ export async function honestRecord(
   return {
     owner: request.owner,
     ...(await publishedKeys(request)),
-    mergingEnabled: options.mergingEnabled ?? false,
+    mergingEnabled: options.mergingEnabled ?? true,
     bump: 255,
   };
 }

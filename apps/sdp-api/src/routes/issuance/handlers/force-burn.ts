@@ -17,8 +17,16 @@ import {
   requireProjectScope,
 } from "../helpers";
 import type { forceBurnSchema } from "../schemas";
-import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
+import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveAuthoritySigner,
+  resolveAuthorityWallet,
+  resolveDirectIssuanceReplay,
+  resolvePermanentDelegateAuthority,
+} from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -46,19 +54,23 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
-  const permanentDelegateRaw =
-    body.forceBurn.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
+  if (
+    body.forceBurn.delegateAuthority !== undefined &&
+    body.forceBurn.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { signer, custodyWalletId } = await resolveAuthoritySigner({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
@@ -83,6 +95,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "force_burn",
     params: {
       source: body.forceBurn.source,
@@ -106,11 +119,12 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "prepare",
+      custodyWalletId,
     },
   });
 
   return success(c, {
-    transaction: tx,
+    transaction: toPublicTokenTransaction(tx),
     preparedTransaction: {
       serialized: prepared.serializedTx,
       blockhash: prepared.blockhash,
@@ -137,39 +151,79 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "force_burn",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "force_burn",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:admin"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      action: "force_burn",
+    });
+    if (transaction.status === "confirmed") {
+      await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.forceBurn.amount);
+    }
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
+  }
+
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
 
   const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
-  const permanentDelegateRaw =
-    body.forceBurn.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
+  if (
+    body.forceBurn.delegateAuthority !== undefined &&
+    body.forceBurn.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { custodyWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "force_burn",
-    mode: "execute",
-    params: body,
+  const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "force_burn",
     params: {
       source: body.forceBurn.source,
@@ -194,8 +248,16 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     if (transaction.status === "confirmed") {
       await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
     }
-    return success(c, { transaction });
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
+
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
@@ -208,6 +270,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       amount: body.forceBurn.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "execute",
+      custodyWalletId,
     },
   });
   let onChainEffectCompleted = false;
@@ -249,7 +312,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
       slot: result.slot.toString(),
     });
 
-    return success(c, { transaction: updatedTx });
+    return success(c, { transaction: toPublicTokenTransaction(updatedTx) });
   } catch (error) {
     if (!onChainEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {

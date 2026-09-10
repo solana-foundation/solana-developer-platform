@@ -25,6 +25,8 @@ export {
 export type {
   BuildOperationInput,
   BuildOperationResult,
+  EnsureMergingEnabledInput,
+  EnsureMergingEnabledResult,
   KnownAsset,
   ProvisionIdentityInput,
   ProvisionIdentityResult,

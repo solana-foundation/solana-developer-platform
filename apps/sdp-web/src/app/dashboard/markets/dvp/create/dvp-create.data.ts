@@ -13,6 +13,8 @@ export interface DvpCreateOption {
   /** The mint address, which is what the API actually takes. */
   mint: string;
   label: string;
+  /** The token's human name ("USD Coin"), or null when the metadata has none. */
+  name: string | null;
   /**
    * Lets the form take a human amount and convert it. Null when unknown, in
    * which case the field falls back to base units rather than guessing a scale
@@ -28,7 +30,7 @@ export interface DvpCreateOption {
 }
 
 export interface DvpCreateWallet {
-  /** `custody_wallets.id` — the record id the API expects as sdpWalletId. */
+  /** `custody_wallets.id` — the record id the API takes as a party or payer walletId. */
   id: string;
   address: string;
   label: string | null;
@@ -45,9 +47,25 @@ export interface DvpWalletBalance {
   symbol: string | null;
 }
 
+/**
+ * A registered counterparty crypto-wallet account, as a party slot option.
+ *
+ * The API resolves `counterpartyAccountId` to the account's address at create
+ * and stores the reference; the client carries the address only to compare the
+ * two slots and to label payouts.
+ */
+export interface DvpCreateCounterpartyAccount {
+  counterpartyAccountId: string;
+  /** Who the account belongs to, as the picker should name it. */
+  name: string;
+  label: string | null;
+  address: string;
+}
+
 export interface DvpCreateContext {
   wallets: DvpCreateWallet[];
   tokens: DvpCreateOption[];
+  counterpartyAccounts: DvpCreateCounterpartyAccount[];
   error: string | null;
 }
 
@@ -115,18 +133,44 @@ function mapWallets(rows: WalletRow[]): DvpCreateWallet[] {
   );
 }
 
+interface CounterpartyAccountRow {
+  counterpartyAccountId?: string;
+  /** `counterparty_display_name` — the picker's label, always present. */
+  name?: string;
+  label?: string | null;
+  address?: string;
+}
+
+function mapCounterpartyAccounts(rows: CounterpartyAccountRow[] | null | undefined) {
+  return (rows ?? []).flatMap((account) =>
+    account.counterpartyAccountId && account.name && account.address
+      ? [
+          {
+            counterpartyAccountId: account.counterpartyAccountId,
+            name: account.name,
+            label: account.label ?? null,
+            address: account.address,
+          },
+        ]
+      : []
+  );
+}
+
 /** Never throws: a form that renders with empty pickers beats a 500. */
 export async function fetchDvpCreateContext(
   request: SdpApiClient["request"]
 ): Promise<DvpCreateContext> {
   try {
-    const [walletsResponse, tokensResponse] = await Promise.all([
+    const [walletsResponse, tokensResponse, counterpartiesResponse] = await Promise.all([
       // Balances come along for the ride. The form is asking someone to commit
       // a quantity of an asset, and it was doing so without ever showing how
       // much of it they hold — so an over-commitment only surfaced later, as a
       // funding transfer that failed for insufficient funds.
       request("/v1/wallets?includeBalances=true"),
       request("/v1/issuance/tokens?pageSize=100"),
+      // The registered crypto-wallet accounts a slot can name, address resolved
+      // server-side the same way create will resolve `counterpartyAccountId`.
+      request("/v1/counterparties/accounts?pageSize=100"),
     ]);
 
     const walletsBody = (await walletsResponse.json().catch(() => ({}))) as {
@@ -137,11 +181,16 @@ export async function fetchDvpCreateContext(
       data?: TokenRow[];
       error?: { message?: string };
     };
+    const counterpartiesBody = (await counterpartiesResponse.json().catch(() => ({}))) as {
+      data?: { accounts?: CounterpartyAccountRow[] };
+      error?: { message?: string };
+    };
 
     if (!walletsResponse.ok) {
       return {
         wallets: [],
         tokens: [],
+        counterpartyAccounts: [],
         error: walletsBody.error?.message ?? `Wallet list failed (${walletsResponse.status}).`,
       };
     }
@@ -156,10 +205,26 @@ export async function fetchDvpCreateContext(
       return {
         wallets: mapWallets(walletRows),
         tokens: [],
+        counterpartyAccounts: [],
         error: tokensBody.error?.message ?? `Token list failed (${tokensResponse.status}).`,
       };
     }
     const tokenRows = tokensBody.data ?? [];
+
+    // Same rule as the tokens: a counterparty list that failed must not read
+    // as "you have no counterparties", which would hide the second-reference
+    // option from somebody who uses it daily.
+    if (!counterpartiesResponse.ok) {
+      return {
+        wallets: mapWallets(walletRows),
+        tokens: tokenRows.flatMap(toTokenOption),
+        counterpartyAccounts: [],
+        error:
+          counterpartiesBody.error?.message ??
+          `Counterparty list failed (${counterpartiesResponse.status}).`,
+      };
+    }
+    const accountRows = counterpartiesBody.data?.accounts ?? [];
 
     return {
       wallets: mapWallets(walletRows),
@@ -170,26 +235,31 @@ export async function fetchDvpCreateContext(
       // create endpoint reads the mint on chain and refuses with the offending
       // extension named, which is strictly better than anything this list could
       // claim — it carries no extension data at all.
-      tokens: tokenRows.flatMap((token) =>
-        token.mintAddress
-          ? [
-              {
-                mint: token.mintAddress,
-                label: token.symbol || token.name || token.mintAddress,
-                decimals: typeof token.decimals === "number" ? token.decimals : null,
-                // Every SDP-issued asset is minted under Token-2022.
-                tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
-              },
-            ]
-          : []
-      ),
+      tokens: tokenRows.flatMap(toTokenOption),
+      counterpartyAccounts: mapCounterpartyAccounts(accountRows),
       error: null,
     };
   } catch (error) {
     return {
       wallets: [],
       tokens: [],
+      counterpartyAccounts: [],
       error: error instanceof Error ? error.message : "Could not load trade options.",
     };
   }
+}
+
+function toTokenOption(token: TokenRow) {
+  return token.mintAddress
+    ? [
+        {
+          mint: token.mintAddress,
+          label: token.symbol || token.name || token.mintAddress,
+          name: token.name ? token.name : null,
+          decimals: typeof token.decimals === "number" ? token.decimals : null,
+          // Every SDP-issued asset is minted under Token-2022.
+          tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+        },
+      ]
+    : [];
 }

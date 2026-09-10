@@ -263,6 +263,20 @@ export interface EarnStrategy {
    * of a platform-global catalogue row.
    */
   fundable: boolean;
+  /**
+   * Whether SDP's treasury vault flow would pay the network fee (and any
+   * share-ATA rent) for a movement on this strategy from **the caller's
+   * environment**, derived per request and never stored, like `fundable`.
+   *
+   * This is the SAME gate execution applies (`resolveVaultSponsorship`), so it
+   * is the field a client reads for honest fee copy. It deliberately does not
+   * ride on the deposit quote: providers with no quote-derived floor (Kamino)
+   * never fetch a quote, and a flag that only travels with one is unreadable
+   * exactly for them. Always `false` when not `fundable`. A swap-funded deposit
+   * is wallet-pays regardless; the swap choice is the client's, so the client
+   * applies that override.
+   */
+  feeSponsored: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -281,6 +295,13 @@ export interface EarnVaultPosition {
   shareMint: string;
   createdAt: string;
   closedAt: string | null;
+  /**
+   * Whether SDP would pay the network fee for a withdrawal from this position:
+   * the execution gate (`resolveVaultSponsorship`) answered per request for the
+   * caller's environment, so the exit copy never depends on a quote the
+   * provider may not offer. See `EarnStrategy.feeSponsored`.
+   */
+  feeSponsored: boolean;
   /** Absent when the provider read failed; never coerce an unavailable value to zero. */
   shares?: string;
   /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
@@ -585,10 +606,13 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
  * swap-funded deposit could not fit in ONE Solana transaction (the packet
  * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
- * instructions). Nothing is persisted for this answer: SDP hands back an
- * unsigned SWAP-ONLY transaction for the owner to sign and broadcast itself,
- * plus the exact follow-up deposit to build once the swap lands. The follow-up
- * build then takes the ordinary single-transaction path.
+ * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
+ * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
+ * itself, plus the exact follow-up deposit to build once the swap lands. The
+ * follow-up build then takes the ordinary single-transaction path. SDP does
+ * record an advisory that the split was handed out, and flags owners whose
+ * swap landed without a follow-up deposit (PRO-1864); recovery stays the
+ * partner's duty.
  */
 export interface EarnExternalWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
@@ -597,9 +621,9 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
     /**
      * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
      * the owner, or the original request's `feePayer` (which then co-signs
-     * this transaction too). The partner broadcasts it itself — it moves only
+     * this transaction too). The partner broadcasts it itself; it moves only
      * the owner's own funds between the owner's own token accounts, so SDP
-     * records nothing for it.
+     * records no movement for it, only the orphan-detection advisory.
      */
     transaction: string;
     /** Block height after which these exact bytes can no longer land. */

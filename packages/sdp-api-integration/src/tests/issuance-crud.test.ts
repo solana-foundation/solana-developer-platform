@@ -12,11 +12,13 @@ import { createStablecoin, TEST_WALLETS } from "../helpers/issuance";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD Endpoints", () => {
   let apiKeyHash: string;
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -24,7 +26,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("lists templates and gets a template", async () => {
@@ -47,7 +50,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
   });
 
   it("creates, lists, gets, and updates a token", async () => {
-    const tokenId = await createStablecoin(request, "Issuance CRUD Coverage", "ISCRUD");
+    const tokenId = await createStablecoin(
+      request,
+      "Issuance CRUD Coverage",
+      "ISCRUD",
+      custodyWalletId
+    );
 
     const listTokensRes = await request("/v1/issuance/tokens?page=1&pageSize=20");
     expect(listTokensRes.status).toBe(200);
@@ -78,7 +86,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
   });
 
   it("adds, lists, and removes an allowlist entry", async () => {
-    const tokenId = await createStablecoin(request, "Issuance Allowlist Coverage", "ISALLOW");
+    const tokenId = await createStablecoin(
+      request,
+      "Issuance Allowlist Coverage",
+      "ISALLOW",
+      custodyWalletId
+    );
 
     const emptyAllowlistRes = await request(
       `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=10`

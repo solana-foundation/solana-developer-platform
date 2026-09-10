@@ -54,7 +54,16 @@ function InboundLegCell({ leg, yours }: { leg: DvpInboundLeg; yours: boolean }) 
  * Its own component so each row owns its pending state; one hook above the rows
  * would put every row into "Funding…" at once.
  */
-function InboundFundAction({ frozen, tradeId }: { frozen: boolean; tradeId: string }) {
+function InboundFundAction({
+  frozen,
+  side,
+  tradeId,
+}: {
+  frozen: boolean;
+  /** The leg the custody lookup made this caller's. */
+  side: "a" | "b";
+  tradeId: string;
+}) {
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(tradeId);
 
@@ -64,12 +73,12 @@ function InboundFundAction({ frozen, tradeId }: { frozen: boolean; tradeId: stri
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
         disabled={frozen || pending !== null || awaitingApproval}
-        onClick={() => act("fund-as-party")}
+        onClick={() => act("fund", { side })}
         size="sm"
         type="button"
         variant="secondary"
       >
-        {pending === "fund-as-party"
+        {pending === "fund"
           ? t("DashboardMarkets.dvp.inboundFunding")
           : t("DashboardMarkets.dvp.inboundFundAction")}
       </Button>
@@ -135,7 +144,13 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
           {formatTimestamp(new Date(Number(trade.expiryTimestamp) * 1000).toISOString(), t)}
         </TableCell>
         <TableCell>
-          {funded ? null : <InboundFundAction frozen={yours.frozen === true} tradeId={trade.id} />}
+          {funded ? null : (
+            <InboundFundAction
+              frozen={yours.frozen === true}
+              side={trade.yourSide}
+              tradeId={trade.id}
+            />
+          )}
         </TableCell>
       </TableRow>
     );

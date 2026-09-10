@@ -80,7 +80,7 @@ async function createFixtureToken(
     symbol: string;
     uri: string;
     requiresAllowlist: boolean;
-    signingWalletId: string;
+    signingCustodyWalletId: string;
   }
 ): Promise<Token> {
   const data = await api.post<TokenResponse>("/v1/issuance/tokens", {
@@ -89,7 +89,7 @@ async function createFixtureToken(
     template: "stablecoin",
     uri: input.uri,
     description: `${input.name} description`,
-    signingWalletId: input.signingWalletId,
+    signingCustodyWalletId: input.signingCustodyWalletId,
     requiresAllowlist: input.requiresAllowlist,
     isMintable: true,
     isFreezable: true,
@@ -101,10 +101,10 @@ async function createFixtureToken(
 async function deployFixtureToken(
   api: LocalApiClient,
   tokenId: string,
-  signingWalletId: string
+  signingCustodyWalletId: string
 ): Promise<Token> {
   await api.post<TokenResponse>(`/v1/issuance/tokens/${tokenId}/deploy`, {
-    signingWalletId,
+    signingCustodyWalletId,
   });
 
   return waitForTokenStatus(
@@ -186,37 +186,33 @@ export async function bootstrapLocalIssuanceFixtures({
     symbol: "E2EPND",
     uri: "https://example.com/metadata/e2e-pending-stable.json",
     requiresAllowlist: false,
-    signingWalletId: treasuryWallet.walletId,
+    signingCustodyWalletId: treasuryWallet.id,
   });
   const allowlistedDraft = await createFixtureToken(api, {
     name: "E2E Allowlist Stable",
     symbol: "E2EALW",
     uri: "https://example.com/metadata/e2e-allowlisted-stable.json",
     requiresAllowlist: true,
-    signingWalletId: treasuryWallet.walletId,
+    signingCustodyWalletId: treasuryWallet.id,
   });
   const openDraft = await createFixtureToken(api, {
     name: "E2E Open Stable",
     symbol: "E2EOPN",
     uri: "https://example.com/metadata/e2e-open-stable.json",
     requiresAllowlist: false,
-    signingWalletId: treasuryWallet.walletId,
+    signingCustodyWalletId: treasuryWallet.id,
   });
   const authorityDraft = await createFixtureToken(api, {
     name: "E2E Authority Stable",
     symbol: "E2EAUT",
     uri: "https://example.com/metadata/e2e-authority-stable.json",
     requiresAllowlist: false,
-    signingWalletId: treasuryWallet.walletId,
+    signingCustodyWalletId: treasuryWallet.id,
   });
 
-  const allowlistedToken = await deployFixtureToken(
-    api,
-    allowlistedDraft.id,
-    treasuryWallet.walletId
-  );
-  const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.walletId);
-  const authorityToken = await deployFixtureToken(api, authorityDraft.id, treasuryWallet.walletId);
+  const allowlistedToken = await deployFixtureToken(api, allowlistedDraft.id, treasuryWallet.id);
+  const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.id);
+  const authorityToken = await deployFixtureToken(api, authorityDraft.id, treasuryWallet.id);
 
   const fixtures: IssuanceFixtures = {
     organization: walletBootstrap.organization,
@@ -266,9 +262,9 @@ export async function bootstrapLocalPaymentFixtures({
     symbol: "E2EOPN",
     uri: "https://example.com/metadata/e2e-open-stable.json",
     requiresAllowlist: false,
-    signingWalletId: treasuryWallet.walletId,
+    signingCustodyWalletId: treasuryWallet.id,
   });
-  const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.walletId);
+  const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.id);
 
   return {
     projectId,

@@ -1,6 +1,8 @@
 import type {
   BuildOperationInput,
   BuildOperationResult,
+  EnsureMergingEnabledInput,
+  EnsureMergingEnabledResult,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
   ProvisionRingInput,
@@ -41,7 +43,13 @@ export interface InMemoryRingsGatewayOptions {
 }
 
 /** Op types that consume notes, and so have inputs worth pinning. */
-const SPENDS = new Set<string>(["transfer_registered", "withdraw", "merge"]);
+const SPENDS = new Set<string>([
+  "transfer_registered",
+  "withdraw",
+  "merge",
+  "ring_exit",
+  "ring_entry",
+]);
 
 const ALL_GREEN: RuntimeHealth = {
   rpc: "green",
@@ -75,6 +83,8 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
   ) => Promise<ProvisionRingResult>;
   private readonly syncCounters = new Map<string, number>();
   private readonly submittedAt = new Map<string, number>();
+  /** Public so a test can assert the on-chain merge gate was cleared first. */
+  readonly mergingEnabledCalls: EnsureMergingEnabledInput[] = [];
 
   constructor(options: InMemoryRingsGatewayOptions = {}) {
     this.now = options.now ?? (() => new Date().toISOString());
@@ -97,7 +107,6 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
         owner: input.sdpAddress,
       },
       registrationSignatures: [`sig:${hashHex(`${seed}:register`, 8)}`],
-      mergingEnabled: true,
       materialTag: "simulated",
     };
   }
@@ -130,9 +139,20 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
         owner: input.owner,
       },
       registrationSignatures: [`sig:${hashHex(`${seed}:rekey`, 8)}`],
-      mergingEnabled: true,
       materialTag: "simulated",
     };
+  }
+
+  /**
+   * Records the call so tests can assert a merge clears the on-chain gate
+   * before building. Answers "already on" because the interesting case here is
+   * the ordering, not the transaction.
+   */
+  async ensureMergingEnabled(
+    input: EnsureMergingEnabledInput
+  ): Promise<EnsureMergingEnabledResult> {
+    this.mergingEnabledCalls.push(input);
+    return { signature: null };
   }
 
   async readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult> {
@@ -155,7 +175,16 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     const amountRaw = String(1_000_000_000 * next);
 
     return {
-      balances: [{ mint: NATIVE_MINT, amountRaw, decimals: 9, symbol: "SOL", ringProgramId: null }],
+      balances: [
+        {
+          mint: NATIVE_MINT,
+          amountRaw,
+          decimals: 9,
+          symbol: "SOL",
+          ringProgramId: null,
+          noteCount: 1,
+        },
+      ],
       history: [
         {
           signature: `sig:${hashHex(`${input.walletId}:${next}`, 8)}`,

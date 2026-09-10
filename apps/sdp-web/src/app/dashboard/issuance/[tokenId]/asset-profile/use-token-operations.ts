@@ -22,7 +22,7 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
-  findWalletByWalletId,
+  findWalletByCustodyWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
   getControlListCopy,
@@ -71,6 +71,7 @@ export function useTokenOperations({
     runActionImmediately: runActionImmediatelyBase,
     dismissActionConfirmation,
     confirmAction,
+    selectConfirmationWallet,
   } = useTokenActionRunner();
   const { isPending: isRefreshingSupply, runAction: refreshSupply } = useTokenActionRunner();
 
@@ -82,6 +83,8 @@ export function useTokenOperations({
   const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
+  const [deployWalletDialogOpen, setDeployWalletDialogOpen] = useState(false);
+  const [deployCustodyWalletId, setDeployCustodyWalletId] = useState("");
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
   const [seizeForm, setSeizeForm] = useState(createInitialSeizeForm);
@@ -110,6 +113,8 @@ export function useTokenOperations({
 
   const {
     authorityWallets,
+    authorityWalletsData,
+    authorityWalletsFetchError,
     authorityWalletsError,
     authorityWalletsLoading,
     supportingDataLoading,
@@ -156,6 +161,7 @@ export function useTokenOperations({
     pauseDisabledReason,
     metadataAuthority,
     withWalletLoadError,
+    deploySignerSelection,
     deployDisabledReason,
     mintSignerSelection,
     burnSignerSelection,
@@ -181,6 +187,31 @@ export function useTokenOperations({
     t,
   });
   const extensionRows = useMemo(() => getExtensionRows(token, t), [token, t]);
+  const metadataSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "metadata",
+      token,
+      authorityWallets,
+      metadataAuthority: authorityWalletsData?.metadataAuthority ?? null,
+      metadataAuthorityError:
+        authorityWalletsFetchError ??
+        authorityWalletsData?.metadataAuthorityError ??
+        (authorityWalletsData?.metadataAuthority === undefined
+          ? t("DashboardIssuance.management.loadingSignerWallets")
+          : null),
+      t,
+    })
+  );
+  const allowlistSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "allowlist",
+      token,
+      authorityWallets,
+      metadataAuthority,
+      allowlistAuthority: authorityWalletsData?.allowlistAuthority,
+      t,
+    })
+  );
 
   // Lock supply = mint the remainder, then revoke the mint authority. Both legs
   // are signed by the current mint authority, so mintSignerSelection covers the
@@ -190,12 +221,10 @@ export function useTokenOperations({
     getLockSupplyDisabledReason(token, t) ?? mintSignerSelection.unavailableReason;
 
   const selectedBurnSignerWallet =
-    findWalletByWalletId(
+    findWalletByCustodyWalletId(
       burnSignerSelection.wallets,
       burnForm.signingWalletId || burnSignerSelection.defaultWalletId
-    ) ??
-    burnSignerSelection.wallets[0] ??
-    null;
+    ) ?? null;
   const mintValidationReason = getMintValidationReason({
     token,
     destination: mintForm.destination,
@@ -263,12 +292,13 @@ export function useTokenOperations({
     mint: effectiveMintDisabledReason ?? mintValidationReason,
     burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
-  // Allowlist mutations only touch the chain when the token has an on-chain ABL
-  // list; then the list is governed by the freeze-authority delegate (sRFC-37
-  // Token ACL), so it needs the freeze authority under SDP custody — same check
-  // as freeze. DB-only allowlists need no signer and stay ungated.
+  // A list has its own live authority; it need not be the token freeze authority.
+  // Database-only allowlists still need no signer.
   const allowlistDisabledReason = token.ablListAddress
-    ? freezeSignerSelection.unavailableReason
+    ? (authorityWalletsData?.allowlistAuthorityError ??
+      (authorityWalletsData?.allowlistAuthority === undefined
+        ? t("DashboardIssuance.management.loadingSignerWallets")
+        : allowlistSignerSelection.unavailableReason))
     : null;
 
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
@@ -294,10 +324,7 @@ export function useTokenOperations({
     }
   };
 
-  // Fees are always Kora-sponsored and the server resolves the signing wallet
-  // (token signer, then org custody fallback), so deploy fires immediately —
-  // no modal, no confirmation dialog.
-  const deployToken = () => {
+  const submitDeploy = (signingCustodyWalletId: string) => {
     void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
@@ -305,6 +332,7 @@ export function useTokenOperations({
         path: `${tokenBasePath}/deploy`,
         body: {
           feePayment: "sponsored",
+          signingCustodyWalletId,
         },
       },
       {
@@ -312,6 +340,31 @@ export function useTokenOperations({
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
     );
+  };
+
+  const deployToken = () => {
+    if (token.signingCustodyWalletId) {
+      submitDeploy(token.signingCustodyWalletId);
+      return;
+    }
+
+    if (deploySignerSelection.unavailableReason) {
+      toast.error(deploySignerSelection.unavailableReason);
+      return;
+    }
+
+    setDeployCustodyWalletId(
+      deploySignerSelection.wallets.length === 1 ? deploySignerSelection.wallets[0].id : ""
+    );
+    setDeployWalletDialogOpen(true);
+  };
+
+  const confirmDeployWallet = () => {
+    if (!deployCustodyWalletId) {
+      return;
+    }
+    setDeployWalletDialogOpen(false);
+    submitDeploy(deployCustodyWalletId);
   };
 
   const handleRefreshSupply = () => {
@@ -357,7 +410,8 @@ export function useTokenOperations({
         method: "POST",
         path: `${tokenBasePath}/mint`,
         body: {
-          signingWalletId: mintForm.signingWalletId || undefined,
+          signingCustodyWalletId:
+            mintForm.signingWalletId || mintSignerSelection.defaultWalletId || undefined,
           mint: {
             destination,
             amount,
@@ -419,7 +473,7 @@ export function useTokenOperations({
         method: "POST",
         path: `${tokenBasePath}/burn`,
         body: {
-          signingWalletId: burnForm.signingWalletId || undefined,
+          signingCustodyWalletId: burnForm.signingWalletId || burnSignerSelection.defaultWalletId,
           burn: {
             source,
             amount,
@@ -474,7 +528,8 @@ export function useTokenOperations({
         method: "POST",
         path: `${tokenBasePath}/seize`,
         body: {
-          signingWalletId: seizeForm.signingWalletId || undefined,
+          signingCustodyWalletId:
+            seizeForm.signingWalletId || seizeSignerSelection.defaultWalletId || undefined,
           seize: {
             source,
             destination,
@@ -488,6 +543,16 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.seizeConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.seizeConfirmationDescription"),
+        confirmationWarning: t("DashboardIssuance.management.seizeConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.source"), value: source },
+          { label: t("DashboardIssuance.forms.destination"), value: destination },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.transferNow"),
         submitToast: t("DashboardIssuance.management.submittingForceTransfer"),
         successToast: t("DashboardIssuance.management.forceTransferFinalized"),
@@ -522,7 +587,8 @@ export function useTokenOperations({
         method: "POST",
         path: `${tokenBasePath}/force-burn`,
         body: {
-          signingWalletId: forceBurnForm.signingWalletId || undefined,
+          signingCustodyWalletId:
+            forceBurnForm.signingWalletId || forceBurnSignerSelection.defaultWalletId || undefined,
           forceBurn: {
             source,
             amount,
@@ -535,6 +601,15 @@ export function useTokenOperations({
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.forceBurnConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
+        confirmationWarning: t("DashboardIssuance.management.forceBurnConfirmationDescription"),
+        confirmationDetails: [
+          { label: t("DashboardIssuance.forms.amount"), value: `${amount} ${token.symbol}` },
+          { label: t("DashboardIssuance.forms.source"), value: source },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.forceBurnNow"),
         submitToast: t("DashboardIssuance.management.submittingForceBurn"),
         successToast: t("DashboardIssuance.management.forceBurnFinalized"),
@@ -602,6 +677,7 @@ export function useTokenOperations({
         successToast: pause
           ? t("DashboardIssuance.management.pauseFinalized")
           : t("DashboardIssuance.management.unpauseFinalized"),
+        signerWallets: pauseSignerSelection.wallets,
       }
     );
   };
@@ -626,6 +702,8 @@ export function useTokenOperations({
           path: `${tokenBasePath}/unfreeze`,
           body: {
             accountAddress,
+            signingCustodyWalletId:
+              freezeForm.signingWalletId || freezeSignerSelection.defaultWalletId || undefined,
           },
         },
         {
@@ -634,6 +712,18 @@ export function useTokenOperations({
           confirmationDescription: t(
             "DashboardIssuance.management.unfreezeConfirmationDescription"
           ),
+          confirmationWarning: t("DashboardIssuance.management.unfreezeConfirmationDescription"),
+          confirmationDetails: [
+            {
+              label: t("DashboardIssuance.draftForm.token"),
+              value: `${token.name} (${token.symbol})`,
+            },
+            { label: t("DashboardIssuance.forms.walletAddress"), value: accountAddress },
+            {
+              label: t("DashboardIssuance.draftForm.network"),
+              value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+            },
+          ],
           confirmButtonLabel: t("DashboardIssuance.management.unfreezeNow"),
           submitToast: t("DashboardIssuance.management.submittingUnfreeze"),
           successToast: t("DashboardIssuance.management.unfreezeFinalized"),
@@ -650,12 +740,26 @@ export function useTokenOperations({
         body: {
           accountAddress,
           reason: asOptionalString(freezeForm.reason),
+          signingCustodyWalletId:
+            freezeForm.signingWalletId || freezeSignerSelection.defaultWalletId || undefined,
         },
       },
       {
         requiresConfirmation: true,
         confirmationTitle: t("DashboardIssuance.management.freezeConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.freezeConfirmationDescription"),
+        confirmationWarning: t("DashboardIssuance.management.freezeConfirmationDescription"),
+        confirmationDetails: [
+          {
+            label: t("DashboardIssuance.draftForm.token"),
+            value: `${token.name} (${token.symbol})`,
+          },
+          { label: t("DashboardIssuance.forms.walletAddress"), value: accountAddress },
+          {
+            label: t("DashboardIssuance.draftForm.network"),
+            value: sdpEnvironment === "production" ? "Mainnet" : "Devnet",
+          },
+        ],
         confirmButtonLabel: t("DashboardIssuance.management.freezeNow"),
         submitToast: t("DashboardIssuance.management.submittingFreeze"),
         successToast: t("DashboardIssuance.management.freezeFinalized"),
@@ -677,15 +781,19 @@ export function useTokenOperations({
       return;
     }
 
-    runAction({
-      label: controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
-      method: "POST",
-      path: `${tokenBasePath}/allowlist`,
-      body: {
-        address,
-        label: asOptionalString(allowlistForm.label),
+    runAction(
+      {
+        label:
+          controlListCopy?.addActionLabel ?? t("DashboardIssuance.management.addAllowlistEntry"),
+        method: "POST",
+        path: `${tokenBasePath}/allowlist`,
+        body: {
+          address,
+          label: asOptionalString(allowlistForm.label),
+        },
       },
-    });
+      { signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined }
+    );
   };
 
   const handleRemoveAllowlist = (entryId: string) => {
@@ -695,13 +803,16 @@ export function useTokenOperations({
     }
     // The list + labels/count refresh via the allowlist SWR keys in
     // revalidateAfterSuccess, so no local optimistic update is needed here.
-    runAction({
-      label:
-        controlListCopy?.removeActionLabel ??
-        t("DashboardIssuance.management.removeAllowlistEntry"),
-      method: "DELETE",
-      path: `${tokenBasePath}/allowlist/${entryId}`,
-    });
+    runAction(
+      {
+        label:
+          controlListCopy?.removeActionLabel ??
+          t("DashboardIssuance.management.removeAllowlistEntry"),
+        method: "DELETE",
+        path: `${tokenBasePath}/allowlist/${entryId}`,
+      },
+      { signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined }
+    );
   };
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {
@@ -751,7 +862,7 @@ export function useTokenOperations({
         method: "POST",
         path: `${tokenBasePath}/authority`,
         body: {
-          signingWalletId: authorityModalSignerWalletId || undefined,
+          signingCustodyWalletId: authorityModalSignerWalletId || undefined,
           authority: {
             role: authorityModalRow.authorityRole,
             currentAuthority: authorityModalCurrentAuthority ?? undefined,
@@ -871,7 +982,7 @@ export function useTokenOperations({
       return;
     }
 
-    const signingWalletId = lockSupplyForm.signingWalletId || undefined;
+    const signingCustodyWalletId = lockSupplyForm.signingWalletId || undefined;
     const destination = lockSupplyForm.destination.trim();
     const needsMint = !lockSupplyMinted && isPositiveAmount(lockSupplyRemaining);
 
@@ -887,7 +998,7 @@ export function useTokenOperations({
           method: "POST",
           path: `${tokenBasePath}/mint`,
           body: {
-            signingWalletId,
+            signingCustodyWalletId,
             mint: { destination, amount: lockSupplyRemaining },
           },
         },
@@ -915,7 +1026,7 @@ export function useTokenOperations({
         method: "POST",
         path: `${tokenBasePath}/authority`,
         body: {
-          signingWalletId,
+          signingCustodyWalletId,
           authority: { role: "mint", newAuthority: null },
         },
       },
@@ -985,22 +1096,20 @@ export function useTokenOperations({
           signerWallets: freezeSignerSelection.wallets,
           defaultSignerWalletId: freezeSignerSelection.defaultWalletId,
           signerUnavailableReason: freezeSignerSelection.unavailableReason,
-          // Freeze authority is always single
-          onSignerWalletIdChange: (_value: string) => {},
+          onSignerWalletIdChange: (value: string) =>
+            setFreezeForm((previous) => ({ ...previous, signingWalletId: value })),
         };
       case "pause":
         return {
           signerWallets: pauseSignerSelection.wallets,
           defaultSignerWalletId: pauseSignerSelection.defaultWalletId,
           signerUnavailableReason: pauseSignerSelection.unavailableReason,
-          // Pause authority is always single
+          // The confirmation dialog owns pause/unpause signer selection.
           onSignerWalletIdChange: (_value: string) => {},
         };
       case "allowlist":
         return {
           signerWallets: [] as PaymentsDashboardWallet[],
-          // On-chain allowlist mutations are signed by the freeze-authority
-          // delegate, so gate on the same custody availability.
           signerUnavailableReason: allowlistDisabledReason,
           onSignerWalletIdChange: (_value: string) => {},
         };
@@ -1020,6 +1129,8 @@ export function useTokenOperations({
     actionConfirmation,
     dismissActionConfirmation,
     confirmAction,
+    selectConfirmationWallet,
+    metadataSignerSelection,
     // token facts
     tokenBasePath,
     explorerHref,
@@ -1086,6 +1197,12 @@ export function useTokenOperations({
     forceBurnValidationErrors,
     forceBurnValidationReason,
     deployDisabledReason,
+    deployWalletDialogOpen,
+    deployCustodyWalletId,
+    deploySignerSelection,
+    setDeployCustodyWalletId,
+    closeDeployWalletDialog: () => setDeployWalletDialogOpen(false),
+    confirmDeployWallet,
     fundManagementModalAction,
     openFundManagementModal,
     closeFundManagementModal,
@@ -1107,6 +1224,8 @@ export function useTokenOperations({
     authorityModalCurrentAuthority,
     authorityModalNewAuthority,
     setAuthorityModalNewAuthority,
+    authorityModalSignerWalletId,
+    setAuthorityModalSignerWalletId,
     authorityModalSignerSelection,
     handleAuthorityModalOpen,
     handleAuthorityModalClose,
