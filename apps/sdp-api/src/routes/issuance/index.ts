@@ -32,7 +32,7 @@ import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holder
 import { serveTokenMetadata } from "./handlers/metadata";
 import { executeMint, extractMintPolicyCandidate, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
-import { executeSeize, prepareSeize } from "./handlers/seize";
+import { executeSeize, extractSeizePolicyCandidate, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
@@ -191,6 +191,7 @@ issuance.post(
   "/tokens/:tokenId/seize",
   requirePermissions("tokens:admin"),
   validateBody(seizeSchema),
+  policyGate({ extract: extractSeizePolicyCandidate }),
   executeSeize
 );
 
