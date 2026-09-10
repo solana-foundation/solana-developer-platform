@@ -1,6 +1,12 @@
 /** Moving one side of a trade into escrow, from the custody wallet that owns that side's party address. */
 
-import { decodeSwapDvpChecked, SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
+import {
+  assertSwapDvpTerms,
+  decodeSwapDvpChecked,
+  SwapDvpTermsMismatchError,
+  SwapDvpVerificationError,
+  verifySwapDvpAccount,
+} from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,
@@ -204,42 +210,43 @@ export async function executeDvpFunding(
     throw error;
   }
 
-  const onChain = decodeSwapDvpChecked(snapshot.trade).data;
-  const recorded = {
-    userA: trade.userA,
-    userB: trade.userB,
-    mintA: trade.mintA,
-    mintB: trade.mintB,
-    amountA: BigInt(trade.amountA),
-    amountB: BigInt(trade.amountB),
-    expiryTimestamp: BigInt(trade.expiryTimestamp),
-    userASettlementDestination: trade.userASettlementDestination,
-    userBSettlementDestination: trade.userBSettlementDestination,
-    settlementAuthority: trade.settlementAuthority,
-  };
-  const live = {
-    userA: onChain.userA,
-    userB: onChain.userB,
-    mintA: onChain.mintA,
-    mintB: onChain.mintB,
-    amountA: onChain.amountA,
-    amountB: onChain.amountB,
-    expiryTimestamp: onChain.expiryTimestamp,
-    userASettlementDestination: onChain.userASettlementDestination,
-    userBSettlementDestination: onChain.userBSettlementDestination,
-    settlementAuthority: onChain.settlementAuthority,
-  };
-  const mismatched = (Object.keys(recorded) as (keyof typeof recorded)[]).filter(
-    (term) => live[term] !== recorded[term]
-  );
-  if (mismatched.length > 0) {
-    getLogger().warn(
-      { tradeId: trade.id, swapDvp: trade.swapDvp, mismatched, recorded, onChain: live },
-      "dvp funding: on-chain trade does not match recorded terms"
-    );
-    throw conflict(
-      `DvP trade ${trade.id}: the on-chain trade does not match the recorded terms; nothing was sent`
-    );
+  // Every agreed term, not only the seeds: the PDA omits amounts, time bounds
+  // and destinations, so a trade re-created at this address can differ in any
+  // of them and still verify. `assertSwapDvpTerms` is the one list of terms.
+  try {
+    assertSwapDvpTerms(decodeSwapDvpChecked(snapshot.trade).data, {
+      settlementAuthority: trade.settlementAuthority,
+      userA: trade.userA,
+      userB: trade.userB,
+      mintA: trade.mintA,
+      mintB: trade.mintB,
+      nonce: BigInt(trade.nonce),
+      amountA: BigInt(trade.amountA),
+      amountB: BigInt(trade.amountB),
+      expiryTimestamp: BigInt(trade.expiryTimestamp),
+      earliestSettlementTimestamp:
+        trade.earliestSettlementTimestamp === null
+          ? null
+          : BigInt(trade.earliestSettlementTimestamp),
+      userASettlementDestination: trade.userASettlementDestination,
+      userBSettlementDestination: trade.userBSettlementDestination,
+    });
+  } catch (error) {
+    if (error instanceof SwapDvpTermsMismatchError) {
+      getLogger().warn(
+        {
+          tradeId: trade.id,
+          swapDvp: trade.swapDvp,
+          mismatched: error.fields,
+          detail: error.message,
+        },
+        "dvp funding: on-chain trade does not match recorded terms"
+      );
+      throw conflict(
+        `DvP trade ${trade.id}: the on-chain trade does not match the recorded terms; nothing was sent`
+      );
+    }
+    throw error;
   }
 
   const legObservation = side === "a" ? snapshot.legA : snapshot.legB;

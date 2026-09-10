@@ -12,7 +12,7 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
-import { address } from "@solana/kit";
+import { address, none, some } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
@@ -147,6 +147,8 @@ describe("fundDvpTradeLeg", () => {
         userASettlementDestination: trade().userASettlementDestination,
         userBSettlementDestination: trade().userBSettlementDestination,
         settlementAuthority: trade().settlementAuthority,
+        nonce: BigInt(trade().nonce),
+        earliestSettlementTimestamp: none(),
       },
     }));
     readMintDecimals.mockResolvedValue(6);
@@ -282,6 +284,34 @@ describe("fundDvpTradeLeg", () => {
         userASettlementDestination: trade().userASettlementDestination,
         userBSettlementDestination: trade().userBSettlementDestination,
         settlementAuthority: trade().settlementAuthority,
+        nonce: BigInt(trade().nonce),
+        earliestSettlementTimestamp: none(),
+      },
+    }));
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
+      /on-chain trade does not match the recorded terms; nothing was sent/
+    );
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // Not a PDA seed either: a re-created trade can allow settlement earlier
+  // than the recorded deal, and only the terms check would notice.
+  it("refuses when the live trade carries an earliest settlement time the deal did not", async () => {
+    decodeSwapDvpChecked.mockImplementation(() => ({
+      data: {
+        userA: trade().userA,
+        userB: trade().userB,
+        mintA: trade().mintA,
+        mintB: trade().mintB,
+        amountA: BigInt(trade().amountA),
+        amountB: BigInt(trade().amountB),
+        expiryTimestamp: BigInt(trade().expiryTimestamp),
+        userASettlementDestination: trade().userASettlementDestination,
+        userBSettlementDestination: trade().userBSettlementDestination,
+        settlementAuthority: trade().settlementAuthority,
+        nonce: BigInt(trade().nonce),
+        earliestSettlementTimestamp: some(1n),
       },
     }));
 
