@@ -31,6 +31,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`, `earn`
 - Hidden/internal families stay out of public AI resources unless product policy changes: `rpc`, `admin`, `onboarding`, `auth`, `organizations`, `members`
+- Promoting a route into the public OpenAPI document is a security-relevant scope change, not a docs edit: the PR needs a named security sign-off. For `earn` the pinned list in `apps/sdp-api/src/openapi/spec.test.ts` enforces this (see `apps/sdp-api/src/routes/earn/CLAUDE.md`, "Public OpenAPI promotion").
 
 ## Preferred checks
 

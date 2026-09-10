@@ -98,6 +98,19 @@ balance with a live one.
   integration guide is derived from the strategy catalogue and persists
   nothing.
 
+- **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
+  model EARN-027). `registerPublicEarnPaths` decides what partners see, and
+  the public/preview split is a PUBLICATION boundary only: every `/v1/earn`
+  route accepts every auth mode at runtime, and both surfaces are the same
+  Hono router under the same `/v1/*` tracing and rate-limit middleware. So
+  moving a route into the public document changes the partner-facing scope
+  without changing any enforcement, which is why it needs a human gate. The
+  pinned operation list in `../../openapi/spec.test.ts` ("publishes the
+  caller-signed money routes") is that gate: growing it requires a security
+  sign-off named in the PR (who reviewed, and the threat-model row the route
+  lands under), and the threat model's revisit trigger fires. Never widen the
+  list just to make the test pass.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
