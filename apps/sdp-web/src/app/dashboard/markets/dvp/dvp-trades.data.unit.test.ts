@@ -57,16 +57,13 @@ describe("fetchDvpTrades", () => {
 
   // The filters narrow SERVER-SIDE because of that cap: a client-side filter
   // over the newest page makes an older matching trade unfindable.
-  it("carries the status and search filters on the query string", async () => {
+  it("carries the status filter on the query string", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request, {
-      statuses: ["created", "funded"],
-      q: "USDC",
-    });
+    await fetchDvpTrades(request, { statuses: ["created", "funded"] });
 
     expect(request).toHaveBeenCalledWith(
-      `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=created%2Cfunded&q=USDC`
+      `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=created%2Cfunded`
     );
   });
 
@@ -75,7 +72,7 @@ describe("fetchDvpTrades", () => {
   it("omits the filter params when unfiltered", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request, { statuses: null, q: null });
+    await fetchDvpTrades(request, { statuses: null });
 
     expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
   });
@@ -90,14 +87,6 @@ describe("fetchDvpTrades", () => {
     await fetchDvpTrades(request, filters);
 
     expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
-  });
-
-  it("keeps the search param company when the statuses group is empty", async () => {
-    const request = ok({ data: { trades: [] } });
-
-    await fetchDvpTrades(request, { statuses: [], q: "USDC" });
-
-    expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&q=USDC`);
   });
 
   it("carries the API's message out on a failure", async () => {

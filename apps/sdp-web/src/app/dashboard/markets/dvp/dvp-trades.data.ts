@@ -11,16 +11,15 @@ export const DVP_TRADES_PAGE_SIZE = 50;
 
 /**
  * The list filters the API narrows SERVER-SIDE. `statuses` maps the UI's status
- * group to the real statuses behind it; `q` is the search text. `null` means
+ * group to the real statuses behind it. `null` means
  * unfiltered on that axis, explicit because the house has no default params.
  */
 export interface DvpTradesFilters {
   statuses: DvpTradeStatus[] | null;
-  q: string | null;
 }
 
 /** The explicit no-filter filters: unfiltered is a choice, never a default. */
-export const UNFILTERED_DVP_TRADES: DvpTradesFilters = { statuses: null, q: null };
+export const UNFILTERED_DVP_TRADES: DvpTradesFilters = { statuses: null };
 
 export interface DvpTradesResult {
   trades: DvpTrade[];
@@ -81,9 +80,6 @@ export async function fetchDvpTrades(
     // no statuses of its own) parses to one.
     if (filters.statuses !== null && filters.statuses.length > 0) {
       query.set("status", filters.statuses.join(","));
-    }
-    if (filters.q !== null) {
-      query.set("q", filters.q);
     }
     const response = await request(`/v1/dvp/trades?${query.toString()}`);
     const body = (await response.json().catch(() => ({}))) as {

@@ -3,15 +3,14 @@
 /**
  * The trades list.
  *
- * The filters live in the URL (`?status=<group>&q=<text>`, the transactions
- * pattern): the status group and the debounced search text are pushed with
- * `router.replace` inside a transition, and the server refetches with them
- * mapped to real statuses — the list is capped with no cursor, so a
- * client-side filter would make an older matching trade unfindable.
+ * The status filter lives in the URL (`?status=<group>`, the transactions
+ * pattern): the group is pushed with `router.replace` inside a transition, and
+ * the server refetches with it mapped to real statuses — the list is capped
+ * with no cursor, so a client-side filter would make an older matching trade
+ * unfindable.
  *
  * `waiting` stays component state: it swaps in a different endpoint's rows
- * (the inbound list), which the URL has no reason to carry, and its search
- * stays client-side because that list is small and complete.
+ * (the inbound list), which the URL has no reason to carry.
  */
 
 import {
@@ -46,7 +45,6 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
@@ -81,9 +79,39 @@ const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
 /** The trades status groups that ride the URL. */
 type UrlStatusFilter = Exclude<StatusFilter, "waiting">;
 
-/** The page path, with the filters serialized onto it. */
-function tradesHref(status: UrlStatusFilter | "waiting", q: string | null): string {
-  const query = serializeDvpTradesFilters(status, q);
+/**
+ * Whether a trade answers the search box.
+ *
+ * What somebody has to hand when hunting for one trade: the counterparty they
+ * agreed it with, a symbol, or an address off an explorer. Both parties always,
+ * because on an agent trade neither of them is us and either is what somebody
+ * would paste in. Client-side over BOTH lists, deliberately: the search is a
+ * sieve for what is on screen and never rides the URL or the API query.
+ *
+ * @param trade - Either list's trade; both carry the searched fields.
+ * @param needle - The query, already trimmed and lowercased ("" matches all).
+ */
+function matchesTradeQuery(trade: DvpTrade | DvpInboundTrade, needle: string): boolean {
+  if (!needle) {
+    return true;
+  }
+  return [
+    trade.id,
+    trade.swapDvp,
+    trade.legs.a.symbol,
+    trade.legs.b.symbol,
+    trade.legs.a.mint,
+    trade.legs.b.mint,
+    trade.legs.a.party.address,
+    trade.legs.b.party.address,
+  ]
+    .filter(Boolean)
+    .some((value) => matchesAddressQuery(String(value), needle));
+}
+
+/** The page path, with the status group serialized onto it. */
+function tradesHref(status: UrlStatusFilter | "waiting"): string {
+  const query = serializeDvpTradesFilters(status);
   return `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}${query}`;
 }
 
@@ -150,36 +178,6 @@ function LegCell({
       </div>
     </div>
   );
-}
-
-/**
- * Whether a trade answers the search box.
- *
- * What somebody has to hand when hunting for one trade: the counterparty they
- * agreed it with, a symbol, or an address off an explorer. Both parties always,
- * because on an agent trade neither of them is us and either is what somebody
- * would paste in.
- *
- * Kept for the WAITING list only: that list is small and complete, so the
- * client answers without a round trip. The project's own list is filtered
- * server-side, where the whole history is searchable.
- */
-function matchesTradeQuery(trade: DvpInboundTrade, needle: string): boolean {
-  if (!needle) {
-    return true;
-  }
-  return [
-    trade.id,
-    trade.swapDvp,
-    trade.legs.a.symbol,
-    trade.legs.b.symbol,
-    trade.legs.a.mint,
-    trade.legs.b.mint,
-    trade.legs.a.party.address,
-    trade.legs.b.party.address,
-  ]
-    .filter(Boolean)
-    .some((value) => matchesAddressQuery(String(value), needle));
 }
 
 /**
@@ -409,33 +407,22 @@ export function DvpTradesWorkspace({
   trades,
   inbound,
   error,
-  searchQuery,
   statusFilter,
 }: {
   trades: DvpTrade[];
   /** Trades another organization created that name one of this project's wallets. */
   inbound: DvpInboundTrade[];
   error: string | null;
-  /** The active URL search text ("" when none), not the live input value. */
-  searchQuery: string;
   /** The active URL status group for the trades list. */
   statusFilter: UrlStatusFilter;
 }) {
   const t = useTranslations();
   const router = useRouter();
   const [, startTransition] = useTransition();
-  // The search input's live value: it stays local so typing never navigates
-  // per keystroke, and the debounced copy is what reaches the URL.
-  const [queryInput, setQueryInput] = useState(searchQuery);
-  const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
-  // A browser Back/Forward changes the URL's q (the prop) without remounting
-  // the workspace, so the input is adjusted during render to follow it —
-  // an effect doing this would write the STALE input back into the URL.
-  if (prevSearchQuery !== searchQuery) {
-    setPrevSearchQuery(searchQuery);
-    setQueryInput(searchQuery);
-  }
-  const debouncedQuery = useDebounce(queryInput.trim(), 300);
+  // The search is a client-side sieve over what is already on screen: it never
+  // rides the URL or the API query, so typing filters instantly and a browser
+  // navigation has nothing to restore.
+  const [query, setQuery] = useState("");
 
   // The URL is the filter state for the trades list; `waiting` selects the
   // inbound segment instead and lives here only, because it answers from a
@@ -448,26 +435,6 @@ export function DvpTradesWorkspace({
     setWaiting(false);
   }, [statusFilter]);
 
-  // The debounced input becomes the URL's q. The API floor is two characters:
-  // shorter text is still in the box but not yet a filter. `waiting` never
-  // enters this: it is not a trades-filter state, so the URL keeps the group
-  // it had while the inbound segment answers the same text client-side.
-  //
-  // A flush is written only while it still matches the live input: a browser
-  // navigation resets the input during render, so keystrokes that were still
-  // waiting to debounce when the navigation happened arrive here already
-  // superseded and are dropped instead of undoing the navigation.
-  useEffect(() => {
-    if (debouncedQuery !== queryInput.trim()) {
-      return;
-    }
-    if (debouncedQuery === searchQuery) {
-      return;
-    }
-    const q = debouncedQuery.length >= 2 ? debouncedQuery : null;
-    startTransition(() => router.replace(tradesHref(statusFilter, q), { scroll: false }));
-  }, [debouncedQuery, queryInput, router, searchQuery, statusFilter]);
-
   const onStatusChange = (next: StatusFilter) => {
     if (next === "waiting") {
       // The inbound segment swaps the table's rows rather than filtering the
@@ -476,21 +443,19 @@ export function DvpTradesWorkspace({
       return;
     }
     setWaiting(false);
-    const q = searchQuery === "" ? null : searchQuery;
-    startTransition(() => router.replace(tradesHref(next, q), { scroll: false }));
+    startTransition(() => router.replace(tradesHref(next), { scroll: false }));
   };
 
-  /** Clear filters resets the URL params, which is the whole filter state. */
+  /** Clear filters resets the search and the URL param, the whole filter state. */
   const clearFilters = () => {
     setWaiting(false);
-    setQueryInput("");
-    startTransition(() => router.replace(tradesHref("all", null), { scroll: false }));
+    setQuery("");
+    startTransition(() => router.replace(tradesHref("all"), { scroll: false }));
   };
 
   const showingInbound = waiting;
-  // The inbound segment keeps its client-side search: that list is small and
-  // complete, so the client answers without a round trip.
-  const needle = searchQuery.trim().toLowerCase();
+  const needle = query.trim().toLowerCase();
+  const visibleTrades = trades.filter((trade) => matchesTradeQuery(trade, needle));
   const visibleInbound = showingInbound
     ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
     : [];
@@ -504,7 +469,7 @@ export function DvpTradesWorkspace({
   // draws from `inbound` and leaves the trades table empty by design, so
   // counting only `trades` declared "no trades match" over a table that had a
   // row to render.
-  const shownCount = showingInbound ? visibleInbound.length : trades.length;
+  const shownCount = showingInbound ? visibleInbound.length : visibleTrades.length;
 
   const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
 
@@ -540,9 +505,9 @@ export function DvpTradesWorkspace({
                   action on the right, table flush below. */}
               <TradesToolbar
                 inboundCount={inbound.length}
-                onQueryChange={setQueryInput}
+                onQueryChange={setQuery}
                 onStatusChange={onStatusChange}
-                query={queryInput}
+                query={query}
                 status={waiting ? "waiting" : statusFilter}
                 tradeCount={trades.length}
               />
@@ -565,7 +530,7 @@ export function DvpTradesWorkspace({
                 <TradesTable
                   inbound={visibleInbound}
                   showingInbound={showingInbound}
-                  trades={showingInbound ? [] : trades}
+                  trades={showingInbound ? [] : visibleTrades}
                 />
               )}
             </>

@@ -197,6 +197,7 @@ describe("isNotFound", () => {
  * it into the search is the obvious move and it found nothing, because the only
  * thing being matched was the full forty-four characters.
  */
+
 describe("matchesAddressQuery", () => {
   const ADDRESS = "BMiuAaumaf6XFdmm1SjQfhYo5pXPq92bU3qEaBEUw1eP";
 

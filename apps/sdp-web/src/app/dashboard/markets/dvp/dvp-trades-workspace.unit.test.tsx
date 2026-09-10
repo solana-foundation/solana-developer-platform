@@ -16,7 +16,7 @@
  * filter strip's presence rules, and the party/leg rendering.
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -55,13 +55,11 @@ function renderWorkspace({
   trades,
   inbound,
   error = null,
-  searchQuery = "",
   statusFilter = "all",
 }: {
   trades: DvpTrade[];
   inbound: DvpInboundTrade[];
   error?: string | null;
-  searchQuery?: string;
   statusFilter?: "all" | "open" | "ready" | "closed";
 }): string {
   return renderToStaticMarkup(
@@ -69,7 +67,6 @@ function renderWorkspace({
       <DvpTradesWorkspace
         error={error}
         inbound={inbound}
-        searchQuery={searchQuery}
         statusFilter={statusFilter}
         trades={trades}
       />
@@ -157,6 +154,28 @@ describe("DvpTradesWorkspace", () => {
 
   it("offers filters once there is more than one trade", () => {
     expect(renderList([trade(), trade({ id: "dvp_2" })])).toContain("Search trades");
+  });
+
+  // The search is a client-side sieve: it narrows the rendered rows and never
+  // writes the URL, so there is no query param to restore or race.
+  it("filters the trades client-side without touching the URL", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradesWorkspace
+          error={null}
+          inbound={[]}
+          statusFilter="all"
+          trades={[trade(), trade({ id: "dvp_2" })]}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "dvp_2" } });
+
+    // The id is not rendered as text; the row's detail link carries it.
+    expect(document.querySelector('a[href*="dvp_2"]')).toBeTruthy();
+    expect(document.querySelector('a[href*="dvp_1"]')).toBeNull();
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
   // The trigger names what the control filters, not the opaque "All" — the
@@ -355,38 +374,5 @@ describe("DvpTradesWorkspace", () => {
     const html = renderList([trade()]);
 
     expect(html).not.toContain("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
-  });
-
-  // A browser Back/Forward changes the URL's q without remounting the
-  // workspace, so the input must adopt the new prop during render — and the
-  // just-synced render must not push the debounced OLD text back into the
-  // URL, which would undo the navigation.
-  it("follows a changed searchQuery prop without writing the old query back", () => {
-    const { rerender } = render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery="abacus"
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </I18nProvider>
-    );
-
-    rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <DvpTradesWorkspace
-          error={null}
-          inbound={[]}
-          searchQuery="bamboo"
-          statusFilter="all"
-          trades={[trade(), trade({ id: "dvp_2" })]}
-        />
-      </I18nProvider>
-    );
-
-    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("bamboo");
-    expect(replaceMock).not.toHaveBeenCalled();
   });
 });
