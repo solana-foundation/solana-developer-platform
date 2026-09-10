@@ -1,5 +1,4 @@
 import {
-  advanceQuickStartProgress,
   ORGANIZATION_STATUSES,
   ORGANIZATION_TIERS,
   type Organization,
@@ -181,17 +180,10 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
     }
 
     if (settingsPatch !== undefined) {
-      const currentSettings = parseOrganizationSettings(existing.settings);
       const mergedSettings: OrganizationSettings = {
-        ...currentSettings,
+        ...(parseOrganizationSettings(existing.settings) ?? {}),
         ...settingsPatch,
       };
-      if (settingsPatch.quickStartStep !== undefined) {
-        mergedSettings.quickStartStep = advanceQuickStartProgress(
-          currentSettings?.quickStartStep,
-          settingsPatch.quickStartStep
-        );
-      }
       updates.push("settings = ?");
       params.push(JSON.stringify(mergedSettings));
     }

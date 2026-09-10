@@ -2,7 +2,6 @@ export type OnboardingStatusResponse = {
   linked: boolean;
   organization: {
     id: string;
-    settings?: import("@sdp/types").OrganizationSettings | null;
   } | null;
   setup?: {
     status: "not_started" | "in_progress" | "complete";

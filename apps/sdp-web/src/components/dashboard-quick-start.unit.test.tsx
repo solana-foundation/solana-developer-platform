@@ -22,14 +22,11 @@ const workspace = vi.hoisted(() => ({
   sdpEnvironment: "sandbox",
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => workspace.pathname }));
-vi.mock("@/lib/quick-start-actions", () => ({
-  saveQuickStartProgress: vi.fn().mockResolvedValue(true),
-}));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
 }));
 
-const key = () => quickStartKey(workspace.dashboardCacheScope, workspace.selectedProjectId);
+const key = () => quickStartKey(workspace.dashboardCacheScope);
 const ui = (docked = false) => (
   <I18nProvider locale="en" messages={getMessages("en")}>
     <DashboardQuickStart docked={docked} />
@@ -42,12 +39,13 @@ const renderGuide = () => {
   if (launcher) fireEvent.click(launcher);
   return view;
 };
-let projectSequence = 0;
+let orgSequence = 0;
 
 beforeEach(() => {
   workspace.initialQuickStartStep = "api-key";
   workspace.pathname = "/dashboard";
-  workspace.selectedProjectId = `project_${++projectSequence}`;
+  workspace.dashboardCacheScope = { userId: "user_test", orgId: `org_${++orgSequence}` };
+  workspace.selectedProjectId = "project_test";
   workspace.sdpEnvironment = "sandbox";
   workspace.flags.custody = true;
   workspace.dashboardAccess.capabilities.canManageApiKeys = true;
@@ -82,11 +80,8 @@ describe("dashboard quick start", () => {
       "/dashboard/wallets/setup"
     );
     act(() => completeQuickStartStep(key(), "wallet"));
-    const faucet = view.getByRole("link", { name: "Open USDC faucet" });
-    expect(faucet.getAttribute("href")).toBe("https://faucet.circle.com/");
-    expect(faucet.getAttribute("target")).toBe("_blank");
-    expect(readQuickStart(key())).toBe("faucet");
-    fireEvent.click(view.getByRole("button", { name: "Finish quick start" }));
+    expect(readQuickStart(key())).toBe("done");
+    expect(view.queryByRole("dialog")).toBeNull();
     expect(view.queryByRole("complementary")).toBeNull();
   });
 
@@ -96,6 +91,12 @@ describe("dashboard quick start", () => {
     fireEvent.click(view.getByRole("button", { name: "Skip this step" }));
     expect(view.getByRole("heading", { name: "Get test USDC" })).toBeTruthy();
     expect(view.getByText(/Test funds have no monetary value/)).toBeTruthy();
+    const faucet = view.getByRole("link", { name: "Open USDC faucet" });
+    expect(faucet.getAttribute("href")).toBe("https://faucet.circle.com/");
+    expect(faucet.getAttribute("target")).toBe("_blank");
+    expect(readQuickStart(key())).toBe("faucet");
+    fireEvent.click(view.getByRole("button", { name: "Finish quick start" }));
+    expect(view.queryByRole("dialog")).toBeNull();
   });
 
   it("remembers dismissal and does not reopen after unrelated creation", () => {
@@ -108,16 +109,21 @@ describe("dashboard quick start", () => {
     expect(render(ui()).queryByRole("complementary")).toBeNull();
   });
 
-  it("isolates progress when the project changes", () => {
+  it("keeps dismissal across projects and isolates it between organizations and users", () => {
     setQuickStart(key(), "done");
     const view = render(ui());
     expect(view.queryByRole("complementary")).toBeNull();
     workspace.selectedProjectId = "another_project";
     view.rerender(ui());
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(view.queryByRole("complementary")).toBeNull();
+    workspace.dashboardCacheScope.orgId = "another_org";
+    view.rerender(ui());
     expect(view.getByRole("dialog")).toBeTruthy();
-    expect(
-      quickStartKey({ userId: "another_user", orgId: "org_test" }, workspace.selectedProjectId)
-    ).not.toBe(key());
+    fireEvent.click(view.getByRole("button", { name: "Skip quick start" }));
+    workspace.dashboardCacheScope.userId = "another_user";
+    view.rerender(ui());
+    expect(view.getByRole("dialog")).toBeTruthy();
   });
 
   it("hides in production and for users who cannot create API keys", () => {

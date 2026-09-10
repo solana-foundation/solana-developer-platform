@@ -1,4 +1,4 @@
-import { DASHBOARD_QUICK_START_STEPS, ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
+import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { z } from "zod";
 import { canonicalizeIpAllowlistEntry } from "@/lib/ip-allowlist";
 
@@ -27,7 +27,6 @@ export const updateOrgSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   settings: z
     .object({
-      quickStartStep: z.enum(DASHBOARD_QUICK_START_STEPS).optional(),
       rpcProvider: z.enum(ORGANIZATION_RPC_PROVIDERS).optional(),
       defaultEnvironment: z.enum(["sandbox", "production"]).optional(),
       allowedIpAddresses: z

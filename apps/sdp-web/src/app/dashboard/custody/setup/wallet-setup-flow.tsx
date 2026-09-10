@@ -288,7 +288,7 @@ export function WalletSetupFlow({
         }
 
         if (selectedProjectId) {
-          completeQuickStartStep(quickStartKey(dashboardCacheScope, selectedProjectId), "wallet");
+          completeQuickStartStep(quickStartKey(dashboardCacheScope), "wallet");
         }
         router.refresh();
         router.push("/dashboard/wallets");

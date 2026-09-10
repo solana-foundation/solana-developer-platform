@@ -4,12 +4,11 @@ import { ArrowUpRight, ChevronDown, ChevronUp, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "radix-ui";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
-  initializeQuickStart,
   quickStartKey,
   quickStartLayout,
   readQuickStart,
@@ -18,7 +17,6 @@ import {
   setQuickStartPlacement,
   subscribeQuickStart,
 } from "@/lib/dashboard-quick-start";
-import { saveQuickStartProgress } from "@/lib/quick-start-actions";
 import styles from "./dashboard-quick-start.module.css";
 
 const serverSnapshot = () => null;
@@ -103,11 +101,10 @@ function isQuickStartEligible(workspace: ReturnType<typeof useDashboardWorkspace
 export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
   const t = useTranslations();
   const workspace = useDashboardWorkspace();
-  const { dashboardCacheScope, selectedProjectId, dashboardAccess, flags, initialQuickStartStep } =
-    workspace;
+  const { dashboardCacheScope, dashboardAccess, flags, initialQuickStartStep } = workspace;
   const eligible = isQuickStartEligible(workspace);
   const pathname = usePathname();
-  const storageKey = quickStartKey(dashboardCacheScope, selectedProjectId);
+  const storageKey = quickStartKey(dashboardCacheScope);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const step = useSyncExternalStore(
@@ -120,14 +117,6 @@ export function DashboardQuickStart({ docked = false }: { docked?: boolean }) {
     () => readQuickStartPlacement(storageKey),
     serverSnapshot
   );
-  useEffect(() => {
-    if (eligible && initialQuickStartStep && dashboardCacheScope.orgId) {
-      const orgId = dashboardCacheScope.orgId;
-      initializeQuickStart(storageKey, initialQuickStartStep, (nextStep) =>
-        saveQuickStartProgress(orgId, nextStep)
-      );
-    }
-  }, [storageKey, dashboardCacheScope.orgId, initialQuickStartStep, eligible]);
   if (!eligible || !step || step === "done") return null;
 
   const current = stepCopy[step];

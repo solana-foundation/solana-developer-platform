@@ -552,15 +552,9 @@ export function HomeWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
-  const {
-    dashboardAccess,
-    flags,
-    dashboardCacheScope,
-    selectedProjectId,
-    initialQuickStartStep,
-    sdpEnvironment,
-  } = useDashboardWorkspace();
-  const progressKey = quickStartKey(dashboardCacheScope, selectedProjectId);
+  const { dashboardAccess, flags, dashboardCacheScope, initialQuickStartStep, sdpEnvironment } =
+    useDashboardWorkspace();
+  const progressKey = quickStartKey(dashboardCacheScope);
   const quickStartFinished = useSyncExternalStore(
     subscribeQuickStart,
     () => readQuickStart(progressKey, initialQuickStartStep) === "done",

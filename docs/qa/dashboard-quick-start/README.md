@@ -16,6 +16,16 @@ No API key or wallet was created, and no faucet transaction was submitted. The M
 
 ## Automated coverage
 
-Focused tests cover initial modal/minimization, navigation without premature completion, dismissal, completion from successful creation, completed and unknown server states, organization/project isolation, disabled custody, unavailable browser storage, cross-tab dismissal, bounded sync polling, access failures, and monotonic persisted progress. Both web and API typechecks pass.
+Focused tests cover initial modal/minimization, navigation without premature completion, dismissal, completion from successful creation, completed and unknown server states, user/organization isolation, dismissal across projects, disabled custody, unavailable browser storage, cross-tab dismissal, bounded sync polling, access failures, and progress that cannot move backward.
+
+September 10 verification: 50 focused web tests passed, along with the web typecheck, scoped Biome checks, and module-boundary generation/check. The browser screenshots above predate the persistence refactor; wallet-based suppression and browser persistence were verified with automated tests.
+
+## Web-only eligibility and persistence
+
+The guide uses existing organization state: legacy completion, a configured default custody wallet, or any wallet in an accessible project suppresses it. Wallet checks include all providers and omit balances. Unknown organization or wallet state does not show the guide. Creating a wallet also dismisses the guide immediately; skipping wallet setup still leads to the test USDC faucet.
+
+Progress and dismissal live in browser storage, scoped to the user and organization, so changing projects does not reopen the guide. Dismissal is not shared with teammates or other browsers and resets when browser data is cleared. Existing wallets still suppress the guide on a new device.
+
+No SDP API changes, organization-settings writes, shared-type changes, or database migrations are required.
 
 The unsynced and already-onboarded scenarios were checked with deterministic tests, not new live Clerk organizations.

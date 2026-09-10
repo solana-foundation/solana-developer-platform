@@ -1237,7 +1237,7 @@ export function ApiKeyAuthoringWorkspace({
       }
       toast.success(result.message, { position: "bottom-right" });
       if (mode === "create" && selectedProjectId) {
-        completeQuickStartStep(quickStartKey(dashboardCacheScope, selectedProjectId), "api-key");
+        completeQuickStartStep(quickStartKey(dashboardCacheScope), "api-key");
       }
       router.push(API_KEYS_PATH);
       router.refresh();
