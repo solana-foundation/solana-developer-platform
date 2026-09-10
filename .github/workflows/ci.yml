@@ -898,23 +898,18 @@ jobs:
             test_script: test:e2e:dashboard-transactions
             artifact_suffix: dashboard-transactions-surfpool
           - name: Issuance E2E (basics)
-            test_script: kora:surfpool:e2e:issuance
             issuance_group: basics
             artifact_suffix: issuance-basics
           - name: Issuance E2E (authority and supply)
-            test_script: kora:surfpool:e2e:issuance
             issuance_group: authority-and-supply
             artifact_suffix: issuance-authority-and-supply
           - name: Issuance E2E (freeze controls)
-            test_script: kora:surfpool:e2e:issuance
             issuance_group: freeze-controls
             artifact_suffix: issuance-freeze-controls
           - name: Issuance E2E (pause controls)
-            test_script: kora:surfpool:e2e:issuance
             issuance_group: pause-controls
             artifact_suffix: issuance-pause-controls
           - name: Issuance E2E (allowlist)
-            test_script: kora:surfpool:e2e:issuance
             issuance_group: allowlist
             artifact_suffix: issuance-allowlist
     env:
@@ -1052,8 +1047,8 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
-          if [ "${{ matrix.test_script }}" = "kora:surfpool:e2e:issuance" ]; then
-            scripts/doppler/run-with-config.sh pnpm ${{ matrix.test_script }} -- ${{ matrix.issuance_group }}
+          if [ -n "${{ matrix.issuance_group }}" ]; then
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance -- ${{ matrix.issuance_group }}
           else
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
           fi
