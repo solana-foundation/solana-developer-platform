@@ -12,6 +12,7 @@
     "typecheck": "vitest run --typecheck.enabled --typecheck.only --typecheck.include='src/**/*.test.ts' --passWithNoTests"
   },
   "dependencies": {
+    "@sdp/dvp": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/spc-escrow": "workspace:*",

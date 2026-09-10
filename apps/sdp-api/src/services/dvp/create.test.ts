@@ -13,12 +13,24 @@
  * deposit that nobody can ever rescue (EXO-216/217).
  */
 
+import { FeePaymentError } from "@sdp/payments/fee-payment";
 import {
   address,
+  appendTransactionMessageInstructions,
   type Blockhash,
+  compileTransaction,
+  createTransactionMessage,
   getBase58Codec,
+  getCompiledTransactionMessageDecoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+  pipe,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,7 +39,9 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
+const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+const getFeePayer = vi.hoisted(() => vi.fn());
+const signAsFeePayer = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 // The mint pre-flight is verified separately against real devnet mints in
 // mints.test.ts; here it is stubbed so these tests stay about broadcast
@@ -39,7 +53,12 @@ const inspectDvpMint = vi.hoisted(() => vi.fn());
 // stubbed so these tests stay about broadcast ordering.
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 
-vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
+vi.mock("@/services/sponsorship.service", async () => {
+  const actual = await vi.importActual<typeof import("@/services/sponsorship.service")>(
+    "@/services/sponsorship.service"
+  );
+  return { ...actual, createProjectSponsorshipFeePayment };
+});
 vi.mock("./mints", () => ({ validateDvpMints }));
 vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
@@ -74,7 +93,6 @@ function tradeInput() {
     projectId: TEST_PROJECT_ID,
     partyA: { walletId: CUSTODY_WALLET_ID },
     partyB: { address: address(COUNTERPARTY_ADDRESS) },
-    payerWalletId: null,
     mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
     tokenProgramA: address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
     mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
@@ -118,6 +136,7 @@ async function rowsInDb(): Promise<
 
 describe("createDvpTrade", () => {
   let custodyWalletAddress: string;
+  let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let originalSettlementAuthority: string | undefined;
 
   beforeAll(async () => {
@@ -137,6 +156,18 @@ describe("createDvpTrade", () => {
     getOrCreateDvpSettlementWallet.mockResolvedValue({
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
+    });
+    sponsor = await generateKeyPairSigner();
+    getFeePayer.mockResolvedValue(sponsor.address);
+    signAsFeePayer.mockImplementation(async (bytes: Uint8Array) => {
+      const transaction = getTransactionDecoder().decode(bytes);
+      expect(transaction.signatures[sponsor.address]).toBeNull();
+      const signed = await partiallySignTransaction([sponsor.keyPair], transaction);
+      return new Uint8Array(getTransactionEncoder().encode(signed));
+    });
+    createProjectSponsorshipFeePayment.mockResolvedValue({
+      getFeePayer,
+      signAsFeePayer,
     });
     originalSettlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
     env.DVP_SETTLEMENT_AUTHORITY = SETTLEMENT_AUTHORITY;
@@ -183,11 +214,8 @@ describe("createDvpTrade", () => {
       .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
       .run();
 
-    // A real signer, so the transaction is really signed and the signature the
-    // row carries is the one the network would see.
     const signer = await generateKeyPairSigner();
     custodyWalletAddress = signer.address;
-    createOrgSignerForCustodyWallet.mockResolvedValue(signer);
 
     await db
       .prepare(
@@ -282,7 +310,8 @@ describe("createDvpTrade", () => {
 
     await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/ScaledUiAmountConfig/);
 
-    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(signAsFeePayer).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
   });
@@ -423,7 +452,7 @@ describe("createDvpTrade", () => {
     expect(second.id).not.toBe(first.id);
   });
 
-  it("writes nothing when the terms are refused before signing", async () => {
+  it("resolves sponsorship after term validation", async () => {
     await expect(
       createDvpTrade(env, {
         ...tradeInput(),
@@ -431,6 +460,8 @@ describe("createDvpTrade", () => {
       })
     ).rejects.toThrow(/settlementAuthority must not be/);
 
+    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(signAsFeePayer).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
   });
@@ -607,34 +638,70 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toEqual([]);
   });
 
-  // An explicit payer signs with that wallet; an omitted payer signs with the
-  // settlement wallet.
-  it("signs with an explicit payer wallet when one is given", async () => {
+  it("uses the sponsor as fee payer and instruction payer in one signature slot", async () => {
     sendTransaction.mockResolvedValue("sig");
-    await createDvpTrade(env, {
-      ...tradeInput(),
-      partyA: { address: address(COUNTERPARTY_ADDRESS) },
-      partyB: { address: address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr") },
-      payerWalletId: CUSTODY_WALLET_ID,
-    });
+    const trade = await createDvpTrade(env, tradeInput());
 
-    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
-      env,
-      TEST_ORG.id,
-      TEST_PROJECT_ID,
-      CUSTODY_WALLET_ID
-    );
+    const [, bytes] = sendTransaction.mock.calls[0];
+    const transaction = getTransactionDecoder().decode(bytes);
+    const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+    expect(Object.keys(transaction.signatures)).toEqual([sponsor.address]);
+    expect(message.staticAccounts[0]).toBe(sponsor.address);
+    expect(message).toMatchObject({
+      version: 0,
+      instructions: [{ accountIndices: expect.arrayContaining([0]) }],
+    });
+    expect(trade.createSignature).toBe(getSignatureFromTransaction(transaction));
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      actor: { type: "wallet", id: "cwlt_settlement" },
+    });
   });
 
-  it("signs with the settlement wallet when no payer is given", async () => {
-    sendTransaction.mockResolvedValue("sig");
-    await createDvpTrade(env, tradeInput());
+  it("refuses sponsor bytes over a different message", async () => {
+    signAsFeePayer.mockImplementation(async () => {
+      const foreign = pipe(
+        createTransactionMessage({ version: 0 }),
+        (message) => setTransactionMessageFeePayer(sponsor.address, message),
+        (message) =>
+          setTransactionMessageLifetimeUsingBlockhash(
+            {
+              blockhash: getBase58Codec().decode(new Uint8Array(32).fill(9)) as Blockhash,
+              lastValidBlockHeight: 100n,
+            },
+            message
+          ),
+        (message) =>
+          appendTransactionMessageInstructions(
+            [{ programAddress: address("11111111111111111111111111111111") }],
+            message
+          ),
+        compileTransaction
+      );
+      const signed = await partiallySignTransaction([sponsor.keyPair], foreign);
+      return new Uint8Array(getTransactionEncoder().encode(signed));
+    });
 
-    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
-      env,
-      TEST_ORG.id,
-      TEST_PROJECT_ID,
-      "cwlt_settlement"
-    );
+    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/different message/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses bytes without the sponsor signature", async () => {
+    signAsFeePayer.mockImplementation(async (bytes: Uint8Array) => bytes);
+
+    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/missing the sponsor/);
+    await expect(rowsInDb()).resolves.toEqual([]);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when Kora denies sponsorship", async () => {
+    const denial = new FeePaymentError("Kora rate limit", "RATE_LIMITED");
+    signAsFeePayer.mockRejectedValue(denial);
+
+    await expect(createDvpTrade(env, tradeInput())).rejects.toBe(denial);
+    await expect(rowsInDb()).resolves.toEqual([]);
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 });

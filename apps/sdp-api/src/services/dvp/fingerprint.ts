@@ -2,8 +2,8 @@
  * The fingerprint of a keyed create request.
  *
  * A key is a claim, not a proof; the hash covers every field that defines the
- * trade — payer (as sent), both party slots (reference kind, value AND
- * resolved address), mints, token programs, amounts, timestamps, destinations
+ * trade — both party slots (reference kind, value AND resolved address),
+ * mints, token programs, amounts, timestamps, destinations
  * and refString — so a reuse with different terms (or a wallet-scoped caller
  * replaying someone else's key) 409s instead of handing escrows back. Hashed
  * AS SENT, so a retry replays even after settlement-wallet rotation. No v1
@@ -60,8 +60,6 @@ export function dvpCreateFingerprint({
   // Explicit, not derived from object iteration (reordering must never
   // invalidate stored fingerprints); JSON encoding keeps null and "" distinct.
   const material = [
-    // As sent; null when defaulted, so a retry replays across settlement-wallet rotation.
-    input.payerWalletId,
     ...partySlotMaterial(input.partyA, resolvedA),
     ...partySlotMaterial(input.partyB, resolvedB),
     input.mintA,

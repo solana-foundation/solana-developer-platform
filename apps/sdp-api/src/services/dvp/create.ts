@@ -6,9 +6,9 @@
  *
  * Two things about `CreateDvp` shape this whole function.
  *
- * Only the PAYER signs. `user_a`, `user_b` and `settlement_authority` are plain
- * accounts on the instruction, so the counterparty signs nothing here and needs
- * no integration with us. Verified on devnet by creating a trade with addresses
+ * Only the PAYER signs, and that payer is Kora's sponsor. `user_a`, `user_b`
+ * and `settlement_authority` are plain accounts on the instruction, so the
+ * counterparty signs nothing here and needs no integration with us. Verified on devnet by creating a trade with addresses
  * we hold no keys for. It also means the instruction creates no obligation: a
  * SwapDvp is a proposal until someone funds it.
  *
@@ -26,6 +26,8 @@ import {
   type Address,
   address,
   appendTransactionMessageInstructions,
+  compileTransaction,
+  createNoopSigner,
   createTransactionMessage,
   getSignatureFromTransaction,
   getTransactionEncoder,
@@ -34,11 +36,10 @@ import {
   pipe,
   type Signature,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-  setTransactionMessageFeePayerSigner,
+  setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   some,
 } from "@solana/kit";
-import { signTransactionMessageWithSigners } from "@solana/signers";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import {
@@ -50,7 +51,10 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import {
+  assertSponsorSignedSameMessage,
+  createProjectSponsorshipFeePayment,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { dvpCreateFingerprint, type ResolvedParty } from "./fingerprint";
 import { describeDvpDestinationProblem, findDvpDestinationProblem } from "./inspect-destination";
@@ -76,8 +80,6 @@ export type CreateDvpTradeInput = {
   /** The two parties, each as the caller described them. */
   partyA: DvpPartyInput;
   partyB: DvpPartyInput;
-  /** Signs and pays fee + rent; null means the settlement wallet. NOT a term of the trade. */
-  payerWalletId: string | null;
   /** Asset leg mint and its token program. */
   mintA: Address;
   tokenProgramA: Address;
@@ -340,20 +342,6 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   });
   const settlementAuthority = settlement.address;
 
-  // The payer signs and pays fee + rent: explicit `payerWalletId`, else the
-  // settlement wallet already provisioned above (one provisioning call serves
-  // both roles). It is legal as payer for both trade shapes — the program
-  // refuses only `settlement_authority == user_a || user_b` — and rent refunds
-  // land on the wallet that closes, which is this same one.
-  const payerWalletId =
-    input.payerWalletId === null ? settlement.custodyWalletId : input.payerWalletId;
-  const signer = await createOrgSignerForCustodyWallet(
-    env,
-    input.organizationId,
-    input.projectId,
-    payerWalletId
-  );
-
   const userA = resolvedA.address;
   const userB = resolvedB.address;
 
@@ -392,6 +380,17 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     throw badRequest(`Invalid DvP terms: ${problems.join("; ")}`);
   }
 
+  // Kora pays the fee and ~6.63M lamports of rent per trade, while close
+  // refunds settlement_authority. That devnet subsidy is deliberate; mainnet
+  // pricing is a product decision tracked by PRO-1906. Resolved only after
+  // every local check above, so a 400 never costs a Kora round trip.
+  const feePayment = await createProjectSponsorshipFeePayment(env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    actor: { type: "wallet", id: settlement.custodyWalletId },
+  });
+  const sponsor = await feePayment.getFeePayer();
+
   // Cryptographically random, and a bigint throughout. A predictable nonce lets
   // a third party squat the address before the real parties reach it.
   const nonce = randomDvpNonce();
@@ -411,7 +410,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   ]);
 
   const instruction = getCreateDvpInstruction({
-    payer: signer,
+    payer: createNoopSigner(sponsor),
     swapDvp,
     nonceTombstone,
     settlementAuthority,
@@ -440,13 +439,19 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(signer, m),
+    (m) => setTransactionMessageFeePayer(sponsor, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions([instruction], m)
   );
-  const signed = await signTransactionMessageWithSigners(message);
+  const compiled = compileTransaction(message);
+  const bytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+  const sponsorSigned = assertSponsorSignedSameMessage({
+    unsignedOrPartiallySigned: compiled,
+    sponsorSigned: await feePayment.signAsFeePayer(bytes),
+    sponsor,
+  });
   // Known from the signed bytes, so the row can carry it before anything is sent.
-  const signature: Signature = getSignatureFromTransaction(signed);
+  const signature: Signature = getSignatureFromTransaction(sponsorSigned);
 
   // Recorded BEFORE broadcast, at status `creating`. The six seed values are the
   // only durable copy of what RecoverDvp needs to rescue a deposit that lands
@@ -501,11 +506,17 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // and their transaction is the one on the network. Broadcasting ours too
   // would create the second trade this key exists to prevent.
   if (recorded.createSignature !== signature) {
+    // The race loser has already reserved and signed sponsorship budget. The
+    // reconciler releases it after blockhash expiry once the signature remains
+    // absent for two passes; preflight-rejected broadcasts follow the same path.
     return recorded;
   }
 
   try {
-    await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+    await solanaRpc.sendTransaction(
+      rpc,
+      new Uint8Array(getTransactionEncoder().encode(sponsorSigned))
+    );
   } catch (error) {
     // A preflight failure is the one send error that is definitively terminal:
     // the RPC rejected the bytes in simulation and never forwarded them, so

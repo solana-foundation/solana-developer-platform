@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { probeGatewayHealth } from "@sdp/private-channels";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
@@ -46,11 +47,9 @@ async function runPreflight(): Promise<void> {
   // existing Kora/on-chain shards keep working unchanged.
   const requested = getRequestedSuites();
   const koraInScope = requested ? requested.has("kora") : !!env.KORA_RPC_URL;
-  // DvP needs a cluster and a custody signer and nothing else — no Kora fee
-  // payer, no Private Channels gateway. Requiring either would make the suite
-  // unreachable without standing up a harness it never calls, which is the
-  // same reasoning that already keeps Kora and SPC independent of each other.
-  const dvpInScope = requested?.has("dvp") ?? false;
+  // DvP needs a cluster, custody signer, and Kora sponsorship. Private Channels
+  // remains independent because the DvP lane never calls its gateway.
+  const dvpInScope = requested === null ? false : requested.has("dvp");
   const spcInScope = requested
     ? requested.has("spc")
     : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
@@ -66,7 +65,7 @@ async function runPreflight(): Promise<void> {
   // Each scope validates only its own dependencies: an SPC-only run must not
   // require Kora, or the Private Channels suites are unreachable without standing
   // up a Kora harness they never call.
-  if (koraInScope) {
+  if (koraInScope || dvpInScope) {
     await preflightKoraSuite();
   }
   if (spcInScope) {
@@ -78,8 +77,8 @@ async function runPreflight(): Promise<void> {
 }
 
 /**
- * What a DvP run actually needs: a cluster, and a custody signer to be the
- * organization's side of a trade.
+ * What a DvP run actually needs: a cluster, Kora sponsorship, and a custody
+ * signer to be the organization's side of a trade.
  *
  * Deliberately short. Everything else DvP touches — the settlement authority,
  * the escrows, the policy rows — is created by the code under test, and a
@@ -90,6 +89,7 @@ async function preflightDvpSuite(): Promise<void> {
   const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
   if (integrationCustodyProvider === "local" && !env.CUSTODY_PRIVATE_KEY) {
     missing.push("CUSTODY_PRIVATE_KEY");
   }
@@ -226,14 +226,19 @@ async function preflightKoraSuite(): Promise<void> {
 }
 
 function getRequiredKoraAllowedPrograms(): readonly string[] {
-  if (isKoraSurfpoolShim()) {
-    return REQUIRED_SURFPOOL_ALLOWED_PROGRAMS;
-  }
-
-  return REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS;
+  const requested = getRequestedSuites();
+  const dvpRequired = requested === null ? false : requested.has("dvp");
+  const base = isKoraSurfpoolShim()
+    ? REQUIRED_SURFPOOL_ALLOWED_PROGRAMS
+    : REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS;
+  return dvpRequired ? [...base, DVP_SWAP_PROGRAM_PROGRAM_ADDRESS] : base;
 }
 
 function getKoraPreflightScopeLabel(): string {
+  const requested = getRequestedSuites();
+  if (requested === null ? false : requested.has("dvp")) {
+    return "DvP";
+  }
   if (isKoraSurfpoolShim()) {
     return "Surfpool-backed SDP";
   }

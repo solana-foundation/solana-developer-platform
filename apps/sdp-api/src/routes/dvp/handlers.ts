@@ -376,14 +376,9 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  // A wallet named here either spends fee+rent (the payer) or is staged for
-  // funding (a party slot), so the key's binding on it is re-read from the DB
-  // (never the hour-old auth snapshot). The DEFAULTED payer — the settlement
-  // wallet — is project infrastructure every trade uses and needs no per-key
-  // assertion; key/wallet bindings gate caller-chosen wallets only.
-  // Liveness first, for EVERY key: with a defaulted payer and pasted-address
-  // slots no wallet is named below, yet create provisions the settlement
-  // wallet and spends its rent — a revoked key must not get that far on a
+  // Liveness first, for EVERY key. Create provisions the settlement wallet and
+  // spends sponsored Kora budget on the project's behalf, even when both party
+  // slots are pasted addresses, so a revoked key must not get that far on a
   // stale snapshot.
   await assertFreshApiKeyActive(getDb(c.env), auth);
   // A wallet-scoped key only SEES trades its bound wallets are party to, and
@@ -404,7 +399,6 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     );
   }
   const assertedWalletIds = [
-    ...(body.payerWalletId ? [body.payerWalletId] : []),
     ...("walletId" in body.partyA ? [body.partyA.walletId] : []),
     ...("walletId" in body.partyB ? [body.partyB.walletId] : []),
   ];
@@ -417,8 +411,6 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     projectId,
     partyA: body.partyA,
     partyB: body.partyB,
-    payerWalletId:
-      body.payerWalletId === null || body.payerWalletId === undefined ? null : body.payerWalletId,
     mintA: body.mintA,
     tokenProgramA: body.tokenProgramA,
     mintB: body.mintB,

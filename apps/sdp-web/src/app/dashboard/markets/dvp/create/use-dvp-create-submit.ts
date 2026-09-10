@@ -61,7 +61,6 @@ function partyRefKind(ref: DvpPartyRef): string {
 
 function createIdempotencyKey(request: DvpCreateRequest): string {
   const material = JSON.stringify([
-    request.payerWalletId,
     // The party's address plus which reference kind named it: a wallet and a
     // registered counterparty resolving to the same address are different
     // attributions, and the fingerprint treats them as different parties.
@@ -92,12 +91,6 @@ function createIdempotencyKey(request: DvpCreateRequest): string {
 
 export interface DvpCreateRequest {
   parties: { a: DvpPartyWire; b: DvpPartyWire };
-  /**
-   * The wallet that pays the fee and the escrow rent, or null for the
-   * project's settlement wallet. Omitted from the request when null — the
-   * absence IS the default.
-   */
-  payerWalletId: string | null;
   amountA: string;
   amountB: string;
   /** The expiry as a local wall-clock datetime, "YYYY-MM-DDTHH:mm". */
@@ -144,9 +137,6 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
         body: JSON.stringify({
           partyA: request.parties.a.ref,
           partyB: request.parties.b.ref,
-          // Treated as the wire shape says: present only when the caller
-          // picked a payer; the project settlement wallet pays otherwise.
-          ...(request.payerWalletId ? { payerWalletId: request.payerWalletId } : {}),
           mintA: request.mintA,
           mintB: request.mintB,
           // A PASTED address is assumed Token-2022; if it is not, create

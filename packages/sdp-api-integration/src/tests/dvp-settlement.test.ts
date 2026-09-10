@@ -154,10 +154,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
         mintAuthority: signer,
       });
 
-      // SDP is a party slot, the counterparty a bare external address. The
-      // payer is named explicitly: the default (the project's settlement
-      // wallet) is provisioned by the first create but not funded in this
-      // suite, so it cannot pay the create's rent.
+      // SDP is a party slot, the counterparty a bare external address. Kora
+      // pays create fee and rent; this wallet still needs SOL for settlement.
       const partyA = side === "a" ? { walletId: wallet.id } : { address: signer.address };
       const partyB = side === "a" ? { address: signer.address } : { walletId: wallet.id };
 
@@ -167,7 +165,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
         body: JSON.stringify({
           partyA,
           partyB,
-          payerWalletId: wallet.id,
           mintA: asset.mint,
           tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
           mintB: cash.mint,

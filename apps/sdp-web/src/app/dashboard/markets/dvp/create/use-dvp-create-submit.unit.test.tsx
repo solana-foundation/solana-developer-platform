@@ -44,7 +44,6 @@ function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
       a: { ref: { walletId: WALLET_A }, address: ADDRESS_A },
       b: { ref: { address: ADDRESS_B }, address: ADDRESS_B },
     },
-    payerWalletId: null,
     amountA: "1000",
     amountB: "2000",
     expiry: "2027-01-01T23:59",
@@ -107,18 +106,6 @@ describe("useDvpCreateSubmit wire shape", () => {
     expect(body.partyA).toEqual({ counterpartyAccountId: "cpa_1" });
   });
 
-  it("omits payerWalletId when the project settlement wallet pays", async () => {
-    const { body } = await requestFor({ payerWalletId: null });
-
-    expect(body).not.toHaveProperty("payerWalletId");
-  });
-
-  it("sends payerWalletId only when a wallet was picked", async () => {
-    const { body } = await requestFor({ payerWalletId: "cwlt_payer" });
-
-    expect(body.payerWalletId).toBe("cwlt_payer");
-  });
-
   it("omits empty settlement destinations rather than sending empty strings", async () => {
     const { body } = await requestFor();
 
@@ -164,7 +151,6 @@ describe("useDvpCreateSubmit idempotency key", () => {
           },
         },
       ],
-      ["the payer wallet", { payerWalletId: "cwlt_other" }],
       ["the asset token program", { tokenProgramA: LEGACY }],
       ["the cash token program", { tokenProgramB: LEGACY }],
       ["the reference", { refString: "invoice-42" }],

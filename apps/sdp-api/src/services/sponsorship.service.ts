@@ -6,7 +6,13 @@ import {
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
-import type { Signature } from "@solana/kit";
+import {
+  type Address,
+  bytesEqual,
+  getTransactionDecoder,
+  type Signature,
+  type Transaction,
+} from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -43,6 +49,39 @@ export interface OwnedSubmissionLifecycle {
   persistSigned(submission: OwnedSignedSubmission): Promise<void>;
   markStarted(): Promise<void>;
   hasStarted(): Promise<boolean>;
+}
+
+/**
+ * Refuses paymaster bytes that are not the sponsor's signature over exactly
+ * the message SDP compiled.
+ *
+ * A paymaster returns bytes rather than a signature, so it could substitute a
+ * different message while still providing a valid fee-payer signature. This
+ * check also forbids relayers from injecting instructions after SDP simulated
+ * or size-checked the transaction.
+ *
+ * @param params - The compiled transaction, returned bytes, and expected sponsor.
+ * @param params.unsignedOrPartiallySigned - The transaction SDP handed to the sponsor.
+ * @param params.sponsorSigned - The bytes returned by the sponsor.
+ * @param params.sponsor - The address whose signature must be present.
+ * @returns The decoded sponsor-signed transaction.
+ */
+export function assertSponsorSignedSameMessage(params: {
+  unsignedOrPartiallySigned: Transaction;
+  sponsorSigned: Uint8Array;
+  sponsor: Address;
+}): Transaction {
+  const sponsorSigned = getTransactionDecoder().decode(params.sponsorSigned);
+  if (!bytesEqual(sponsorSigned.messageBytes, params.unsignedOrPartiallySigned.messageBytes)) {
+    throw new Error("Sponsored transaction came back over a different message");
+  }
+  if (
+    sponsorSigned.signatures[params.sponsor] === null ||
+    sponsorSigned.signatures[params.sponsor] === undefined
+  ) {
+    throw new Error("Sponsored transaction is missing the sponsor fee-payer signature");
+  }
+  return sponsorSigned;
 }
 
 /** App-local extension for SDP-owned submission flows. */

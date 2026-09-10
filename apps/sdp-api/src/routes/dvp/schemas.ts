@@ -90,16 +90,13 @@ const dvpTradeTermsShape = {
 /**
  * The create body: two symmetric party slots and the trade terms.
  *
- * `partyA` and `partyB` are {@link dvpPartySchema} slots; `payerWalletId` is the
- * fee/rent signer and is NOT a term of the trade. Omitted, the project's DvP
- * settlement wallet pays — and, closing every trade, later receives the rent
- * back.
+ * `partyA` and `partyB` are {@link dvpPartySchema} slots. Fee and rent are paid
+ * by SDP's sponsored fee payer; nothing about the payer is configurable or a
+ * term of the trade.
  */
 export const createDvpTradeSchema = z.object({
   partyA: dvpPartySchema,
   partyB: dvpPartySchema,
-  /** Fee/rent signer; omitted means the settlement wallet pays. Not a term of the trade. */
-  payerWalletId: z.string().min(1).nullish(),
   ...dvpTradeTermsShape,
 });
 

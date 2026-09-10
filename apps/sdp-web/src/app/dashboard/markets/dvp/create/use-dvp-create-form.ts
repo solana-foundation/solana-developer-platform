@@ -210,9 +210,6 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
       mintA: asset.mint,
       mintB: cash.mint,
       parties: parties.wire,
-      // Nobody configures a fee payer: the project settlement wallet signs
-      // and pays fee + rent until create is Kora-sponsored.
-      payerWalletId: null,
       refString: refString.trim(),
       tokenProgramA: asset.token?.tokenProgram ?? null,
       tokenProgramB: cash.token?.tokenProgram ?? null,
