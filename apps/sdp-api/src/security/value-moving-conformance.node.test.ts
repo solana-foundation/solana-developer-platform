@@ -111,6 +111,66 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/seize.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/seize",',
+      before: "policyGate({ extract: extractSeizePolicyCandidate })",
+      after: "executeSeize",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied seize before signer and issuance side effects",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/force-burn.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/force-burn",',
+      before: "policyGate({ extract: extractForceBurnPolicyCandidate })",
+      after: "executeForceBurn",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied force-burn before signer and issuance side effects",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/burn.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/burn",',
+      before: "policyGate({ extract: extractBurnPolicyCandidate })",
+      after: "executeBurn",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied burn before signer and issuance side effects",
+      },
+    ],
+  },
+  {
     family: "payments",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/context.ts",
@@ -378,13 +438,18 @@ describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
     // `earn` appears twice: money-in (vault deposits) and money-out (vault
     // withdrawals) are separately gated routes, and each carries its own
-    // authorization boundary and replay evidence.
+    // authorization boundary and replay evidence. `issuance` appears four
+    // times for the same reason: authority updates, seize, force-burn, and
+    // burn are separately gated execute routes.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
       "dvp",
       "earn",
       "earn",
+      "issuance",
+      "issuance",
+      "issuance",
       "issuance",
       "payments",
       "ramps",

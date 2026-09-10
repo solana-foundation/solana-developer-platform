@@ -4,6 +4,7 @@ import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -26,6 +27,7 @@ import {
   resolveIssuanceWallet,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
@@ -444,3 +446,77 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     throw error;
   }
 };
+
+export async function extractBurnPolicyCandidate(
+  c: ValidatedBodyContext<typeof burnSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "burn",
+      source: body.burn.source,
+      amount: body.burn.amount,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: "burn",
+        idempotencyKey: c.req.header("Idempotency-Key"),
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:write"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+            tokenId,
+            operation: "burn",
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  assertTokenAllowsOperation(token, "burn");
+  assertTokenIsDeployed(token);
+
+  const wallet = await resolveIssuanceWallet({
+    env: c.env,
+    auth,
+    custodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+
+  return {
+    ...emptyExtraction,
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType: "issuance_burn_execute",
+      amount: body.burn.amount,
+      destination: null,
+    }),
+  };
+}

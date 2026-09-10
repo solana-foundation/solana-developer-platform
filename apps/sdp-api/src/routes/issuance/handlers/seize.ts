@@ -3,6 +3,7 @@ import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -27,6 +28,7 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
@@ -339,3 +341,92 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     throw error;
   }
 };
+
+export async function extractSeizePolicyCandidate(
+  c: ValidatedBodyContext<typeof seizeSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "seize",
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: "seize",
+        idempotencyKey: c.req.header("Idempotency-Key"),
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:admin"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+            tokenId,
+            operation: "seize",
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  assertTokenAllowsOperation(token, "seize");
+  assertTokenIsDeployed(token);
+
+  parsePositiveTokenAmount(body.seize.amount, token.decimals);
+
+  const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
+  assertDestinationAllowedByControlList({
+    token,
+    destination: body.seize.destination,
+    isOnControlList,
+  });
+
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  if (!permanentDelegateRaw) {
+    throw badRequest("Permanent delegate is not configured for this token");
+  }
+  const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  return {
+    ...emptyExtraction,
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId,
+      walletId: providerWalletId,
+      operationType: "issuance_seize_execute",
+      amount: body.seize.amount,
+      destination: body.seize.destination,
+    }),
+  };
+}

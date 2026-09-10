@@ -4,7 +4,11 @@ import { walletOperationActorFromAuth } from "@/services/policy/enforcement.serv
 
 type IssuancePolicyOperationType = Extract<
   WalletOperationType,
-  "issuance_mint_execute" | "issuance_update_authority_execute"
+  | "issuance_burn_execute"
+  | "issuance_force_burn_execute"
+  | "issuance_mint_execute"
+  | "issuance_seize_execute"
+  | "issuance_update_authority_execute"
 >;
 
 /**
