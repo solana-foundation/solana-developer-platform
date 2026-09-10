@@ -84,7 +84,7 @@ describe("API key privilege guards", () => {
     await clearKVStores(env);
 
     const db = getDb(env);
-    await db.prepare("DELETE FROM api_keys").run();
+    await db.prepare("DELETE FROM api_keys WHERE organization_id = ?").bind(TEST_ORG.id).run();
     await db
       .prepare(
         "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active') ON CONFLICT (id) DO NOTHING"
@@ -110,8 +110,14 @@ describe("API key privilege guards", () => {
     await seedKeyRow(WRITER_KEY, "api_developer", null);
   });
 
+  async function reseedActor() {
+    const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, writerHash, WRITER_CACHED);
+  }
+
   it("refuses to rotate a key whose permissions exceed the actor's", async () => {
     await seedKeyRow(ADMIN_TARGET_KEY, "api_admin", null);
+    await reseedActor();
 
     const res = await app.request(
       `/v1/api-keys/${ADMIN_TARGET_KEY.id}/rotate`,
@@ -132,6 +138,7 @@ describe("API key privilege guards", () => {
   it("rotates a lesser key and carries its expiry onto the replacement", async () => {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     await seedKeyRow(READONLY_TARGET_KEY, "api_readonly", expiresAt);
+    await reseedActor();
 
     const res = await app.request(
       `/v1/api-keys/${READONLY_TARGET_KEY.id}/rotate`,
@@ -253,6 +260,7 @@ describe("API key privilege guards", () => {
   });
 
   it("refuses a key updating its own record", async () => {
+    await reseedActor();
     const res = await app.request(
       `/v1/api-keys/${WRITER_KEY.id}`,
       {
