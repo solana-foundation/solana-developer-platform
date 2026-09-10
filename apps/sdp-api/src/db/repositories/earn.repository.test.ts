@@ -228,6 +228,76 @@ describe("EarnRepository (postgres)", () => {
     });
   });
 
+  /**
+   * The "before" the anomaly check (PRO-1867) diffs against: the whole stored
+   * shelf for one (provider, environment), every status and both clusters.
+   */
+  describe("listStrategyFigures", () => {
+    it("returns every row for the provider and environment with TVL lifted out of the metadata", async () => {
+      await seedStrategy({
+        providerReference: "a",
+        currentApy: "0.05",
+        riskMetadata: { tvlUsd: 1_500_000 },
+      });
+      await seedStrategy({
+        providerReference: "b",
+        currentApy: null,
+        riskMetadata: {},
+        status: "paused",
+      });
+      await seedStrategy({
+        providerReference: "m",
+        hostCluster: "mainnet-beta",
+        riskMetadata: { tvlUsd: 9e7 },
+      });
+      // Other provider and other environment: out of scope.
+      await seedStrategy({ provider: "kamino", providerReference: "a" });
+      await seedStrategy({
+        providerReference: "a",
+        environment: "production",
+        hostCluster: "mainnet-beta",
+      });
+
+      const figures = await repo.listStrategyFigures({ provider: "veda", environment: "sandbox" });
+
+      expect(figures).toEqual([
+        {
+          provider_reference: "a",
+          host_cluster: "devnet",
+          status: "active",
+          current_apy: "0.05",
+          tvl_usd: 1_500_000,
+        },
+        {
+          provider_reference: "b",
+          host_cluster: "devnet",
+          status: "paused",
+          current_apy: null,
+          tvl_usd: null,
+        },
+        {
+          provider_reference: "m",
+          host_cluster: "mainnet-beta",
+          status: "active",
+          current_apy: "0.052",
+          tvl_usd: 90_000_000,
+        },
+      ]);
+    });
+
+    it("reads a non-numeric tvlUsd as no figure and a NULL host_cluster as the environment's cluster", async () => {
+      const seeded = await seedStrategy({ riskMetadata: { tvlUsd: "12M" } });
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?")
+        .bind(seeded.id)
+        .run();
+
+      const [figure] = await repo.listStrategyFigures({ provider: "veda", environment: "sandbox" });
+
+      expect(figure).toMatchObject({ tvl_usd: null, host_cluster: "devnet" });
+    });
+  });
+
   describe("upsertStrategy", () => {
     it("inserts a catalogue row and round-trips the jsonb columns", async () => {
       const row = await seedStrategy();

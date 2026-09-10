@@ -25,9 +25,16 @@ const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   upsertStrategy: vi.fn(),
   deleteUnlistedStrategies: vi.fn(),
+  listStrategyFigures: vi.fn(),
+  logEvent: vi.fn(),
   get: vi.fn(),
   compareAndSet: vi.fn(),
   compareAndDelete: vi.fn(),
+}));
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent: mocks.logEvent,
 }));
 
 vi.mock("@sdp/earn", async (importOriginal) => {
@@ -42,6 +49,7 @@ vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     upsertStrategy: mocks.upsertStrategy,
     deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+    listStrategyFigures: mocks.listStrategyFigures,
   })),
 }));
 
@@ -109,6 +117,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
     mocks.deleteUnlistedStrategies.mockReset().mockResolvedValue([]);
+    mocks.listStrategyFigures.mockReset().mockResolvedValue([]);
+    mocks.logEvent.mockReset();
     // Default slot state: empty and claimable.
     mocks.get.mockReset().mockResolvedValue(null);
     mocks.compareAndSet.mockReset().mockResolvedValue(true);
@@ -120,6 +130,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
           ({
             upsertStrategy: mocks.upsertStrategy,
             deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+            listStrategyFigures: mocks.listStrategyFigures,
           }) as never
       );
     installProviders({});
@@ -767,6 +778,141 @@ describe("runEarnCatalogueSyncIfDue", () => {
       expect(mocks.upsertStrategy).not.toHaveBeenCalledWith(
         expect.objectContaining({ providerReference: "rogue-mainnet" })
       );
+    });
+  });
+
+  describe("figure anomalies (PRO-1867, EARN-010)", () => {
+    const storedFigure = (
+      provider_reference: string,
+      current_apy: string | null,
+      host_cluster: "devnet" | "mainnet-beta" = "devnet",
+      tvl_usd: number | null = null
+    ) => ({ provider_reference, host_cluster, status: "active", current_apy, tvl_usd });
+
+    it("emits a figure anomaly on a 10x APY jump against the stored row, and still writes it", async () => {
+      // The sync is a mirror of the provider, not a judge of it: the write
+      // lands, and the event is what gets a human to look at it. Only sandbox
+      // holds a stored row, so production's empty read is a new shelf, not a
+      // vanished one.
+      mocks.listStrategyFigures.mockImplementation(async ({ environment }) =>
+        environment === "sandbox" ? [storedFigure("vault-a", "0.05")] : []
+      );
+      installProviders({
+        ground: makeProvider("ground", async (ctx: EarnRuntimeContext) =>
+          ctx.environment === "production"
+            ? []
+            : [{ ...makeSnapshot("vault-a"), currentApy: "0.5" }]
+        ),
+      });
+
+      expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+
+      expect(mocks.logEvent).toHaveBeenCalledExactlyOnceWith("warn", {
+        event: "sdp_api_earn_catalogue_figure_anomaly",
+        source: "catalogue_sync",
+        provider: "ground",
+        environment: "sandbox",
+        provider_reference: "vault-a",
+        host_cluster: "devnet",
+        metric: "apy",
+        reason: "jump",
+        previous: 0.05,
+        current: 0.5,
+        ratio: 10,
+      });
+      expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+        expect.objectContaining({ providerReference: "vault-a", currentApy: "0.5" })
+      );
+    });
+
+    it("diffs each lane against its own sub-shelf, so the mirror never judges devnet rows", async () => {
+      // Sandbox stores a devnet row and a mirrored mainnet row under different
+      // references; production stores nothing yet. Only the mirror lane's
+      // incoming figure moves.
+      mocks.listStrategyFigures.mockImplementation(async ({ environment }) =>
+        environment === "sandbox"
+          ? [
+              storedFigure("devnet-vault", "0.05", "devnet"),
+              storedFigure("mainnet-vault", "0.04", "mainnet-beta"),
+            ]
+          : []
+      );
+      installProviders({
+        ground: makeProvider("ground", async (ctx: EarnRuntimeContext) =>
+          ctx.environment === "production"
+            ? [{ ...makeSnapshot("mainnet-vault", "mainnet-beta"), currentApy: "0.4" }]
+            : [{ ...makeSnapshot("devnet-vault"), currentApy: "0.05" }]
+        ),
+      });
+
+      await runEarnCatalogueSyncIfDue(env);
+
+      // Production has no stored rows in this fixture (new row, exempt); the
+      // sandbox mirror lane does, and reports the jump there once.
+      const anomalies = mocks.logEvent.mock.calls.filter(
+        ([, payload]) => payload.event === "sdp_api_earn_catalogue_figure_anomaly"
+      );
+      expect(anomalies).toHaveLength(1);
+      expect(anomalies[0]?.[1]).toMatchObject({
+        environment: "sandbox",
+        provider_reference: "mainnet-vault",
+        host_cluster: "mainnet-beta",
+        ratio: 10,
+      });
+    });
+
+    it("reports a fundable shelf the provider reliably stopped listing, and does not delist it", async () => {
+      mocks.listStrategyFigures.mockResolvedValue([
+        storedFigure("vault-a", "0.05"),
+        storedFigure("vault-b", "0.06"),
+      ]);
+      installProviders({
+        ground: makeProvider(
+          "ground",
+          vi.fn(async () => [])
+        ),
+      });
+
+      await runEarnCatalogueSyncIfDue(env);
+
+      // Production's own lane (environment-wide) and sandbox's own devnet lane
+      // both held rows and both received an empty list.
+      expect(mocks.logEvent).toHaveBeenCalledWith("error", {
+        event: "sdp_api_earn_catalogue_shelf_disappeared",
+        source: "catalogue_sync",
+        provider: "ground",
+        environment: "production",
+        delist_scope: "environment",
+        previous_count: 2,
+        will_delist: false,
+      });
+      expect(mocks.logEvent).toHaveBeenCalledWith(
+        "error",
+        expect.objectContaining({
+          environment: "sandbox",
+          delist_scope: "devnet",
+          will_delist: false,
+        })
+      );
+      // The own-shelf refusal to delist on an empty read is untouched.
+      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+        expect.objectContaining({ hostCluster: "devnet" })
+      );
+    });
+
+    it("stays quiet on an empty stored shelf and never lets a figure read failure sink the pass", async () => {
+      mocks.listStrategyFigures.mockRejectedValue(new Error("figures table unreadable"));
+      installProviders({
+        ground: makeProvider(
+          "ground",
+          vi.fn(async () => [makeSnapshot("v")])
+        ),
+      });
+
+      expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+
+      expect(mocks.logEvent).not.toHaveBeenCalled();
+      expect(mocks.upsertStrategy).toHaveBeenCalled();
     });
   });
 });

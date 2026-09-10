@@ -211,6 +211,20 @@ export interface ListEarnStrategiesInput {
   offset: number;
 }
 
+/**
+ * The volatile figures of one stored strategy, as the anomaly check reads them
+ * before a catalogue or metrics write (PRO-1867, threat model EARN-010).
+ * `tvl_usd` is lifted out of the `risk_metadata` bag and is null unless the
+ * stored value is a JSON number, the same guard `listStrategies` ranks by.
+ */
+export interface EarnStrategyFigureRow {
+  provider_reference: string;
+  host_cluster: SolanaCluster;
+  status: EarnStrategyStatus;
+  current_apy: string | null;
+  tvl_usd: number | null;
+}
+
 export interface ListEarnStrategiesResult {
   rows: EarnStrategyRow[];
   total: number;
@@ -259,6 +273,16 @@ export interface EarnRepository {
   updateStrategyMetrics(input: UpdateEarnStrategyMetricsInput): Promise<boolean>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
+  /**
+   * Every stored strategy's volatile figures for one (provider, environment),
+   * both clusters and every status: the "before" the catalogue sync and the
+   * metrics refresh diff their incoming figures against (PRO-1867). Whole shelf
+   * on purpose, so a paused row's rate moving 10x is still visible.
+   */
+  listStrategyFigures(params: {
+    provider: string;
+    environment: SdpEnvironment;
+  }): Promise<EarnStrategyFigureRow[]>;
   /**
    * Every catalogued strategy that mints a share token on the given cluster,
    * for share-mint → vault attribution (PRO-1741). The WHOLE stored inventory
