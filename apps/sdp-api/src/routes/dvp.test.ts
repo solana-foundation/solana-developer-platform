@@ -878,6 +878,7 @@ describe("DvP routes", () => {
               frozen: false,
             },
             fundingSignature: "sig_live_claim",
+            outcome: "funded",
           },
           b: {
             party: {
@@ -894,6 +895,7 @@ describe("DvP routes", () => {
             settlementDestination: PARTY_B_EXTERNAL,
             funding: null,
             fundingSignature: null,
+            outcome: "awaiting",
           },
         },
         kind: "principal",
@@ -952,6 +954,7 @@ describe("DvP routes", () => {
             settlementDestination: PARTY_A_ADDRESS,
             funding: null,
             fundingSignature: null,
+            outcome: "awaiting",
           },
           b: {
             party: {
@@ -968,6 +971,7 @@ describe("DvP routes", () => {
             settlementDestination: PARTY_B_EXTERNAL,
             funding: null,
             fundingSignature: null,
+            outcome: "awaiting",
           },
         },
         kind: "principal",
@@ -1019,6 +1023,23 @@ describe("DvP routes", () => {
       expect(first.legs.a.party.counterparty).toEqual({
         id: accountId,
         label: "Acme Desk",
+      });
+      expect(first.legs.a).toEqual({
+        party: {
+          address: PARTY_A_ADDRESS,
+          counterparty: { id: accountId, label: "Acme Desk" },
+          wallet: { id: BOUND_WALLET.id, name: null },
+        },
+        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        amount: "1000",
+        decimals: null,
+        symbol: null,
+        escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+        settlementDestination: PARTY_A_ADDRESS,
+        funding: null,
+        fundingSignature: null,
+        outcome: "awaiting",
       });
       // Both sides held by the creator's wallets: bilateral.
       expect(second.kind).toBe("bilateral");

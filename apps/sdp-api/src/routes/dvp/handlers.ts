@@ -31,6 +31,7 @@ import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
+import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
 import {
   observeDvpTradeIfStale,
   observeDvpTradeNow,
@@ -68,6 +69,7 @@ interface LegInput {
   decimals: number | null;
   symbol: string | null;
   frozen: boolean | null;
+  outcome: ReturnType<typeof deriveDvpLegOutcome>;
 }
 
 /** One party of a trade, as the caller may see it. */
@@ -197,6 +199,7 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     /** Pay this address to fund the leg. */
     escrow: leg.escrow,
     settlementDestination: leg.settlementDestination,
+    outcome: leg.outcome,
     funding,
     /** Which transaction funded this leg. @see {@link fundingSignatureFor} */
     fundingSignature,
@@ -237,6 +240,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           decimals: row.decimalsA,
           symbol: row.symbolA,
           frozen: row.escrowAFrozen,
+          outcome: deriveDvpLegOutcome(row, "a"),
         },
         resolveParty(
           row.userA,
@@ -257,6 +261,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           decimals: row.decimalsB,
           symbol: row.symbolB,
           frozen: row.escrowBFrozen,
+          outcome: deriveDvpLegOutcome(row, "b"),
         },
         resolveParty(
           row.userB,

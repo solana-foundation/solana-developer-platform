@@ -55,6 +55,8 @@ function inbound(): DvpInboundTrade {
     escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
     escrowAAmount: "100000000",
     escrowBAmount: null,
+    escrowAPeakAmount: "100000000",
+    escrowBPeakAmount: "0",
     escrowAFrozen: false,
     escrowBFrozen: false,
     userASettlementDestination: USER_A,
@@ -90,6 +92,28 @@ describe("toDvpInboundResponse", () => {
     expect(response.legs.b.escrow).toBe("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y");
     expect(response.legs.b.amount).toBe("250000000");
     expect(response.legs.b.decimals).toBe(6);
+  });
+
+  it("returns the full leg shape with its server-derived outcome", () => {
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES);
+
+    expect(response.legs.b).toEqual({
+      party: {
+        address: USER_B,
+        counterparty: null,
+        wallet: { id: "cwlt_the_viewer", name: "Viewer Desk" },
+      },
+      mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+      tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      amount: "250000000",
+      decimals: 6,
+      symbol: "DUSD",
+      escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+      settlementDestination: USER_B,
+      observedAmount: null,
+      frozen: false,
+      outcome: "awaiting",
+    });
   });
 
   // Everything above is on chain already. A party holding the PDA can decode

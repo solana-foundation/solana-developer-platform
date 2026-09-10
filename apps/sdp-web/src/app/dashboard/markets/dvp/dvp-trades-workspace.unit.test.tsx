@@ -510,7 +510,7 @@ describe("DvpTradesWorkspace", () => {
     const html = renderList([trade({ legs: { a: frozen, b: testLeg() } })]);
 
     expect(html).toContain("Escrow is frozen");
-    expect(html).not.toContain("Holds more than the trade needs");
+    expect(html).not.toContain("Overfunded");
   });
 
   it("labels an over-funded row as over-funded", () => {
@@ -519,7 +519,7 @@ describe("DvpTradesWorkspace", () => {
     });
     const html = renderList([trade({ legs: { a: surplus, b: testLeg() } })]);
 
-    expect(html).toContain("Holds more than the trade needs");
+    expect(html).toContain("Overfunded");
   });
 
   it("marks nothing on an ordinary row", () => {
@@ -529,7 +529,7 @@ describe("DvpTradesWorkspace", () => {
     const html = renderList([trade({ legs: { a: funded, b: funded } })]);
 
     expect(html).not.toContain("Escrow is frozen");
-    expect(html).not.toContain("Holds more than the trade needs");
+    expect(html).not.toContain("Overfunded");
   });
 
   it("does not inline an escrow address into the parties column", () => {

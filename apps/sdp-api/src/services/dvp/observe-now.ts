@@ -16,6 +16,7 @@ import type { Signature } from "@solana/kit";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { resolveDvpClose } from "./closing-transaction";
 import { deriveDvpTradeState } from "./observe";
 import { readDvpTradeObservation } from "./read-chain";
 
@@ -60,6 +61,9 @@ export async function observeDvpTradeNow(
       },
       blockHeight
     );
+    observation.closeResolution = observation.tradeAccountExists
+      ? null
+      : await resolveDvpClose(rpc, trade.swapDvp);
 
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
@@ -74,6 +78,8 @@ export async function observeDvpTradeNow(
       escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
       escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
       observedAt: new Date().toISOString(),
+      closeSignature:
+        observation.closeResolution === null ? null : observation.closeResolution.signature,
     });
   } catch (error) {
     getLogger().warn(
@@ -121,6 +127,9 @@ export async function observeDvpTradeWithoutRecording(
       },
       blockHeight
     );
+    observation.closeResolution = observation.tradeAccountExists
+      ? null
+      : await resolveDvpClose(rpc, trade.swapDvp);
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
     return {

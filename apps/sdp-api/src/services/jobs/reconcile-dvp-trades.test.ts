@@ -10,12 +10,14 @@ import { seedTestDatabase } from "@/test/mocks/db";
 const getBlockHeight = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
 const getSignatureStatusesMock = vi.hoisted(() => vi.fn());
+const resolveDvpClose = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
   getSignatureStatuses: getSignatureStatusesMock,
 }));
 vi.mock("@/services/dvp/read-chain", () => ({ readDvpTradeObservation }));
+vi.mock("@/services/dvp/closing-transaction", () => ({ resolveDvpClose }));
 
 const { reconcileDvpTrades } = await import("./reconcile-dvp-trades");
 
@@ -41,6 +43,7 @@ function observation(overrides: Record<string, unknown> = {}) {
     legA: leg(0n),
     legB: leg(0n),
     blockHeight: 1_000n,
+    closeResolution: null,
     ...overrides,
   };
 }
@@ -100,7 +103,7 @@ async function seedTrade(id: string, status: string, overrides: Record<string, s
 async function statusOf(id: string): Promise<Record<string, unknown> | null> {
   return getDb(env)
     .prepare(
-      "SELECT status, escrow_a_amount, escrow_b_amount, escrow_a_frozen, observed_at FROM dvp_trades WHERE id = ?"
+      "SELECT status, escrow_a_amount, escrow_b_amount, escrow_a_frozen, observed_at, close_signature FROM dvp_trades WHERE id = ?"
     )
     .bind(id)
     .first<Record<string, unknown>>();
@@ -115,6 +118,7 @@ describe("reconcileDvpTrades", () => {
     // Default: broadcast claims check out on chain as landed, so existing
     // receipt rows survive. Tests that exercise a dead broadcast override.
     getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
+    resolveDvpClose.mockResolvedValue(null);
     readDvpTradeObservation.mockResolvedValue(observation());
 
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -227,6 +231,19 @@ describe("reconcileDvpTrades", () => {
     await expect(statusOf("dvp_gone")).resolves.toMatchObject({ status: "closed_unknown" });
   });
 
+  it("records a decoded close and its signature", async () => {
+    await seedTrade("dvp_external_settle", "funded");
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+    resolveDvpClose.mockResolvedValue({ status: "settled", signature: SIG });
+
+    await reconcileDvpTrades(env);
+
+    await expect(statusOf("dvp_external_settle")).resolves.toMatchObject({
+      status: "settled",
+      close_signature: SIG,
+    });
+  });
+
   // The most destructive failure this job could cause. `create_failed` and
   // `closed_unknown` are both terminal and both excluded from later sweeps, so
   // treating a rate-limited RPC as "the account is gone" would permanently
@@ -272,12 +289,12 @@ describe("reconcileDvpTrades", () => {
     await expect(statusOf("dvp_healthy")).resolves.toMatchObject({ status: "funded" });
   });
 
-  it("does not sweep trades that already reached a terminal state", async () => {
+  it("revisits recently closed trades for late deposits", async () => {
     await seedTrade("dvp_settled", "settled");
 
     await reconcileDvpTrades(env);
 
-    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+    expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
 
   // A row something better-informed already advanced must win over a sweep
@@ -294,6 +311,7 @@ describe("reconcileDvpTrades", () => {
       escrowBAmount: null,
       escrowAFrozen: null,
       escrowBFrozen: null,
+      closeSignature: null,
       observedAt: new Date().toISOString(),
     });
 

@@ -12,7 +12,9 @@
  * the mint on chain.
  */
 
+import type { DvpLegOutcome } from "@sdp/types";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
+import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
 
 /** One party of the trade, as a party who is not the author may see it. */
 interface DvpInboundPartyResponse {
@@ -39,6 +41,7 @@ interface DvpInboundLegResponse {
   observedAmount: string | null;
   /** Null when the reconciler has not looked yet, which is not the same as thawed. */
   frozen: boolean | null;
+  outcome: DvpLegOutcome;
 }
 
 export interface DvpInboundTradeResponse {
@@ -107,6 +110,7 @@ export function toDvpInboundResponse(
         settlementDestination: trade.userASettlementDestination,
         observedAmount: trade.escrowAAmount,
         frozen: trade.escrowAFrozen,
+        outcome: deriveDvpLegOutcome(trade, "a"),
       },
       b: {
         party: inboundParty(trade.userB, callerAddresses),
@@ -119,6 +123,7 @@ export function toDvpInboundResponse(
         settlementDestination: trade.userBSettlementDestination,
         observedAmount: trade.escrowBAmount,
         frozen: trade.escrowBFrozen,
+        outcome: deriveDvpLegOutcome(trade, "b"),
       },
     },
     expiryTimestamp: trade.expiryTimestamp,

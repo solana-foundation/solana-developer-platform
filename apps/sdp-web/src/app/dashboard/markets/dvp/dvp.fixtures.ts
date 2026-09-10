@@ -48,6 +48,7 @@ export function testLeg(overrides: Partial<DvpTradeLeg> = {}): DvpTradeLeg {
     settlementDestination: OTHER_ADDRESS,
     funding: null,
     fundingSignature: null,
+    outcome: "awaiting",
     ...overrides,
   };
 }

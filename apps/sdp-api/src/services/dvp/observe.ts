@@ -11,6 +11,7 @@
  */
 
 import type { DvpTradeStatus } from "@/db/repositories";
+import type { DvpCloseResolution } from "./closing-transaction";
 
 /** One escrow, as read. `exists: false` means the account is not on chain. */
 export interface DvpLegObservation {
@@ -28,6 +29,8 @@ export interface DvpTradeObservation {
   legB: DvpLegObservation;
   /** Current cluster block height, for judging create-transaction expiry. */
   blockHeight: bigint;
+  /** Decoded close for a vanished trade account, or null when none was found. */
+  closeResolution: DvpCloseResolution | null;
 }
 
 /** The trade fields the derivation needs. A subset of `DvpTradeRow`. */
@@ -95,6 +98,12 @@ export function deriveDvpTradeState(
   if (!observation.tradeAccountExists) {
     // Nothing at the address. Two very different reasons, and the row's own
     // status is what tells them apart.
+    if (
+      observation.closeResolution !== null &&
+      (trade.status === "creating" || CLOSABLE.has(trade.status))
+    ) {
+      return { status: observation.closeResolution.status, ...flags };
+    }
     if (trade.status === "creating") {
       // The create was signed and recorded but never seen to land. Whether it
       // still CAN land is not a question about elapsed time — it is decided by
@@ -109,11 +118,6 @@ export function deriveDvpTradeState(
       return { status: expired ? "create_failed" : "creating", ...flags };
     }
     if (CLOSABLE.has(trade.status)) {
-      // It existed and now does not. Settle, Cancel and Reject all close the
-      // account and none of them announce it, so the closing transaction is the
-      // only thing that could tell them apart — and this sweep does not fetch
-      // it. Saying `closed_unknown` is the honest answer; claiming `settled`
-      // would be a guess with money attached.
       return { status: "closed_unknown", ...flags };
     }
     // Already terminal. A reconciler must never walk a trade backwards out of

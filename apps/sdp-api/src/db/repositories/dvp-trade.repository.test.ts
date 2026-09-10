@@ -214,6 +214,37 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(resolved?.swapDvp).toBe(created.swapDvp);
   });
 
+  it("remembers the peak open balance when a later observation is lower", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+    const first = await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "created",
+      status: "partially_funded",
+      escrowAAmount: "900",
+      escrowBAmount: "0",
+      escrowAFrozen: false,
+      escrowBFrozen: false,
+      closeSignature: null,
+      observedAt: "2026-09-10T00:00:00.000Z",
+    });
+    const reclaimed = await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "partially_funded",
+      status: "partially_funded",
+      escrowAAmount: "100",
+      escrowBAmount: "0",
+      escrowAFrozen: false,
+      escrowBFrozen: false,
+      closeSignature: null,
+      observedAt: "2026-09-10T00:01:00.000Z",
+    });
+
+    expect(first?.escrowAPeakAmount).toBe("900");
+    expect(reclaimed?.escrowAPeakAmount).toBe("900");
+    expect(reclaimed?.escrowAAmount).toBe("100");
+  });
+
   // Compare-and-swap: whoever moved the row off `creating` first had better
   // information, and a late caller must not overwrite it.
   it("refuses to resolve a trade that is no longer creating", async () => {

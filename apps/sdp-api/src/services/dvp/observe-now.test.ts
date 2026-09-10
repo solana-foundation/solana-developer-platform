@@ -15,6 +15,7 @@ import { env } from "@/test/helpers/env";
 const recordObservation = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn(() => ({ send: async () => 100n })));
+const resolveDvpClose = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight }),
@@ -25,6 +26,7 @@ vi.mock("@/db/repositories", async (importOriginal) => ({
   createDvpTradeRepository: () => ({ recordObservation }),
 }));
 vi.mock("./read-chain", () => ({ readDvpTradeObservation }));
+vi.mock("./closing-transaction", () => ({ resolveDvpClose }));
 vi.mock("./observe", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./observe")>()),
   deriveDvpTradeState: () => ({ status: "funded" }),
@@ -52,9 +54,13 @@ describe("observeDvpTradeIfStale", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readDvpTradeObservation.mockResolvedValue({
+      tradeAccountExists: true,
       legA: { exists: true, amount: 1n, frozen: false },
       legB: { exists: true, amount: 2n, frozen: false },
+      blockHeight: 100n,
+      closeResolution: null,
     });
+    resolveDvpClose.mockResolvedValue(null);
     recordObservation.mockResolvedValue(trade({ status: "funded" }));
   });
 

@@ -8,7 +8,7 @@
  * names an escrow address that does not exist.
  */
 
-import { DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_LEG_OUTCOMES, DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
 import {
   createDvpTradeSchema as createDvpTradeSchemaBase,
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
@@ -53,6 +53,11 @@ const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
   description:
     "Last observed lifecycle state. The program emits no events and funding never invokes it, so this is a cache of a poll rather than an event log. `creating` means the create transaction was signed and recorded but its outcome is not yet known. `closed_unknown` means the on-chain account is gone but which terminal path closed it has not been determined.",
   example: "created",
+});
+
+const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
+  description:
+    "Server-derived leg state: awaiting, partial, funded, overfunded, frozen, reclaimed, expired, delivered, refunded, recoverable after a late deposit, or closed without a recoverable balance.",
 });
 
 const dvpCallerWalletSchema = z
@@ -141,6 +146,7 @@ const dvpTradeLegSchema = z
       description:
         "The transaction that moved this leg into escrow: the funding receipt when one exists, else the live claim's signature while a funding is still in flight (so an in-flight funding links to the transaction it is waiting on), else null. Funding claims are tenant-scoped to the funding organization, so an organization that cannot read the claim row gets null — never a guess.",
     }),
+    outcome: dvpLegOutcomeSchema,
   })
   .openapi({ description: "One leg of the trade." });
 
@@ -229,6 +235,7 @@ const dvpInboundLegSchema = z
       description:
         "Whether the escrow account was last observed frozen. Null before the reconciler looked, which is not the same as thawed.",
     }),
+    outcome: dvpLegOutcomeSchema,
   })
   .openapi({ description: "One leg of an inbound trade." });
 

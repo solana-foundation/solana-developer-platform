@@ -1,6 +1,6 @@
 "use client";
 
-import type { DvpTradeSide, DvpTradeStatus, SolanaCluster } from "@sdp/types";
+import type { DvpLegOutcome, DvpTradeSide, SolanaCluster } from "@sdp/types";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -122,41 +122,6 @@ function TransactionLink({ signature, cluster }: { signature: string; cluster: S
 }
 
 /**
- * How a closed trade ended for its legs.
- *
- * `closed` alone was forcing every finished leg to read as delivered, which
- * is a false statement about a cancelled or rejected trade: those refunded each
- * leg to whoever deposited it. Only `settled` delivered anything. An expired
- * trade is neither: its escrows still hold whatever was deposited until a
- * cancel returns it, so the leg keeps its real amount and stops taking deposits.
- */
-type LegOutcome = "open" | "expired" | "settled" | "refunded" | "closed";
-
-function legOutcome(status: DvpTradeStatus): LegOutcome {
-  switch (status) {
-    case "settled":
-      return "settled";
-    case "cancelled":
-    case "rejected":
-      return "refunded";
-    case "closed_unknown":
-    case "create_failed":
-      return "closed";
-    case "expired":
-      return "expired";
-    case "creating":
-    case "created":
-    case "partially_funded":
-    case "funded":
-      return "open";
-    default: {
-      const unreachable: never = status;
-      throw new Error(`Unhandled DvP trade status ${String(unreachable)}`);
-    }
-  }
-}
-
-/**
  * The one thing true of this leg right now, as an icon and a label.
  *
  * Derived from the condition that actually fired rather than from a single
@@ -164,12 +129,14 @@ function legOutcome(status: DvpTradeStatus): LegOutcome {
  * from it, and a warning triangle captioned for the wrong reason is worse than
  * no icon at all.
  */
-function legStatus(
-  leg: DvpTradeLeg,
-  outcome: LegOutcome
-): { Icon: LucideIcon; tone: string; bar: string; key: MessageKey } {
-  switch (outcome) {
-    case "settled":
+function legStatus(leg: DvpTradeLeg): {
+  Icon: LucideIcon;
+  tone: string;
+  bar: string;
+  key: MessageKey;
+} {
+  switch (leg.outcome) {
+    case "delivered":
       return {
         Icon: CircleCheckIcon,
         tone: "text-success",
@@ -197,39 +164,54 @@ function legStatus(
         bar: "bg-warning",
         key: "DashboardMarkets.dvp.legExpired",
       };
-    case "open":
-      break;
+    case "frozen":
+      return {
+        Icon: SnowflakeIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legFrozen",
+      };
+    case "overfunded":
+      return {
+        Icon: TriangleAlertIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legOverFunded",
+      };
+    case "funded":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-success",
+        bar: "bg-success",
+        key: "DashboardMarkets.dvp.legFunded",
+      };
+    case "reclaimed":
+      return {
+        Icon: ClockIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legReclaimed",
+      };
+    case "recoverable":
+      return {
+        Icon: TriangleAlertIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legRecoverable",
+      };
+    case "awaiting":
+    case "partial":
+      return {
+        Icon: ClockIcon,
+        tone: "text-tertiary",
+        bar: "bg-info",
+        key: "DashboardMarkets.dvp.legAwaiting",
+      };
+    default: {
+      const unreachable: never = leg.outcome;
+      throw new Error(`Unhandled DvP leg outcome ${String(unreachable)}`);
+    }
   }
-  if (leg.funding?.frozen) {
-    return {
-      Icon: SnowflakeIcon,
-      tone: "text-warning",
-      bar: "bg-warning",
-      key: "DashboardMarkets.dvp.legFrozen",
-    };
-  }
-  if (leg.funding?.surplus) {
-    return {
-      Icon: TriangleAlertIcon,
-      tone: "text-warning",
-      bar: "bg-warning",
-      key: "DashboardMarkets.dvp.legOverFunded",
-    };
-  }
-  if (leg.funding?.funded) {
-    return {
-      Icon: CircleCheckIcon,
-      tone: "text-success",
-      bar: "bg-success",
-      key: "DashboardMarkets.dvp.legFunded",
-    };
-  }
-  return {
-    Icon: ClockIcon,
-    tone: "text-tertiary",
-    bar: "bg-info",
-    key: "DashboardMarkets.dvp.legAwaiting",
-  };
 }
 
 /**
@@ -303,18 +285,24 @@ function TokenMark({ symbol }: { symbol: string }) {
 /** The line under the amount: progress while open, the outcome once closed. */
 function legProgressCaption(
   t: ReturnType<typeof useTranslations>,
-  outcome: LegOutcome,
+  outcome: DvpLegOutcome,
   held: string,
   target: string
 ): string {
   switch (outcome) {
-    case "settled":
+    case "delivered":
       return t("DashboardMarkets.dvp.deliveredLabel");
     case "refunded":
       return t("DashboardMarkets.dvp.refundedLabel");
     case "closed":
       return t("DashboardMarkets.dvp.closedLabel");
-    case "open":
+    case "awaiting":
+    case "partial":
+    case "funded":
+    case "overfunded":
+    case "frozen":
+    case "reclaimed":
+    case "recoverable":
     case "expired":
       return `${held} / ${target}`;
   }
@@ -327,25 +315,24 @@ function legProgressCaption(
  */
 function LegCard({
   action,
-  outcome,
   cluster,
   leg,
   side,
 }: {
   action: ReactNode | undefined;
-  outcome: LegOutcome;
   cluster: SolanaCluster;
   leg: DvpTradeLeg;
   side: DvpTradeSide;
 }) {
   const t = useTranslations();
-  const status = legStatus(leg, outcome);
+  const outcome = leg.outcome;
+  const status = legStatus(leg);
   const ratio =
-    outcome === "settled"
+    outcome === "delivered"
       ? 1
-      : outcome === "open" || outcome === "expired"
-        ? legFundingRatio(leg)
-        : 0;
+      : outcome === "refunded" || outcome === "closed"
+        ? 0
+        : legFundingRatio(leg);
   const percent = ratio === null ? 0 : Math.round(Math.min(ratio, 1) * 100);
   const target = formatLegAmount(leg.amount, leg.decimals);
   const held = leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0";
@@ -377,7 +364,7 @@ function LegCard({
           escrow can still receive: once the leg is funded, frozen, or the trade
           is closed, an address here is an invitation to send tokens somewhere
           they will bounce or are not wanted. */}
-      {outcome !== "open" || leg.funding?.funded || leg.funding?.frozen ? null : (
+      {outcome !== "awaiting" && outcome !== "partial" ? null : (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-fill-subtle px-3 py-2">
           <span className="text-[11px] text-tertiary">{t("DashboardMarkets.dvp.escrowLabel")}</span>
           <CopyableAddress
@@ -661,6 +648,16 @@ function TimestampFact({
   );
 }
 
+/** A warning callout's title line: the mark beside the words, the explanation beneath. */
+function WarningTitle({ Icon, label }: { Icon: LucideIcon; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon aria-hidden className="h-4 w-4 shrink-0" />
+      {label}
+    </span>
+  );
+}
+
 /**
  * Everything wrong with a trade that is worth saying before somebody acts.
  *
@@ -685,40 +682,47 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
   return (
     <>
       {redirected.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.destinationDiffersTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {t("DashboardMarkets.dvp.destinationDiffersBody")}
-              <span className="mt-2 block">
-                {redirected.map((leg) => (
-                  <span className="block text-xs" key={leg.settlementDestination}>
-                    {t("DashboardMarkets.dvp.destinationDiffersLeg", {
-                      address: leg.settlementDestination,
-                    })}
-                  </span>
-                ))}
+        <Callout
+          title={
+            <WarningTitle
+              Icon={TriangleAlertIcon}
+              label={t("DashboardMarkets.dvp.destinationDiffersTitle")}
+            />
+          }
+          variant="warning"
+        >
+          {t("DashboardMarkets.dvp.destinationDiffersBody")}
+          <span className="mt-2 block">
+            {redirected.map((leg) => (
+              <span className="block text-xs" key={leg.settlementDestination}>
+                {t("DashboardMarkets.dvp.destinationDiffersLeg", {
+                  address: leg.settlementDestination,
+                })}
               </span>
-            </span>
+            ))}
           </span>
         </Callout>
       ) : null}
 
       {frozen.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <SnowflakeIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            {t("DashboardMarkets.dvp.frozenDescription")}
-          </span>
+        <Callout
+          title={
+            <WarningTitle Icon={SnowflakeIcon} label={t("DashboardMarkets.dvp.frozenTitle")} />
+          }
+          variant="warning"
+        >
+          {t("DashboardMarkets.dvp.frozenDescription")}
         </Callout>
       ) : null}
 
       {overFunded.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.surplusTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            {t("DashboardMarkets.dvp.surplusDescription")}
-          </span>
+        <Callout
+          title={
+            <WarningTitle Icon={TriangleAlertIcon} label={t("DashboardMarkets.dvp.surplusTitle")} />
+          }
+          variant="warning"
+        >
+          {t("DashboardMarkets.dvp.surplusDescription")}
         </Callout>
       ) : null}
     </>
@@ -752,7 +756,6 @@ export function DvpTradeDetailWorkspace({
   cluster: SolanaCluster;
 }) {
   const tradeClosed = isDvpTradeClosed(trade);
-  const outcome = legOutcome(trade.status);
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
   const partyView = isDvpPartyView(trade);
@@ -813,8 +816,6 @@ export function DvpTradeDetailWorkspace({
           <DvpNextStep trade={trade} />
         </div>
 
-        <TradeWarnings trade={trade} />
-
         <section>
           <div className="flex flex-wrap items-center gap-4">
             <h2 className="font-medium text-lg text-primary tracking-tight">
@@ -829,13 +830,14 @@ export function DvpTradeDetailWorkspace({
                 action={fundActionFor(side)}
                 cluster={cluster}
                 key={side}
-                outcome={outcome}
                 leg={trade.legs[side]}
                 side={side}
               />
             ))}
           </div>
         </section>
+
+        <TradeWarnings trade={trade} />
 
         {awaitingApproval ? (
           <Callout live title={t("DashboardMarkets.dvp.approvalPending")} variant="info">

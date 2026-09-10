@@ -331,6 +331,7 @@ describe("DvpTradeDetailWorkspace", () => {
           a: testLeg({
             escrow: LEG_ESCROW_A,
             funding: frozen,
+            outcome: "frozen",
             party: ownParty(),
           }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
@@ -357,7 +358,7 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html).toContain("Holds more than the trade needs");
+    expect(html).toContain("Overfunded");
   });
 
   it("shows the reference in the on-chain details only when the trade carries one", () => {
@@ -374,8 +375,13 @@ describe("DvpTradeDetailWorkspace", () => {
       trade({
         status: "cancelled",
         legs: {
-          a: testLeg({ escrow: LEG_ESCROW_A, funding: FUNDED, party: ownParty() }),
-          b: testLeg({ escrow: LEG_ESCROW_B }),
+          a: testLeg({
+            escrow: LEG_ESCROW_A,
+            funding: FUNDED,
+            outcome: "refunded",
+            party: ownParty(),
+          }),
+          b: testLeg({ escrow: LEG_ESCROW_B, outcome: "refunded" }),
         },
       })
     );
@@ -394,8 +400,13 @@ describe("DvpTradeDetailWorkspace", () => {
       trade({
         status: "expired",
         legs: {
-          a: testLeg({ escrow: LEG_ESCROW_A, funding: FUNDED, party: ownParty() }),
-          b: testLeg({ escrow: LEG_ESCROW_B }),
+          a: testLeg({
+            escrow: LEG_ESCROW_A,
+            funding: FUNDED,
+            outcome: "expired",
+            party: ownParty(),
+          }),
+          b: testLeg({ escrow: LEG_ESCROW_B, outcome: "expired" }),
         },
       })
     );
@@ -406,10 +417,27 @@ describe("DvpTradeDetailWorkspace", () => {
   });
 
   it("shows delivery only on a settled trade", () => {
-    const html = renderDetail(trade({ status: "settled" }));
+    const html = renderDetail(
+      trade({
+        status: "settled",
+        legs: { a: testLeg({ outcome: "delivered" }), b: testLeg({ outcome: "delivered" }) },
+      })
+    );
 
     expect(html).toContain("Delivered in full");
     expect(html).not.toContain("Refunded");
+  });
+
+  it("shows a reclaimed deposit from the server outcome", () => {
+    expect(
+      renderDetail(trade({ legs: { a: testLeg({ outcome: "reclaimed" }), b: testLeg() } }))
+    ).toContain("Deposit reclaimed by the depositor");
+  });
+
+  it("shows a late deposit that needs recovery", () => {
+    expect(
+      renderDetail(trade({ legs: { a: testLeg({ outcome: "recoverable" }), b: testLeg() } }))
+    ).toContain("Deposit arrived after close, needs recovery");
   });
 
   // A frozen escrow bounces incoming transfers, so the pay-in address must not
@@ -419,7 +447,7 @@ describe("DvpTradeDetailWorkspace", () => {
     const html = renderDetail(
       trade({
         legs: {
-          a: testLeg({ escrow: LEG_ESCROW_A, funding: frozen }),
+          a: testLeg({ escrow: LEG_ESCROW_A, funding: frozen, outcome: "frozen" }),
           b: testLeg({ escrow: LEG_ESCROW_B }),
         },
       })

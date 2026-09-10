@@ -76,6 +76,10 @@ export interface DvpTradeRow {
   // Last observed escrow state. Null until the reconciler has looked.
   escrowAAmount: string | null;
   escrowBAmount: string | null;
+  /** Highest observed escrow balance while the trade was open. */
+  escrowAPeakAmount: string | null;
+  /** Highest observed escrow balance while the trade was open. */
+  escrowBPeakAmount: string | null;
   escrowAFrozen: boolean | null;
   escrowBFrozen: boolean | null;
   createdAt: string;
@@ -98,6 +102,8 @@ export type DvpTradeInsert = Omit<
   | "updatedAt"
   | "escrowAAmount"
   | "escrowBAmount"
+  | "escrowAPeakAmount"
+  | "escrowBPeakAmount"
   | "escrowAFrozen"
   | "escrowBFrozen"
 >;
@@ -139,6 +145,7 @@ export interface DvpTradeObservationUpdate {
   escrowBAmount: string | null;
   escrowAFrozen: boolean | null;
   escrowBFrozen: boolean | null;
+  closeSignature: Signature | null;
   observedAt: string;
 }
 
