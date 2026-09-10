@@ -111,7 +111,6 @@ export type {
 } from "./helius-rings-health.repository";
 export { mapHeliusRingsHealthRows } from "./helius-rings-health.repository";
 export { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
-export type {} from "./helius-rings-key-ref.repository";
 export type {
   FailHeliusRingsOperationInput,
   HeliusRingsOperationRepository,
