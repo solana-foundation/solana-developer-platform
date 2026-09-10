@@ -41,8 +41,27 @@ configuration without changing this schema.
 | `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
 | `SOLANA_NETWORK` | Must be `devnet`. |
 
-> **The seed is public.** Identities derive from `INSECURE_TEST_SEED_DEVNET_ONLY!!`
-> in `packages/sdp-helius-rings-sdk/src/deterministic-ka/seed.ts`. Devnet only.
+### Where the shielded keys come from
+
+A wallet's viewing and nullifier keys derive from its **own custody key**. The owner
+signs Zolana's fixed derivation message, and that signature is the seed the two keys
+expand from (`packages/sdp-helius-rings-sdk/src/custody-ka/`). Ed25519 signing is
+deterministic, so the same custody key always yields the same shielded identity, and
+nothing is stored at rest.
+
+Two consequences worth knowing before provisioning:
+
+- **The identity follows the owner key, not the project.** One custody wallet gives one
+  shielded identity, so two Rings wallets over the same custody wallet — in different
+  projects or different organizations — converge on it. That matches the chain, whose
+  user-record PDA is keyed on the owner address alone.
+- **The custody provider must sign raw messages.** `coinbase_cdp` and `utila` cannot, and
+  provisioning refuses them. `local`, `turnkey`, `fireblocks`, `privy`, `para`, `dfns` and
+  `ibm_haven` all work.
+
+Losing or rotating a wallet's custody key changes its shielded identity, which the first
+sync detects and quarantines; recover with the re-key flow below. Notes encrypted to the
+old keys do not survive a re-key.
 
 Missing setup → the dashboard shows the configuration form; direct port methods
 fail with `config_error`.

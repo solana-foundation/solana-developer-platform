@@ -5,9 +5,12 @@ import {
   derivedIdentity,
   honestRecord,
   publishedKeys,
+  rekeyedIdentity,
+  TEST_FOREIGN_REQUEST,
   TEST_OWNER,
   TEST_REQUEST,
-  TEST_SEED,
+  testDerivationSeed,
+  testMaterialSource,
 } from "./test/shielded-identity-fixtures.js";
 
 const fetchUserRecord = vi.fn();
@@ -22,7 +25,6 @@ vi.mock("@heliuslabs/zolana/wallet", async (importOriginal) => ({
   fetchUserRecord: (...args: unknown[]) => fetchUserRecord(...args),
 }));
 
-const { createDeterministicMaterialSource } = await import("./deterministic-ka/index.js");
 const { readRingsIdentityStatus } = await import("./identity.js");
 
 const OWNER = TEST_OWNER;
@@ -36,12 +38,12 @@ const INPUT = { walletId: TEST_REQUEST.walletId, owner: OWNER };
  * wallet's derivation rather than filler bytes: a record built from arbitrary
  * bytes would fail at the decode and never reach the comparison under test.
  */
-const FOREIGN = { ...TEST_REQUEST, walletId: "hrw_someone_else" };
+const FOREIGN = TEST_FOREIGN_REQUEST;
 
 function deps() {
   return {
     client: {} as never,
-    material: createDeterministicMaterialSource({ seed: TEST_SEED }),
+    material: testMaterialSource(),
     organizationId: TEST_REQUEST.organizationId,
     projectId: TEST_REQUEST.projectId,
   };
@@ -84,16 +86,19 @@ describe("readRingsIdentityStatus", () => {
   // Canonicalised from the record rather than copied from the derivation, so
   // "ours" is an agreement of two independently computed values.
   it("canonicalises the published address from the record it read", async () => {
-    const foreign = await publishedKeys(FOREIGN);
+    // The same owner publishing different keys: a re-keyed record, and the only
+    // shape that still isolates "computed from the record" now that one owner
+    // derives exactly one identity.
+    const rekeyed = await rekeyedIdentity();
     fetchUserRecord.mockResolvedValue({
       ...(await honestRecord()),
-      nullifierPublicKey: foreign.nullifierPublicKey,
-      viewingPublicKey: foreign.viewingPublicKey,
+      nullifierPublicKey: rekeyed.nullifierPublicKey,
+      viewingPublicKey: rekeyed.viewingPublicKey,
     });
 
     const result = await readRingsIdentityStatus(deps(), INPUT);
 
-    expect(result.publishedShieldedAddress).toBe(await derivedIdentity(FOREIGN));
+    expect(result.publishedShieldedAddress).toBe(rekeyed.identity);
     expect(result.publishedShieldedAddress).not.toBe(result.derivedShieldedAddress);
   });
 
@@ -224,7 +229,7 @@ describe("readRingsIdentityStatus", () => {
         ours.viewingPublicKey,
         theirs.nullifierPublicKey,
         theirs.viewingPublicKey,
-        TEST_SEED,
+        await testDerivationSeed(),
       ]) {
         for (const encoded of encodingsOf(bytes)) {
           expect(serialised).not.toContain(encoded);

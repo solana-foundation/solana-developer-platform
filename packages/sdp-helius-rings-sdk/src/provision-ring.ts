@@ -8,6 +8,7 @@ import {
   fetchRingProgramConfig,
   grantReadAccessInstruction,
   initSppRingConfigInstruction,
+  listRegisteredRings,
   RingError,
   type RingProgramConfig,
   RingRpc,
@@ -148,6 +149,15 @@ export async function provisionCustomRing(
       );
     }
   }
+
+  // Refuse a frozen ring before binding this project's deposits to it.
+  //
+  // `paused` lives on the POOL's config for the ring, not the ring's own
+  // (`RingProgramConfig` above has no such field), so it is read from the pool
+  // registry. Nothing raises a typed error for it: while it is set the chain
+  // refuses every operational ring instruction, so an unchecked ring fails
+  // after the proof is built and the fee paid.
+  await assertRingNotPaused(deps.client, ringProgramId);
 
   // The ring-auth account only ever exists once SPP registration ran, so its
   // absence is the resume point for the second half of bring-up.
@@ -378,6 +388,40 @@ async function assertRingLookupTableBringUp(
 interface DecodedRingMessage {
   readonly header: Readonly<{ numSignerAccounts: number; numReadonlySignerAccounts: number }>;
   readonly staticAccounts: readonly string[];
+}
+
+/**
+ * Refuses a ring the pool has frozen.
+ *
+ * The registry is the only supported way to read `paused`: it is a field on the
+ * pool's per-ring config, and the SDK exports no single-account decoder for
+ * that account. The scan uses `getProgramAccounts`, which some providers
+ * refuse — that is reported as a configuration failure rather than skipped,
+ * because bring-up is the one deliberate moment this is decided and an
+ * unchecked ring is exactly what this call exists to prevent.
+ *
+ * A ring absent from the registry is not judged here: bring-up's own steps
+ * create the pool-side registration, so absence is a resume point, not a fault.
+ */
+async function assertRingNotPaused(client: ZolanaClient, ringProgramId: Address): Promise<void> {
+  let registered: Awaited<ReturnType<typeof listRegisteredRings>>;
+  try {
+    registered = await listRegisteredRings(client);
+  } catch (error) {
+    throw new HeliusRingsError(
+      "config_error",
+      "the shielded pool's ring registry could not be read, so the ring's paused state is unknown; bring-up needs an RPC that serves getProgramAccounts",
+      { cause: error }
+    );
+  }
+
+  const ring = registered.find((candidate) => candidate.programId === ringProgramId);
+  if (ring?.paused) {
+    throw new HeliusRingsError(
+      "conflict",
+      "the shielded pool has paused this ring; every ring instruction is refused while it is paused, so it cannot be brought up"
+    );
+  }
 }
 
 /** Absent is a state bring-up handles; any other config failure is the caller's problem. */

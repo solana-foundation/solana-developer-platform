@@ -20,6 +20,7 @@ import {
   type TransactionSigner,
 } from "@solana/signers";
 import { getDb } from "@/db";
+import type { SigningProviderType } from "@/services/adapters/signing";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -39,6 +40,35 @@ const NON_RETRYABLE_SIGNING_CODES = new Set([
   "NOT_FOUND",
   "INVALID_REQUEST",
   "APPROVAL_REJECTED",
+]);
+
+/**
+ * Providers that sign raw message bytes as-is.
+ *
+ * Rings needs this for more than the ring auditor attestation: the shielded keys
+ * derive from the owner's signature over Zolana's derivation message, so a
+ * provider that cannot sign arbitrary bytes cannot hold a Rings wallet at all.
+ *
+ * The two omissions are deliberate, and neither is a passing structural check:
+ *  - `coinbase_cdp` UTF-8-decodes the payload, and the derivation envelope opens
+ *    with `0xff`, which is not valid UTF-8.
+ *  - `utila` has a `signMessages` that throws, so `isMessagePartialSigner` says
+ *    yes and the call fails afterwards — as a *retryable* signer failure, which
+ *    would retry forever. Refusing up front is the difference.
+ *  - `anchorage` does no transaction signing in SDP.
+ *
+ * Signing the bare `"TSPP/derive/v1"` payload instead would get CDP past this,
+ * and is why it is not done: the bare payload yields a different seed, so those
+ * wallets would fork onto identities no other provider can reproduce.
+ */
+const RAW_MESSAGE_SIGNING_PROVIDERS: ReadonlySet<SigningProviderType> = new Set([
+  "local",
+  "turnkey",
+  "fireblocks",
+  "privy",
+  "para",
+  "dfns",
+  "ibm_haven",
 ]);
 
 export interface SignRingsOuterTransactionInput {
@@ -250,6 +280,14 @@ async function resolveOwnerSigner(
   ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner);
   if (!wallet) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
+  }
+  if (!RAW_MESSAGE_SIGNING_PROVIDERS.has(wallet.provider)) {
+    // Non-retryable on purpose: no amount of retrying teaches a provider to sign
+    // raw bytes, and the wallet has to move providers before Rings can use it.
+    throw new SigningError(
+      `custody provider ${wallet.provider} cannot sign raw messages, which Rings requires`,
+      "INVALID_REQUEST"
+    );
   }
 
   const signer = await createOrgSignerForCustodyWallet(

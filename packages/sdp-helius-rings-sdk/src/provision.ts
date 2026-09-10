@@ -14,6 +14,7 @@ import {
 } from "@solana/kit";
 import {
   canonicalShieldedIdentity,
+  publishedHalves,
   type ShieldedMaterial,
   type ShieldedMaterialSource,
 } from "./material.js";
@@ -213,10 +214,12 @@ function firstMismatch(
   owner: string
 ): string | undefined {
   if (record.owner !== owner) return "owner";
-  if (!sameBytes(record.nullifierPublicKey, material.nullifierKey.publicKey())) {
+
+  const derived = publishedHalves(material.shieldedAddress);
+  if (!sameBytes(record.nullifierPublicKey, derived.nullifierPublicKey)) {
     return "nullifier key";
   }
-  if (!sameBytes(record.viewingPublicKey, material.viewingKey.publicKey().toBytes())) {
+  if (!sameBytes(record.viewingPublicKey, derived.viewingPublicKey)) {
     return "viewing key";
   }
   return undefined;
