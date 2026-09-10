@@ -79,6 +79,7 @@ export interface DashboardData {
     address: string;
     solBalance: string;
     cluster: "devnet";
+    feesPaidBy: "customer" | "northstar";
   };
   balances: TokenBalance[];
   strategies: YieldStrategy[];
@@ -86,6 +87,8 @@ export interface DashboardData {
   movements: YieldMovement[];
   earnings: TokenEarnings[];
   totals: {
+    tokenMint: string | null;
+    tokenSymbol: string | null;
     available: string;
     inYield?: string;
     portfolio?: string;

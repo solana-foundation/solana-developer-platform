@@ -40,12 +40,15 @@ const DEVNET_SYMBOLS: Record<string, string> = {
 
 export async function signTransaction(
   transactionBase64: string,
-  signer: KeyPairSigner
+  signers: readonly KeyPairSigner[]
 ): Promise<string> {
   const transaction = getTransactionDecoder().decode(
     Buffer.from(transactionBase64, "base64")
   );
-  const signed = await partiallySignTransaction([signer.keyPair], transaction);
+  const signed = await partiallySignTransaction(
+    signers.map((signer) => signer.keyPair),
+    transaction
+  );
   return getBase64EncodedWireTransaction(signed);
 }
 

@@ -95,6 +95,7 @@ export class EmbeddedYieldClient {
   async buildDeposit(input: {
     strategyId: string;
     ownerAddress: string;
+    feePayer?: string;
     amount: string;
     sourceTokenMint: string;
     minSharesOut?: string;
@@ -143,6 +144,7 @@ export class EmbeddedYieldClient {
     positionId: string;
     shares: string;
     minAmountOut?: string;
+    feePayer?: string;
   }): Promise<BuiltTransaction> {
     const data = await this.request<WithdrawalBuildResult>(
       "/v1/earn/external-wallet/withdrawal-transactions",
@@ -232,6 +234,12 @@ export class EmbeddedYieldClient {
     ) {
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       movement = await this.getMovement(movementId);
+    }
+
+    if (movement.status !== "finalized" && movement.status !== "failed") {
+      throw new Error(
+        `Movement ${movementId} is still ${movement.status} after ${timeoutMs}ms; refresh before treating it as settled`
+      );
     }
 
     return movement;

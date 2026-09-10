@@ -1,7 +1,12 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 const preview = process.argv.includes("--preview");
 const executable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const childEnvironment = {
+  ...process.env,
+  NORTHSTAR_DEMO_SESSION_TOKEN: randomBytes(32).toString("base64url"),
+};
 const commands = [
   [
     "exec",
@@ -21,7 +26,7 @@ const commands = [
 ];
 
 const children = commands.map((args) =>
-  spawn(executable, args, { stdio: "inherit" })
+  spawn(executable, args, { env: childEnvironment, stdio: "inherit" })
 );
 
 function stop(signal = "SIGTERM") {

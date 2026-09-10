@@ -28,9 +28,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  formatAccountToken,
   formatApy,
   formatDate,
-  formatMoney,
   formatToken,
   shortAddress,
   titleCase,
@@ -131,21 +131,27 @@ export function OverviewDashboard({
                 <Badge variant="secondary">Live</Badge>
               </div>
               <CardTitle className="text-4xl font-semibold tracking-[-0.045em] sm:text-5xl">
-                {formatMoney(data.totals.portfolio)}
+                {formatAccountToken(
+                  data.totals.portfolio,
+                  data.totals.tokenSymbol
+                )}
               </CardTitle>
               <CardDescription>
-                On-chain stablecoin balances plus live Embedded Yield positions.
+                One account token, combining its on-chain balance and live
+                Embedded Yield positions.
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
               <DepositDialog
                 strategies={data.strategies}
                 balances={data.balances}
+                feesPaidBy={data.wallet.feesPaidBy}
                 busy={busy}
                 onSubmit={onDeposit}
               />
               <WithdrawDialog
                 positions={data.positions}
+                feesPaidBy={data.wallet.feesPaidBy}
                 busy={busy}
                 onSubmit={onWithdraw}
               />
@@ -155,16 +161,26 @@ export function OverviewDashboard({
         <CardContent className="grid gap-0 p-0 sm:grid-cols-3">
           <BalanceMetric
             label="Available"
-            value={formatMoney(data.totals.available)}
+            value={formatAccountToken(
+              data.totals.available,
+              data.totals.tokenSymbol
+            )}
           />
           <BalanceMetric
             label="In yield"
-            value={formatMoney(data.totals.inYield)}
+            value={formatAccountToken(
+              data.totals.inYield,
+              data.totals.tokenSymbol
+            )}
             unavailable={data.totals.unavailableYieldPositions > 0}
           />
           <BalanceMetric
             label="Total earned"
-            value={formatMoney(data.totals.earned, { signed: true })}
+            value={formatAccountToken(
+              data.totals.earned,
+              data.totals.tokenSymbol,
+              { signed: true }
+            )}
             positive
           />
         </CardContent>
@@ -188,6 +204,12 @@ export function OverviewDashboard({
                   <PositionRow
                     key={position.id}
                     position={position}
+                    tokenSymbol={
+                      data.balances.find(
+                        (balance) => balance.mint === position.tokenMint
+                      )?.symbol ?? "tokens"
+                    }
+                    feesPaidBy={data.wallet.feesPaidBy}
                     busy={busy}
                     onWithdraw={onWithdraw}
                   />
@@ -289,6 +311,7 @@ export function OverviewDashboard({
                 <DepositDialog
                   strategies={[strategy]}
                   balances={data.balances}
+                  feesPaidBy={data.wallet.feesPaidBy}
                   busy={busy}
                   onSubmit={onDeposit}
                 />
@@ -420,10 +443,14 @@ function BalanceMetric({
 
 function PositionRow({
   position,
+  tokenSymbol,
+  feesPaidBy,
   busy,
   onWithdraw,
 }: {
   position: YieldPosition;
+  tokenSymbol: string;
+  feesPaidBy: "customer" | "northstar";
   busy: boolean;
   onWithdraw: (positionId: string, shares: string) => Promise<void>;
 }) {
@@ -443,7 +470,9 @@ function PositionRow({
       <div className="flex items-center justify-between gap-5 sm:justify-end">
         <div className="flex flex-col items-end gap-0.5">
           <span className="text-sm font-medium">
-            {formatMoney(position.tokenValue)}
+            {position.tokenValue === undefined
+              ? "Not available"
+              : formatToken(position.tokenValue, tokenSymbol)}
           </span>
           <span className="text-xs text-muted-foreground">
             {position.shares === undefined
@@ -453,6 +482,7 @@ function PositionRow({
         </div>
         <WithdrawDialog
           positions={[position]}
+          feesPaidBy={feesPaidBy}
           initialPositionId={position.id}
           busy={busy}
           onSubmit={onWithdraw}

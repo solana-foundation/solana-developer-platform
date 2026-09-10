@@ -4,11 +4,13 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import type { ApiErrorBody } from "../src/types.ts";
+import { DEMO_SESSION_HEADER, hasValidDemoSession } from "./demo-session.ts";
 import { deposit, loadDashboard, withdraw } from "./embedded-yield.ts";
 import { getConfig } from "./env.ts";
 import { SdpApiError } from "./sdp-client.ts";
 
 const app = new Hono();
+const config = getConfig();
 
 const depositSchema = z.object({
   strategyId: z.string().min(1),
@@ -17,6 +19,27 @@ const depositSchema = z.object({
 const withdrawalSchema = z.object({
   positionId: z.string().min(1),
   shares: z.string().min(1).max(128),
+});
+
+app.use("/api/*", async (context, next) => {
+  if (
+    !hasValidDemoSession(
+      context.req.header(DEMO_SESSION_HEADER),
+      config.NORTHSTAR_DEMO_SESSION_TOKEN
+    )
+  ) {
+    return context.json(
+      {
+        error: {
+          code: "DEMO_UNAUTHORIZED",
+          message: "Access Northstar through its local Vite application",
+        },
+      } satisfies ApiErrorBody,
+      401
+    );
+  }
+
+  await next();
 });
 
 app.get("/api/health", async (context) => {
@@ -72,7 +95,6 @@ app.onError((error, context) => {
   return context.json(body, responseStatus);
 });
 
-const config = getConfig();
 serve({ fetch: app.fetch, hostname: "127.0.0.1", port: config.DEMO_API_PORT });
 console.log(
   `Northstar demo API listening on http://127.0.0.1:${config.DEMO_API_PORT}`

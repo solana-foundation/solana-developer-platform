@@ -8,14 +8,19 @@ const configSchema = z.object({
   DEMO_WALLET_PRIVATE_KEY: z
     .string()
     .min(1, "DEMO_WALLET_PRIVATE_KEY is required"),
+  DEMO_FEE_PAYER_PRIVATE_KEY: z.string().min(1).optional(),
   SOLANA_RPC_URL: z.url().default("https://api.devnet.solana.com"),
   DEMO_API_PORT: z.coerce.number().int().min(1).max(65_535).default(4174),
+  NORTHSTAR_DEMO_SESSION_TOKEN: z
+    .string()
+    .min(32, "Start Northstar with its documented pnpm command"),
 });
 
 export type DemoConfig = z.infer<typeof configSchema>;
 
 let cachedConfig: DemoConfig | undefined;
 let cachedSigner: KeyPairSigner | undefined;
+let cachedFeePayerSigner: KeyPairSigner | null | undefined;
 
 export function getConfig(): DemoConfig {
   if (cachedConfig) return cachedConfig;
@@ -35,12 +40,33 @@ export function getConfig(): DemoConfig {
 export async function getDemoSigner(): Promise<KeyPairSigner> {
   if (cachedSigner) return cachedSigner;
 
-  const bytes = decodePrivateKey(getConfig().DEMO_WALLET_PRIVATE_KEY);
+  const bytes = decodePrivateKey(
+    getConfig().DEMO_WALLET_PRIVATE_KEY,
+    "DEMO_WALLET_PRIVATE_KEY"
+  );
   cachedSigner = await createKeyPairSignerFromBytes(bytes);
   return cachedSigner;
 }
 
-export function decodePrivateKey(value: string): Uint8Array {
+export async function getFeePayerSigner(): Promise<KeyPairSigner | undefined> {
+  if (cachedFeePayerSigner !== undefined)
+    return cachedFeePayerSigner ?? undefined;
+
+  const privateKey = getConfig().DEMO_FEE_PAYER_PRIVATE_KEY;
+  if (!privateKey) {
+    cachedFeePayerSigner = null;
+    return undefined;
+  }
+
+  const bytes = decodePrivateKey(privateKey, "DEMO_FEE_PAYER_PRIVATE_KEY");
+  cachedFeePayerSigner = await createKeyPairSignerFromBytes(bytes);
+  return cachedFeePayerSigner;
+}
+
+export function decodePrivateKey(
+  value: string,
+  variableName = "DEMO_WALLET_PRIVATE_KEY"
+): Uint8Array {
   const trimmed = value.trim();
   let bytes: Uint8Array;
 
@@ -51,7 +77,7 @@ export function decodePrivateKey(value: string): Uint8Array {
       parsed.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
     ) {
       throw new Error(
-        "DEMO_WALLET_PRIVATE_KEY must be a JSON array of bytes or base58"
+        `${variableName} must be a JSON array of bytes or base58`
       );
     }
     bytes = Uint8Array.from(parsed);
@@ -61,7 +87,7 @@ export function decodePrivateKey(value: string): Uint8Array {
 
   if (bytes.length !== 64) {
     throw new Error(
-      `DEMO_WALLET_PRIVATE_KEY must decode to 64 bytes; received ${bytes.length}`
+      `${variableName} must decode to 64 bytes; received ${bytes.length}`
     );
   }
 

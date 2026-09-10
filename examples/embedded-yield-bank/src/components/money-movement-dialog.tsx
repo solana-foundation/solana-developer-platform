@@ -4,6 +4,7 @@ import {
   LoaderCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +37,7 @@ import type { TokenBalance, YieldPosition, YieldStrategy } from "@/types";
 interface DepositDialogProps {
   strategies: YieldStrategy[];
   balances: TokenBalance[];
+  feesPaidBy: "customer" | "northstar";
   busy: boolean;
   onSubmit: (strategyId: string, amount: string) => Promise<void>;
 }
@@ -43,6 +45,7 @@ interface DepositDialogProps {
 export function DepositDialog({
   strategies,
   balances,
+  feesPaidBy,
   busy,
   onSubmit,
 }: DepositDialogProps) {
@@ -123,10 +126,12 @@ export function DepositDialog({
             </Field>
           </FieldGroup>
 
-          <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
-            Northstar signs the SDP-built transaction with the managed demo
-            wallet. The key stays on the server and the movement is recorded
-            against this sandbox project.
+          <div className="rounded-lg border bg-muted/50 p-3">
+            <NetworkFeePayer feesPaidBy={feesPaidBy} />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Northstar signs the SDP-built transaction. Keys stay on the server
+              and the movement is recorded against this sandbox project.
+            </p>
           </div>
 
           <DialogFooter>
@@ -153,6 +158,7 @@ export function DepositDialog({
 
 interface WithdrawDialogProps {
   positions: YieldPosition[];
+  feesPaidBy: "customer" | "northstar";
   busy: boolean;
   initialPositionId?: string;
   trigger?: React.ReactNode;
@@ -161,6 +167,7 @@ interface WithdrawDialogProps {
 
 export function WithdrawDialog({
   positions,
+  feesPaidBy,
   busy,
   initialPositionId,
   trigger,
@@ -261,6 +268,10 @@ export function WithdrawDialog({
             </Field>
           </FieldGroup>
 
+          <div className="rounded-lg border bg-muted/50 p-3">
+            <NetworkFeePayer feesPaidBy={feesPaidBy} />
+          </div>
+
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={busy}>
@@ -280,5 +291,20 @@ export function WithdrawDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function NetworkFeePayer({
+  feesPaidBy,
+}: {
+  feesPaidBy: "customer" | "northstar";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 text-sm">
+      <span className="text-muted-foreground">Network fees</span>
+      <Badge variant="outline" className="status-success">
+        {feesPaidBy === "northstar" ? "Northstar pays" : "You pay"}
+      </Badge>
+    </div>
   );
 }

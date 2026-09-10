@@ -28,6 +28,22 @@ export function formatToken(
   }).format(amount)} ${symbol}`;
 }
 
+export function formatAccountToken(
+  value: string | undefined,
+  symbol: string | null,
+  options?: { signed?: boolean }
+): string {
+  if (value === undefined || !symbol) return "Not available";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "Not available";
+  const formatted = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: Math.abs(amount) < 1 ? 4 : 2,
+  }).format(Math.abs(amount));
+  const sign = options?.signed && amount > 0 ? "+" : amount < 0 ? "-" : "";
+  return `${sign}${formatted} ${symbol}`;
+}
+
 export function formatApy(value: string | undefined): string {
   if (value === undefined) return "Variable";
   const apy = Number(value);

@@ -6,20 +6,29 @@ This is a real sandbox integration, not a fixture UI. The balances come from the
 
 ## Screenshots
 
-| Partner experience | SDP project portfolio |
-| --- | --- |
-| ![Northstar customer dashboard](./screenshots/northstar-dashboard.jpg) | ![SDP Embedded Yield dashboard](./screenshots/sdp-embedded-yield-dashboard.jpg) |
+| Partner overview | Fee-payer flow | SDP project portfolio |
+| --- | --- | --- |
+| ![Northstar customer dashboard](./screenshots/northstar-dashboard.jpg) | ![Northstar deposit dialog](./screenshots/northstar-deposit.jpg) | ![SDP Embedded Yield dashboard](./screenshots/sdp-embedded-yield-dashboard.jpg) |
+
+Only **Overview** is an implemented page. The other sidebar items are static
+navigation affordances that make the example feel like a complete partner bank
+dashboard; they are not routes or supported demo flows.
 
 ## What the example demonstrates
 
 - Keep the SDP API key and wallet private key on the Hono server.
+- Optionally co-sign with a Northstar fee-payer key so the bank covers network
+  fees and first-deposit account rent.
 - Show the fundable devnet strategies the managed wallet can actually enter.
 - Read the customer's token and SOL balances directly from devnet.
+- Keep account totals in one token denomination instead of adding unrelated
+  assets together.
 - Preview a deposit when the strategy requires a quote-derived floor.
 - Derive slippage floors with exact `BigInt` arithmetic.
 - Build, sign, and submit a caller-owned wallet transaction.
 - Retry submits safely with an `Idempotency-Key`.
-- Poll until `finalized` or `failed`, never stopping at `confirmed`.
+- Poll until `finalized` or `failed`, and fail explicitly if the demo timeout
+  expires first.
 - Page positions to completion and preserve unavailable live values.
 - Quote a position-based withdrawal when required, then build and submit it.
 
@@ -73,7 +82,7 @@ Prerequisites are Node.js 24+, pnpm 10.16+, Docker, and the team Doppler develop
    cp examples/embedded-yield-bank/.env.example examples/embedded-yield-bank/.env
    ```
 
-   Set `SDP_API_KEY` and set `DEMO_WALLET_PRIVATE_KEY` to the generated `CUSTODY_PRIVATE_KEY`. Keep `SDP_API_BASE_URL=http://127.0.0.1:8787` for the local stack.
+   Set `SDP_API_KEY` and set `DEMO_WALLET_PRIVATE_KEY` to the generated `CUSTODY_PRIVATE_KEY`. Keep `SDP_API_BASE_URL=http://127.0.0.1:8787` for the local stack. To demo sponsored fees, set `DEMO_FEE_PAYER_PRIVATE_KEY` to a different funded devnet keypair. When it is omitted, the customer wallet pays.
 
 7. Fund `PUBLIC_KEY` before the demo:
 
@@ -95,6 +104,7 @@ Open `http://127.0.0.1:4173`. Deposit into a listed strategy, wait for the succe
 - Enable both `MARKETS_ENABLED` and `EARN_ENABLED` for the API and web processes. Enabling only the web app renders the route, but the API correctly answers Embedded Yield requests with `403`.
 - Use an API key created in the exact project selected in the dashboard's top-left project switcher. API keys and Embedded Yield movements are project-scoped. A valid key from another project will make Northstar work while the open dashboard shows different aggregate data.
 - Restart Northstar after changing `examples/embedded-yield-bank/.env`; the server reads secrets at startup.
+- Always start Northstar with `pnpm dev:example:embedded-yield`. The runner creates an ephemeral session token that the Vite proxy adds server-side; direct requests to the signer service on port `4174` are rejected.
 - Wait for Northstar's finalized success toast before comparing balances. In local development, the open and visible Embedded Yield dashboard polls live position totals every three seconds, so the matching strategy total should change within one or two refresh cycles without a page reload.
 
 ## Configuration
@@ -104,6 +114,7 @@ Open `http://127.0.0.1:4173`. Deposit into a listed strategy, wait for the succe
 | `SDP_API_BASE_URL` | No | SDP API origin. Defaults to local port `8787`. |
 | `SDP_API_KEY` | Yes | Sandbox project key with Embedded Yield read and write permissions. |
 | `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used by the example server. |
+| `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded devnet keypair that co-signs and pays network fees and account rent. |
 | `SOLANA_RPC_URL` | No | Devnet RPC used for direct wallet balance reads. |
 | `DEMO_API_PORT` | No | Hono server port. Defaults to `4174`. |
 
@@ -120,4 +131,4 @@ pnpm -C examples/embedded-yield-bank lint
 pnpm -C examples/embedded-yield-bank build
 ```
 
-This example is for devnet evaluation only. Do not use its in-process private-key signer for production custody.
+This example is for devnet evaluation only. Its ephemeral local session guard is not customer authentication. Do not use its in-process private-key signer for production custody.
