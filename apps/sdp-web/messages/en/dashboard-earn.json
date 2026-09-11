@@ -367,6 +367,7 @@
       "partyModeCounterparty": "Counterparty",
       "partyModeLabel": "How to name this party",
       "partyModeWallet": "SDP Wallet",
+      "partyExternal": "External",
       "partySdpWallet": "SDP Wallet",
       "partySlotLabelA": "Choose the seller delivering the asset",
       "partySlotLabelB": "Choose the buyer paying the cash",

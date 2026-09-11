@@ -26,30 +26,30 @@ function AddressWithCopy({ address }: { address: string }) {
   );
 }
 
+/**
+ * Two grid cells — who, then where — so a column of parties lines up: names
+ * under names, addresses under addresses, whichever way each party is
+ * classified. The parent supplies the grid; this renders as `contents`.
+ */
 export function DvpPartyCell({ party }: { party: DvpPartyRef }) {
   const t = useTranslations();
-  if (party.counterparty) {
-    return (
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        <EntityLink
-          href={`/dashboard/payments/counterparty/${encodeURIComponent(party.counterparty.id)}`}
-        >
-          {party.counterparty.label}
-        </EntityLink>
-        <AddressWithCopy address={party.address} />
-      </span>
-    );
-  }
+  const label = party.counterparty ? (
+    <EntityLink
+      href={`/dashboard/payments/counterparty/${encodeURIComponent(party.counterparty.id)}`}
+    >
+      {party.counterparty.label}
+    </EntityLink>
+  ) : party.wallet ? (
+    <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
+      {party.wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : party.wallet.name}
+    </EntityLink>
+  ) : (
+    <span className="text-tertiary">{t("DashboardMarkets.dvp.partyExternal")}</span>
+  );
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="contents">
+      <span className="min-w-0 truncate">{label}</span>
       <AddressWithCopy address={party.address} />
-      {party.wallet ? (
-        <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
-          {party.wallet.name === null
-            ? t("DashboardMarkets.dvp.partySdpWallet")
-            : party.wallet.name}
-        </EntityLink>
-      ) : null}
     </span>
   );
 }

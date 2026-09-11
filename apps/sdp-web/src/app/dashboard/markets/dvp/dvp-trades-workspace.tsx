@@ -23,7 +23,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -208,10 +208,14 @@ function LegCell({
  */
 function OwnTradeRow({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  // Both parties, each styled for how the API classifies it: a counterparty
+  // Both parties, captioned by role — leg a delivers the asset, leg b the
+  // cash — and each styled for how the API classifies it: a counterparty
   // link when registered, a wallet link when the caller custodies the
   // address, plain otherwise.
-  const parties = [trade.legs.a.party, trade.legs.b.party];
+  const parties = [
+    { party: trade.legs.a.party, role: t("DashboardMarkets.dvp.fieldPartyA") },
+    { party: trade.legs.b.party, role: t("DashboardMarkets.dvp.fieldPartyB") },
+  ];
   // Marked on the row rather than announced in a banner: a warning that does not
   // say WHICH trade sends an operator through every row to find it.
   //
@@ -252,9 +256,14 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
             address: it cannot be pasted into a wallet, an explorer or a message
             back to the other side, which is most of what anyone wants this
             column for. */}
-        <span className="grid gap-0.5">
-          {parties.map((party) => (
-            <DvpPartyCell key={party.address} party={party} />
+        <span className="grid grid-cols-[auto_auto_1fr] items-center gap-x-3 gap-y-0.5">
+          {parties.map(({ party, role }) => (
+            <Fragment key={party.address}>
+              <span className="font-medium text-tertiary text-xs uppercase tracking-wide">
+                {role}
+              </span>
+              <DvpPartyCell party={party} />
+            </Fragment>
           ))}
         </span>
       </TableCell>
