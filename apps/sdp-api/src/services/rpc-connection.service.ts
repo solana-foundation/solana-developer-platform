@@ -16,7 +16,7 @@ import type {
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
-import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
+import { createSecretRetirementsRepository } from "@/db/repositories";
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import {
@@ -414,7 +414,7 @@ export async function submitRpcConnection(
   if (stored.secretVersionRef !== predictedVersionRef) {
     await queuePendingSecretVersion(c.env, stored, retirementContext);
     if (predictedVersionRef) {
-      await createWorkflowSecretRetirementsRepository(c.env)
+      await createSecretRetirementsRepository(c.env)
         .deleteRetirementByVersionRef(predictedVersionRef)
         .catch(() => undefined);
     }
@@ -842,7 +842,7 @@ export async function rotateRpcConnection(
   if (stored.secretVersionRef !== predictedVersionRef) {
     await queuePendingSecretVersion(c.env, stored, nextRetirementContext);
     if (predictedVersionRef) {
-      await createWorkflowSecretRetirementsRepository(c.env)
+      await createSecretRetirementsRepository(c.env)
         .deleteRetirementByVersionRef(predictedVersionRef)
         .catch(() => undefined);
     }

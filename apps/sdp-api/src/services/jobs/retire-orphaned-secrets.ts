@@ -1,12 +1,12 @@
 // Retries secret-version destroys that failed at request time.
 //
-// Retiring a workflow action's signing secret happens after the rotation or delete it
+// Retiring a credential's secret version happens after the rotation or delete it
 // follows has already committed, so it cannot fail the request — a backend error is
-// queued (workflow_action_secret_retirements) instead. This drains that queue. Until it
-// existed, a single failed destroy left the superseded credential readable in Secret
-// Manager forever, with nothing referencing it and nothing retrying.
+// queued (secret_retirements) instead. This drains that queue. Until it existed, a
+// single failed destroy left the superseded credential readable in Secret Manager
+// forever, with nothing referencing it and nothing retrying.
 
-import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
+import { createSecretRetirementsRepository } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStorageBackend,
@@ -21,7 +21,7 @@ const BATCH_SIZE = 25;
 const BASE_RETRY_MINUTES = 5;
 const MAX_RETRY_MINUTES = 6 * 60;
 
-export interface RetireWorkflowSecretsResult {
+export interface RetireSecretsResult {
   retired: number;
   failed: number;
 }
@@ -85,12 +85,12 @@ function storeForBackend(
   return resolved;
 }
 
-export async function retireOrphanedActionSecrets(
+export async function retireOrphanedSecrets(
   env: Env,
   now = new Date()
-): Promise<RetireWorkflowSecretsResult> {
-  const result: RetireWorkflowSecretsResult = { retired: 0, failed: 0 };
-  const repo = createWorkflowSecretRetirementsRepository(env);
+): Promise<RetireSecretsResult> {
+  const result: RetireSecretsResult = { retired: 0, failed: 0 };
+  const repo = createSecretRetirementsRepository(env);
 
   const due = await repo.listDueRetirements({ dueBefore: now.toISOString(), limit: BATCH_SIZE });
   if (due.length === 0) {
@@ -137,12 +137,12 @@ export async function retireOrphanedActionSecrets(
       getLogger().error(
         {
           secretVersionRef: row.secret_version_ref,
-          workflowId: row.workflow_id,
+          sourceId: row.source_id,
           attemptCount: row.attempt_count + 1,
           error: reason,
           reason: "secret_cleanup_retry_failed",
         },
-        "workflow_action_secret_orphan_risk"
+        "secret_retirement_orphan_risk"
       );
     }
   }

@@ -9,9 +9,9 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
+import { createSecretRetirementsRepository } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
-import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
+import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import {
   deactivateRpcConnection,
   rotateRpcConnection,
@@ -38,10 +38,10 @@ vi.mock("@/db/repositories", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db/repositories")>();
   return {
     ...actual,
-    createWorkflowSecretRetirementsRepository: (
-      ...args: Parameters<typeof actual.createWorkflowSecretRetirementsRepository>
+    createSecretRetirementsRepository: (
+      ...args: Parameters<typeof actual.createSecretRetirementsRepository>
     ) => {
-      const repository = actual.createWorkflowSecretRetirementsRepository(...args);
+      const repository = actual.createSecretRetirementsRepository(...args);
       return {
         ...repository,
         recordRetirement: async (input: Parameters<typeof repository.recordRetirement>[0]) => {
@@ -131,7 +131,7 @@ function submitInput(label: string) {
 
 async function retirementRows(refLike: string): Promise<Array<{ secret_version_ref: string }>> {
   return getDb(appEnv).queryMany<{ secret_version_ref: string }>(
-    `SELECT secret_version_ref FROM workflow_action_secret_retirements
+    `SELECT secret_version_ref FROM secret_retirements
       WHERE secret_version_ref LIKE ?`,
     [refLike]
   );
@@ -202,10 +202,9 @@ beforeEach(async () => {
   retirementQueueControl.failRecordRetirement = false;
   gcpMock.destroyVersion.mockReset();
   gcpMock.destroyVersion.mockResolvedValue(undefined);
-  await getDb(appEnv).execute(
-    `DELETE FROM workflow_action_secret_retirements WHERE secret_version_ref LIKE ?`,
-    ["projects/sdp-test/secrets/pcred_%"]
-  );
+  await getDb(appEnv).execute(`DELETE FROM secret_retirements WHERE secret_version_ref LIKE ?`, [
+    "projects/sdp-test/secrets/pcred_%",
+  ]);
 });
 
 describe("BYOK RPC secret retirement", () => {
@@ -249,7 +248,7 @@ describe("BYOK RPC secret retirement", () => {
 
     // On record, so worker loss still cannot lose the version...
     const [row] = await getDb(appEnv).queryMany<{ next_attempt_at: string }>(
-      `SELECT next_attempt_at FROM workflow_action_secret_retirements
+      `SELECT next_attempt_at FROM secret_retirements
         WHERE secret_version_ref = ?`,
       [stored.secretVersionRef]
     );
@@ -257,7 +256,7 @@ describe("BYOK RPC secret retirement", () => {
     // ...but not yet due to anyone.
     expect(new Date(row.next_attempt_at).getTime()).toBeGreaterThan(Date.now());
 
-    await retireOrphanedActionSecrets(appEnv);
+    await retireOrphanedSecrets(appEnv);
 
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
     expect(await retirementRows(stored.secretVersionRef)).toHaveLength(1);
@@ -294,12 +293,12 @@ describe("BYOK RPC secret retirement", () => {
     // Destroying cannot join the transaction that cancels the obligation, so
     // the row is the token that decides who acts. Both orderings must resolve
     // to exactly one winner.
-    const repo = createWorkflowSecretRetirementsRepository(appEnv);
+    const repo = createSecretRetirementsRepository(appEnv);
     const lease = new Date(Date.now() + 60_000).toISOString();
 
     async function queuedRow(secretVersionRef: string) {
       const [row] = await getDb(appEnv).queryMany<{ id: string; attempt_count: number }>(
-        `SELECT id, attempt_count FROM workflow_action_secret_retirements
+        `SELECT id, attempt_count FROM secret_retirements
           WHERE secret_version_ref = ?`,
         [secretVersionRef]
       );
@@ -462,7 +461,7 @@ describe("BYOK RPC secret retirement", () => {
 
     // Cleanup recovery: the sweeper destroys what the request could not.
     gcpMock.destroyVersion.mockResolvedValue(undefined);
-    const swept = await retireOrphanedActionSecrets(appEnv);
+    const swept = await retireOrphanedSecrets(appEnv);
     expect(swept.retired).toBeGreaterThanOrEqual(1);
     expect(gcpMock.destroyVersion).toHaveBeenCalledWith({
       secretVersionRef: rows[0].secret_version_ref,
@@ -491,7 +490,7 @@ describe("BYOK RPC secret retirement", () => {
     expect(await retirementRows(versionRef)).toHaveLength(1);
 
     gcpMock.destroyVersion.mockResolvedValue(undefined);
-    const swept = await retireOrphanedActionSecrets(appEnv);
+    const swept = await retireOrphanedSecrets(appEnv);
     expect(swept.retired).toBeGreaterThanOrEqual(1);
     expect(await retirementRows(versionRef)).toEqual([]);
   });

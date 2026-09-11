@@ -193,7 +193,7 @@ describe("deactivateRpcConnection", () => {
     // request could not. The log is the alert, the row is the guarantee.
     const queued = await getDb(appEnv)
       .prepare(
-        `SELECT secret_version_ref FROM workflow_action_secret_retirements
+        `SELECT secret_version_ref FROM secret_retirements
           WHERE secret_version_ref = ?`
       )
       .bind(SECRET_VERSION_REF)

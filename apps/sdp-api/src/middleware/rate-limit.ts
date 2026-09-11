@@ -147,9 +147,8 @@ function looksLikeClerkJwt(token: string, env: Env): boolean {
  * The verified Clerk user id, or null when the token isn't a valid Clerk JWT.
  *
  * Dashboard traffic used to skip rate limiting entirely, which left every authenticated
- * endpoint unbounded per user: a signed-in caller could loop rule creation or execution
- * decisions (each several queries plus a write), and a `send_webhook` rule turns that
- * into unbounded outbound traffic. Verification is already cached per request by
+ * endpoint unbounded per user: a signed-in caller could loop any write endpoint (each
+ * several queries plus a write). Verification is already cached per request by
  * `verifyClerkJwtForRequest`, so keying on the user costs nothing extra.
  *
  * @param c - Request context (provides the JWKS configuration).

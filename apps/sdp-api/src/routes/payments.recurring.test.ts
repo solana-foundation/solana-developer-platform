@@ -4888,32 +4888,6 @@ describe("Payments routes — recurring", () => {
       "Content-Type": "application/json",
     };
     const recurringPayment = await activateRecurringPaymentForTest(headers);
-    const workflowTokenId = await seedIssuedTokenMint({
-      projectId: TEST_PROJECT.id,
-      mintAddress: sourceSigner.address,
-      status: "active",
-    });
-    const workflowId = `awf_${crypto.randomUUID()}`;
-    await getDb(env)
-      .prepare(
-        `INSERT INTO asset_workflows
-           (id, organization_id, project_id, token_id, trigger_type, action_type,
-            definition, review_mode, created_by)
-         VALUES (?, ?, ?, ?, 'recurring_payment_failed', 'record', ?::jsonb, 'auto', ?)`
-      )
-      .bind(
-        workflowId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        workflowTokenId,
-        JSON.stringify({
-          condition: null,
-          action: { type: "record", params: {} },
-          retryPolicy: { maxAttempts: 1, retryAfterMinutes: 1 },
-        }),
-        TEST_USER.id
-      )
-      .run();
     const now = new Date();
     const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
     await getDb(env).batch([
@@ -5000,26 +4974,6 @@ describe("Payments routes — recurring", () => {
       .first<{ count: number }>();
     expect(collectionOperations).toEqual({ count: 0 });
     expect(collectionTransfers).toEqual({ count: 0 });
-    const workflowExecutions = await getDb(env)
-      .prepare(
-        `SELECT trigger_type, idempotency_key, trigger_payload
-           FROM workflow_executions
-          WHERE workflow_id = ?`
-      )
-      .bind(workflowId)
-      .all<{
-        trigger_type: string;
-        idempotency_key: string;
-        trigger_payload: { recurringPaymentId?: string; attemptId?: string };
-      }>();
-    expect(workflowExecutions.results).toHaveLength(1);
-    expect(workflowExecutions.results[0]).toMatchObject({
-      trigger_type: "recurring_payment_failed",
-      trigger_payload: { recurringPaymentId: recurringPayment.id },
-    });
-    expect(workflowExecutions.results[0]?.idempotency_key).toBe(
-      `recurring_payment_failed:${attempts.results[0]?.id}`
-    );
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 

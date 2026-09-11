@@ -9,15 +9,6 @@ export type {
   UpdateAssetProfileInput,
 } from "./asset-profile.repository";
 export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
-export type {
-  AssetWorkflowDefinition,
-  AssetWorkflowRow,
-  AssetWorkflowsRepository,
-  CreateAssetWorkflowInput,
-  UpdateAssetWorkflowInput,
-} from "./asset-workflow.repository";
-export { generateAssetWorkflowId } from "./asset-workflow.repository";
-export { createPostgresAssetWorkflowsRepository } from "./asset-workflow.repository.postgres";
 export type { RepositoryDbClient } from "./base";
 export type {
   ArchiveCounterpartyInput,
@@ -445,7 +436,6 @@ export type {
 export { createPostgresProjectUserRepository } from "./project-user.repository.postgres";
 export {
   createAssetProfilesRepository,
-  createAssetWorkflowsRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createDvpTradeRepository,
@@ -474,6 +464,7 @@ export {
   createPrivateChannelVerifiedWalletRepository,
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
+  createSecretRetirementsRepository,
   createSystemAssetProfilesRepository,
   createSystemCounterpartiesRepository,
   createSystemPaymentRequestsRepository,
@@ -482,9 +473,13 @@ export {
   createSystemTransactionalPaymentsRepository,
   createTokenRepository,
   createWalletAssetEnrollmentsRepository,
-  createWorkflowExecutionsRepository,
-  createWorkflowSecretRetirementsRepository,
 } from "./repository-factory";
+export type {
+  RecordSecretRetirementInput,
+  SecretRetirementRow,
+  SecretRetirementsRepository,
+} from "./secret-retirement.repository";
+export { createPostgresSecretRetirementsRepository } from "./secret-retirement.repository.postgres";
 export type {
   ListTokensOptions,
   TokenRepository,
@@ -498,16 +493,3 @@ export type {
   WalletAssetEnrollmentsRepository,
 } from "./wallet-asset-enrollment.repository";
 export { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
-export type {
-  CreateWorkflowExecutionInput,
-  ListWorkflowExecutionsInput,
-  WorkflowExecutionRow,
-  WorkflowExecutionsRepository,
-} from "./workflow-execution.repository";
-export { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
-export type {
-  RecordWorkflowSecretRetirementInput,
-  WorkflowSecretRetirementRow,
-  WorkflowSecretRetirementsRepository,
-} from "./workflow-secret-retirement.repository";
-export { createPostgresWorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository.postgres";

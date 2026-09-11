@@ -50,13 +50,6 @@ export const AUDIT_ACTIONS = [
   "rollback",
   "deactivate",
   "blocked_deactivation",
-  // Workflow automation (system actor)
-  "workflow_action_executed",
-  "workflow_action_failed",
-  // Workflow human decisions (real actor — records WHO approved/declined a held action)
-  "workflow_execution_approved",
-  "workflow_execution_rejected",
-  "workflow_execution_retried",
   // Earn money movements (PRO-1866): resourceType "earn_movement", resourceId
   // the ledger movement id, actor matching the row's createdBy/initiatedByKeyId.
   "deposit",
@@ -95,8 +88,6 @@ export type ResourceType =
   | "asset_profile"
   | "provider_credential"
   | "custody_connection"
-  | "workflow"
-  | "workflow_execution"
   | "earn_movement"
   | "audit_ledger";
 

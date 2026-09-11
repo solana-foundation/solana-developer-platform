@@ -16,7 +16,6 @@ import {
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
@@ -326,15 +325,6 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     });
 
     await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "force_burn",
-      signature: result.signature,
-      slot: result.slot.toString(),
-    });
 
     return success(c, { transaction: toPublicTokenTransaction(updatedTx) });
   } catch (error) {

@@ -40,11 +40,7 @@ import {
 } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { startCron } from "./runner";
-import { runWorkflowExecutions, WORKFLOW_EXECUTIONS_CRON } from "./workflow-executions";
-import {
-  runWorkflowSecretRetirements,
-  WORKFLOW_SECRET_RETIREMENTS_CRON,
-} from "./workflow-secret-retirements";
+import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
 const scheduleMock = vi.fn();
 const stopMock = vi.fn();
@@ -128,13 +124,6 @@ vi.mock("./revoked-api-key-cache", () => ({
   runRevokedApiKeyCacheReconciliation: vi.fn(),
 }));
 
-// The workflow engine reaches the same heavy Solana modules as the reconcilers above.
-vi.mock("./workflow-executions", () => ({
-  WORKFLOW_EXECUTIONS_CRON: "* * * * *",
-  WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
-  runWorkflowExecutions: vi.fn(),
-}));
-
 // The rings poll pulls the rings service and through it the Solana signer stack;
 // mocked like the other wrappers. Registered unconditionally (the job itself
 // early-returns unless the rings flag and the http adapter are set), so it is
@@ -146,9 +135,9 @@ vi.mock("./rings-indexing", () => ({
 
 // Pulls in the credential secret store (and through it the custody cipher); mocked for
 // the same reason as the wrappers above.
-vi.mock("./workflow-secret-retirements", () => ({
-  WORKFLOW_SECRET_RETIREMENTS_CRON: "*/5 * * * *",
-  runWorkflowSecretRetirements: vi.fn(),
+vi.mock("./secret-retirements", () => ({
+  SECRET_RETIREMENTS_CRON: "*/5 * * * *",
+  runSecretRetirements: vi.fn(),
 }));
 
 vi.mock("./provider-credential-secret-cleanup", () => ({
@@ -182,17 +171,10 @@ describe("startCron", () => {
     vi.mocked(runRecurringPaymentsCollection).mockReset();
     vi.mocked(runRevokedApiKeyCacheReconciliation).mockReset();
     vi.mocked(runRingsIndexingPoll).mockReset();
-    vi.mocked(runWorkflowExecutions).mockReset();
-    vi.mocked(runWorkflowSecretRetirements).mockReset();
+    vi.mocked(runSecretRetirements).mockReset();
     vi.mocked(runProviderCredentialSecretCleanup).mockReset();
   });
 
-  // Asset profiles is on unless a self-hosted operator opts out, so the workflow
-  // executions task is part of the DEFAULT schedule — every count below includes it.
-  // Its cron expression is indistinguishable from the others here (all mocked to
-  // "* * * * *"), so identity is asserted by firing the tick and seeing which
-  // reconciler runs.
-  //
   // The secret-retirement sweep is registered behind no flag at all, so it is
   // in every count below too — including the ones where asset profiles is off.
   //
@@ -200,7 +182,7 @@ describe("startCron", () => {
   // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 15;
+  const ALL_TASKS = 14;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -221,17 +203,16 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
     expect(scheduleMock.mock.calls[2][0]).toBe(REVOKED_API_KEY_CACHE_CRON);
     expect(scheduleMock.mock.calls[3][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
-    expect(scheduleMock.mock.calls[4][0]).toBe(WORKFLOW_EXECUTIONS_CRON);
-    expect(scheduleMock.mock.calls[5][0]).toBe(PENDING_DEPOSITS_CRON);
-    expect(scheduleMock.mock.calls[6][0]).toBe(PENDING_WITHDRAWALS_CRON);
-    expect(scheduleMock.mock.calls[7][0]).toBe(RINGS_INDEXING_CRON);
-    expect(scheduleMock.mock.calls[8][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
-    expect(scheduleMock.mock.calls[9][0]).toBe(EARN_METRICS_REFRESH_CRON);
-    expect(scheduleMock.mock.calls[10][0]).toBe(WORKFLOW_SECRET_RETIREMENTS_CRON);
-    expect(scheduleMock.mock.calls[11][0]).toBe(PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON);
-    expect(scheduleMock.mock.calls[12][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
-    expect(scheduleMock.mock.calls[13][0]).toBe(DVP_TRADES_CRON);
-    expect(scheduleMock.mock.calls[14][0]).toBe(EARN_SPLIT_SWAPS_CRON);
+    expect(scheduleMock.mock.calls[4][0]).toBe(PENDING_DEPOSITS_CRON);
+    expect(scheduleMock.mock.calls[5][0]).toBe(PENDING_WITHDRAWALS_CRON);
+    expect(scheduleMock.mock.calls[6][0]).toBe(RINGS_INDEXING_CRON);
+    expect(scheduleMock.mock.calls[7][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
+    expect(scheduleMock.mock.calls[8][0]).toBe(EARN_METRICS_REFRESH_CRON);
+    expect(scheduleMock.mock.calls[9][0]).toBe(SECRET_RETIREMENTS_CRON);
+    expect(scheduleMock.mock.calls[10][0]).toBe(PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON);
+    expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
+    expect(scheduleMock.mock.calls[13][0]).toBe(EARN_SPLIT_SWAPS_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {
@@ -254,36 +235,22 @@ describe("startCron", () => {
     });
   });
 
-  it("schedules workflow executions by default, and its tick runs the engine", () => {
-    const bg = makeBg();
-    const env = {} as Env;
-    const observability = makeObservability();
-    startCron({ env, bg, observability });
-
-    (scheduleMock.mock.calls[4][1] as () => void)();
-    expect(runWorkflowExecutions).toHaveBeenCalledWith({
-      env,
-      bg,
-      observability: expect.anything(),
-    });
-  });
-
   it("gives every tick monitor a check-in margin surviving instance restarts", async () => {
     const bg = makeBg();
     const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
 
-    (scheduleMock.mock.calls[4][1] as () => void)();
-    const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
+    (scheduleMock.mock.calls[9][1] as () => void)();
+    const passed = vi.mocked(runSecretRetirements).mock.calls[0][0].observability;
     expect(passed).toBeDefined();
     expect(passed).not.toBe(observability);
 
-    await passed?.withMonitor("sdp-api-run-workflow-executions", async () => undefined, {
+    await passed?.withMonitor("sdp-api-retire-secrets", async () => undefined, {
       schedule: { type: "crontab", value: "*/5 * * * *" },
     });
     expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
-      "sdp-api-run-workflow-executions",
+      "sdp-api-retire-secrets",
       expect.any(Function),
       {
         schedule: { type: "crontab", value: "*/5 * * * *" },
@@ -298,9 +265,9 @@ describe("startCron", () => {
     vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
     startCron({ env: {} as Env, bg, observability });
 
-    (scheduleMock.mock.calls[4][1] as () => void)();
-    const passed = vi.mocked(runWorkflowExecutions).mock.calls[0][0].observability;
-    await passed?.withMonitor("sdp-api-run-workflow-executions", async () => undefined, {
+    (scheduleMock.mock.calls[9][1] as () => void)();
+    const passed = vi.mocked(runSecretRetirements).mock.calls[0][0].observability;
+    await passed?.withMonitor("sdp-api-retire-secrets", async () => undefined, {
       schedule: { type: "crontab", value: "*/5 * * * *" },
     });
 
@@ -308,32 +275,15 @@ describe("startCron", () => {
       "info",
       expect.objectContaining({
         event: "sdp_cron_run",
-        monitor: "sdp-api-run-workflow-executions",
+        monitor: "sdp-api-retire-secrets",
         status: "ok",
         duration_ms: expect.any(Number),
       })
     );
   });
 
-  // The engine is the one scheduled task behind a feature flag that defaults ON (asset
-  // profiles is only opt-in for self-hosted operators). A self-hosted deployment that
-  // has not enabled it must not accumulate a workflow backlog it never drains.
-  it("omits workflow executions when asset profiles is off", () => {
-    startCron({ env: SELF_HOSTED_NO_PROFILES, bg: makeBg() });
-
-    expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
-    for (const call of scheduleMock.mock.calls) {
-      (call[1] as () => void)();
-    }
-    expect(runWorkflowExecutions).not.toHaveBeenCalled();
-  });
-
-  // …but the cleanup it used to carry must survive the flag. The retirement queue is
-  // durable and only ever holds credentials that are ALREADY orphaned: the rule is gone,
-  // nothing references the version, and it stays readable in Secret Manager until
-  // something destroys it. Draining it rode on the workflow tick, so turning asset
-  // profiles off — a plausible incident response, and exactly when the cleanup matters —
-  // stranded every queued retirement permanently, with no consumer left.
+  // The retirement queue is durable and only ever holds credentials that are ALREADY
+  // orphaned, so the sweep runs behind no feature flag.
   it("still sweeps secret retirements when asset profiles is off", () => {
     const bg = makeBg();
     const observability = makeObservability();
@@ -342,8 +292,7 @@ describe("startCron", () => {
     for (const call of scheduleMock.mock.calls) {
       (call[1] as () => void)();
     }
-    expect(runWorkflowExecutions).not.toHaveBeenCalled();
-    expect(runWorkflowSecretRetirements).toHaveBeenCalledWith({
+    expect(runSecretRetirements).toHaveBeenCalledWith({
       env: SELF_HOSTED_NO_PROFILES,
       bg,
       observability: expect.anything(),
@@ -361,7 +310,7 @@ describe("startCron", () => {
     });
     startCron({ env: SELF_HOSTED_NO_PROFILES, bg, observability });
 
-    (scheduleMock.mock.calls[11][1] as () => void)();
+    (scheduleMock.mock.calls[10][1] as () => void)();
 
     expect(runProviderCredentialSecretCleanup).toHaveBeenCalledExactlyOnceWith({
       env: SELF_HOSTED_NO_PROFILES,
@@ -425,7 +374,7 @@ describe("startCron", () => {
     const bg = makeBg();
     startCron({ env: {} as Env, bg });
 
-    (scheduleMock.mock.calls[5][1] as () => void)();
+    (scheduleMock.mock.calls[4][1] as () => void)();
     expect(runPendingDepositsReconciliation).not.toHaveBeenCalled();
     expect(bg.run).toHaveBeenCalledTimes(1);
     await vi.mocked(bg.run).mock.calls[0][0];
@@ -444,7 +393,7 @@ describe("startCron", () => {
     const bg = makeBg();
     startCron({ env: {} as Env, bg });
 
-    (scheduleMock.mock.calls[9][1] as () => void)();
+    (scheduleMock.mock.calls[8][1] as () => void)();
     expect(bg.run).toHaveBeenCalledTimes(1);
     await vi.mocked(bg.run).mock.calls[0][0];
 
@@ -523,7 +472,7 @@ describe("startCron", () => {
     // Indexed rather than `.at(-1)`: this asserts the vault-movement task
     // specifically, and taking whatever happens to be registered last silently
     // retargets the assertion the moment another task is appended.
-    const tick = scheduleMock.mock.calls[12][1] as () => void;
+    const tick = scheduleMock.mock.calls[11][1] as () => void;
     tick();
     expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
       env,
@@ -540,7 +489,7 @@ describe("startCron", () => {
     });
     startCron({ env, bg });
 
-    (scheduleMock.mock.calls[13][1] as () => void)();
+    (scheduleMock.mock.calls[12][1] as () => void)();
 
     expect(runDvpTradeReconciliation).toHaveBeenCalledExactlyOnceWith({
       env,
@@ -554,7 +503,7 @@ describe("startCron", () => {
     const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
-    // recovery, transfers, recurring, workflow executions — recurring is third.
+    // recovery, transfers, revoked-key cache, recurring — recurring is fourth.
     const tick = scheduleMock.mock.calls[3][1] as () => void;
     tick();
     expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({
@@ -607,7 +556,7 @@ describe("startCron", () => {
     const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
-    const tick = scheduleMock.mock.calls[7][1] as () => void;
+    const tick = scheduleMock.mock.calls[6][1] as () => void;
     tick();
     expect(runRingsIndexingPoll).toHaveBeenCalledWith({
       env,
