@@ -45,9 +45,11 @@ configuration without changing this schema.
 
 A wallet's viewing and nullifier keys derive from its **own custody key**. The owner
 signs Zolana's fixed derivation message, and that signature is the seed the two keys
-expand from (`packages/sdp-helius-rings-sdk/src/custody-ka/`). Ed25519 signing is
-deterministic, so the same custody key always yields the same shielded identity, and
-nothing is stored at rest.
+expand from (`packages/sdp-helius-rings-sdk/src/custody-ka/`). For a single-signer
+(enclave) provider, Ed25519 signing is deterministic, so the same custody key always
+yields the same shielded identity, and nothing is stored at rest. MPC providers
+randomize the signature by design and are refused — see
+[helius-rings-custody-providers.md](helius-rings-custody-providers.md).
 
 Two consequences worth knowing before provisioning:
 
@@ -55,9 +57,11 @@ Two consequences worth knowing before provisioning:
   shielded identity, so two Rings wallets over the same custody wallet — in different
   projects or different organizations — converge on it. That matches the chain, whose
   user-record PDA is keyed on the owner address alone.
-- **The custody provider must sign raw messages.** `coinbase_cdp` and `utila` cannot, and
-  provisioning refuses them. `local`, `turnkey`, `fireblocks`, `privy`, `para`, `dfns` and
-  `ibm_haven` all work.
+- **The custody provider must sign raw messages, reproducibly.** Only `local`, `privy`
+  and `turnkey` qualify. `coinbase_cdp`, `utila` and `anchorage` cannot sign the
+  derivation bytes at all; `fireblocks`, `para` and `dfns` sign them with a random
+  nonce (MPC), so the derived identity changes per call; `ibm_haven` is unverified.
+  Provisioning refuses them all.
 
 Losing or rotating a wallet's custody key changes its shielded identity, which the first
 sync detects and quarantines; recover with the re-key flow below. Notes encrypted to the
