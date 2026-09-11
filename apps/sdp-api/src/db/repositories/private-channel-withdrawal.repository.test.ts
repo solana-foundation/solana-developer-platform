@@ -211,10 +211,9 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
   });
 
   it("countNonTerminalByInstance counts only in-flight rows for the instance", async () => {
-    await seedInstance("inst_A");
     await seedInstance("inst_B", TEST_PRODUCTION_PROJECT_ID);
-    const inFlight = await repo.createWithdrawal(makeInput({ instanceId: "inst_A" }));
-    const other = await seed({ instanceId: "inst_A" });
+    const inFlight = await repo.createWithdrawal(makeInput({ instanceId: TEST_INSTANCE_ID }));
+    const other = await seed({ instanceId: TEST_INSTANCE_ID });
     await repo.createWithdrawal(
       makeInput({ instanceId: "inst_B", projectId: TEST_PRODUCTION_PROJECT_ID })
     );
@@ -232,7 +231,7 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       expectedStatus: "confirmed",
     });
 
-    expect(await repo.countNonTerminalByInstance("inst_A")).toBe(1);
+    expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(1);
     expect(await repo.countNonTerminalByInstance("inst_B")).toBe(1);
     void inFlight;
   });
