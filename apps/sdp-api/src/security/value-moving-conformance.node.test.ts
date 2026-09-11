@@ -242,7 +242,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "fresh_blockhash_per_attempt",
         file: "apps/sdp-api/src/services/dvp/settle.test.ts",
-        evidence: "fences after the sponsor signs and before the bytes go out",
+        evidence: "fetches a fresh blockhash for every attempt",
       },
     ],
   },

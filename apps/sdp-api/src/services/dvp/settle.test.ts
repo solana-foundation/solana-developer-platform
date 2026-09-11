@@ -36,6 +36,12 @@ const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
+const getRecentBlockhash = vi.hoisted(() =>
+  vi.fn(async () => ({
+    blockhash: "11111111111111111111111111111111",
+    lastValidBlockHeight: 100n,
+  }))
+);
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async () => {
@@ -57,10 +63,7 @@ vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
-  getRecentBlockhash: async () => ({
-    blockhash: "11111111111111111111111111111111",
-    lastValidBlockHeight: 100n,
-  }),
+  getRecentBlockhash,
   sendTransaction,
 }));
 
@@ -378,6 +381,15 @@ describe("closeDvpTrade", () => {
 
       await expect(closeDvpTrade(context, trade(), "settle")).rejects.toBe(error);
       expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
+    });
+
+    it("fetches a fresh blockhash for every attempt", async () => {
+      sendTransaction.mockRejectedValueOnce(new Error("socket hang up"));
+
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow("socket hang up");
+      await closeDvpTrade(context, trade(), "settle");
+
+      expect(getRecentBlockhash).toHaveBeenCalledTimes(2);
     });
   });
 });
