@@ -9,6 +9,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -33,6 +34,11 @@ const ORG = "org_external_position_reads";
 const PROJECT = "prj_external_position_reads";
 const USER = "usr_external_position_reads";
 const KEY = { id: "key_external_position_reads", raw: "sk_test_external_position_reads" };
+const PRODUCTION_KEY = {
+  id: "key_external_position_reads_production",
+  raw: "sk_live_external_position_reads",
+  prefix: "sk_live_ext",
+};
 const OWNER_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const OWNER_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -71,6 +77,20 @@ async function seedScope() {
     createdBy: USER,
     members: [],
     ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PRODUCTION_KEY,
+    organizationId: ORG,
+    projectId: `${PROJECT}_production`,
+    createdBy: USER,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: PRODUCTION_KEY.id,
+    projectId: `${PROJECT}_production`,
+    environment: "production",
   });
   await getDb(env).batch([
     getDb(env)
@@ -146,6 +166,10 @@ function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${KEY.raw}` } }, env);
 }
 
+function getAsProduction(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${PRODUCTION_KEY.raw}` } }, env);
+}
+
 beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
@@ -170,6 +194,20 @@ beforeEach(async () => {
 });
 
 describe("external-wallet position reads", () => {
+  it("summary excludes another project's positions and owner addresses", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    const response = await getAsProduction("/v1/earn/external-wallet/positions/summary");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { summary: { walletCount: 0, positionCount: 0, totalsByStrategy: [] } },
+    });
+  });
+
   it("returns complete exact-decimal totals across wallets by strategy and token", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,

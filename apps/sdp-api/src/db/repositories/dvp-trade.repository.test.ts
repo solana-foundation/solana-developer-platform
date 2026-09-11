@@ -3,7 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   DvpInboundScope,
@@ -79,6 +83,7 @@ const UNFILTERED: DvpTradeListFilters = { statuses: null, q: null };
 
 describe("DvpTradeRepository (postgres)", () => {
   let repo: DvpTradeRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -109,7 +114,7 @@ describe("DvpTradeRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await seedDefaultProjects(db, {
+    projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -138,6 +143,27 @@ describe("DvpTradeRepository (postgres)", () => {
       .run();
 
     repo = createPostgresDvpTradeRepository(db);
+  });
+
+  it.each([
+    [
+      "id",
+      (projectId: string, id: string) =>
+        repo.getById({ organizationId: TEST_ORG.id, projectId }, id),
+    ],
+    [
+      "swap address",
+      (projectId: string, id: string) =>
+        repo.getBySwapDvp({ organizationId: TEST_ORG.id, projectId }, address(id)),
+    ],
+  ])("does not leak a trade across projects by %s", async (kind, read) => {
+    const created = await repo.create(tradeInsert());
+    const identifier = kind === "id" ? created.id : created.swapDvp;
+    await expectProjectScoped(
+      (projectId) => read(projectId, identifier),
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
   });
 
   // The row is written before the create transaction is broadcast, so its

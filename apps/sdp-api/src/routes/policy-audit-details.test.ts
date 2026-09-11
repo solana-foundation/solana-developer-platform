@@ -10,6 +10,8 @@ import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -149,6 +151,14 @@ async function seedAuthAndWallet() {
     createdBy: TEST_USER_ID,
     members: [],
     ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+  });
+  await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: TEST_ORG_ID,
+    projectId: `${TEST_PROJECT_ID}_production`,
+    createdBy: TEST_USER_ID,
+    role: "api_admin",
+    permissions: ["*"],
   });
   await seedDefaultProjects(getDb(env), {
     organizationId: OTHER_ORG_ID,
@@ -571,6 +581,15 @@ describe("Wallet policy audit detail routes", () => {
       env
     );
     expect(crossOrganization.status).toBe(404);
+  });
+
+  it("returns 404 for a sandbox evaluation read with the production key", async () => {
+    const response = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.allow}`,
+      { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
+      env
+    );
+    expect(response.status).toBe(404);
   });
 
   it("redacts credential fields and never returns raw or provider payloads", async () => {

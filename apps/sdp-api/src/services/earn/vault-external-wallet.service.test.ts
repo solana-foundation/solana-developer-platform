@@ -14,7 +14,11 @@ import { getDb } from "@/db";
 import type { EarnExternalWalletTransactionRow } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   ExternalWalletDepositBuildInput,
@@ -76,6 +80,7 @@ const {
 
 const ORG = "org_ext_wallet";
 const PROJECT = "prj_ext_wallet";
+const PRODUCTION_PROJECT = `${PROJECT}_production`;
 const USER = "usr_ext_wallet";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
@@ -87,6 +92,7 @@ const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 let ownerKeyPair: CryptoKeyPair;
 let ownerAddress: string;
+let projects: SeededDefaultProjects;
 
 function providerInstruction() {
   return {
@@ -149,11 +155,11 @@ async function seedTenancy(): Promise<void> {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "ext-wallet@example.com"),
   ]);
-  await seedDefaultProjects(db, {
+  projects = await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: USER,
     members: [],
-    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    ids: { sandbox: PROJECT, production: PRODUCTION_PROJECT },
   });
 }
 
@@ -713,6 +719,34 @@ describe("submitExternalWalletDeposit", () => {
       code: "BAD_REQUEST",
     });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("scopes the build to its exact project", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    await expectProjectScoped(
+      (projectId) =>
+        submitDeposit(built, signed, crypto.randomUUID(), { projectId }).catch((error: unknown) =>
+          error instanceof Error && "code" in error ? error.code : error
+        ),
+      { own: projects.sandbox, other: projects.production },
+      (result) => result === "NOT_FOUND"
+    );
+  });
+
+  it("enforces the external position's project claim in the database", async () => {
+    const built = await buildDepositRow(depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
+        .bind(PRODUCTION_PROJECT, result.movement.id)
+        .run()
+    ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
   });
 
   it("preserves external position and movement history after project deletion", async () => {

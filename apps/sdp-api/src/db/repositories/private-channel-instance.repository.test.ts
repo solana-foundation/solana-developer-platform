@@ -3,7 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { CreateDepositInput } from "./private-channel-deposit.repository";
 import { createPostgresPrivateChannelDepositRepository } from "./private-channel-deposit.repository.postgres";
@@ -33,6 +37,7 @@ function depositInput(instanceId: string): CreateDepositInput {
 
 describe("PrivateChannelInstanceRepository (postgres)", () => {
   let repo: PrivateChannelInstanceRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -59,7 +64,7 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await seedDefaultProjects(db, {
+    projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -141,6 +146,20 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     });
     expect(found?.gateway_url).toBe(SANDBOX_DEFAULTS.gatewayUrl);
     expect(found?.is_active).toBe(false);
+  });
+
+  it("scopes active instance reads to the project", async () => {
+    await repo.createActive({
+      organizationId: TEST_ORG.id,
+      projectId: projects.sandbox.id,
+      createdBy: TEST_USER.id,
+      ...SANDBOX_DEFAULTS,
+    });
+    await expectProjectScoped(
+      (projectId) => repo.getActiveByProject({ organizationId: TEST_ORG.id, projectId }),
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
   });
 
   it("reactivateAndUpdate updates editable fields and flips is_active back to true", async () => {

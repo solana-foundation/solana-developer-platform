@@ -2,7 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -13,6 +17,7 @@ const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
 
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -43,7 +48,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await seedDefaultProjects(db, {
+    projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -201,6 +206,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
       expect(row).toBeNull();
     });
+
+    it("returns null when the project does not match", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+      if (!created) throw new Error("createPaymentRequest returned null");
+      await expectProjectScoped(
+        (projectId) =>
+          repo.getPaymentRequestById({
+            requestId: created.id,
+            organizationId: TEST_ORG.id,
+            projectId,
+          }),
+        { own: projects.sandbox, other: projects.production },
+        (row) => row === null
+      );
+    });
   });
 
   describe("listPaymentRequests", () => {
@@ -227,6 +247,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       expect(total).toBe(2);
       expect(rows.map((row) => row.id)).toEqual([second?.id, first?.id]);
+    });
+
+    it("scopes lists by project", async () => {
+      await repo.createPaymentRequest(createInput());
+      await expectProjectScoped(
+        (projectId) =>
+          repo.listPaymentRequests({
+            organizationId: TEST_ORG.id,
+            projectId,
+            limit: 50,
+            offset: 0,
+          }),
+        { own: projects.sandbox, other: projects.production },
+        ({ rows }) => rows.length === 0
+      );
     });
 
     it("filters by status", async () => {
@@ -271,6 +306,25 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(canceled?.canceled_by).toBe(TEST_USER.id);
       expect(canceled?.lifecycle).toHaveLength(2);
       expect(canceled?.lifecycle[1]).toMatchObject({ status: "canceled" });
+    });
+
+    it("does not transition another project's request", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+      if (!created) throw new Error("createPaymentRequest returned null");
+      const transition = (projectId: string) =>
+        repo.markPaymentRequest({
+          requestId: created.id,
+          organizationId: TEST_ORG.id,
+          projectId,
+          status: "canceled",
+          fulfilledByTransferId: null,
+          canceledBy: TEST_USER.id,
+        });
+      await expectProjectScoped(
+        transition,
+        { own: projects.sandbox, other: projects.production },
+        (row) => row === null
+      );
     });
 
     it("marks paid and links the settling transfer", async () => {

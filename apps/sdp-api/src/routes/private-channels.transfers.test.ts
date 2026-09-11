@@ -4,6 +4,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import app from "@/index";
 import * as solanaServices from "@/services/solana";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -176,6 +178,14 @@ async function seedRouteState(): Promise<void> {
     createdBy: ACTOR_USER_ID,
     members: [ACTOR_USER_ID],
     ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await seedProjectApiKey(db, env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: ORGANIZATION_ID,
+    projectId: `${PROJECT_ID}_production`,
+    createdBy: ACTOR_USER_ID,
+    role: "api_admin",
+    permissions: ["payments:read"],
   });
   await db.batch([
     db
@@ -789,5 +799,17 @@ describe("Private Channels — transfer access and routes", () => {
       env
     );
     expect(getVisible.status).toBe(200);
+  });
+
+  it("returns 404 for another project's transfer", async () => {
+    await seedTransfer({ id: "pct-sandbox-owned" });
+    const response = await app.request(
+      "/v1/private-channels/transfers/pct-sandbox-owned",
+      {
+        headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
+      },
+      env
+    );
+    expect(response.status).toBe(404);
   });
 });

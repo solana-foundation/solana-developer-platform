@@ -8,7 +8,11 @@ import {
 } from "@/services/earn-withdrawal-ledger.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   EarnProviderWalletRow,
@@ -37,6 +41,7 @@ const SHARED_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
 describe("EarnRepository (postgres)", () => {
   let repo: EarnRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -70,7 +75,7 @@ describe("EarnRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await seedDefaultProjects(db, {
+    projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -1183,6 +1188,15 @@ describe("EarnRepository (postgres)", () => {
       });
       const { total } = await listPrograms({ provider: "ground" });
       expect(total).toBe(2);
+    });
+
+    it("lists programs only for their project", async () => {
+      await seedProviderWallet();
+      await expectProjectScoped(
+        (projectId) => listPrograms({ projectId }),
+        { own: projects.sandbox, other: projects.production },
+        ({ total }) => total === 0
+      );
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {

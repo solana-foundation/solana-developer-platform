@@ -5,6 +5,8 @@ import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -126,6 +128,20 @@ async function seedScope(): Promise<void> {
     createdBy: USER,
     members: [],
     ids: { sandbox: PROJECT_A, production: "prj_earn_feed_prod" },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: ORG,
+    projectId: "prj_earn_feed_prod",
+    createdBy: USER,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: TEST_PRODUCTION_API_KEY.id,
+    projectId: "prj_earn_feed_prod",
+    environment: "production",
   });
   await getDb(env).batch([
     getDb(env)
@@ -294,6 +310,14 @@ function listMovements(query = "") {
   );
 }
 
+function listMovementsAsProduction() {
+  return app.request(
+    "/v1/earn/movements",
+    { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
+    env
+  );
+}
+
 async function movementsJson(query = ""): Promise<{
   movements: MovementJson[];
   hasMore: boolean;
@@ -316,6 +340,14 @@ beforeEach(async () => {
 });
 
 describe("GET /v1/earn/movements", () => {
+  it("hides another project's vault movement", async () => {
+    const movement = await seedVaultDeposit({ projectId: PROJECT_A, walletId: WALLET_A });
+    const body = (await (await listMovementsAsProduction()).json()) as {
+      data: { movements: MovementJson[] };
+    };
+    expect(body.data.movements.map(({ id }) => id)).not.toContain(movement.movement.id);
+  });
+
   it("returns both execution models in one chronological list, each self-describing", async () => {
     const { withdrawal } = await seedProgramWithdrawal({ amountUsd: "500.25" });
     const deposit = await seedVaultDeposit({ amount: "10" });

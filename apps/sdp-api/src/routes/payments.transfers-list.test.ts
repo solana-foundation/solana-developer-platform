@@ -3,7 +3,10 @@ import type { Address, Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -23,6 +26,17 @@ import { seedRateLimit } from "@/test/mocks/kv";
 
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
+
+  beforeEach(async () => {
+    await seedProjectApiKey(getDb(env), env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT.id}_production`,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["payments:read"],
+    });
+  });
 
   async function seedTransfer(params: {
     id: string;
@@ -1380,6 +1394,18 @@ describe("Payments routes — list transfers", () => {
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("returns 404 for another project's transfer", async () => {
+      await seedTransfer({ id: "xfr_sandbox_owned", status: "confirmed" });
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_sandbox_owned",
+        {
+          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(res.status).toBe(404);
     });
   });
 });

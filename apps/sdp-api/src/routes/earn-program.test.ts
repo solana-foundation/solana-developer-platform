@@ -45,6 +45,8 @@ import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -169,6 +171,20 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
     createdBy: TEST_USER.id,
     members: [TEST_USER.id],
     ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    createdBy: TEST_USER.id,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_PRODUCTION_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    environment: "production",
   });
   await getDb(env).batch([
     getDb(env)
@@ -1295,6 +1311,22 @@ describe("Earn program — session callers and environment isolation", () => {
 });
 
 describe("Earn program — live reads", () => {
+  it.each([
+    ["program", "GET", ""],
+    ["deposits", "GET", "/deposits"],
+    ["withdrawal preview", "POST", "/withdrawal-preview"],
+  ])("404s another project's program on %s", async (_name, method, suffix) => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    const response = await requestEarn(
+      method,
+      programPath(program.id, suffix),
+      { amountUsd: "25.50", token: "usdc" },
+      { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` }
+    );
+    expect(response.status).toBe(404);
+  });
+
   it("returns an empty collection while the organization has no programs", async () => {
     await seedAuth();
 

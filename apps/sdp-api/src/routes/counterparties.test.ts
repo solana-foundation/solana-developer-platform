@@ -7,8 +7,13 @@ import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import {
+  TEST_API_KEY,
+  TEST_CACHED_API_KEY,
+  TEST_PRODUCTION_API_KEY,
+} from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -83,6 +88,14 @@ describe("Counterparties Routes", () => {
       createdBy: TEST_USER.id,
       members: [TEST_USER.id],
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await seedProjectApiKey(db, env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT_ID}_production`,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
     });
 
     await db
@@ -375,6 +388,17 @@ describe("Counterparties Routes", () => {
       const res = await app.request(
         "/v1/counterparties/cpty_does_not_exist",
         { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 for another project's counterparty", async () => {
+      const created = await createCounterparty({ externalId: "cross_project" });
+      const counterparty = (await created.json()).data.counterparty;
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
         env
       );
       expect(res.status).toBe(404);

@@ -7,6 +7,7 @@ import {
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -44,6 +45,11 @@ const PUBLIC_KEY_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const API_KEY = { id: "key_vault_positions", raw: "sk_test_vault_positions" };
+const PRODUCTION_API_KEY = {
+  id: "key_vault_positions_production",
+  raw: "sk_live_vault_positions",
+  prefix: "sk_live_vau",
+};
 
 function cachedKey(): CachedApiKey {
   return {
@@ -77,6 +83,20 @@ async function seedScope(): Promise<void> {
     createdBy: USER,
     members: [],
     ids: { sandbox: PROJECT_A, production: `${PROJECT_A}_production` },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PRODUCTION_API_KEY,
+    organizationId: ORG,
+    projectId: `${PROJECT_A}_production`,
+    createdBy: USER,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: PRODUCTION_API_KEY.id,
+    projectId: `${PROJECT_A}_production`,
+    environment: "production",
   });
   await getDb(env).batch([
     getDb(env)
@@ -161,6 +181,10 @@ function getDeposit(movementId: string) {
   );
 }
 
+function requestAsProduction(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${PRODUCTION_API_KEY.raw}` } }, env);
+}
+
 function encodeCursorPayload(createdAt: string, id: string): string {
   return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -188,6 +212,24 @@ beforeEach(async () => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
+  it.each([
+    ["position list", "/v1/earn/vault-positions", 200],
+    ["deposit list", "/v1/earn/vault-deposits", 200],
+    ["deposit request-id lookup", "/v1/earn/vault-deposits?requestId=project-scope", 200],
+  ])("hides another project's resource from the %s", async (_name, path, status) => {
+    await createPosition({ requestId: "project-scope" });
+    const response = await requestAsProduction(path);
+    expect(response.status).toBe(status);
+    expect(JSON.stringify(await response.json())).not.toContain(PROJECT_A);
+  });
+
+  it("404s another project's deposit", async () => {
+    const created = await createPosition({});
+    expect(
+      (await requestAsProduction(`/v1/earn/vault-deposits/${created.movement.id}`)).status
+    ).toBe(404);
+  });
+
   /**
    * The exit's fee copy reads the position, not a quote: Kamino declares no
    * withdrawal floor, so its exit never fetches one. The field answers the same

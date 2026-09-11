@@ -31,6 +31,7 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -41,6 +42,7 @@ import {
   TEST_PROJECT_CACHED_KEY,
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -367,6 +369,14 @@ describe("Issuance Routes", () => {
       createdBy: TEST_USER.id,
       members: [],
       ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+    });
+    await seedProjectApiKey(db, env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT.id,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
     });
 
     // Seed project-scoped API key
@@ -3550,6 +3560,17 @@ describe("Issuance Routes", () => {
         env
       );
 
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 when the token belongs to the sandbox project", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${tokenId}`,
+        {
+          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
+        },
+        env
+      );
       expect(res.status).toBe(404);
     });
   });

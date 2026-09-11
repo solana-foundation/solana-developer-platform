@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { custodyWalletForParty } from "./custody-party";
 
@@ -18,6 +22,7 @@ const PARTY_ADDRESS = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 const UNKNOWN_ADDRESS = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
 
 describe("custodyWalletForParty", () => {
+  let projects: SeededDefaultProjects;
   beforeEach(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     const db = getDb(env);
@@ -43,7 +48,7 @@ describe("custodyWalletForParty", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await seedDefaultProjects(db, {
+    projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -109,6 +114,20 @@ describe("custodyWalletForParty", () => {
     );
 
     expect(result).toBeNull();
+  });
+
+  it("returns null when the address is in the wrong project", async () => {
+    await expectProjectScoped(
+      (projectId) =>
+        custodyWalletForParty(
+          env,
+          { organizationId: TEST_ORG.id, projectId },
+          address(PARTY_ADDRESS),
+          null
+        ),
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
   });
 
   describe("duplicate active records for one address", () => {

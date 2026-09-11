@@ -16,6 +16,7 @@ import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -122,6 +123,20 @@ async function seedAuth(): Promise<void> {
     createdBy: TEST_USER.id,
     members: [],
     ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PROD_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    createdBy: TEST_USER.id,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: PROD_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    environment: "production",
   });
   await getDb(env).batch([
     getDb(env)
@@ -818,6 +833,12 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
 });
 
 describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
+  it("404s another project's withdrawal", async () => {
+    await seedAuth();
+    const { recorded } = await recordWithdrawal({ requestId: "vw-project-scope" });
+    expect((await getWithdrawal(`/${recorded.movement.id}`, PROD_API_KEY.raw)).status).toBe(404);
+  });
+
   async function recordWithdrawal(params: {
     requestId: string;
     projectId?: string;

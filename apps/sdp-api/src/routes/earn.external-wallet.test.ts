@@ -893,6 +893,16 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 });
 
 describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
+  it.each([
+    ["withdrawal preview", "withdrawal-previews"],
+    ["withdrawal transaction", "withdrawal-transactions"],
+  ])("404s another project's position for %s", async (_name, path) => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+    const response = await post(path, { positionId, shares: "10" }, { apiKey: PROD_API_KEY.raw });
+    expect(response.status).toBe(404);
+  });
+
   it("quotes an external-wallet exit so callers can derive minAmountOut", async () => {
     await seedAuth();
     const positionId = await seedExternalWalletPosition();

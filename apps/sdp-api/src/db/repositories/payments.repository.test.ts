@@ -4,7 +4,11 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
@@ -91,6 +95,7 @@ function transferInput(overrides: {
 }
 
 describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
+  let projects: SeededDefaultProjects;
   let repo: PaymentsRepository;
 
   beforeAll(async () => {
@@ -121,7 +126,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await seedDefaultProjects(db, {
+    projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -401,6 +406,24 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         updatedAt: new Date().toISOString(),
       })
     ).resolves.toMatchObject({ id: "xfr_org_admin", status: "confirmed" });
+  });
+
+  it("does not transition a transfer scoped to another project", async () => {
+    await seedTransfer({ id: "xfr_guard_project", status: "awaiting_payment" });
+    const transition = (projectId: string) =>
+      repo.updateTransferStatusGuarded({
+        transferId: "xfr_guard_project",
+        organizationId: TEST_ORG.id,
+        projectId,
+        fromStatuses: CANCELABLE,
+        toStatus: "canceled",
+        updatedAt: new Date().toISOString(),
+      });
+    await expectProjectScoped(
+      transition,
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
   });
 
   it("persists idempotency metadata and looks it up by (org, key)", async () => {
