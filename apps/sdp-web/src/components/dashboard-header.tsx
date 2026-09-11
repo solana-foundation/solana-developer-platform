@@ -405,8 +405,7 @@ function getCounterpartyRoutePageConfig(
 
 function getMarketsRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  dvpEnabled: boolean
+  t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/markets") {
     return {
@@ -449,27 +448,7 @@ function getMarketsRoutePageConfig(
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
-      routeTabs: {
-        ariaLabel: t("Shared.dashboardShell.markets"),
-        tabs: [
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
-            label: t("Shared.dashboardShell.treasurySolutions"),
-          },
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
-            label: t("Shared.dashboardShell.earnProgram"),
-          },
-          ...(dvpEnabled
-            ? [
-                {
-                  href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
-                  label: t("DashboardMarkets.dvp.navLabel"),
-                },
-              ]
-            : []),
-        ],
-      },
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
@@ -706,13 +685,7 @@ export function getDashboardPageConfig(
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
   _paymentsEnabled = true,
-  _policiesEnabled = true,
-  /**
-   * Gates the DvP tab. The sidebar already hides DvP behind this flag, and a
-   * header tab that stays visible when the sidebar entry is gone points at a
-   * workspace the flag exists to keep out of reach.
-   */
-  dvpEnabled = false
+  _policiesEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -771,7 +744,7 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t, dvpEnabled);
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
   }
