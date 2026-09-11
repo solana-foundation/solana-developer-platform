@@ -1,30 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
-import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  clearKVStores,
-  readRateLimitCount,
-  seedCachedApiKey,
-  seedRateLimit,
-} from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
-
-// The fund policy extractor prices the request off a live escrow read. These
-// route tests have no chain, so the shortfall is pinned; everything else in the
-// fund module stays real.
-const readDvpLegShortfall = vi.hoisted(() => vi.fn(async () => 1000n));
-vi.mock("@/services/dvp/fund", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/dvp/fund")>();
-  return { ...actual, readDvpLegShortfall };
-});
 
 const TEST_ORG = { id: "org_dvp_test", name: "DvP Test Org", slug: "dvp-test-org" };
 const TEST_PROJECT = { id: "prj_dvp_test", slug: "dvp-test-project" };
@@ -75,7 +59,6 @@ const PARTY_CACHED_API_KEY: CachedApiKey = {
 };
 
 let originalMarkets: string | undefined;
-let originalDvp: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -243,35 +226,6 @@ async function seedCustodyWallets(): Promise<void> {
       )
       .bind(THIRD_WALLET.id, CUSTODY_CONFIG_ID, THIRD_WALLET.walletId, UNRELATED_ADDRESS),
   ]);
-}
-
-async function requireFundApproval(): Promise<void> {
-  const repository = createPostgresPolicyRepository(
-    getDb(env),
-    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-  );
-  const profile = await repository.createApiKeyControlProfile({
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    apiKeyId: TEST_API_KEY.id,
-    name: "Approve DvP funding",
-  });
-  if (profile === null) {
-    throw new Error("Failed to create DvP approval profile");
-  }
-  const revision = await repository.createApiKeyControlProfileRevision({
-    profileId: profile.id,
-    rules: [{ id: "approve-dvp-fund", kind: "approval", operationTypes: ["dvp_fund"] }],
-    defaultAction: "allow",
-    createdBy: TEST_USER.id,
-  });
-  if (revision === null) {
-    throw new Error("Failed to create DvP approval revision");
-  }
-  await repository.activateApiKeyControlProfileRevision({
-    profileId: profile.id,
-    revisionId: revision.id,
-  });
 }
 
 /**
@@ -520,28 +474,17 @@ describe("deriveDvpTradeKind", () => {
 describe("DvP routes", () => {
   beforeEach(async () => {
     originalMarkets = env.MARKETS_ENABLED;
-    originalDvp = env.DVP_ENABLED;
     env.MARKETS_ENABLED = "true";
-    env.DVP_ENABLED = "true";
     await seedTestDatabase(env);
     await seedAuth();
   });
 
   afterEach(async () => {
     env.MARKETS_ENABLED = originalMarkets;
-    env.DVP_ENABLED = originalDvp;
     await clearKVStores(env);
   });
 
-  it("returns 403 when the DvP flag is off", async () => {
-    env.DVP_ENABLED = undefined;
-    const res = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
-    expect(res.status).toBe(403);
-  });
-
-  // DvP is a Markets sub-module, so clearing the parent has to dark-launch it
-  // even with its own flag on. Same hierarchy Earn uses.
-  it("returns 403 when Markets is off even though DvP is on", async () => {
+  it("returns 403 when Markets is off", async () => {
     env.MARKETS_ENABLED = undefined;
     const res = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
     expect(res.status).toBe(403);
@@ -567,30 +510,6 @@ describe("DvP routes", () => {
 
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
-  });
-
-  it("does not consume fund quota when policy parks the request for approval", async () => {
-    await seedCustodyWallets();
-    await seedTradeFor({
-      tradeId: "dvp_pending_fund",
-      observation: { escrowAAmount: "0", escrowAFrozen: false },
-    });
-    await requireFundApproval();
-
-    const response = await app.request(
-      "/v1/dvp/trades/dvp_pending_fund/fund",
-      {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ side: "a", walletId: BOUND_WALLET.id }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(202);
-    await expect(
-      readRateLimitCount(env, `metered:dvp-fund:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`)
-    ).resolves.toBe(0);
   });
 
   // Every documented family answers in the { data, meta } envelope. DvP returned

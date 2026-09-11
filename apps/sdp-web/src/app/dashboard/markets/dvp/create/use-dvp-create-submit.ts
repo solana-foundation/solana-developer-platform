@@ -9,84 +9,22 @@
 
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import type { DvpPartyRef, DvpPartyWire } from "./use-dvp-parties";
+import type { DvpPartyWire } from "./use-dvp-parties";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 
 /**
- * The idempotency key for one logical create.
- *
- * Derived from the WHOLE payload, in the same field order the API fingerprints
- * (`apps/sdp-api/src/services/dvp/fingerprint.ts`). That order is not cosmetic:
- * the API compares a replay's fingerprint against the stored one and refuses a
- * mismatch, so a key covering fewer fields than the fingerprint turns two
- * genuinely different trades into "Idempotency key already used with different
- * request payload". Same wallet, counterparty, amounts and expiry but a
- * different mint is the case that reached a 409 — a valid trade, refused.
- *
- * Hashed rather than concatenated only to keep the header short; every field
- * that distinguishes one trade from another is inside the digest, which is what
- * makes a double submit a replay and a changed asset a new request.
- *
- * Deliberately NOT `crypto.subtle`. That is async and, more importantly, only
- * exists in a secure context — a dashboard reached over plain http on a LAN
- * address would have no `subtle` at all and every create would throw. Nothing
- * else in this app depends on it, and an idempotency key needs to be
- * deterministic, not unforgeable: the API re-derives its own SHA-256
- * fingerprint server-side and refuses a mismatched replay, so this value is a
- * lookup handle rather than a security boundary.
- *
- * 128-bit FNV-1a over the JSON encoding. JSON is what makes the input
- * injective: a `refString` is free text and could otherwise contain whatever
- * separator a plain join picked, letting two different trades produce one key.
+ * A fresh idempotency key, from `getRandomValues` rather than `randomUUID`:
+ * the latter needs a secure context, and a dashboard reached over plain http
+ * on a LAN address has none.
  */
-const FNV_OFFSET = 0x6c62272e07bb014262b821756295c58dn;
-const FNV_PRIME = 0x0000000001000000000000000000013bn;
-const FNV_MASK = (1n << 128n) - 1n;
-
-/** Which reference kind named a party, for the fingerprint. */
-function partyRefKind(ref: DvpPartyRef): string {
-  if ("walletId" in ref) {
-    return "walletId";
-  }
-  if ("counterpartyAccountId" in ref) {
-    return "counterpartyAccountId";
-  }
-  return "address";
-}
-
-function createIdempotencyKey(request: DvpCreateRequest): string {
-  const material = JSON.stringify([
-    // The party's address plus which reference kind named it: a wallet and a
-    // registered counterparty resolving to the same address are different
-    // attributions, and the fingerprint treats them as different parties.
-    `${partyRefKind(request.parties.a.ref)}:${request.parties.a.address}`,
-    `${partyRefKind(request.parties.b.ref)}:${request.parties.b.address}`,
-    request.mintA,
-    request.tokenProgramA ?? TOKEN_2022,
-    request.mintB,
-    request.tokenProgramB ?? TOKEN_2022,
-    request.amountA,
-    request.amountB,
-    request.expiry,
-    request.refString,
-    // Must stay in step with the server fingerprint, which gained these at the
-    // same time. Two trades identical but for where the proceeds go are
-    // different trades; leaving these out would give them one key and get the
-    // second refused as a mismatched replay.
-    request.userASettlementDestination,
-    request.userBSettlementDestination,
-  ]);
-
-  let hash = FNV_OFFSET;
-  for (const byte of new TextEncoder().encode(material)) {
-    hash = ((hash ^ BigInt(byte)) * FNV_PRIME) & FNV_MASK;
-  }
-  return `dvp-create-${hash.toString(16).padStart(32, "0")}`;
+function freshIdempotencyKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `dvp-create-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export interface DvpCreateRequest {
@@ -120,19 +58,23 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One key per logical request. It rotates only once a trade was created, so
+  // a second trade on the same terms is a new request rather than a replay of
+  // the first. Every other outcome keeps it: a throw or a server error may have
+  // left the first attempt broadcasting, and the retry has to replay it rather
+  // than draw a second trade at a second address; a rejection stored nothing,
+  // so the key is still free.
+  const idempotencyKey = useRef(freshIdempotencyKey());
 
   async function submit(request: DvpCreateRequest) {
     setSubmitting(true);
     setError(null);
     try {
-      // One logical request: a double submit, or a retry after a dropped
-      // connection, must not create a second trade at a second address.
-      const idempotencyKey = createIdempotencyKey(request);
       const response = await fetch("/api/dashboard/markets/dvp/trades", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": idempotencyKey,
+          "Idempotency-Key": idempotencyKey.current,
         },
         body: JSON.stringify({
           partyA: request.parties.a.ref,
@@ -177,6 +119,7 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
         data?: { trade?: { id?: string } };
       };
       const id = body.data?.trade?.id;
+      idempotencyKey.current = freshIdempotencyKey();
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement

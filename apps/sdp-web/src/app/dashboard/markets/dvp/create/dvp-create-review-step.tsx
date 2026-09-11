@@ -7,6 +7,7 @@ import { Callout } from "@/components/ui/callout";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
+import { AddressWithCopy } from "../dvp-party-cell";
 import { Field, ReferenceField } from "./dvp-create-fields";
 import type { DvpCreateForm } from "./use-dvp-create-form";
 import type { DvpLeg } from "./use-dvp-leg";
@@ -31,7 +32,7 @@ function ReviewFact({
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <dt className="flex shrink-0 items-center gap-1.5 text-tertiary text-xs">
+      <dt className="flex shrink-0 items-center gap-1.5 text-secondary text-sm">
         {icon}
         {label}
       </dt>
@@ -44,8 +45,8 @@ function ReviewFact({
 function ReviewLeg({ leg }: { leg: DvpLeg }) {
   return (
     <span className="flex items-center justify-end gap-2">
-      <TokenMark className="shrink-0" mint={leg.mint} size="xs" symbol={leg.symbol} />
-      <span className="truncate font-medium text-primary text-sm tabular-nums">
+      <TokenMark className="shrink-0" mint={leg.mint} size="sm" symbol={leg.symbol} />
+      <span className="truncate font-medium text-primary text-base tabular-nums">
         {leg.amount} <span className="text-secondary">{leg.symbol}</span>
       </span>
     </span>
@@ -81,31 +82,33 @@ function ReviewPartySide({
 }) {
   const t = useTranslations();
   return (
-    <div className="grid content-start gap-3 p-4">
+    <div className="grid content-start gap-4 p-5">
       <div>
-        <p className="text-tertiary text-xs">{title}</p>
-        <p className="mt-1 font-medium text-primary text-sm">
+        <p className="text-tertiary text-sm">{title}</p>
+        <p className="mt-1 font-medium text-primary text-base">
           {resolved.label ?? shortenAddress(resolved.address ?? "")}
         </p>
         {resolved.address === null ? null : (
-          <p className="break-all text-tertiary text-xs">{resolved.address}</p>
+          <p className="text-tertiary text-sm">
+            <AddressWithCopy address={resolved.address} />
+          </p>
         )}
       </div>
-      <dl className="grid gap-2.5 border-border-default border-t pt-3">
+      <dl className="grid gap-3 border-border-default border-t pt-4">
         <ReviewFact
-          icon={<ArrowUpRightIcon aria-hidden className="h-3.5 w-3.5" />}
+          icon={<ArrowUpRightIcon aria-hidden className="h-4 w-4" />}
           label={t("DashboardMarkets.dvp.reviewDelivers")}
         >
           <ReviewLeg leg={delivers} />
         </ReviewFact>
         <ReviewFact
-          icon={<ArrowDownLeftIcon aria-hidden className="h-3.5 w-3.5" />}
+          icon={<ArrowDownLeftIcon aria-hidden className="h-4 w-4" />}
           label={t("DashboardMarkets.dvp.reviewReceives")}
         >
           <ReviewLeg leg={receives} />
         </ReviewFact>
         <ReviewFact icon={null} label={t("DashboardMarkets.dvp.reviewPaidAt")}>
-          <span className="text-primary text-sm">{shortenAddress(paidAt)}</span>
+          <span className="text-base text-primary">{shortenAddress(paidAt)}</span>
         </ReviewFact>
       </dl>
     </div>

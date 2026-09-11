@@ -221,21 +221,17 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /**
-     * DvP settle and cancel. Registered WITH the routes rather than after them,
-     * following the Earn exit's example: a money-moving surface born governed,
-     * not retrofitted once someone notices.
-     */
+    /** DvP settle and cancel resolve tenant-scoped signing authority in the handler. */
     family: "dvp",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/dvp/policy.ts",
+      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
       evidence: "const settlement = await readDvpSettlementWallet(c.env, {",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/dvp/index.ts",
-      section: '"/trades/:tradeId/settle",',
-      before: 'extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle")',
-      after: "settleTrade",
+      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
+      section: "const closeTrade =",
+      before: "await assertFreshApiKeyCustodyWalletAccess(",
+      after: "const result = await closeDvpTrade(",
     },
     replay: [
       {
@@ -246,7 +242,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "fresh_blockhash_per_attempt",
         file: "apps/sdp-api/src/services/dvp/settle.test.ts",
-        evidence: "fences after the sponsor signs and before the bytes go out",
+        evidence: "fetches a fresh blockhash for every attempt",
       },
     ],
   },
@@ -349,12 +345,9 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
-  // DvP create, settle/cancel and payments share the owned sponsorship
-  // submission sink, which signs and persists before broadcasting; settle only
-  // partially signs as the authority and is not a sink of its own. Fund still
-  // signs from the project's custody wallet and returns fully signed bytes
-  // without sending.
-  "apps/sdp-api/src/services/dvp/fund.ts": ["signTransactionMessageWithSigners"],
+  // DvP create, fund, settle/cancel and payments share the owned sponsorship
+  // submission sink, which signs and persists before broadcasting; fund and
+  // settle only partially sign as authorities and are not sinks of their own.
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],

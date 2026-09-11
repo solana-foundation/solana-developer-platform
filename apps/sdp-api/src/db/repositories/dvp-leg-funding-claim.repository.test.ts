@@ -203,6 +203,26 @@ describe("DvpLegFundingClaimRepository", () => {
     expect(blocked).toBe(false);
   });
 
+  it("rebinds an unbroadcast claim to the sponsored signature", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "wallet_sig"));
+
+      expect(await repo.rebindSignature(TRADE_ID, "a", "wallet_sig", "sponsor_sig")).toBe(true);
+      expect(await repo.hasClaim(TRADE_ID, "a", "wallet_sig")).toBe(false);
+      expect(await repo.hasClaim(TRADE_ID, "a", "sponsor_sig")).toBe(true);
+    });
+  });
+
+  it("does not rebind a claim whose signature does not match", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "wallet_sig"));
+
+      expect(await repo.rebindSignature(TRADE_ID, "a", "stale_sig", "sponsor_sig")).toBe(false);
+      expect(await repo.hasClaim(TRADE_ID, "a", "wallet_sig")).toBe(true);
+      expect(await repo.hasClaim(TRADE_ID, "a", "sponsor_sig")).toBe(false);
+    });
+  });
+
   // Once the transfer is on the wire the row is a receipt, and releasing it
   // would invite a second transfer on top of one that may yet land.
   it("keeps a claim whose transfer was broadcast", async () => {

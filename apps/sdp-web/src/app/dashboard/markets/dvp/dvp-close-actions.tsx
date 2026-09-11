@@ -19,15 +19,15 @@ import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import type { DvpTrade } from "./dvp-trade";
 import { canCancelDvpTrade, canSettleDvpTrade } from "./dvp-trade";
-import type { DvpTradeActionName } from "./use-dvp-trade-actions";
+import type { DvpPendingAction } from "./use-dvp-trade-actions";
 
 export function DvpCloseActions({
   onAct,
   pending,
   trade,
 }: {
-  onAct: (action: DvpTradeActionName) => void;
-  pending: DvpTradeActionName | null;
+  onAct: (action: "settle" | "cancel") => void;
+  pending: ReadonlySet<DvpPendingAction>;
   trade: DvpTrade;
 }) {
   const t = useTranslations();
@@ -53,7 +53,7 @@ export function DvpCloseActions({
         </div>
         <Button
           className="shrink-0"
-          disabled={!canSettle || pending !== null}
+          disabled={!canSettle || pending.size > 0}
           onClick={() => onAct("settle")}
           type="button"
         >
@@ -71,7 +71,7 @@ export function DvpCloseActions({
         </div>
         <Button
           className="shrink-0 text-destructive"
-          disabled={pending !== null}
+          disabled={pending.size > 0}
           onClick={() => setConfirmingCancel(true)}
           type="button"
           variant="outline"
@@ -103,7 +103,7 @@ export function DvpCloseActions({
               {t("DashboardMarkets.dvp.cancelConfirmDismiss")}
             </Button>
             <Button
-              disabled={pending !== null}
+              disabled={pending.size > 0}
               onClick={() => {
                 setConfirmingCancel(false);
                 onAct("cancel");

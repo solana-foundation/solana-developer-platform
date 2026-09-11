@@ -796,7 +796,7 @@ export function DvpTradeDetailWorkspace({
 }) {
   const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
-  const { act, awaitingApproval, pending } = useDvpTradeActions(trade.id);
+  const { act, pending } = useDvpTradeActions(trade.id);
   const partyView = isDvpPartyView(trade);
   const expiry = new Date(Number(trade.expiryTimestamp) * 1000).toISOString();
 
@@ -808,7 +808,11 @@ export function DvpTradeDetailWorkspace({
       /* Clicked, not held. Funding moves your leg into the trade's own
          escrow, which is a step forward rather than something to walk back;
          hold is reserved for destroying something (HOO-1230). */
-      <Button disabled={pending !== null} onClick={() => act("fund", { side })} type="button">
+      <Button
+        disabled={pending.has(`fund:${side}`)}
+        onClick={() => act("fund", { side })}
+        type="button"
+      >
         {t("DashboardMarkets.dvp.actionFund")}
       </Button>
     ) : undefined;
@@ -868,11 +872,6 @@ export function DvpTradeDetailWorkspace({
 
         <TradeWarnings trade={trade} />
 
-        {awaitingApproval ? (
-          <Callout live title={t("DashboardMarkets.dvp.approvalPending")} variant="info">
-            {t("DashboardMarkets.dvp.approvalPendingDescription")}
-          </Callout>
-        ) : null}
         {/* Only the settlement authority can settle or cancel, and a party
             reading somebody else's trade is not it. Offering the buttons put
             two irreversible-looking actions in front of somebody whose click

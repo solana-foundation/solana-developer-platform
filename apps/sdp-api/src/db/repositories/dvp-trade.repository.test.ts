@@ -341,6 +341,7 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(observed).toMatchObject({
       closeResolutionAttempts: 0,
       closeResolutionAfter: null,
+      closedAt: "2026-09-11T00:00:00.000Z",
     });
   });
 

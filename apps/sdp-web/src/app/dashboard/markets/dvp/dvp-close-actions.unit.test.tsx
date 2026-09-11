@@ -33,7 +33,7 @@ function trade(status: DvpTradeStatus, bothFunded: boolean): DvpTrade {
 function renderActions(value: DvpTrade): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <DvpCloseActions onAct={vi.fn()} pending={null} trade={value} />
+      <DvpCloseActions onAct={vi.fn()} pending={new Set()} trade={value} />
     </I18nProvider>
   );
 }
