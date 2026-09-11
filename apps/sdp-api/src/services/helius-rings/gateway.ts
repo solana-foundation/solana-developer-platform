@@ -157,11 +157,14 @@ async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (!(error instanceof RingsAdapterError)) throw error;
     if (error.failureCode === "provider_unsupported") {
-      // Passed through, not summarized: the custody provider has to change,
-      // and a caller cannot act on that without being told which provider and
-      // what it lacks. Built in this codebase and redacted by the error
-      // constructor, so no upstream text escapes here.
-      throw new HeliusRingsError("invalid_input", error.message);
+      // Code and message both pass through. The message, because a caller
+      // cannot act on "custody could not sign" without being told which
+      // provider and what it lacks — and this text is built in this codebase
+      // and redacted by the error constructor, so no upstream string escapes.
+      // The code, because derivation failures reach the operation row through
+      // this boundary, and collapsing to invalid_input would file a custody
+      // problem as a malformed request.
+      throw new HeliusRingsError("provider_unsupported", error.message);
     }
     throw new HeliusRingsError(
       error.retryable ? "gateway_unavailable" : "invalid_input",

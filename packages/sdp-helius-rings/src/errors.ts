@@ -11,6 +11,11 @@ export type HeliusRingsErrorCode =
   | "gateway_unavailable"
   | "config_error"
   | "insufficient_balance"
+  // The wallet's custody provider cannot meet what Rings needs from a
+  // signature. Distinct from `invalid_input` so the classification survives the
+  // gateway boundary and reaches the operation row: the request was well
+  // formed, and only changing custody provider changes the outcome.
+  | "provider_unsupported"
   | "manual_reconciliation_required";
 
 export class HeliusRingsError extends Error {

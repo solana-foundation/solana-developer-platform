@@ -126,10 +126,11 @@ describe("createConfiguredRingsGateway", () => {
     }
   );
 
-  // The one adapter failure that keeps its own message. A fixed string cannot
-  // name the provider refused or what it lacks, and without those an operator
-  // cannot act: the remedy is moving the wallet to another custody provider.
-  it("surfaces a provider_unsupported message rather than replacing it", async () => {
+  // The one adapter failure that keeps both its code and its message. A fixed
+  // string cannot name the provider refused or what it lacks, and collapsing
+  // the code to invalid_input would file a custody problem as a malformed
+  // request — on the path that carries derivation failures to the row.
+  it("keeps a provider_unsupported code and message rather than replacing them", async () => {
     const reason =
       "custody provider para cannot back a Rings private wallet: providers that do: local, privy, turnkey.";
     const { captured, createGateway } = capturingCreate();
@@ -143,7 +144,7 @@ describe("createConfiguredRingsGateway", () => {
     const config = captured[0];
     if (!config) throw new Error("no gateway config was captured");
     await expect(config.signTransaction("unsigned", "OwnerPublicKey")).rejects.toMatchObject({
-      code: "invalid_input",
+      code: "provider_unsupported",
       message: reason,
     });
   });
