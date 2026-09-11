@@ -9,10 +9,40 @@
  */
 import { guardedFetch } from "@/services/guarded-egress";
 
-// A probe reads a status and a short JSON-RPC answer; a hostile endpoint gets
-// neither unbounded time nor an unbounded body out of a health check.
+// A probe reads a status and a short JSON-RPC answer; no endpoint —
+// tenant-supplied or configured — gets unbounded time or an unbounded body
+// out of a health check.
 const PROBE_TIMEOUT_MS = 10_000;
-const PROBE_MAX_RESPONSE_BYTES = 64 * 1024;
+export const PROBE_MAX_RESPONSE_BYTES = 64 * 1024;
+
+/**
+ * Read at most `maxBytes` of the body. The guarded branch bounds its read in
+ * the transport; this covers the plain-fetch branch, where `text()` would
+ * buffer whatever the endpoint sends.
+ */
+async function readBodyBounded(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return "";
+  }
+
+  const chunks: Uint8Array[] = [];
+  let buffered = 0;
+  while (buffered < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done || !value) {
+      break;
+    }
+    const room = maxBytes - buffered;
+    chunks.push(value.length > room ? value.subarray(0, room) : value);
+    buffered += Math.min(value.length, room);
+    if (value.length > room) {
+      await reader.cancel();
+      break;
+    }
+  }
+  return Buffer.concat(chunks).toString();
+}
 
 export interface RpcProbeTarget {
   endpoint: string;
@@ -81,9 +111,10 @@ export async function probeRpcEndpoint(
         redirect: "manual",
         headers,
         body,
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
 
-  const rawBody = await upstream.text();
+  const rawBody = await readBodyBounded(upstream, PROBE_MAX_RESPONSE_BYTES);
   return {
     elapsedMs: Date.now() - startedAt,
     upstream,

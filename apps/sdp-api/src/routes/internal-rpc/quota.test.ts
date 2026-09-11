@@ -89,4 +89,29 @@ describe("internal RPC connectivity test quota", () => {
     const body = await response.json();
     expect(body.error.code).toBe("RATE_LIMITED");
   });
+
+  it("refuses an invalid connection id without charging the quota", async () => {
+    await seedRateLimit(env, `metered:rpc:org:${ORG_ID}:user:${ADMIN_USER_ID}`, 100_000);
+
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", kvStoreMiddleware());
+    app.route("/", internalRpc);
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 400 | 401 | 403 | 429);
+      }
+      throw error;
+    });
+
+    const response = await app.request(
+      "/connections/%20/test",
+      {
+        method: "POST",
+        headers: { Cookie: `sdp_session=${SESSION_ID}`, "x-project-id": PROJECT_ID },
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+  });
 });
