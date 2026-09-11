@@ -77,6 +77,7 @@ export type DashboardLoadingRoute =
   | "integrations"
   | "integration-detail"
   | "private-channels-setup"
+  | "helius-rings"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -130,6 +131,18 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   return null;
 }
 
+function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
+  if (pathname === "/dashboard/api-keys") return "api-keys-list";
+  if (pathname === "/dashboard/api-keys/new") return "api-key-new";
+  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
+  if (pathname === "/dashboard/policies") return "policies";
+  if (pathname === "/dashboard/approvals") return "approvals-list";
+  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
+  // Members only redirects into Settings, so it loads as the page it lands on.
+  if (pathname === "/dashboard/settings" || pathname === "/dashboard/members") return "settings";
+  return null;
+}
+
 /** Resolves a dashboard pathname to the exact canonical route loading surface. */
 export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoadingRoute | null {
   const pathname = normalizePathname(rawPathname);
@@ -162,13 +175,10 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
     return "recurring-payment-detail";
   }
 
-  if (pathname === "/dashboard/api-keys") return "api-keys-list";
-  if (pathname === "/dashboard/api-keys/new") return "api-key-new";
-  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
-  if (pathname === "/dashboard/policies") return "policies";
-  if (pathname === "/dashboard/approvals") return "approvals-list";
-  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
-  if (pathname === "/dashboard/settings") return "settings";
+  const operationsRoute = resolveOperationsLoadingRoute(pathname);
+  if (operationsRoute) return operationsRoute;
+
+  if (pathname === DASHBOARD_SIDE_NAV_HREFS.heliusRings) return "helius-rings";
   if (pathname === "/dashboard/integrations") return "integrations";
   if (pathname === "/dashboard/integrations/private-channels/setup") {
     return "private-channels-setup";

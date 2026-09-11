@@ -13,6 +13,7 @@ import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
+import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
@@ -204,6 +205,8 @@ function resolvePageLoadingComponent(
       return ApprovalDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
+    case "helius-rings":
+      return HeliusRingsSkeleton;
     case "allowlist":
       return AllowlistLoading;
   }

@@ -21,6 +21,7 @@ import {
 } from "./helius-rings.data";
 import { healthAlerts, isSettling } from "./helius-rings.utils";
 import { fetchRingsSetupStatus, type RingsSetupStatus } from "./helius-rings-configuration.data";
+import { HeliusRingsWorkspaceSkeleton } from "./helius-rings-skeleton";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { type CustodyWalletOption, PrivateWalletsCard } from "./private-wallets-card";
@@ -196,11 +197,7 @@ export function HeliusRingsWorkspace({
       {loadError ? <Callout variant="danger">{loadError}</Callout> : null}
 
       {setup === null ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-secondary">
-            {t("DashboardHeliusRings.setup.loading")}
-          </CardContent>
-        </Card>
+        <HeliusRingsWorkspaceSkeleton />
       ) : setup.source !== "database" ? (
         <RingsConfigurationCard setup={setup} onConfigured={refresh} />
       ) : null}

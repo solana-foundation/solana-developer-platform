@@ -844,7 +844,11 @@ export function getDashboardPageConfig(
   if (integrationsConfig) {
     return integrationsConfig;
   }
-  if (pathname.startsWith("/dashboard/settings")) {
+  if (pathname === "/dashboard/helius-rings") {
+    return { title: t("Shared.dashboardShell.heliusRings") };
+  }
+  // Members only redirects into Settings, so its loading frame carries the Settings title.
+  if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
     // the members table and the RPC form are label/value rows, and letting them span

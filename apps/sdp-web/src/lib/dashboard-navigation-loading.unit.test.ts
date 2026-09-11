@@ -43,6 +43,8 @@ describe("dashboard loading route", () => {
     ["/dashboard/approvals", "approvals-list"],
     ["/dashboard/approvals/request-1", "approval-detail"],
     ["/dashboard/settings", "settings"],
+    ["/dashboard/members", "settings"],
+    ["/dashboard/helius-rings", "helius-rings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
     ["/dashboard/integrations/private-channels/setup", "private-channels-setup"],
