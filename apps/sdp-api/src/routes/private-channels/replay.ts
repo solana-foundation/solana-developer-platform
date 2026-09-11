@@ -53,16 +53,21 @@ export async function authorizeMovementReplay<
 
 export function matchesWithdrawalReplay(
   row: PrivateChannelWithdrawalRow,
-  input: { walletId: string; amount: string; mint?: string; destination?: string }
+  input: {
+    walletId: string;
+    amount: string;
+    mint?: string;
+    /** Resolved by the access seam from the body, exactly as on the first request. */
+    destination: string;
+  }
 ): void {
-  const destination = input.destination === row.wallet_id ? row.owner : input.destination;
   if (
     (input.walletId !== row.wallet_id && input.walletId !== row.owner) ||
     row.idempotency_fingerprint !==
       buildPrivateChannelWithdrawalFingerprint({
         instanceId: row.instance_id,
         walletId: row.wallet_id,
-        destination: destination ?? row.owner,
+        destination: input.destination,
         mint: input.mint ?? row.mint,
         amount: input.amount,
       })
@@ -99,16 +104,21 @@ export function matchesTransferReplay(
 
 export function matchesDepositReplay(
   row: PrivateChannelDepositRow,
-  input: { walletId: string; amount: string; mint?: string; recipient?: string }
+  input: {
+    walletId: string;
+    amount: string;
+    mint?: string;
+    /** Resolved by the access seam from the body, exactly as on the first request. */
+    recipient: string;
+  }
 ): void {
-  const recipient = input.recipient === row.wallet_id ? row.depositor : input.recipient;
   if (
     (input.walletId !== row.wallet_id && input.walletId !== row.depositor) ||
     row.idempotency_fingerprint !==
       buildPrivateChannelDepositFingerprint({
         instanceId: row.instance_id,
         walletId: row.wallet_id,
-        recipient: recipient ?? row.depositor,
+        recipient: input.recipient,
         mint: input.mint ?? row.mint,
         amount: input.amount,
       })

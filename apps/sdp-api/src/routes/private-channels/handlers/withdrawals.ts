@@ -54,13 +54,15 @@ export async function createPrivateChannelWithdrawal(
     const auth = getAuth(c);
     const repo = getPrivateChannelWithdrawalRepository(c);
     const onReplay = async (row: PrivateChannelWithdrawalRow) => {
-      matchesWithdrawalReplay(row, body);
+      // Source from the recorded row, never the body's wallet; destination from
+      // the body, resolved by the same seam as the first request.
       const context = await authorizeMovementReplay(c, row, () =>
         resolveWithdrawalCreateContext(c, {
           walletId: row.wallet_id,
-          destination: row.destination,
+          destination: body.destination,
         })
       );
+      matchesWithdrawalReplay(row, { ...body, destination: context.destination });
       if (isAbandonedReservation(row)) {
         const gatewayAuth = await resolveGatewayAuth(c.env, {
           instance: context.instance,

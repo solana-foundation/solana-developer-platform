@@ -43,13 +43,15 @@ export async function createPrivateChannelDeposit(
     await requireMovementWrite(c);
     const auth = getAuth(c);
     const onReplay = async (row: PrivateChannelDepositRow) => {
-      matchesDepositReplay(row, body);
-      await authorizeMovementReplay(c, row, () =>
+      // Source from the recorded row, never the body's wallet; recipient from the
+      // body, resolved by the same seam as the first request.
+      const context = await authorizeMovementReplay(c, row, () =>
         resolveDepositCreateContext(c, {
           walletId: row.wallet_id,
-          recipient: row.recipient,
+          recipient: body.recipient,
         })
       );
+      matchesDepositReplay(row, { ...body, recipient: context.recipient });
       return mapPrivateChannelDepositRow(row);
     };
     const replay = await getPrivateChannelDepositRepository(c).findDepositByIdempotency({

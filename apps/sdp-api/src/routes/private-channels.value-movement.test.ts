@@ -440,14 +440,14 @@ async function postWithdrawal(
   );
 }
 
-async function recordedDeposit() {
+async function recordedDeposit(recipient = ACTOR_ADDRESS) {
   return createPrivateChannelDepositRepository(env).createDeposit({
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
     walletId: ACTOR_WALLET_ID,
     depositor: ACTOR_ADDRESS,
-    recipient: ACTOR_ADDRESS,
+    recipient,
     mint: EXTERNAL_ADDRESS,
     amount: "1.5",
     context: {},
@@ -455,21 +455,21 @@ async function recordedDeposit() {
     idempotencyFingerprint: buildPrivateChannelDepositFingerprint({
       instanceId: INSTANCE_ID,
       walletId: ACTOR_WALLET_ID,
-      recipient: ACTOR_ADDRESS,
+      recipient,
       mint: EXTERNAL_ADDRESS,
       amount: "1.5",
     }),
   });
 }
 
-async function recordedWithdrawal() {
+async function recordedWithdrawal(destination = ACTOR_ADDRESS) {
   const row = await createPrivateChannelWithdrawalRepository(env).createWithdrawal({
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
     walletId: ACTOR_WALLET_ID,
     owner: ACTOR_ADDRESS,
-    destination: ACTOR_ADDRESS,
+    destination,
     mint: EXTERNAL_ADDRESS,
     amount: "1.5",
     context: {},
@@ -477,7 +477,7 @@ async function recordedWithdrawal() {
     idempotencyFingerprint: buildPrivateChannelWithdrawalFingerprint({
       instanceId: INSTANCE_ID,
       walletId: ACTOR_WALLET_ID,
-      destination: ACTOR_ADDRESS,
+      destination,
       mint: EXTERNAL_ADDRESS,
       amount: "1.5",
     }),
@@ -997,6 +997,51 @@ describe("Private Channels — deposit and withdrawal access", () => {
       (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5", ...changed })).status
     ).toBe(409);
     expect(providerSignerMock).not.toHaveBeenCalled();
+  });
+
+  it("replays a deposit whose recipient was named by walletId", async () => {
+    const original = await recordedDeposit(COLLEAGUE_ADDRESS);
+    const response = await postDeposit({
+      walletId: ACTOR_WALLET_ID,
+      amount: "1.5",
+      recipient: COLLEAGUE_WALLET_ID,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { id: original?.id, recipient: COLLEAGUE_ADDRESS },
+    });
+    expect(providerSignerMock).not.toHaveBeenCalled();
+    expect(createChannelDepositMock).not.toHaveBeenCalled();
+  });
+
+  it("replays a deposit whose recipient is the source named by walletId", async () => {
+    const original = await recordedDeposit();
+    const response = await postDeposit({
+      walletId: ACTOR_WALLET_ID,
+      amount: "1.5",
+      recipient: ACTOR_WALLET_ID,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { id: original?.id, recipient: ACTOR_ADDRESS },
+    });
+    expect(providerSignerMock).not.toHaveBeenCalled();
+    expect(createChannelDepositMock).not.toHaveBeenCalled();
+  });
+
+  it("replays a withdrawal whose destination was named by walletId", async () => {
+    const original = await recordedWithdrawal(COLLEAGUE_ADDRESS);
+    const response = await postWithdrawal({
+      walletId: ACTOR_WALLET_ID,
+      amount: "1.5",
+      destination: COLLEAGUE_WALLET_ID,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { id: original.id, destination: COLLEAGUE_ADDRESS },
+    });
+    expect(providerSignerMock).not.toHaveBeenCalled();
+    expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
   it.each([true, false])(
