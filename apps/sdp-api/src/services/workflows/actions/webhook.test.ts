@@ -177,6 +177,27 @@ describe("runSendWebhook", () => {
     expect(Number(guardedTransport.calls[0]?.init.maxResponseBytes)).toBeGreaterThan(0);
   });
 
+  it("fails permanently when the transport refuses the connection", async () => {
+    // A record that flips to a private address after the pre-flight lookup is
+    // refused by the transport; retrying re-runs the same refusal, so the
+    // failure must be permanent, exactly like a pre-flight block.
+    const { EgressBlockedError } = await import("@/services/guarded-egress");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new EgressBlockedError("rebound.example.net"))
+    );
+
+    const outcome = await runSendWebhook(env, executionFixture(), {
+      params: { url: "https://example.com/hook" },
+    });
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      retryable: false,
+      error: "BLOCKED_URL:PRIVATE_HOST",
+    });
+  });
+
   it("POSTs the trigger event and signs the body when a secret is set", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

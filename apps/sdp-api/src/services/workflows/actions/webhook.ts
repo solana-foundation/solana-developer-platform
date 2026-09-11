@@ -1,5 +1,5 @@
 import type { WorkflowExecutionRow } from "@/db/repositories";
-import { guardedFetch } from "@/services/guarded-egress";
+import { EgressBlockedError, guardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 import { readActionSecret } from "../action-secret";
 import { resolveWebhookUrl } from "../webhook-url";
@@ -51,13 +51,23 @@ async function deliver(
     // The transport is the boundary: it resolves again at connect time, so a
     // record that flips between the check and the connection is still refused,
     // and its response is buffered under the cap, so no drain is needed.
-    const response = await guardedFetch(checked.url.toString(), {
-      method: init.method,
-      headers: init.headers,
-      body: init.body,
-      signal,
-      maxResponseBytes: MAX_RESPONSE_BYTES,
-    });
+    let response: Response;
+    try {
+      response = await guardedFetch(checked.url.toString(), {
+        method: init.method,
+        headers: init.headers,
+        body: init.body,
+        signal,
+        maxResponseBytes: MAX_RESPONSE_BYTES,
+      });
+    } catch (error) {
+      // The transport refusing the dialled address is the same condition as a
+      // pre-flight block — a retry re-runs the same refusal.
+      if (error instanceof EgressBlockedError) {
+        return { ok: false, result: permanentFail("BLOCKED_URL:PRIVATE_HOST") };
+      }
+      throw error;
+    }
     if (response.status < 300 || response.status >= 400) {
       return { ok: true, response };
     }
