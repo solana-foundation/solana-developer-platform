@@ -31,7 +31,7 @@ import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
-import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
+import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
 import {
   observeDvpTradeIfStale,
   observeDvpTradeNow,
@@ -231,6 +231,7 @@ interface TradeReadContext {
 function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
   const mintAImage = context.mintImages.get(row.mintA);
   const mintBImage = context.mintImages.get(row.mintB);
+  const current = observedAfterClose(row);
   return {
     id: row.id,
     status: row.status,
@@ -244,7 +245,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           amount: row.amountA,
           escrow: row.escrowA,
           settlementDestination: row.userASettlementDestination,
-          observedAmount: row.escrowAAmount,
+          observedAmount: current ? row.escrowAAmount : null,
           decimals: row.decimalsA,
           symbol: row.symbolA,
           name: row.nameA,
@@ -267,7 +268,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           amount: row.amountB,
           escrow: row.escrowB,
           settlementDestination: row.userBSettlementDestination,
-          observedAmount: row.escrowBAmount,
+          observedAmount: current ? row.escrowBAmount : null,
           decimals: row.decimalsB,
           symbol: row.symbolB,
           name: row.nameB,

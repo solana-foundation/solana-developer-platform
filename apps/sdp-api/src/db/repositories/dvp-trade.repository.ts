@@ -64,6 +64,12 @@ export interface DvpTradeRow {
 
   status: DvpTradeStatus;
   observedAt: string | null;
+  /**
+   * When the row first reached a closed status, by whichever writer got there.
+   * An observation older than this predates the close and says nothing about
+   * the escrows after it.
+   */
+  closedAt: string | null;
   /** Caller-supplied Idempotency-Key, when one was sent. */
   idempotencyKey: string | null;
   /** Hash of the terms that key was first used with. */
@@ -104,6 +110,7 @@ export type DvpTradeInsert = Omit<
   | "closeResolutionAfter"
   | "status"
   | "observedAt"
+  | "closedAt"
   | "createdAt"
   | "updatedAt"
   | "escrowAAmount"

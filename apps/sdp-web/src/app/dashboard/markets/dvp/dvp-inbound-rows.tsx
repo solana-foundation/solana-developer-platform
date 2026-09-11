@@ -72,13 +72,13 @@ function InboundFundAction({
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
-        disabled={frozen || pending !== null || awaitingApproval}
+        disabled={frozen || pending.has(`fund:${side}`) || awaitingApproval}
         onClick={() => act("fund", { side })}
         size="sm"
         type="button"
         variant="secondary"
       >
-        {pending === "fund"
+        {pending.has(`fund:${side}`)
           ? t("DashboardMarkets.dvp.inboundFunding")
           : t("DashboardMarkets.dvp.inboundFundAction")}
       </Button>

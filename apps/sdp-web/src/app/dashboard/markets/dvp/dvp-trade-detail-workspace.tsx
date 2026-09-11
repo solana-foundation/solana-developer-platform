@@ -808,7 +808,11 @@ export function DvpTradeDetailWorkspace({
       /* Clicked, not held. Funding moves your leg into the trade's own
          escrow, which is a step forward rather than something to walk back;
          hold is reserved for destroying something (HOO-1230). */
-      <Button disabled={pending !== null} onClick={() => act("fund", { side })} type="button">
+      <Button
+        disabled={pending.has(`fund:${side}`)}
+        onClick={() => act("fund", { side })}
+        type="button"
+      >
         {t("DashboardMarkets.dvp.actionFund")}
       </Button>
     ) : undefined;

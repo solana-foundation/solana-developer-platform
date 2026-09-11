@@ -21,15 +21,21 @@ import { useTranslations } from "@/i18n/provider";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund";
 
-/** Funding options: the leg being funded is part of the request. */
-export interface DvpTradeActionOptions {
-  side?: DvpTradeSide;
-}
+/** Settle and cancel act on the trade; fund names the leg it moves. */
+export type DvpTradeActionCall =
+  | [action: "settle" | "cancel"]
+  | [action: "fund", options: { side: DvpTradeSide }];
+
+/**
+ * One in-flight request. Funding is keyed by side, since a bilateral trade
+ * funds two legs from two wallets and waiting on one must not block the other.
+ */
+export type DvpPendingAction = "settle" | "cancel" | `fund:${DvpTradeSide}`;
 
 export interface DvpTradeActions {
-  act: (action: DvpTradeActionName, options?: DvpTradeActionOptions) => Promise<void>;
+  act: (...call: DvpTradeActionCall) => Promise<void>;
   awaitingApproval: boolean;
-  pending: DvpTradeActionName | null;
+  pending: ReadonlySet<DvpPendingAction>;
 }
 
 /**
@@ -54,11 +60,13 @@ const HELD_MESSAGE: Record<DvpTradeActionName, MessageKey> = {
 export function useDvpTradeActions(tradeId: string): DvpTradeActions {
   const router = useRouter();
   const t = useTranslations();
-  const [pending, setPending] = useState<DvpTradeActionName | null>(null);
+  const [pending, setPending] = useState<ReadonlySet<DvpPendingAction>>(new Set());
   const [awaitingApproval, setAwaitingApproval] = useState(false);
 
-  async function act(action: DvpTradeActionName, options?: DvpTradeActionOptions) {
-    setPending(action);
+  async function act(...call: DvpTradeActionCall) {
+    const [action] = call;
+    const key: DvpPendingAction = call[0] === "fund" ? `fund:${call[1].side}` : call[0];
+    setPending((current) => new Set(current).add(key));
     setAwaitingApproval(false);
     try {
       const response = await fetch(
@@ -66,9 +74,7 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
         {
           method: "POST",
           // Funding names the leg it moves; settle and cancel carry no body.
-          ...(action === "fund" && options?.side
-            ? { body: JSON.stringify({ side: options.side }) }
-            : {}),
+          ...(call[0] === "fund" ? { body: JSON.stringify({ side: call[1].side }) } : {}),
         }
       );
       // 202 is a normal outcome, not a failure: wallet policy is holding the
@@ -108,7 +114,11 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
       const message = caught instanceof Error ? caught.message : "Request failed.";
       toast.error(message, { position: "bottom-right" });
     } finally {
-      setPending(null);
+      setPending((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
     }
   }
 

@@ -141,6 +141,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     closeSignature: null,
     closeResolutionAttempts: 0,
     closeResolutionAfter: null,
+    closedAt: null,
     escrowAAmount: null,
     escrowBAmount: null,
     escrowAPeakAmount: null,

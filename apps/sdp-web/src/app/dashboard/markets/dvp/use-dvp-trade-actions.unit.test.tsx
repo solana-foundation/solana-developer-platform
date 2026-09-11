@@ -76,7 +76,7 @@ describe("useDvpTradeActions", () => {
     global.fetch = respond(409, { error: { message: "Leg already funded." } }) as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
 
-    await act(async () => await result.current.act("fund"));
+    await act(async () => await result.current.act("fund", { side: "a" }));
 
     expect(toast.error).toHaveBeenCalledWith(
       "Leg already funded.",
@@ -114,7 +114,7 @@ describe("useDvpTradeActions", () => {
       "socket hang up",
       expect.objectContaining({ position: "bottom-right" })
     );
-    expect(result.current.pending).toBeNull();
+    expect(result.current.pending.size).toBe(0);
   });
 
   // A trade id goes into the path, so it is encoded rather than interpolated.
