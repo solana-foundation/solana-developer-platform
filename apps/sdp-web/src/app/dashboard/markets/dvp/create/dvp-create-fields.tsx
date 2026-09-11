@@ -196,7 +196,6 @@ export function AmountField({
   label,
   onChange,
   symbol,
-  tokenName,
   value,
 }: {
   decimals: number | null;
@@ -206,8 +205,6 @@ export function AmountField({
   label: string;
   onChange: (next: string) => void;
   symbol: string;
-  /** The token's human name, shown beside the symbol in the suffix; null when no metadata names it. */
-  tokenName: string | null;
   value: string;
 }) {
   const t = useTranslations();
@@ -223,46 +220,31 @@ export function AmountField({
       label={label}
       tone={tooPrecise ? "danger" : "muted"}
     >
-      <div className="relative">
-        {/* inputMode, never type="number": these resolve to u64 base units and a
-            number input rounds above 2^53. */}
-        <Input
-          className={cn("tabular-nums", symbol && (tokenName === null ? "pr-20" : "pr-48"))}
-          disabled={disabled}
-          id={id}
-          inputMode="decimal"
-          size="xl"
-          // Enforced at the keystroke: anything but digits and one dot never
-          // lands, and neither does a digit the mint cannot represent — which
-          // is what makes the "N decimals" explainer hint unnecessary.
-          onChange={(event) => {
-            const next = event.target.value;
-            if (!/^\d*\.?\d*$/.test(next)) {
-              return;
-            }
-            if (decimals !== null && exceedsScale(next, decimals)) {
-              return;
-            }
-            onChange(next);
-          }}
-          placeholder={decimals === null ? "1000" : "10"}
-          required
-          value={value}
-        />
-        {/* Name and symbol only. The mark sits on the picker one line above,
-            and a monogram fallback beside its own symbol reads as "TBO TBOND". */}
-        {symbol ? (
-          <span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 flex max-w-[11rem] items-center gap-1.5 text-tertiary text-xs">
-            {tokenName === null ? null : (
-              <>
-                <span className="truncate">{tokenName}</span>
-                <span aria-hidden className="h-3 w-px shrink-0 bg-border-default" />
-              </>
-            )}
-            <span className="shrink-0">{symbol}</span>
-          </span>
-        ) : null}
-      </div>
+      {/* inputMode, never type="number": these resolve to u64 base units and a
+          number input rounds above 2^53. */}
+      <Input
+        className="tabular-nums"
+        disabled={disabled}
+        id={id}
+        inputMode="decimal"
+        size="xl"
+        // Enforced at the keystroke: anything but digits and one dot never
+        // lands, and neither does a digit the mint cannot represent — which
+        // is what makes the "N decimals" explainer hint unnecessary.
+        onChange={(event) => {
+          const next = event.target.value;
+          if (!/^\d*\.?\d*$/.test(next)) {
+            return;
+          }
+          if (decimals !== null && exceedsScale(next, decimals)) {
+            return;
+          }
+          onChange(next);
+        }}
+        placeholder={decimals === null ? "1000" : "10"}
+        required
+        value={value}
+      />
     </Field>
   );
 }

@@ -61,7 +61,6 @@ function LegRow({
           label={t(a ? "DashboardMarkets.dvp.fieldAmountA" : "DashboardMarkets.dvp.fieldAmountB")}
           onChange={leg.setAmount}
           symbol={leg.symbol}
-          tokenName={leg.name}
           value={leg.amount}
         />
         <MintField
