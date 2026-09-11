@@ -620,12 +620,59 @@ function DepositApprovalResult({
   );
 }
 
+type DepositMovementOutcome = Extract<DepositOutcome, { kind: "deposit" }>;
+
+function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
+  if (outcome.absorbedByApproval) {
+    return {
+      title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
+      body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
+      note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
+      status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
+      statusVariant: "info" as const,
+    };
+  }
+
+  switch (outcome.deposit.status) {
+    case "confirmed":
+      return {
+        title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
+        body: t("DashboardEarn.deposit.vaultConfirmedBody"),
+        note: t("DashboardEarn.deposit.vaultConfirmedNote"),
+        status: t("DashboardEarn.deposit.vaultConfirmedStatus"),
+        statusVariant: "success" as const,
+      };
+    case "pending":
+      return {
+        title: t("DashboardEarn.deposit.vaultPendingTitle"),
+        body: t("DashboardEarn.deposit.vaultPendingBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        status: t("DashboardEarn.deposit.vaultPendingStatus"),
+        statusVariant: "warning" as const,
+      };
+    default:
+      return {
+        title: t("DashboardEarn.deposit.vaultDoneTitle"),
+        body: t("DashboardEarn.deposit.vaultDoneBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        status: t("DashboardEarn.deposit.vaultDoneStatus"),
+        statusVariant: "default" as const,
+      };
+  }
+}
+
+function depositOutcomeTone(statusVariant: BadgeVariant): "success" | "warning" | "info" {
+  if (statusVariant === "success") return "success";
+  if (statusVariant === "warning") return "warning";
+  return "info";
+}
+
 function DepositMovementResult({
   outcome,
   symbol,
   onClose,
 }: {
-  outcome: Extract<DepositOutcome, { kind: "deposit" }>;
+  outcome: DepositMovementOutcome;
   symbol: string;
   onClose: () => void;
 }) {
@@ -635,43 +682,7 @@ function DepositMovementResult({
   const { deposit } = outcome;
   // The absorbed case overrides the status copy: whatever state the movement is
   // in, the headline is that THIS submission moved nothing.
-  const copy: {
-    body: string;
-    note: string;
-    status: string;
-    statusVariant: BadgeVariant;
-    title: string;
-  } = outcome.absorbedByApproval
-    ? {
-        title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
-        body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
-        note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
-        status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
-        statusVariant: "info",
-      }
-    : deposit.status === "confirmed"
-      ? {
-          title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
-          body: t("DashboardEarn.deposit.vaultConfirmedBody"),
-          note: t("DashboardEarn.deposit.vaultConfirmedNote"),
-          status: t("DashboardEarn.deposit.vaultConfirmedStatus"),
-          statusVariant: "success",
-        }
-      : deposit.status === "pending"
-        ? {
-            title: t("DashboardEarn.deposit.vaultPendingTitle"),
-            body: t("DashboardEarn.deposit.vaultPendingBody"),
-            note: t("DashboardEarn.deposit.vaultSettlingNote"),
-            status: t("DashboardEarn.deposit.vaultPendingStatus"),
-            statusVariant: "warning",
-          }
-        : {
-            title: t("DashboardEarn.deposit.vaultDoneTitle"),
-            body: t("DashboardEarn.deposit.vaultDoneBody"),
-            note: t("DashboardEarn.deposit.vaultSettlingNote"),
-            status: t("DashboardEarn.deposit.vaultDoneStatus"),
-            statusVariant: "default",
-          };
+  const copy = depositMovementCopy(outcome, t);
   const sharedStatus = outcome.absorbedByApproval
     ? null
     : earnVaultPositionStatusDisplay(
@@ -686,17 +697,7 @@ function DepositMovementResult({
 
   return (
     <>
-      {processing ? null : (
-        <EarnOutcomeMark
-          tone={
-            statusVariant === "success"
-              ? "success"
-              : statusVariant === "warning"
-                ? "warning"
-                : "info"
-          }
-        />
-      )}
+      {processing ? null : <EarnOutcomeMark tone={depositOutcomeTone(statusVariant)} />}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -837,36 +838,42 @@ function useVaultFundingToken(input: {
   }, [decimals, depositMint, strategy.hostCluster, symbol]);
   const fundingTokens = useMemo(() => {
     if (wallets === undefined) return supportedFundingTokens;
-    return supportedFundingTokens
-      .map((token, index) => {
-        const balances = wallets.map((wallet) =>
-          walletBalanceForMint(wallet, token.mint, token.decimals)
-        );
-        const knownBalances = balances.filter(
-          (balance): balance is string => balance !== undefined
-        );
-        const hasUnknownBalance = knownBalances.length !== balances.length;
-        const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
-        return {
-          balance,
-          eligible:
-            hasUnknownBalance ||
-            (balance !== undefined && compareUnsignedDecimals(balance, "0") === 1),
-          index,
-          token,
-        };
-      })
-      .filter(({ eligible }) => eligible)
-      .sort((left, right) => {
-        if (left.balance === undefined && right.balance === undefined) {
-          return left.index - right.index;
+    const eligibleTokens: {
+      balance: string | undefined;
+      index: number;
+      token: EarnSwapSourceToken;
+    }[] = [];
+
+    for (const [index, token] of supportedFundingTokens.entries()) {
+      const knownBalances: string[] = [];
+      let hasUnknownBalance = false;
+      for (const wallet of wallets) {
+        const balance = walletBalanceForMint(wallet, token.mint, token.decimals);
+        if (balance === undefined) {
+          hasUnknownBalance = true;
+        } else {
+          knownBalances.push(balance);
         }
-        if (left.balance === undefined) return 1;
-        if (right.balance === undefined) return -1;
-        const order = compareUnsignedDecimals(left.balance, right.balance) ?? 0;
-        return order === 0 ? left.index - right.index : -order;
-      })
-      .map(({ token }) => token);
+      }
+      const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
+      if (hasUnknownBalance || compareUnsignedDecimals(balance ?? "0", "0") === 1) {
+        eligibleTokens.push({ balance, index, token });
+      }
+    }
+
+    eligibleTokens.sort((left, right) => {
+      if (left.balance === undefined && right.balance === undefined) {
+        return left.index - right.index;
+      }
+      if (left.balance === undefined) return 1;
+      if (right.balance === undefined) return -1;
+      const order = compareUnsignedDecimals(left.balance, right.balance) ?? 0;
+      return order === 0 ? left.index - right.index : -order;
+    });
+
+    const tokens: EarnSwapSourceToken[] = [];
+    for (const { token } of eligibleTokens) tokens.push(token);
+    return tokens;
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
   const fundingToken =
