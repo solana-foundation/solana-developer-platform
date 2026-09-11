@@ -20,6 +20,7 @@
 import { getMinimumBalanceForRentExemption, type SolanaRpc } from "@sdp/rpc/solana";
 import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import {
+  type Extension,
   type ExtensionArgs,
   extension,
   findAssociatedTokenPda,
@@ -28,7 +29,7 @@ import {
   getTokenSize,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
-import { badRequest } from "@/lib/errors";
+import { badRequest, internalError } from "@/lib/errors";
 
 export interface DvpSettleParties {
   userA: Address;
@@ -154,6 +155,64 @@ export function describeMissingSettleAta(key: keyof DvpSettleAtas, atas: DvpSett
 const FEE_ALLOWANCE_LAMPORTS = 50_000n;
 
 /**
+ * The account extensions Token-2022 adds to a NEW token account because of one
+ * mint extension. Mirrors `ExtensionType::required_init_account_extensions` in
+ * the program's interface crate, which is what the ATA program's
+ * `GetAccountDataSize` sizes an associated account by: only four mint extensions
+ * force one, and a mint extension absent from that list (ConfidentialTransferMint
+ * included; its account extension is opt-in) adds nothing. The switch is
+ * exhaustive over the client's extension union so a new extension kind fails
+ * the build here rather than under-sizing rent at settlement.
+ *
+ * @param kind - One mint extension's discriminant.
+ * @returns The account extensions that mint extension forces on creation. ImmutableOwner is
+ *   excluded because every associated token account already carries it.
+ */
+function requiredAccountExtensions(kind: Extension["__kind"]): ExtensionArgs[] {
+  switch (kind) {
+    case "TransferFeeConfig":
+      return [extension("TransferFeeAmount", { withheldAmount: 0n })];
+    case "NonTransferable":
+      return [extension("NonTransferableAccount", {})];
+    case "TransferHook":
+      return [extension("TransferHookAccount", { transferring: false })];
+    case "PausableConfig":
+      return [extension("PausableAccount", {})];
+    case "ConfidentialMintBurn":
+    case "ConfidentialTransferAccount":
+    case "ConfidentialTransferFee":
+    case "ConfidentialTransferFeeAmount":
+    case "ConfidentialTransferMint":
+    case "CpiGuard":
+    case "DefaultAccountState":
+    case "GroupMemberPointer":
+    case "GroupPointer":
+    case "ImmutableOwner":
+    case "InterestBearingConfig":
+    case "MemoTransfer":
+    case "MetadataPointer":
+    case "MintCloseAuthority":
+    case "NonTransferableAccount":
+    case "PausableAccount":
+    case "PermanentDelegate":
+    case "PermissionedBurn":
+    // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
+    case "ScaledUiAmountConfig":
+    case "TokenGroup":
+    case "TokenGroupMember":
+    case "TokenMetadata":
+    case "TransferFeeAmount":
+    case "TransferHookAccount":
+    case "Uninitialized":
+      return [];
+    default: {
+      const exhausted: never = kind;
+      throw internalError(`Unhandled Token-2022 extension ${String(exhausted)}`);
+    }
+  }
+}
+
+/**
  * Whether the settlement authority can pay for the close it is about to sign.
  *
  * The authority is provisioned on a project's first trade and starts empty.
@@ -234,14 +293,10 @@ export async function findSettlementFundingShortfall(
       throw badRequest(`DvP mint ${mint.address} cannot be read`);
     }
     const mintExtensions = decoded.extensions.__option === "Some" ? decoded.extensions.value : [];
-    const accountExtensions: ExtensionArgs[] = [extension("ImmutableOwner", {})];
-    for (const mintExtension of mintExtensions) {
-      if (mintExtension.__kind === "TransferHook") {
-        accountExtensions.push(extension("TransferHookAccount", { transferring: false }));
-      } else if (mintExtension.__kind === "PausableConfig") {
-        accountExtensions.push(extension("PausableAccount", {}));
-      }
-    }
+    const accountExtensions: ExtensionArgs[] = [
+      extension("ImmutableOwner", {}),
+      ...mintExtensions.flatMap((mintExtension) => requiredAccountExtensions(mintExtension.__kind)),
+    ];
     return { side: requested.side, size: getTokenSize(accountExtensions) };
   });
   const accountSizes = sizedMints.flatMap(({ side, size }) => {

@@ -174,6 +174,67 @@ describe("settle preflight", () => {
     expect(getMinimumBalanceForRentExemption).toHaveBeenCalledTimes(2);
   });
 
+  // Mirrors `ExtensionType::required_init_account_extensions` in Token-2022's
+  // interface crate: ConfidentialTransferMint forces no account extension (the
+  // account side is opt-in), TransferFeeConfig forces TransferFeeAmount.
+  it("sizes rent by the account extensions the program forces, and only those", async () => {
+    fetchEncodedAccounts.mockResolvedValue([
+      {
+        exists: true,
+        address: MINT_A,
+        programAddress: TOKEN_2022_PROGRAM_ADDRESS,
+        data: mint([
+          extension("ConfidentialTransferMint", {
+            authority: some(USER_A),
+            autoApproveNewAccounts: true,
+            auditorElgamalPubkey: none(),
+          }),
+        ]),
+      },
+      {
+        exists: true,
+        address: MINT_B,
+        programAddress: TOKEN_2022_PROGRAM_ADDRESS,
+        data: mint([
+          extension("TransferFeeConfig", {
+            transferFeeConfigAuthority: USER_A,
+            withdrawWithheldAuthority: USER_A,
+            withheldAmount: 0n,
+            olderTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+            newerTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+          }),
+        ]),
+      },
+    ]);
+    const sizes: number[] = [];
+    getMinimumBalanceForRentExemption.mockImplementation(async (_rpc: unknown, size: number) => {
+      sizes.push(size);
+      return BigInt(size);
+    });
+    const rpcWithBalance = {
+      getBalance: () => ({
+        send: async () => ({ context: { slot: 1n }, value: lamports(1_000_000n) }),
+      }),
+    } as unknown as SolanaRpc;
+
+    await findSettlementFundingShortfall(
+      rpcWithBalance,
+      USER_A,
+      parties,
+      new Set(["userAAtaA", "userBAtaB"])
+    );
+
+    expect(sizes.sort()).toEqual(
+      [
+        getTokenSize([extension("ImmutableOwner", {})]),
+        getTokenSize([
+          extension("ImmutableOwner", {}),
+          extension("TransferFeeAmount", { withheldAmount: 0n }),
+        ]),
+      ].sort()
+    );
+  });
+
   it("uses only the fee balance when no accounts need creation", async () => {
     const rpcWithBalance = {
       getBalance: () => ({ send: async () => ({ value: lamports(100_000n) }) }),
