@@ -156,18 +156,18 @@ export async function closeDvpTrade(
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const bytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
+  // The fence sits between the sponsor signature and the broadcast: a sponsor
+  // refusal leaves the approval retryable, while anything past markStarted may
+  // have landed and is recovered by the reconciler from chain history.
   const store: SignedSubmissionStore = {
     persistSigned: async ({ signature }) => {
       getLogger().info({ tradeId: trade.id, action, signature }, "DvP close signed");
     },
-    markStarted: async () => {},
-    // The managed sponsor consults this only when markStarted throws, and this implementation cannot.
+    markStarted: () => beginApprovedWalletOperationEffect(c),
+    // Consulted only when markStarted throws; a lost lease is not a started effect.
     hasStarted: async () => false,
   };
 
-  // The point of no return. The sponsor signature is the first external call;
-  // after broadcast, the reconciler recovers a vanished trade from chain history.
-  await beginApprovedWalletOperationEffect(c);
   const signature = await submitSponsoredTransaction({
     feePayment,
     rpc,

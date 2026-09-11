@@ -372,12 +372,25 @@ describe("closeDvpTrade", () => {
       }
     });
 
-    it("fences before asking the sponsor to sign", async () => {
+    it("fences after the sponsor signs and before the bytes go out", async () => {
       await closeDvpTrade(context, trade(), "settle");
 
-      expect(beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]).toBeLessThan(
-        prepareOwnedSubmission.mock.invocationCallOrder[0]
+      expect(prepareOwnedSubmission.mock.invocationCallOrder[0]).toBeLessThan(
+        beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]
       );
+      expect(beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]).toBeLessThan(
+        sendTransaction.mock.invocationCallOrder[0]
+      );
+    });
+
+    it("leaves the approval unfenced when the sponsor refuses to sign", async () => {
+      prepareOwnedSubmission.mockRejectedValueOnce(new Error("sponsor rate limited"));
+
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
+        "sponsor rate limited"
+      );
+      expect(beginApprovedWalletOperationEffect).not.toHaveBeenCalled();
+      expect(sendTransaction).not.toHaveBeenCalled();
     });
 
     it("maps a preflight rejection and releases the sponsorship reservation", async () => {
