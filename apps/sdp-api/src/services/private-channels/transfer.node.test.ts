@@ -30,12 +30,18 @@ import type {
   UpdatePrivateChannelTransferInput,
 } from "@/db/repositories";
 import * as repositories from "@/db/repositories";
+import { isAbandonedReservation } from "@/lib/idempotency";
+import { matchesTransferReplay } from "@/routes/private-channels/replay";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
 import * as gatewayAuthService from "./auth/gateway-auth";
 import * as balanceService from "./balance";
-import { buildTokenTransferInstructions, createChannelTransfer } from "./transfer";
+import {
+  buildTokenTransferInstructions,
+  createChannelTransfer,
+  resolveAbandonedTransferReservation,
+} from "./transfer";
 import * as transferEvents from "./transfer-events";
 
 const TEST_ENV = {} as Env;
@@ -86,7 +92,7 @@ function makePendingRow(input: CreatePrivateChannelTransferInput): PrivateChanne
 }
 
 function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1]> = {}) {
-  return {
+  const input: Parameters<typeof createChannelTransfer>[1] = {
     instance: {
       id: INSTANCE_ID,
       gatewayUrl: GATEWAY_URL,
@@ -100,6 +106,22 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     wallet,
     // Resolved by the route's access seam in production; the service never derives it.
     signer: senderSigner,
+    onReplay: async (row) => {
+      matchesTransferReplay(row, {
+        channelId: input.channelId,
+        walletId: input.wallet.walletId,
+        recipientVerifiedWalletId: input.recipient.verifiedWalletId,
+        amount: input.amount,
+        mint: input.mint,
+      });
+      return isAbandonedReservation(row)
+        ? resolveAbandonedTransferReservation(TEST_ENV, repo, row, {
+            gatewayUrl: input.instance.gatewayUrl,
+            gatewayAuth: input.gatewayAuth,
+            sdpUserId: input.sdpUserId,
+          })
+        : repositories.mapPrivateChannelTransferRow(row);
+    },
     recipient: {
       privateChannelUserId: RECIPIENT_PC_USER_ID,
       verifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
@@ -120,6 +142,7 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     },
     ...overrides,
   };
+  return input;
 }
 
 function makeBalance(amount = "10000000"): PrivateChannelBalance {

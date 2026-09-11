@@ -41,6 +41,7 @@ import {
   type Signature,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
+  type TransactionSigner,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -51,13 +52,8 @@ import {
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
-import {
-  buildPrivateChannelWithdrawalFingerprint,
-  isAbandonedReservation,
-  resolveIdempotencyReplay,
-} from "@/lib/idempotency";
+import { buildPrivateChannelWithdrawalFingerprint } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
@@ -87,6 +83,9 @@ export interface CreateChannelWithdrawalInput {
   userId: string | null;
   /** Custody wallet the burn is signed from (the burn `user` / balance owner). */
   wallet: CustodyWallet;
+  signer: TransactionSigner;
+  /** Authorize and match the winning operation again after an idempotency race. */
+  onReplay: (row: PrivateChannelWithdrawalRow) => Promise<PrivateChannelWithdrawal>;
   /** UI decimal amount (e.g. "1.5"). */
   amount: string;
   /** Mint to withdraw; must be on the instance's allowlist. Defaults to its first entry. */
@@ -122,6 +121,7 @@ async function broadcastWithdrawal(
     organizationId: string;
     projectId: string;
     wallet: CustodyWallet;
+    signer: TransactionSigner;
     mint: Address;
     /** Program owning the mint; seeds the burn's `tokenAccount` derivation. */
     tokenProgram: Address;
@@ -141,12 +141,7 @@ async function broadcastWithdrawal(
   // Signer derivation + the (blockhash-independent) burn instruction are built ONCE,
   // outside the retried gateway unit — a 401 retry re-signs against a fresh blockhash
   // but must not re-derive the signer.
-  const signer = await solanaServices.createOrgSigner(
-    env,
-    input.organizationId,
-    input.projectId,
-    input.wallet.walletId
-  );
+  const signer = input.signer;
   if (signer.address !== input.wallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match the withdrawal wallet");
   }
@@ -229,7 +224,7 @@ async function reserveWithdrawal(
     if (!isPostgresUniqueViolation(error)) {
       throw error;
     }
-    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    const raced = await findExisting();
     if (!raced) {
       throw error;
     }
@@ -253,7 +248,7 @@ async function reserveWithdrawal(
  * The `pending` CAS means a still-live original wins the race and these writes
  * are no-ops.
  */
-async function resolveAbandonedReservation(
+export async function resolveAbandonedWithdrawalReservation(
   env: Env,
   repo: PrivateChannelWithdrawalRepository,
   row: PrivateChannelWithdrawalRow,
@@ -364,15 +359,9 @@ export async function createChannelWithdrawal(
   // The replay lookup comes FIRST, ahead of the balance read, because a retry of
   // an already-burned withdrawal must return that withdrawal — the balance it
   // spent is gone, so re-checking would reject the caller's own success.
-  const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
+  const replay = await findReplay();
   if (replay) {
-    if (isAbandonedReservation(replay)) {
-      return resolveAbandonedReservation(env, repo, replay, {
-        gatewayUrl: instance.gatewayUrl,
-        gatewayAuth: input.gatewayAuth,
-      });
-    }
-    return mapPrivateChannelWithdrawalRow(replay);
+    return input.onReplay(replay);
   }
 
   // Reject an over-withdrawal before it reaches the chain. The burn program would
@@ -390,9 +379,8 @@ export async function createChannelWithdrawal(
     throw new AppError("INSUFFICIENT_TOKEN_BALANCE");
   }
 
-  // The reservation is taken BEFORE the signer is derived or the burn is
-  // broadcast, so a retry — or a second request racing the first — can only ever
-  // reach the row the winner created.
+  // The route has admitted and prepared its exact signer. Only the request that
+  // wins this reservation may sign or send; a loser must authorize the winner.
   const { row: created, replayed } = await reserveWithdrawal(repo, fingerprint, findReplay, {
     organizationId,
     projectId,
@@ -414,13 +402,7 @@ export async function createChannelWithdrawal(
     idempotencyKey: input.idempotencyKey,
   });
   if (replayed) {
-    if (isAbandonedReservation(created)) {
-      return resolveAbandonedReservation(env, repo, created, {
-        gatewayUrl: instance.gatewayUrl,
-        gatewayAuth: input.gatewayAuth,
-      });
-    }
-    return mapPrivateChannelWithdrawalRow(created);
+    return input.onReplay(created);
   }
 
   let latest: PrivateChannelWithdrawalRow = created;
@@ -438,6 +420,7 @@ export async function createChannelWithdrawal(
       organizationId,
       projectId,
       wallet,
+      signer: input.signer,
       mint: address(mint),
       tokenProgram: address(tokenProgram),
       destination: address(destination),

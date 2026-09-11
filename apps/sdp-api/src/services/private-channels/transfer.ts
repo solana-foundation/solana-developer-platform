@@ -32,11 +32,7 @@ import {
   type PrivateChannelTransferRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
-import {
-  buildPrivateChannelTransferFingerprint,
-  isAbandonedReservation,
-  resolveIdempotencyReplay,
-} from "@/lib/idempotency";
+import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -63,11 +59,13 @@ export interface CreateChannelTransferInput {
   /** The already-resolved SDP custody wallet selected by the acting user. */
   wallet: CustodyWallet;
   /**
-   * Signer for `wallet`, derived once by the route's access seam, which also holds
+   * Signer for `wallet`, derived once after route replay and admission, which holds
    * it against the member's verified pubkey. Passed in rather than re-derived so a
    * transfer makes one custody-provider round trip instead of two.
    */
   signer: TransactionSigner;
+  /** Authorize and match the winning operation again after an idempotency race. */
+  onReplay: (row: PrivateChannelTransferRow) => Promise<PrivateChannelTransfer>;
   /** The already-resolved verified wallet of another channel member. */
   recipient: {
     privateChannelUserId: string;
@@ -295,7 +293,7 @@ async function reserveTransfer(
     if (!isPostgresUniqueViolation(error)) {
       throw error;
     }
-    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    const raced = await findExisting();
     if (!raced) {
       throw error;
     }
@@ -319,7 +317,7 @@ async function reserveTransfer(
  * The `pending` CAS in `settleTransfer` means a still-live original wins the
  * race and these writes are no-ops.
  */
-async function resolveAbandonedReservation(
+export async function resolveAbandonedTransferReservation(
   env: Env,
   repo: PrivateChannelTransferRepository,
   row: PrivateChannelTransferRow,
@@ -423,16 +421,9 @@ export async function createChannelTransfer(
   // The replay lookup comes FIRST, ahead of the balance read, because a retry of
   // an already-executed transfer must return that transfer — the balance it spent
   // is gone, so re-checking would reject the caller's own success.
-  const replay = await resolveIdempotencyReplay(findReplay, fingerprint);
+  const replay = await findReplay();
   if (replay) {
-    if (isAbandonedReservation(replay)) {
-      return resolveAbandonedReservation(env, repo, replay, {
-        gatewayUrl: input.instance.gatewayUrl,
-        gatewayAuth: input.gatewayAuth,
-        sdpUserId: input.sdpUserId,
-      });
-    }
-    return mapPrivateChannelTransferRow(replay);
+    return input.onReplay(replay);
   }
 
   const balance = await getChannelBalance(env, {
@@ -466,14 +457,7 @@ export async function createChannelTransfer(
     idempotencyKey: input.idempotencyKey,
   });
   if (reserved.replayed) {
-    if (isAbandonedReservation(reserved.row)) {
-      return resolveAbandonedReservation(env, repo, reserved.row, {
-        gatewayUrl: input.instance.gatewayUrl,
-        gatewayAuth: input.gatewayAuth,
-        sdpUserId: input.sdpUserId,
-      });
-    }
-    return mapPrivateChannelTransferRow(reserved.row);
+    return input.onReplay(reserved.row);
   }
   const pending = reserved.row;
 
