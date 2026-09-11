@@ -88,12 +88,44 @@ const mocks = vi.hoisted(() => ({
   >,
   vaultDepositModal: undefined as
     | {
-        onDeposited?: (deposit: {
+        onDeposited?: (
+          deposit: {
+            failureReason: string | null;
+            movementId: string;
+            positionId: string;
+            status: string;
+          },
+          intent?: { amount: string; custodyWalletId: string; projectBalance: boolean }
+        ) => void;
+        onMovementUpdated?: (deposit: {
+          createdAt?: string;
           failureReason: string | null;
           movementId: string;
           positionId: string;
           status: string;
         }) => void;
+      }
+    | undefined,
+  vaultWithdrawalModal: undefined as
+    | {
+        onWithdrawn?: (
+          withdrawal: {
+            createdAt: string;
+            failureReason: string | null;
+            movementId: string;
+            positionId: string;
+            status: string;
+          },
+          intent?: { amount: string; projectBalance: boolean }
+        ) => void;
+        onMovementUpdated?: (withdrawal: {
+          createdAt: string;
+          failureReason: string | null;
+          movementId: string;
+          positionId: string;
+          status: string;
+        }) => void;
+        position: { label: string };
       }
     | undefined,
   walletBalances: undefined as
@@ -197,6 +229,7 @@ vi.mock("../earn/earn-program-data", () => ({
             shareMint: "ShareMainnet111111111111111111111111111111",
             apyType: "variable",
             currentApy: "0.081",
+            riskMetadata: { tvlUsd: 32_000_000 },
             liquidityTerm: "instant",
             status: "active",
             hostCluster: "mainnet-beta",
@@ -227,6 +260,7 @@ vi.mock("../earn/earn-program-data", () => ({
               shareMint: SHARE_MINT,
               apyType: "variable",
               currentApy: "0.062",
+              riskMetadata: { tvlUsd: 12_345_678.9 },
               liquidityTerm: "instant",
               status: "active",
               hostCluster: "devnet",
@@ -405,9 +439,29 @@ vi.mock("../earn/earn-program-data", () => ({
 }));
 
 vi.mock("../earn/earn-vault-withdraw-modal", () => ({
-  EarnVaultWithdrawModal: ({ position }: { position: { label: string } }) => (
-    <div role="dialog">Withdraw from {position.label}</div>
-  ),
+  EarnVaultWithdrawModal: (props: {
+    onWithdrawn?: (
+      withdrawal: {
+        createdAt: string;
+        failureReason: string | null;
+        movementId: string;
+        positionId: string;
+        status: string;
+      },
+      intent?: { amount: string; projectBalance: boolean }
+    ) => void;
+    onMovementUpdated?: (withdrawal: {
+      createdAt: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
+    position: { label: string };
+  }) => {
+    mocks.vaultWithdrawalModal = props;
+    return <div role="dialog">Withdraw from {props.position.label}</div>;
+  },
   EarnVaultWithdrawalOutcomeTracker: (props: {
     movementId: string;
     onSettled?: (withdrawal: {
@@ -432,7 +486,17 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
 
 vi.mock("../earn/earn-vault-deposit-modal", () => ({
   EarnVaultDepositModal: (props: {
-    onDeposited?: (deposit: {
+    onDeposited?: (
+      deposit: {
+        failureReason: string | null;
+        movementId: string;
+        positionId: string;
+        status: string;
+      },
+      intent?: { amount: string; custodyWalletId: string; projectBalance: boolean }
+    ) => void;
+    onMovementUpdated?: (deposit: {
+      createdAt?: string;
       failureReason: string | null;
       movementId: string;
       positionId: string;
@@ -501,6 +565,7 @@ beforeEach(() => {
   mocks.vaultDepositTrackers = {};
   mocks.vaultWithdrawalTrackers = {};
   mocks.vaultDepositModal = undefined;
+  mocks.vaultWithdrawalModal = undefined;
   mocks.walletBalances = [
     { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
     // The vault receipt token the custody wallet actually holds on chain, for
@@ -568,6 +633,7 @@ describe("TreasurySolutionsWorkspace", () => {
       throw new Error("Expected separate vault position and strategy rows");
     }
     expect(vaultStrategyRow.textContent).toContain("6.2%");
+    expect(within(vaultStrategyRow).queryByText("Available")).toBeNull();
 
     const activePositionsTable = vaultPositionRow.closest("table");
     if (!activePositionsTable) throw new Error("Expected the active positions table");
@@ -576,7 +642,12 @@ describe("TreasurySolutionsWorkspace", () => {
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
     ).toEqual(["Position", "Asset", "Balance", "Wallet", "Status", "Actions"]);
-    expect(within(vaultPositionRow).getByText("Active")).toBeTruthy();
+    expect(
+      within(vaultPositionRow)
+        .getByText("Active")
+        .closest("[data-variant]")
+        ?.getAttribute("data-variant")
+    ).toBe("success");
 
     // PRO-1723: the allocation summary totals the float above the tables.
     expect(screen.getByText("Deposited")).toBeTruthy();
@@ -621,13 +692,15 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const status = await screen.findByRole("button", {
-      name: "Depositing: The deposit was sent to Solana and is waiting for confirmation.",
+      name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
     });
     expect(status.closest("tr")?.textContent).toContain("Kamino USDC Vault");
 
     await user.hover(status);
     expect(
-      await screen.findByText("The deposit was sent to Solana and is waiting for confirmation.")
+      await screen.findByText(
+        "A deposit or withdrawal is still settling. Follow the flow for detailed progress."
+      )
     ).toBeTruthy();
   });
 
@@ -646,14 +719,14 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const status = await screen.findByRole("button", {
-      name: "Finalizing: Solana confirmed the withdrawal. SDP is waiting for final settlement.",
+      name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
     });
     expect(status.closest("tr")?.textContent).toContain("Kamino USDC Vault");
 
     await user.hover(status);
     expect(
       await screen.findByText(
-        "Solana confirmed the withdrawal. SDP is waiting for final settlement."
+        "A deposit or withdrawal is still settling. Follow the flow for detailed progress."
       )
     ).toBeTruthy();
   });
@@ -681,17 +754,24 @@ describe("TreasurySolutionsWorkspace", () => {
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
     act(() => {
-      mocks.vaultDepositModal?.onDeposited?.({
-        failureReason: null,
-        movementId: "earn_vault_deposit_just_submitted",
-        positionId: "earn_vault_position_live",
-        status: "submitted",
-      });
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId: "earn_vault_deposit_just_submitted",
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        {
+          amount: "10",
+          custodyWalletId: "cwlt_live",
+          projectBalance: true,
+        }
+      );
     });
 
     expect(
       screen.getByRole("button", {
-        name: "Depositing: The deposit was sent to Solana and is waiting for confirmation.",
+        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
       })
     ).toBeTruthy();
 
@@ -715,7 +795,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     expect(
       await screen.findByRole("button", {
-        name: "Finalizing: Solana confirmed the withdrawal. SDP is waiting for final settlement.",
+        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
       })
     ).toBeTruthy();
   });
@@ -744,10 +824,272 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
+    const depositedPositionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!depositedPositionRow) throw new Error("Expected updated position row");
+    const depositedStatus = within(depositedPositionRow).getByRole("button", {
+      name: "Active: This position is active.",
+    });
+    expect(depositedStatus.querySelector("[data-variant]")?.getAttribute("data-variant")).toBe(
+      "success"
+    );
+  });
+
+  it("applies the modal's deposit movement update to the matching table row", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_movement_modal_update";
+    mocks.vaultDeposits = [
+      {
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "submitted",
+      },
+    ];
+    renderWorkspace();
+
+    const strategyRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    if (!strategyRow) throw new Error("Expected strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    act(() => {
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    const positionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!positionRow) throw new Error("Expected position row");
+    expect(
+      within(positionRow).getByRole("button", { name: "Active: This position is active." })
+    ).toBeTruthy();
+  });
+
+  it("projects a confirmed deposit into the position balance until provider hydration catches up", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_movement_balance_projection";
+    const view = renderWorkspace();
+    const strategyRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    if (!strategyRow) throw new Error("Expected strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    act(() => {
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        {
+          amount: "10",
+          custodyWalletId: "cwlt_live",
+          projectBalance: true,
+        }
+      );
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    const projectedBalance = document.querySelector('[data-earn-vault-balance="projected"]');
+    expect(projectedBalance?.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
+      "135.25"
+    );
+    expect(projectedBalance?.className).toContain("animate-pulse");
+    expect(projectedBalance?.textContent).toContain(
+      "Projected balance. Syncing the exact provider value."
+    );
+
+    mocks.livePositionTokenValue = "135.25";
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <TreasurySolutionsWorkspace
+          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
+        />
+      </I18nProvider>
+    );
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
+    );
+    expect(screen.getAllByText("135.25").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a first deposit synced from pending row through provider reconciliation", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_movement_first_position";
+    mocks.positionsEmpty = true;
+    const view = renderWorkspace();
+    const strategyRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    if (!strategyRow) throw new Error("Expected strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    act(() => {
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        {
+          amount: "10",
+          custodyWalletId: "cwlt_live",
+          projectBalance: true,
+        }
+      );
+    });
+
+    const pendingRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!pendingRow) throw new Error("Expected provisional position row");
+    expect(
+      within(pendingRow).getByRole("button", {
+        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
+      })
+    ).toBeTruthy();
+    expect(within(pendingRow).getByText("—")).toBeTruthy();
+
+    act(() => {
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    expect(
+      within(pendingRow).getByRole("button", { name: "Active: This position is active." })
+    ).toBeTruthy();
+    const projectedBalance = within(pendingRow).getByText("10");
+    const projectedBalanceContainer = projectedBalance.closest("[data-earn-vault-balance]");
+    expect(projectedBalanceContainer?.getAttribute("data-earn-vault-balance")).toBe("projected");
+    expect(projectedBalanceContainer?.className).toContain("animate-pulse");
+
+    mocks.positionsEmpty = false;
+    mocks.livePositionTokenValue = "10";
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <TreasurySolutionsWorkspace
+          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
+        />
+      </I18nProvider>
+    );
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
+    );
+    const reconciledRows = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .filter((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    expect(reconciledRows).toHaveLength(1);
+    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("10")).toBeTruthy();
+  });
+
+  it("combines concurrent confirmed movements without dropping either projection", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    const strategyRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    if (!strategyRow) throw new Error("Expected strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    act(() => {
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId: "earn_vault_movement_concurrent_1",
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        { amount: "10", custodyWalletId: "cwlt_live", projectBalance: true }
+      );
+    });
+    act(() => {
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId: "earn_vault_movement_concurrent_2",
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        { amount: "5", custodyWalletId: "cwlt_live", projectBalance: true }
+      );
+    });
+    act(() => {
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId: "earn_vault_movement_concurrent_1",
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    expect(
+      document
+        .querySelector('[data-earn-vault-balance="projected"]')
+        ?.querySelector("[data-earn-vault-balance-value]")?.textContent
+    ).toBe("135.25");
     expect(
       screen.getByRole("button", {
-        name: "Deposited: The latest deposit is confirmed on-chain.",
+        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
       })
+    ).toBeTruthy();
+
+    act(() => {
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:23:00.000Z",
+        failureReason: null,
+        movementId: "earn_vault_movement_concurrent_2",
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    expect(
+      document
+        .querySelector('[data-earn-vault-balance="projected"]')
+        ?.querySelector("[data-earn-vault-balance-value]")?.textContent
+    ).toBe("140.25");
+    const positionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!positionRow) throw new Error("Expected position row");
+    expect(
+      within(positionRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
   });
 
@@ -803,10 +1145,92 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
+    const withdrawnPositionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!withdrawnPositionRow) throw new Error("Expected updated position row");
+    const withdrawnStatus = within(withdrawnPositionRow).getByRole("button", {
+      name: "Active: This position is active.",
+    });
+    expect(withdrawnStatus.querySelector("[data-variant]")?.getAttribute("data-variant")).toBe(
+      "success"
+    );
+  });
+
+  it("applies the modal's withdrawal movement update to the matching table row", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_withdrawal_modal_update";
+    mocks.vaultWithdrawals = [
+      {
+        createdAt: "2026-09-01T17:23:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      },
+    ];
+    renderWorkspace();
+
+    const positionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!positionRow) throw new Error("Expected position row");
+    await user.click(within(positionRow).getByRole("button", { name: "Withdraw" }));
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:23:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "finalized",
+      });
+    });
+
     expect(
-      screen.getByRole("button", {
-        name: "Withdrawn: The withdrawal is final and the proceeds are in the custody wallet.",
-      })
+      within(positionRow).getByRole("button", { name: "Active: This position is active." })
+    ).toBeTruthy();
+  });
+
+  it("projects a finalized withdrawal into the position balance with the same status update", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_withdrawal_balance_projection";
+    renderWorkspace();
+    const positionRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!positionRow) throw new Error("Expected position row");
+    await user.click(within(positionRow).getByRole("button", { name: "Withdraw" }));
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onWithdrawn?.(
+        {
+          createdAt: "2026-09-01T17:23:00.000Z",
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "requested",
+        },
+        { amount: "6", projectBalance: true }
+      );
+      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:23:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "finalized",
+      });
+    });
+
+    const projectedBalance = within(positionRow).getByText("119.25");
+    expect(projectedBalance.closest("[data-earn-vault-balance]")?.className).toContain(
+      "animate-pulse"
+    );
+    expect(
+      within(positionRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
   });
 
@@ -828,7 +1252,8 @@ describe("TreasurySolutionsWorkspace", () => {
       within(strategyTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Your position", "APY", "Status", "Actions"]);
+    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Actions"]);
+    expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
@@ -1189,6 +1614,7 @@ describe("TreasurySolutionsWorkspace", () => {
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
     expect(within(row).getByText("Sandbox only")).toBeTruthy();
+    expect(within(row).getByText("$12,345,678.90")).toBeTruthy();
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
 
@@ -1351,15 +1777,14 @@ describe("TreasurySolutionsWorkspace — catalogue cluster toggle (PRO-1742)", (
     // The card re-reads with the explicit opt-in…
     expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
 
-    // …and the mirrored row renders its Deposit disabled with the cluster
-    // named as the reason — never the bare "Unavailable" collapse.
+    // …and the mirrored row renders provider TVL while Deposit remains disabled.
     const row = screen.getByText("Kamino JLP Vault").closest("tr");
     expect(row).not.toBeNull();
     const cells = within(row as HTMLTableRowElement);
-    expect(cells.getByText("Mainnet only")).toBeTruthy();
-    expect(cells.queryByText("Unavailable")).toBeNull();
+    expect(cells.getByText("$32,000,000.00")).toBeTruthy();
     const deposit = cells.getByRole("button", { name: "Deposit" });
     expect(deposit.hasAttribute("disabled")).toBe(true);
+    expect(cells.getByText("Mainnet only")).toBeTruthy();
   });
 
   it("renders no cluster toggle in production — there is no other shelf to offer", () => {
