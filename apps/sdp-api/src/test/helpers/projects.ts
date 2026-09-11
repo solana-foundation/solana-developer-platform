@@ -1,4 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types";
+import { expect } from "vitest";
 import type { DatabaseClient } from "@/db";
 
 export const DEFAULT_PROJECT_SLUG = {
@@ -98,4 +99,24 @@ export async function seedDefaultProjects(
     environment,
   });
   return { sandbox: seeded("sandbox"), production: seeded("production") };
+}
+
+/**
+ * Assert a read is scoped to its project: visible through the project that owns the row,
+ * hidden through the organization's other project.
+ *
+ * @param read - Performs the read as the given project.
+ * @param projects - The organization's two default projects; `own` owns the row.
+ * @param projects.own - Project the row belongs to.
+ * @param projects.other - The organization's other project.
+ * @param isHidden - Whether a read result reveals nothing (null, empty list, 404 …).
+ * @returns Resolves once both reads are asserted.
+ */
+export async function expectProjectScoped<T>(
+  read: (projectId: string) => Promise<T>,
+  projects: { own: SeededProject; other: SeededProject },
+  isHidden: (result: T) => boolean
+): Promise<void> {
+  expect(isHidden(await read(projects.own.id))).toBe(false);
+  expect(isHidden(await read(projects.other.id))).toBe(true);
 }
