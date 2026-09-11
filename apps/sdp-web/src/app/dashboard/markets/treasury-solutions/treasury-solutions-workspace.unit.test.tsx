@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -543,8 +543,8 @@ vi.mock("../earn/earn-withdraw-modal", () => ({
   ),
 }));
 
-function renderWorkspace({ includeDevnet = true }: { includeDevnet?: boolean } = {}) {
-  const view = render(
+function renderWorkspace() {
+  return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <TreasurySolutionsWorkspace
         providerAccess={{
@@ -553,12 +553,6 @@ function renderWorkspace({ includeDevnet = true }: { includeDevnet?: boolean } =
       />
     </I18nProvider>
   );
-  // Most legacy behavior tests exercise the actionable sandbox strategies.
-  // Product-default catalogue tests opt out and assert the mainnet-first view.
-  if (includeDevnet && mocks.environment === "sandbox") {
-    fireEvent.click(screen.getByRole("switch", { name: "Include devnet strategies" }));
-  }
-  return view;
 }
 
 beforeEach(() => {
@@ -1310,38 +1304,38 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(apyHeader.getAttribute("aria-sort")).toBe("descending");
     expect(tvlHeader.getAttribute("aria-sort")).toBe("none");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino JLP VaultKamino · Mainnet",
-      "Kamino USDC VaultKamino · Devnet",
-      "Kamino PYUSD VaultKamino · Devnet",
-      "Veda Treasury FundVeda · Devnet",
+      "Kamino JLP VaultKamino",
+      "Kamino USDC VaultDevnetKamino",
+      "Kamino PYUSD VaultDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "APY" }));
     expect(apyHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino PYUSD VaultKamino · Devnet",
-      "Kamino USDC VaultKamino · Devnet",
-      "Kamino JLP VaultKamino · Mainnet",
-      "Veda Treasury FundVeda · Devnet",
+      "Kamino JLP VaultKamino",
+      "Kamino PYUSD VaultDevnetKamino",
+      "Kamino USDC VaultDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
     expect(apyHeader.getAttribute("aria-sort")).toBe("none");
     expect(tvlHeader.getAttribute("aria-sort")).toBe("descending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino JLP VaultKamino · Mainnet",
-      "Kamino PYUSD VaultKamino · Devnet",
-      "Kamino USDC VaultKamino · Devnet",
-      "Veda Treasury FundVeda · Devnet",
+      "Kamino JLP VaultKamino",
+      "Kamino PYUSD VaultDevnetKamino",
+      "Kamino USDC VaultDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
     expect(tvlHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino USDC VaultKamino · Devnet",
-      "Kamino PYUSD VaultKamino · Devnet",
-      "Kamino JLP VaultKamino · Mainnet",
-      "Veda Treasury FundVeda · Devnet",
+      "Kamino JLP VaultKamino",
+      "Kamino USDC VaultDevnetKamino",
+      "Kamino PYUSD VaultDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
     ]);
   });
 
@@ -1793,86 +1787,54 @@ describe("TreasurySolutionsWorkspace", () => {
 });
 
 describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)", () => {
-  it("shows mainnet by default and explains its disabled sandbox deposit", async () => {
+  it("shows both networks in sandbox while keeping mainnet deposits disabled", async () => {
     const user = userEvent.setup();
-    renderWorkspace({ includeDevnet: false });
+    renderWorkspace();
 
     const section = screen
       .getByRole("heading", { name: "Available strategies" })
       .closest("section");
     expect(section).not.toBeNull();
     const catalogue = within(section as HTMLElement);
-    expect(catalogue.queryByText("Kamino USDC Vault")).toBeNull();
     expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
-    expect(
-      catalogue
-        .getByRole("switch", { name: "Include devnet strategies" })
-        .getAttribute("aria-checked")
-    ).toBe("false");
+    expect(catalogue.queryByRole("switch")).toBeNull();
 
-    const row = catalogue.getByText("Kamino JLP Vault").closest("tr");
-    expect(row).not.toBeNull();
-    const cells = within(row as HTMLTableRowElement);
-    expect(cells.getByText("$32,000,000.00")).toBeTruthy();
-    expect(cells.getByText(/Mainnet/)).toBeTruthy();
-    const deposit = cells.getByRole("button", { name: "Deposit" });
-    expect(deposit.hasAttribute("disabled")).toBe(true);
-    expect(cells.queryByText("Mainnet only")).toBeNull();
-
-    const reason = "Mainnet vaults are view-only in Sandbox.";
-    const disabledTrigger = cells.getByRole("note", { name: reason });
-    await user.hover(disabledTrigger);
-    expect(await screen.findByText(reason)).toBeTruthy();
-  });
-
-  it("appends devnet strategies to the same list without enabling mainnet deposits", async () => {
-    const user = userEvent.setup();
-    renderWorkspace({ includeDevnet: false });
-
-    const section = screen
-      .getByRole("heading", { name: "Available strategies" })
-      .closest("section");
-    expect(section).not.toBeNull();
-    const catalogue = within(section as HTMLElement);
-    const includeDevnet = catalogue.getByRole("switch", { name: "Include devnet strategies" });
-    await user.click(includeDevnet);
-
-    expect(includeDevnet.getAttribute("aria-checked")).toBe("true");
     const mainnetRow = catalogue.getByText("Kamino JLP Vault").closest("tr");
     const devnetRow = catalogue.getByText("Kamino USDC Vault").closest("tr");
     expect(mainnetRow).not.toBeNull();
     expect(devnetRow).not.toBeNull();
-    expect(
-      within(mainnetRow as HTMLTableRowElement)
-        .getByRole("button", { name: "Deposit" })
-        .hasAttribute("disabled")
-    ).toBe(true);
+    const mainnetCells = within(mainnetRow as HTMLTableRowElement);
+    expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
+    expect(mainnetCells.queryByText("Devnet")).toBeNull();
+    expect(within(devnetRow as HTMLTableRowElement).getByText("Devnet")).toBeTruthy();
+    expect(mainnetCells.getByRole("button", { name: "Deposit" }).hasAttribute("disabled")).toBe(
+      true
+    );
     expect(
       within(devnetRow as HTMLTableRowElement)
         .getByRole("button", { name: "Deposit" })
         .hasAttribute("disabled")
     ).toBe(false);
-    expect(screen.queryByLabelText("Catalogue cluster")).toBeNull();
+
+    const reason = "Mainnet vaults are view-only in Sandbox.";
+    const disabledTrigger = mainnetCells.getByRole("note", { name: reason });
+    await user.hover(disabledTrigger);
+    expect(await screen.findByText(reason)).toBeTruthy();
   });
 
-  it("renders no devnet inclusion switch in production", () => {
+  it("keeps production on its environment shelf with no network toggle", () => {
     mocks.environment = "production";
     renderWorkspace();
 
-    expect(screen.queryByRole("switch", { name: "Include devnet strategies" })).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
     // Production's default shelf is already mainnet, so no explicit cluster is needed.
     expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
   });
 
   it("refreshes the environment and mainnet shelves once each", async () => {
     const user = userEvent.setup();
-    renderWorkspace({ includeDevnet: false });
+    renderWorkspace();
 
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
-
-    await user.click(screen.getByRole("switch", { name: "Include devnet strategies" }));
-    mocks.refreshStrategies.mockClear();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
   });

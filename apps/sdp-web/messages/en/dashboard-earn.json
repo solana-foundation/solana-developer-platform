@@ -101,7 +101,6 @@
       "providerUnavailable": "Setup required",
       "productionUnavailable": "Sandbox only",
       "clusterUnavailable": "{cluster} only",
-      "clusterToggleLabel": "Include devnet strategies",
       "mainnetDepositUnavailable": "Mainnet vaults are view-only in Sandbox.",
       "providerWithdrawalUnavailable": "Provider withdrawal unavailable",
       "strategiesErrorTitle": "Markets data unavailable",

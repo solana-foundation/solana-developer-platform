@@ -39,7 +39,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useDashboardWorkspace,
@@ -137,7 +136,6 @@ type TrackedVaultActivity =
 
 const MAX_VISIBLE_VAULT_ACTIVITY = 50;
 const VAULT_BALANCE_PROJECTION_TTL_MS = 60_000;
-const INCLUDE_DEVNET_STRATEGIES_LABEL_ID = "treasury-include-devnet-strategies-label";
 
 const TREASURY_AVAILABILITY_LABELS = {
   available: "DashboardMarkets.treasury.depositAvailable",
@@ -710,15 +708,25 @@ function TreasuryPositionIdentity({
 }) {
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm text-primary" title={name}>
-        {name}
+      <p className="flex min-w-0 items-center gap-2 text-sm text-primary">
+        <span className="truncate" title={name}>
+          {name}
+        </span>
+        {cluster === "devnet" ? (
+          <Badge className="shrink-0 text-[10px]" variant="outline">
+            {SOLANA_CLUSTER_LABELS[cluster]}
+          </Badge>
+        ) : null}
       </p>
-      <p className="mt-0.5 truncate text-xs text-tertiary">
-        <span>{provider}</span>
-        {cluster ? <span> · {SOLANA_CLUSTER_LABELS[cluster]}</span> : null}
-      </p>
+      <p className="mt-0.5 truncate text-xs text-tertiary">{provider}</p>
     </div>
   );
+}
+
+function strategyNetworkRank(strategy: EarnStrategy): number {
+  if (strategy.hostCluster === "mainnet-beta") return 0;
+  if (strategy.hostCluster === "devnet") return 1;
+  return 2;
 }
 
 function StrategyDepositAction({
@@ -788,15 +796,16 @@ function StrategyTable({
     direction: NumericSortDirection;
     field: StrategySortField;
   }>({ direction: "descending", field: "apy" });
-  const sortedStrategies = useMemo(
-    () =>
-      sortByOptionalDecimal(
-        strategies,
-        strategySort.field === "apy" ? (strategy) => strategy.currentApy : strategyTvlUsd,
-        strategySort.direction
-      ),
-    [strategies, strategySort]
-  );
+  const sortedStrategies = useMemo(() => {
+    const sortedByMetric = sortByOptionalDecimal(
+      strategies,
+      strategySort.field === "apy" ? (strategy) => strategy.currentApy : strategyTvlUsd,
+      strategySort.direction
+    );
+    return sortedByMetric.sort(
+      (left, right) => strategyNetworkRank(left) - strategyNetworkRank(right)
+    );
+  }, [strategies, strategySort]);
   const toggleStrategySort = (field: StrategySortField) => {
     setStrategySort((current) => ({
       direction:
@@ -1240,10 +1249,8 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
 function TreasuryStrategiesCard({
   environment,
   error,
-  includeDevnetStrategies,
   isLoading,
   onDeposit,
-  onIncludeDevnetStrategiesChange,
   onRefresh,
   positions,
   providerAccess,
@@ -1252,10 +1259,8 @@ function TreasuryStrategiesCard({
 }: {
   environment: SdpEnvironment;
   error: unknown;
-  includeDevnetStrategies: boolean;
   isLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
-  onIncludeDevnetStrategiesChange: (include: boolean) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
@@ -1283,21 +1288,6 @@ function TreasuryStrategiesCard({
           />
         </h2>
         <div className="flex items-center gap-2">
-          {environment === "sandbox" ? (
-            <div className="flex items-center gap-2.5">
-              <ToggleSwitch
-                aria-labelledby={INCLUDE_DEVNET_STRATEGIES_LABEL_ID}
-                checked={includeDevnetStrategies}
-                onChange={onIncludeDevnetStrategiesChange}
-              />
-              <span
-                className="text-sm whitespace-nowrap text-secondary"
-                id={INCLUDE_DEVNET_STRATEGIES_LABEL_ID}
-              >
-                {t("DashboardMarkets.treasury.clusterToggleLabel")}
-              </span>
-            </div>
-          ) : null}
           <Button
             iconLeft={<RefreshCwIcon />}
             onClick={onRefresh}
@@ -1451,9 +1441,7 @@ interface TreasuryWorkspaceContentProps {
   catalogueLoading: boolean;
   catalogueStrategies: readonly EarnStrategy[] | undefined;
   environment: SdpEnvironment;
-  includeDevnetStrategies: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
-  onIncludeDevnetStrategiesChange: (include: boolean) => void;
   onRefresh: () => void;
   onWithdrawPosition: (position: EarnVaultPosition) => void;
   onWithdrawProgram: (program: EarnProgram) => void;
@@ -1480,9 +1468,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     catalogueLoading,
     catalogueStrategies,
     environment,
-    includeDevnetStrategies,
     onDeposit,
-    onIncludeDevnetStrategiesChange,
     onRefresh,
     onWithdrawPosition,
     onWithdrawProgram,
@@ -1531,10 +1517,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
       <TreasuryStrategiesCard
         environment={environment}
         error={catalogueError}
-        includeDevnetStrategies={includeDevnetStrategies}
         isLoading={catalogueLoading}
         onDeposit={onDeposit}
-        onIncludeDevnetStrategiesChange={onIncludeDevnetStrategiesChange}
         onRefresh={onRefresh}
         positions={positionsError ? undefined : positions}
         providerAccess={providerAccess}
@@ -1590,13 +1574,10 @@ export function TreasurySolutionsWorkspace({
     isLoading: strategiesLoading,
     refresh: refreshStrategies,
   } = useEarnStrategies();
-  // The allocation summary still reads the environment's actionable shelf
-  // above. The catalogue is mainnet-first: sandbox explicitly reads the
-  // mirrored mainnet shelf, then can append its already-loaded devnet shelf
-  // without replacing the list or weakening the server's `fundable: false`
-  // answer on those mainnet rows. Production's default shelf is mainnet, so its
-  // two consumers continue sharing one SWR key.
-  const [includeDevnetStrategies, setIncludeDevnetStrategies] = useState(false);
+  // The allocation summary still reads the environment's actionable shelf.
+  // Sandbox automatically combines that devnet shelf with the mirrored
+  // mainnet catalogue, preserving the API's `fundable: false` response on
+  // mainnet rows. Production's default shelf is already mainnet.
   const catalogueCluster = sdpEnvironment === "sandbox" ? "mainnet-beta" : undefined;
   const {
     strategies: baseCatalogueStrategies,
@@ -1604,16 +1585,17 @@ export function TreasurySolutionsWorkspace({
     isLoading: baseCatalogueLoading,
     refresh: refreshCatalogue,
   } = useEarnStrategies({ cluster: catalogueCluster });
-  const showDevnetStrategies = sdpEnvironment === "sandbox" && includeDevnetStrategies;
   const catalogueStrategies = useMemo(
     () =>
-      showDevnetStrategies
+      sdpEnvironment === "sandbox"
         ? mergeStrategyCatalogues(baseCatalogueStrategies, strategies)
         : baseCatalogueStrategies,
-    [baseCatalogueStrategies, showDevnetStrategies, strategies]
+    [baseCatalogueStrategies, sdpEnvironment, strategies]
   );
-  const catalogueError = baseCatalogueError ?? (showDevnetStrategies ? strategiesError : undefined);
-  const catalogueLoading = baseCatalogueLoading || (showDevnetStrategies && strategiesLoading);
+  const catalogueError =
+    baseCatalogueError ?? (sdpEnvironment === "sandbox" ? strategiesError : undefined);
+  const catalogueLoading =
+    baseCatalogueLoading || (sdpEnvironment === "sandbox" && strategiesLoading);
   const {
     positions,
     error: positionsError,
@@ -1882,9 +1864,7 @@ export function TreasurySolutionsWorkspace({
         catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
         catalogueStrategies={catalogueStrategies}
         environment={sdpEnvironment}
-        includeDevnetStrategies={showDevnetStrategies}
         onDeposit={setDepositStrategy}
-        onIncludeDevnetStrategiesChange={setIncludeDevnetStrategies}
         onRefresh={() => {
           refreshWalletBalances();
           refreshStrategies();
