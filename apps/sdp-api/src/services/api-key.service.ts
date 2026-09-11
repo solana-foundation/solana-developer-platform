@@ -421,13 +421,19 @@ export class ApiKeyService {
     organizationId: string,
     projectId: string,
     gracePeriodHours: number,
-    pepper?: string
+    actorPermissions: Permission[],
+    pepper?: string,
+    guardTargetWalletScope?: (target: {
+      signingWalletId: string | null;
+      bindingWalletIds: string[];
+    }) => void
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by
+                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by,
+                ak.expires_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ? AND ak.status = 'active'`
@@ -445,11 +451,18 @@ export class ApiKeyService {
         allowed_ips: string | null;
         signing_wallet_id: string | null;
         created_by: string;
+        expires_at: string | null;
       }>();
 
     if (!existing) {
       return null;
     }
+
+    assertGrantableApiKeyPermissions(
+      actorPermissions,
+      existing.role,
+      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions)
+    );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
     const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(existing.environment);
@@ -488,12 +501,31 @@ export class ApiKeyService {
           return;
         }
 
+        // The wallet scope is judged on the rows this transaction copies,
+        // not on what the caller read before the lock: a binding written in
+        // that window would otherwise be cloned unchecked.
+        const currentTarget = await tx.queryOne<{ signing_wallet_id: string | null }>(
+          `SELECT signing_wallet_id FROM api_keys WHERE id = $1`,
+          [keyId]
+        );
+        const signingWalletId = currentTarget?.signing_wallet_id ?? null;
+        if (guardTargetWalletScope) {
+          const bindingRows = await tx.queryMany<{ wallet_id: string }>(
+            `SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = $1`,
+            [keyId]
+          );
+          guardTargetWalletScope({
+            signingWalletId,
+            bindingWalletIds: bindingRows.map((row) => row.wallet_id),
+          });
+        }
+
         await tx
           .prepare(
             `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
           )
           .bind(
             newKeyId,
@@ -507,8 +539,9 @@ export class ApiKeyService {
             existing.role,
             existing.permissions,
             existing.allowed_ips,
-            existing.signing_wallet_id,
-            keyId
+            signingWalletId,
+            keyId,
+            existing.expires_at
           )
           .run();
 
@@ -555,7 +588,7 @@ export class ApiKeyService {
         keyPrefix: newPrefix,
         role: existing.role,
         environment: existing.environment,
-        expiresAt: null,
+        expiresAt: existing.expires_at,
         createdAt: new Date().toISOString(),
       },
       previousKey: {

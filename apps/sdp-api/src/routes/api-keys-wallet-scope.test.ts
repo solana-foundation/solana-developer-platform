@@ -620,8 +620,12 @@ describe("API key wallet scope routes", () => {
   });
 
   it("requires walletScope when updating wallet bindings", async () => {
+    const targetKeyId = await createManagedApiKey({
+      name: "Update target",
+      walletScope: "all",
+    });
     const res = await app.request(
-      `/v1/api-keys/${TEST_API_KEY.id}`,
+      `/v1/api-keys/${targetKeyId}`,
       {
         method: "PATCH",
         headers: {
@@ -642,20 +646,14 @@ describe("API key wallet scope routes", () => {
   });
 
   it("clears wallet bindings when walletScope is updated to all", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?")
-        .bind("wal_scope_a", TEST_API_KEY.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES (?, ?, ?, ?)`
-        )
-        .bind("akw_scope_a", TEST_API_KEY.id, "wal_scope_a", JSON.stringify(["*"])),
-    ]);
+    const targetKeyId = await createManagedApiKey({
+      name: "Scope clear target",
+      walletScope: "selected",
+      walletIds: ["wal_scope_a"],
+    });
 
     const res = await app.request(
-      `/v1/api-keys/${TEST_API_KEY.id}`,
+      `/v1/api-keys/${targetKeyId}`,
       {
         method: "PATCH",
         headers: {
@@ -673,13 +671,13 @@ describe("API key wallet scope routes", () => {
 
     const updated = await getDb(env)
       .prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
-      .bind(TEST_API_KEY.id)
+      .bind(targetKeyId)
       .first<{ signing_wallet_id: string | null }>();
     expect(updated?.signing_wallet_id).toBeNull();
 
     const bindings = await getDb(env)
       .prepare("SELECT COUNT(*) as count FROM api_key_wallet_permissions WHERE api_key_id = ?")
-      .bind(TEST_API_KEY.id)
+      .bind(targetKeyId)
       .first<{ count: number }>();
     expect(bindings?.count).toBe(0);
   });
