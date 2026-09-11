@@ -19,7 +19,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { RampStatusPanel } from "./ramp-status-panel";
+import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
@@ -34,7 +34,15 @@ function OfframpManualQuoteStep({
   quote: Extract<NonNullable<OfframpWizard["quote"]>, { deliveryMode: "manual_instructions" }>;
   t: Translate;
 }) {
-  const { selectedRampPair, fields } = wizard;
+  const { selectedRampPair, fields, transferStatus } = wizard;
+
+  // A cancelled, failed or expired payout can never settle, so the instructions are withdrawn
+  // rather than left on screen — the status panel alone explains where the transfer stands.
+  // Ordered ahead of the missing-instructions guard, which would otherwise report a quote
+  // defect for a transfer whose real problem is that it is already dead.
+  if (isTerminalTransferStatus(transferStatus?.status)) {
+    return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
+  }
 
   if (!quote.paymentInstructions) {
     return (
