@@ -1,5 +1,7 @@
+import { isIP } from "node:net";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { rpcProviderNeedsEndpoint } from "@sdp/types";
+import { isBlockedAddress } from "./blocked-address";
 import {
   applyApiKeyTemplate,
   withAlchemyApiKey,
@@ -136,7 +138,8 @@ export function resolveTenantEndpoint(
  * status and timing. Blocking at submission keeps such a row from existing.
  *
  * Literal-address matching only: a hostname that resolves to a private address
- * still passes here, which is the deeper hardening HOO-1009 covers.
+ * still passes here and is caught at connect time by the egress guard, which
+ * shares the address classification in `blocked-address.ts`.
  */
 const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /^localhost$/i,
@@ -206,6 +209,10 @@ export function assertReachableTenantEndpoint(endpointUrl: string): void {
     throw new SdpRpcError("BAD_REQUEST", "An RPC endpoint must use https");
   }
 
+  if (parsed.username || parsed.password) {
+    throw new SdpRpcError("BAD_REQUEST", "An RPC endpoint URL must not embed credentials");
+  }
+
   const { host, mappedIpv4 } = normalizeHost(parsed.hostname);
   const candidates = mappedIpv4 ? [host, mappedIpv4] : [host];
 
@@ -213,6 +220,10 @@ export function assertReachableTenantEndpoint(endpointUrl: string): void {
     BLOCKED_IPV6_PATTERNS.some((pattern) => pattern.test(host)) ||
     candidates.some((candidate) => BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(candidate)))
   ) {
+    throw new SdpRpcError("BAD_REQUEST", "That RPC endpoint host is not reachable from SDP");
+  }
+
+  if (candidates.some((candidate) => isIP(candidate) !== 0 && isBlockedAddress(candidate))) {
     throw new SdpRpcError("BAD_REQUEST", "That RPC endpoint host is not reachable from SDP");
   }
 }
