@@ -342,6 +342,10 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.getByText("$1.25")).toBeTruthy();
     expect(screen.getByText("Treasury wallet")).toBeTruthy();
     expect(screen.queryByText("Swap required before deposit")).toBeNull();
+    const completedMarker = document.querySelector('[data-earn-step-complete="true"]');
+    expect(completedMarker?.className).toContain("bg-white");
+    expect(completedMarker?.className).toContain("text-black");
+    expect(completedMarker?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Back" }));

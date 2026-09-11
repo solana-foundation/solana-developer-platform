@@ -7,6 +7,7 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 const stepTransition = { duration: 0.18, ease: "easeOut" } as const;
+const checkTransition = { duration: 0.22, ease: [0.22, 1, 0.36, 1] } as const;
 
 function renderStepConnector(filled: boolean, reduceMotion: boolean): ReactNode {
   return (
@@ -25,7 +26,7 @@ function renderStepConnector(filled: boolean, reduceMotion: boolean): ReactNode 
 }
 
 function stepMarkerClassName(active: boolean, complete: boolean): string {
-  if (complete) return "border-primary bg-surface-raised text-primary";
+  if (complete) return "border-primary bg-white text-black";
   if (active) {
     return "border-primary bg-surface-raised text-primary shadow-[0_0_0_3px_var(--color-fill-subtle)]";
   }
@@ -48,13 +49,26 @@ function renderStepMarker(input: {
       aria-hidden="true"
       animate={stepMarkerAnimation(active)}
       className={cn(
-        "relative z-10 flex size-6 items-center justify-center rounded-full border text-[10px] font-medium",
+        "relative z-10 flex size-6 items-center justify-center rounded-full border text-[10px] font-medium transition-[background-color,border-color,color,box-shadow] duration-200 ease-out",
         stepMarkerClassName(active, complete)
       )}
+      data-earn-step-complete={complete ? "true" : undefined}
       initial={false}
       transition={reduceMotion ? { duration: 0 } : stepTransition}
     >
-      {complete ? <CheckIcon className="size-3" strokeWidth={2.5} /> : index + 1}
+      {complete ? (
+        <m.span
+          animate={{ opacity: 1, rotate: 0, scale: 1 }}
+          className="flex items-center justify-center"
+          data-earn-step-check="true"
+          initial={reduceMotion ? false : { opacity: 0, rotate: -8, scale: 0.7 }}
+          transition={reduceMotion ? { duration: 0 } : checkTransition}
+        >
+          <CheckIcon className="size-3" strokeWidth={2.5} />
+        </m.span>
+      ) : (
+        index + 1
+      )}
     </m.span>
   );
 }
