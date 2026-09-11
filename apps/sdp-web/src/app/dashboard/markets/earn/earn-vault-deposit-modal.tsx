@@ -9,7 +9,7 @@ import {
   earnSwapSourceTokens,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { ArrowRightLeftIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -28,10 +28,11 @@ import {
   useEarnFundingWallets,
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
+import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
-import { shortenMarketAddress } from "./earn-market-presentation";
+import { shortenMarketAddress, sumDecimalStrings } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
   type EarnVaultDeposit,
@@ -619,12 +620,59 @@ function DepositApprovalResult({
   );
 }
 
+type DepositMovementOutcome = Extract<DepositOutcome, { kind: "deposit" }>;
+
+function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
+  if (outcome.absorbedByApproval) {
+    return {
+      title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
+      body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
+      note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
+      status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
+      statusVariant: "info" as const,
+    };
+  }
+
+  switch (outcome.deposit.status) {
+    case "confirmed":
+      return {
+        title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
+        body: t("DashboardEarn.deposit.vaultConfirmedBody"),
+        note: t("DashboardEarn.deposit.vaultConfirmedNote"),
+        status: t("DashboardEarn.deposit.vaultConfirmedStatus"),
+        statusVariant: "success" as const,
+      };
+    case "pending":
+      return {
+        title: t("DashboardEarn.deposit.vaultPendingTitle"),
+        body: t("DashboardEarn.deposit.vaultPendingBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        status: t("DashboardEarn.deposit.vaultPendingStatus"),
+        statusVariant: "warning" as const,
+      };
+    default:
+      return {
+        title: t("DashboardEarn.deposit.vaultDoneTitle"),
+        body: t("DashboardEarn.deposit.vaultDoneBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        status: t("DashboardEarn.deposit.vaultDoneStatus"),
+        statusVariant: "default" as const,
+      };
+  }
+}
+
+function depositOutcomeTone(statusVariant: BadgeVariant): "success" | "warning" | "info" {
+  if (statusVariant === "success") return "success";
+  if (statusVariant === "warning") return "warning";
+  return "info";
+}
+
 function DepositMovementResult({
   outcome,
   symbol,
   onClose,
 }: {
-  outcome: Extract<DepositOutcome, { kind: "deposit" }>;
+  outcome: DepositMovementOutcome;
   symbol: string;
   onClose: () => void;
 }) {
@@ -634,43 +682,7 @@ function DepositMovementResult({
   const { deposit } = outcome;
   // The absorbed case overrides the status copy: whatever state the movement is
   // in, the headline is that THIS submission moved nothing.
-  const copy: {
-    body: string;
-    note: string;
-    status: string;
-    statusVariant: BadgeVariant;
-    title: string;
-  } = outcome.absorbedByApproval
-    ? {
-        title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
-        body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
-        note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
-        status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
-        statusVariant: "info",
-      }
-    : deposit.status === "confirmed"
-      ? {
-          title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
-          body: t("DashboardEarn.deposit.vaultConfirmedBody"),
-          note: t("DashboardEarn.deposit.vaultConfirmedNote"),
-          status: t("DashboardEarn.deposit.vaultConfirmedStatus"),
-          statusVariant: "success",
-        }
-      : deposit.status === "pending"
-        ? {
-            title: t("DashboardEarn.deposit.vaultPendingTitle"),
-            body: t("DashboardEarn.deposit.vaultPendingBody"),
-            note: t("DashboardEarn.deposit.vaultSettlingNote"),
-            status: t("DashboardEarn.deposit.vaultPendingStatus"),
-            statusVariant: "warning",
-          }
-        : {
-            title: t("DashboardEarn.deposit.vaultDoneTitle"),
-            body: t("DashboardEarn.deposit.vaultDoneBody"),
-            note: t("DashboardEarn.deposit.vaultSettlingNote"),
-            status: t("DashboardEarn.deposit.vaultDoneStatus"),
-            statusVariant: "default",
-          };
+  const copy = depositMovementCopy(outcome, t);
   const sharedStatus = outcome.absorbedByApproval
     ? null
     : earnVaultPositionStatusDisplay(
@@ -685,12 +697,7 @@ function DepositMovementResult({
 
   return (
     <>
-      <EarnOutcomeMark
-        processing={processing}
-        tone={
-          statusVariant === "success" ? "success" : statusVariant === "warning" ? "warning" : "info"
-        }
-      />
+      {processing ? null : <EarnOutcomeMark tone={depositOutcomeTone(statusVariant)} />}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -831,12 +838,42 @@ function useVaultFundingToken(input: {
   }, [decimals, depositMint, strategy.hostCluster, symbol]);
   const fundingTokens = useMemo(() => {
     if (wallets === undefined) return supportedFundingTokens;
-    return supportedFundingTokens.filter((token) =>
-      wallets.some((wallet) => {
+    const rankedTokens: {
+      balance: string | undefined;
+      index: number;
+      token: EarnSwapSourceToken;
+    }[] = [];
+
+    for (const [index, token] of supportedFundingTokens.entries()) {
+      const knownBalances: string[] = [];
+      let hasUnknownBalance = false;
+      for (const wallet of wallets) {
         const balance = walletBalanceForMint(wallet, token.mint, token.decimals);
-        return balance === undefined || compareUnsignedDecimals(balance, "0") === 1;
-      })
-    );
+        if (balance === undefined) {
+          hasUnknownBalance = true;
+        } else {
+          knownBalances.push(balance);
+        }
+      }
+      const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
+      // Keep every supported stable visible for demo selection. Balance only
+      // controls ranking and the default selection, not visibility.
+      rankedTokens.push({ balance, index, token });
+    }
+
+    rankedTokens.sort((left, right) => {
+      if (left.balance === undefined && right.balance === undefined) {
+        return left.index - right.index;
+      }
+      if (left.balance === undefined) return 1;
+      if (right.balance === undefined) return -1;
+      const order = compareUnsignedDecimals(left.balance, right.balance) ?? 0;
+      return order === 0 ? left.index - right.index : -order;
+    });
+
+    const tokens: EarnSwapSourceToken[] = [];
+    for (const { token } of rankedTokens) tokens.push(token);
+    return tokens;
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
   const fundingToken =
@@ -868,18 +905,15 @@ function DepositFundingTokenPicker({
   disabled,
   onSelect,
   selectedMint,
-  swapNotice,
   tokens,
   title,
 }: {
   disabled: boolean;
   onSelect: (mint: string) => void;
   selectedMint: string | undefined;
-  swapNotice: string | null;
   tokens: EarnSwapSourceToken[];
   title: string;
 }) {
-  if (tokens.length <= 1) return null;
   return (
     <fieldset className="mt-4" disabled={disabled}>
       <legend className="text-sm font-medium text-primary">{title}</legend>
@@ -909,11 +943,6 @@ function DepositFundingTokenPicker({
           );
         })}
       </div>
-      {swapNotice ? (
-        <p className="mt-2 text-xs leading-5 text-secondary" role="note">
-          {swapNotice}
-        </p>
-      ) : null}
     </fieldset>
   );
 }
@@ -932,6 +961,40 @@ function DepositSwapSummaryRow({
     <div className="flex items-baseline justify-between gap-5 py-1">
       <dt className="text-tertiary">{label}</dt>
       <dd className="text-right text-primary">{value}</dd>
+    </div>
+  );
+}
+
+function DepositSwapReviewNotice({
+  active,
+  fundingSymbol,
+  symbol,
+}: {
+  active: boolean;
+  fundingSymbol: string;
+  symbol: string;
+}) {
+  const t = useTranslations();
+  if (!active) return null;
+
+  return (
+    <div
+      className="mt-5 flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3"
+      data-earn-swap-review="true"
+      role="note"
+    >
+      <ArrowRightLeftIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardEarn.deposit.vaultSwapReviewTitle")}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-secondary">
+          {t("DashboardEarn.deposit.vaultSwapReviewBody", {
+            source: fundingSymbol,
+            target: symbol,
+          })}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1008,19 +1071,17 @@ interface DepositDetailsStepProps {
   decimals: number | undefined;
   depositMint: string | undefined;
   fundingDecimals: number | undefined;
-  fundingSymbol: string;
   fundingToken: EarnSwapSourceToken | undefined;
   fundingTokens: EarnSwapSourceToken[];
   onAmountChange: (value: string) => void;
   onContinue: () => void;
   onFundingSelect: (mint: string) => void;
+  onMax: () => void;
   onWalletSelect: (walletId: string) => void;
   overKnownBalance: boolean;
   selectedWallet: EarnFundingWallet | undefined;
   selectedWalletBalance: string | undefined;
   submitting: boolean;
-  swapActive: boolean;
-  symbol: string;
   wallets: readonly EarnFundingWallet[] | undefined;
   walletsError: unknown;
   walletsLoading: boolean;
@@ -1034,19 +1095,17 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
     decimals,
     depositMint,
     fundingDecimals,
-    fundingSymbol,
     fundingToken,
     fundingTokens,
     onAmountChange,
     onContinue,
     onFundingSelect,
+    onMax,
     onWalletSelect,
     overKnownBalance,
     selectedWallet,
     selectedWalletBalance,
     submitting,
-    swapActive,
-    symbol,
     wallets,
     walletsError,
     walletsLoading,
@@ -1071,15 +1130,6 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
         disabled={submitting}
         onSelect={onFundingSelect}
         selectedMint={fundingToken?.mint ?? depositMint}
-        swapNotice={
-          swapActive
-            ? t("DashboardEarn.deposit.vaultSwapNotice", {
-                source: fundingSymbol,
-                target: symbol,
-                pct: String(EARN_SWAP_DEFAULT_SLIPPAGE_BPS / 100),
-              })
-            : null
-        }
         title={t("DashboardEarn.deposit.vaultPayWith")}
         tokens={fundingTokens}
       />
@@ -1092,9 +1142,22 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
           disabled={submitting || !selectedWallet || decimals === undefined}
           id="earn-vault-deposit-amount"
           inputMode="decimal"
+          leadingAddon={<span aria-hidden="true">$</span>}
           maxLength={MAX_AMOUNT_LENGTH}
           onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountChange(event.target.value)}
           placeholder="0.00"
+          action={
+            <EarnAmountMaxButton
+              disabled={
+                submitting ||
+                !selectedWallet ||
+                selectedWalletBalance === undefined ||
+                compareUnsignedDecimals(selectedWalletBalance, "0") !== 1
+              }
+              label={t("DashboardEarn.vaultWithdraw.max")}
+              onClick={onMax}
+            />
+          }
           value={amountInput}
         />
         <div id="earn-vault-deposit-balance" className="sr-only">
@@ -1180,6 +1243,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
   return (
     <>
       <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.deposit.progressReview")}</p>
+      <DepositSwapReviewNotice active={swapActive} fundingSymbol={fundingSymbol} symbol={symbol} />
       <DepositReviewDetails
         amount={amount}
         backing={backing}
@@ -1317,12 +1381,12 @@ export function EarnVaultDepositModal({
     () => (selectedWallet ? [selectedWallet] : executableWallets),
     [executableWallets, selectedWallet]
   );
-  // What the deposit may be PAID in: the vault's own token first, then every
-  // other swap-source stablecoin held by the selected wallet (or across the
-  // selectable wallets until one is chosen). Unknown balances keep every
-  // option visible rather than guessing that a token is absent. Paying in one
-  // of the others sends `sourceTokenMint`, and the API prepends a Jupiter swap
-  // inside the same transaction.
+  // What the deposit may be PAID in: every supported swap-source stablecoin
+  // held by the selected wallet (or across selectable wallets until one is
+  // chosen), ranked by observed balance so the largest is the default. Unknown
+  // balances remain visible after known holdings rather than being guessed
+  // absent. Paying in a token other than the vault's own sends
+  // `sourceTokenMint`, and the API prepends a Jupiter swap in the transaction.
   const {
     fundingDecimals,
     fundingSymbol,
@@ -1549,13 +1613,15 @@ export function EarnVaultDepositModal({
 
   if (visibleOutcome) {
     return (
-      <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="sm">
+      <Modal
+        isOpen
+        ariaLabel={modalLabel}
+        contentClassName={movementProcessing ? "earn-processing-modal" : undefined}
+        onClose={onClose}
+        size="sm"
+      >
         <div className="p-6" ref={contentRef}>
-          <EarnFlowStepper
-            currentStep={progressStep}
-            processing={movementProcessing}
-            steps={progressSteps}
-          />
+          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
             <DepositResult outcome={visibleOutcome} symbol={fundingSymbol} onClose={onClose} />
           </EarnFlowTransition>
@@ -1585,7 +1651,6 @@ export function EarnVaultDepositModal({
               decimals={decimals}
               depositMint={depositMint}
               fundingDecimals={fundingDecimals}
-              fundingSymbol={fundingSymbol}
               fundingToken={fundingToken}
               fundingTokens={fundingTokens}
               onAmountChange={(value) => {
@@ -1600,6 +1665,11 @@ export function EarnVaultDepositModal({
                 setFundingMint(mint);
                 setSubmitError(null);
               }}
+              onMax={() => {
+                if (selectedWalletBalance === undefined) return;
+                setAmountInput(selectedWalletBalance);
+                setSubmitError(null);
+              }}
               onWalletSelect={(selectedWalletId) => {
                 setWalletId(selectedWalletId);
                 setSubmitError(null);
@@ -1608,8 +1678,6 @@ export function EarnVaultDepositModal({
               selectedWallet={selectedWallet}
               selectedWalletBalance={selectedWalletBalance}
               submitting={submitting}
-              swapActive={swapActive}
-              symbol={symbol}
               wallets={wallets}
               walletsError={walletsError}
               walletsLoading={walletsLoading}

@@ -94,10 +94,14 @@ describe("EarnVaultWithdrawModal", () => {
     expect(
       Array.from(progress.querySelectorAll("li"), (item) => item.textContent?.replace(/^\d/, ""))
     ).toEqual(["Details", "Review", "Processing", "Complete"]);
+    expect(screen.getByText("$")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Max" }));
+    const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
+    const maxButton = screen.getByRole("button", { name: "Max" });
+    expect(amountInput.parentElement?.contains(maxButton)).toBe(true);
+    await user.click(maxButton);
 
-    expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("6");
+    expect(amountInput.value).toBe("6");
     expect(screen.getByText(/\$6.00 available of \$10.00 total/)).toBeTruthy();
   });
 
@@ -171,8 +175,9 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/Signed and recorded/)).toBeTruthy();
     expect(screen.getByText("Processing")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
-    expect(document.querySelector('[data-earn-processing="true"]')).toBeTruthy();
-    expect(document.querySelector('[data-earn-step-processing="true"]')).toBeTruthy();
+    expect(document.querySelector(".earn-processing-modal")).toBeTruthy();
+    expect(document.querySelector('[data-earn-processing="true"]')).toBeNull();
+    expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
     expect(onWithdrawn).toHaveBeenCalledWith(recorded, {
       amount: "6",

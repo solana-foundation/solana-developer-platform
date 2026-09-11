@@ -45,6 +45,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.withdraw.done": "Done",
   "DashboardEarn.withdraw.amountLabel": "Amount",
   "DashboardEarn.withdraw.errorAmountRequired": "Enter an amount greater than zero.",
+  "DashboardEarn.vaultWithdraw.max": "Max",
   "DashboardEarn.deposit.cancel": "Cancel",
   "DashboardEarn.deposit.back": "Back",
   "DashboardEarn.deposit.continueAction": "Continue",
@@ -75,9 +76,11 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultAmountPrecision": "Use no more than {decimals} decimal places.",
   "DashboardEarn.deposit.vaultOverBalance":
     "This is above the last observed balance; the provider will verify it on submit.",
-  "DashboardEarn.deposit.vaultSwapNotice": "Swap {source} to {target} at {pct}% tolerance.",
   "DashboardEarn.deposit.vaultSwapRow": "Swap",
   "DashboardEarn.deposit.vaultSwapVia": "{source} to {target} via Jupiter",
+  "DashboardEarn.deposit.vaultSwapReviewTitle": "Swap required before deposit",
+  "DashboardEarn.deposit.vaultSwapReviewBody":
+    "Your {source} will be swapped to the vault's underlying {target} through Jupiter, then deposited in the same transaction.",
   "DashboardEarn.deposit.vaultConfirmNote":
     "The selected custody wallet signs the vault deposit transaction.",
   "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
@@ -308,7 +311,8 @@ describe("exact vault amount helpers", () => {
 });
 
 describe("EarnVaultDepositModal", () => {
-  it("removes setup copy and auto-selects the only wallet and stablecoin", async () => {
+  it("auto-selects the only wallet and its largest held stablecoin and fills Max", async () => {
+    const user = userEvent.setup();
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -322,8 +326,17 @@ describe("EarnVaultDepositModal", () => {
     expect(
       (screen.getByRole("radio", { name: /Treasury wallet/ }) as HTMLInputElement).checked
     ).toBe(true);
-    expect(screen.queryByText("Pay with")).toBeNull();
-    expect((screen.getByLabelText("Amount") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText("Pay with")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement).checked).toBe(false);
+    const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
+    const maxButton = screen.getByRole("button", { name: "Max" });
+    expect(amountInput.disabled).toBe(false);
+    expect(amountInput.parentElement?.contains(maxButton)).toBe(true);
+    await user.click(maxButton);
+    expect(amountInput.value).toBe("2.5");
+    expect(screen.getByText("$")).toBeTruthy();
     expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
   });
 
@@ -337,13 +350,18 @@ describe("EarnVaultDepositModal", () => {
 
     expect(screen.getByText("$1.25")).toBeTruthy();
     expect(screen.getByText("Treasury wallet")).toBeTruthy();
+    expect(screen.queryByText("Swap required before deposit")).toBeNull();
+    const completedMarker = document.querySelector('[data-earn-step-complete="true"]');
+    expect(completedMarker?.className).toContain("bg-white");
+    expect(completedMarker?.className).toContain("text-black");
+    expect(completedMarker?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("1.25");
   });
 
-  it("auto-selects a wallet's only held stablecoin even when the vault uses another", async () => {
+  it("auto-selects a wallet's held stablecoin while showing every supported option", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
@@ -363,11 +381,20 @@ describe("EarnVaultDepositModal", () => {
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     await screen.findByRole("dialog");
-    expect(screen.queryByText("Pay with")).toBeNull();
-    expect(screen.queryByRole("radio", { name: "USDC" })).toBeNull();
+    expect(screen.getByText("Pay with")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Swap required before deposit")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your USDG will be swapped to the vault's underlying USDC through Jupiter, then deposited in the same transaction."
+      )
+    ).toBeTruthy();
+    expect(document.querySelector('[data-earn-swap-review="true"]')).toBeTruthy();
     await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
@@ -785,12 +812,21 @@ describe("EarnVaultDepositModal", () => {
 
       expect(await screen.findByText(title)).toBeTruthy();
       expect(screen.getByText(statusLabel)).toBeTruthy();
-      expect(Boolean(document.querySelector('[data-earn-processing="true"]'))).toBe(
+      expect(Boolean(document.querySelector(".earn-processing-modal"))).toBe(
         status !== "confirmed"
       );
-      expect(Boolean(document.querySelector('[data-earn-step-processing="true"]'))).toBe(
-        status !== "confirmed"
-      );
+      expect(document.querySelector('[data-earn-processing="true"]')).toBeNull();
+      expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
+      if (status === "confirmed") {
+        const confirmation = document.querySelector('[data-earn-outcome="success"]');
+        const terminalStep = document.querySelector('[data-earn-step-terminal-active="true"]');
+        expect(confirmation).toBeTruthy();
+        expect(confirmation?.className).toContain("mx-auto");
+        expect(terminalStep?.className).toContain("bg-white");
+        expect(terminalStep?.className).toContain("text-black");
+        expect(terminalStep?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
+        expect(document.querySelectorAll('[data-earn-step-check="true"]')).toHaveLength(4);
+      }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(
         `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
@@ -877,7 +913,7 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
-  it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
+  it("defaults to the largest held stablecoin while keeping every supported option selectable", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
     const onDeposited = vi.fn();
     mocks.useEarnFundingWallets.mockReturnValue({
@@ -906,8 +942,25 @@ describe("EarnVaultDepositModal", () => {
     );
     await screen.findByRole("dialog");
 
-    expect(screen.queryByRole("radio", { name: "PYUSD" })).toBeNull();
-    await user.click(screen.getByRole("radio", { name: "USDG" }));
+    const pyusdOption = screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement;
+    const usdcOption = screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement;
+    const usdgOption = screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement;
+    expect(usdgOption.checked).toBe(true);
+    expect(usdcOption.checked).toBe(false);
+    expect(pyusdOption.checked).toBe(false);
+    expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
+
+    await user.click(pyusdOption);
+    expect(pyusdOption.checked).toBe(true);
+    expect(screen.getAllByText("Available $0.00").length).toBeGreaterThan(0);
+    expect((screen.getByRole("button", { name: "Max" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(usdcOption);
+    expect(usdcOption.checked).toBe(true);
+    expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
+
+    await user.click(usdgOption);
+    expect(usdgOption.checked).toBe(true);
 
     // The whole form speaks the FUNDING token now: label and balance.
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
@@ -1456,8 +1509,15 @@ describe("fee sponsorship copy", () => {
     // Sponsorship refuses swap routes, so the copy follows the funding choice.
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
     await user.click(screen.getByRole("radio", { name: "USDG" }));
+    expect(screen.queryByText("Swap USDG to USDC at 0.02% tolerance.")).toBeNull();
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Swap required before deposit")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your USDG will be swapped to the vault's underlying USDC through Jupiter, then deposited in the same transaction."
+      )
+    ).toBeTruthy();
     expect(
       screen.getByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeTruthy();

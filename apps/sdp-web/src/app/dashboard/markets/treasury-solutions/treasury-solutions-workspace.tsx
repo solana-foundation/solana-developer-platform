@@ -2,7 +2,6 @@
 
 import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
@@ -11,14 +10,13 @@ import {
   isVaultDirectDepositEnabled,
   type SdpEnvironment,
   SOLANA_CLUSTER_LABELS,
-  SOLANA_CLUSTERS,
-  type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
+  ArrowDownIcon,
   ArrowDownLeftIcon,
   ArrowUpDownIcon,
+  ArrowUpIcon,
   ArrowUpRightIcon,
   InfoIcon,
   RefreshCwIcon,
@@ -149,6 +147,8 @@ const TREASURY_AVAILABILITY_LABELS = {
 } as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
 type NumericSortDirection = "ascending" | "descending";
+type NumericSortState = NumericSortDirection | "none";
+type StrategySortField = "apy" | "tvl";
 
 function sortByOptionalDecimal<Item>(
   items: readonly Item[],
@@ -184,9 +184,16 @@ function SortableNumericTableHead({
 }: {
   children: ReactNode;
   className?: string;
-  direction: NumericSortDirection;
+  direction: NumericSortState;
   onToggle: () => void;
 }) {
+  const SortIcon =
+    direction === "ascending"
+      ? ArrowUpIcon
+      : direction === "descending"
+        ? ArrowDownIcon
+        : ArrowUpDownIcon;
+
   return (
     <TableHead aria-sort={direction} className={className}>
       <button
@@ -194,11 +201,19 @@ function SortableNumericTableHead({
         onClick={onToggle}
         type="button"
       >
-        <ArrowUpDownIcon aria-hidden="true" className="size-4 shrink-0 text-tertiary" />
+        <SortIcon
+          aria-hidden="true"
+          className={`size-4 shrink-0 ${direction === "none" ? "text-tertiary" : "text-secondary"}`}
+        />
         <span>{children}</span>
       </button>
     </TableHead>
   );
+}
+
+function strategyTvlUsd(strategy: EarnStrategy): string | undefined {
+  const tvl = strategy.riskMetadata?.tvlUsd;
+  return typeof tvl === "number" && Number.isFinite(tvl) && tvl >= 0 ? String(tvl) : undefined;
 }
 
 function replaceTrackedVaultMovement<
@@ -682,14 +697,81 @@ function strategyPositionValue(
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
 
-function TreasuryPositionIdentity({ name, provider }: { name: string; provider: string }) {
+function TreasuryPositionIdentity({
+  cluster,
+  name,
+  provider,
+}: {
+  cluster?: EarnStrategy["hostCluster"];
+  name: string;
+  provider: string;
+}) {
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm text-primary" title={name}>
-        {name}
+      <p className="flex min-w-0 items-center gap-2 text-sm text-primary">
+        <span className="truncate" title={name}>
+          {name}
+        </span>
+        {cluster === "devnet" ? (
+          <Badge className="shrink-0 text-[10px]" variant="outline">
+            {SOLANA_CLUSTER_LABELS[cluster]}
+          </Badge>
+        ) : null}
       </p>
       <p className="mt-0.5 truncate text-xs text-tertiary">{provider}</p>
     </div>
+  );
+}
+
+function strategyNetworkRank(strategy: EarnStrategy): number {
+  if (strategy.hostCluster === "mainnet-beta") return 0;
+  if (strategy.hostCluster === "devnet") return 1;
+  return 2;
+}
+
+function StrategyDepositAction({
+  availability,
+  environment,
+  onDeposit,
+  strategy,
+}: {
+  availability: EarnVaultDepositAvailability;
+  environment: SdpEnvironment;
+  onDeposit: (strategy: EarnStrategy) => void;
+  strategy: EarnStrategy;
+}) {
+  const t = useTranslations();
+  const sandboxMainnet = environment === "sandbox" && strategy.hostCluster === "mainnet-beta";
+  const canDeposit = availability === "available" && !sandboxMainnet;
+  const button = (
+    <Button
+      className={sandboxMainnet ? "pointer-events-none" : undefined}
+      disabled={!canDeposit}
+      iconLeft={<ArrowDownLeftIcon />}
+      onClick={() => onDeposit(strategy)}
+      size="sm"
+      type="button"
+    >
+      {t("DashboardMarkets.treasury.deposit")}
+    </Button>
+  );
+
+  if (!sandboxMainnet) return button;
+
+  const reason = t("DashboardMarkets.treasury.mainnetDepositUnavailable");
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span aria-label={reason} className="inline-flex cursor-not-allowed" role="note">
+            {button}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 text-xs leading-5" side="top">
+          {reason}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -710,11 +792,27 @@ function StrategyTable({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const [apySortDirection, setApySortDirection] = useState<NumericSortDirection>("descending");
-  const sortedStrategies = useMemo(
-    () => sortByOptionalDecimal(strategies, (strategy) => strategy.currentApy, apySortDirection),
-    [apySortDirection, strategies]
-  );
+  const [strategySort, setStrategySort] = useState<{
+    direction: NumericSortDirection;
+    field: StrategySortField;
+  }>({ direction: "descending", field: "apy" });
+  const sortedStrategies = useMemo(() => {
+    const sortedByMetric = sortByOptionalDecimal(
+      strategies,
+      strategySort.field === "apy" ? (strategy) => strategy.currentApy : strategyTvlUsd,
+      strategySort.direction
+    );
+    return sortedByMetric.sort(
+      (left, right) => strategyNetworkRank(left) - strategyNetworkRank(right)
+    );
+  }, [strategies, strategySort]);
+  const toggleStrategySort = (field: StrategySortField) => {
+    setStrategySort((current) => ({
+      direction:
+        current.field === field && current.direction === "descending" ? "ascending" : "descending",
+      field,
+    }));
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -729,16 +827,18 @@ function StrategyTable({
             <TableHead className="w-[16%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
             <SortableNumericTableHead
               className="w-[12%]"
-              direction={apySortDirection}
-              onToggle={() =>
-                setApySortDirection((current) =>
-                  current === "descending" ? "ascending" : "descending"
-                )
-              }
+              direction={strategySort.field === "apy" ? strategySort.direction : "none"}
+              onToggle={() => toggleStrategySort("apy")}
             >
               {t("DashboardMarkets.treasury.apy")}
             </SortableNumericTableHead>
-            <TableHead className="w-[18%]">{t("DashboardMarkets.treasury.tvl")}</TableHead>
+            <SortableNumericTableHead
+              className="w-[18%]"
+              direction={strategySort.field === "tvl" ? strategySort.direction : "none"}
+              onToggle={() => toggleStrategySort("tvl")}
+            >
+              {t("DashboardMarkets.treasury.tvl")}
+            </SortableNumericTableHead>
             <TableHead align="right" className="w-[14%]">
               {t("DashboardMarkets.treasury.actions")}
             </TableHead>
@@ -755,15 +855,18 @@ function StrategyTable({
               environment,
               providerAccess
             );
-            const canDeposit = availability === "available";
+            const sandboxMainnet =
+              environment === "sandbox" && strategy.hostCluster === "mainnet-beta";
             const provider = earnProviderLabel(strategy.provider);
-            const tvl = strategy.riskMetadata?.tvlUsd;
-            const tvlUsd =
-              typeof tvl === "number" && Number.isFinite(tvl) && tvl >= 0 ? String(tvl) : undefined;
+            const tvlUsd = strategyTvlUsd(strategy);
             return (
               <TableRow key={strategy.id}>
                 <TableCell>
-                  <TreasuryPositionIdentity name={strategy.name} provider={provider} />
+                  <TreasuryPositionIdentity
+                    cluster={strategy.hostCluster}
+                    name={strategy.name}
+                    provider={provider}
+                  />
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2 text-sm text-secondary">
@@ -795,22 +898,19 @@ function StrategyTable({
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex flex-col items-end gap-2">
-                    {canDeposit ? null : (
+                    {availability === "available" || sandboxMainnet ? null : (
                       <EarnDepositAvailabilityBadge
                         availability={availability}
                         labels={TREASURY_AVAILABILITY_LABELS}
                         strategy={strategy}
                       />
                     )}
-                    <Button
-                      disabled={!canDeposit}
-                      iconLeft={<ArrowDownLeftIcon />}
-                      onClick={() => onDeposit(strategy)}
-                      size="sm"
-                      type="button"
-                    >
-                      {t("DashboardMarkets.treasury.deposit")}
-                    </Button>
+                    <StrategyDepositAction
+                      availability={availability}
+                      environment={environment}
+                      onDeposit={onDeposit}
+                      strategy={strategy}
+                    />
                   </div>
                 </TableCell>
               </TableRow>
@@ -1146,35 +1246,130 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
   return `${watch.programId}:${watch.withdrawalRef}`;
 }
 
-function TreasuryStrategiesCard({
-  cluster,
-  environment,
-  error,
-  isLoading,
-  onClusterChange,
-  onDeposit,
-  onRefresh,
-  positions,
-  providerAccess,
-  strategies,
-  unrecordedShareMints,
-}: {
-  /** The cluster sub-shelf being browsed — the environment's own by default. */
-  cluster: SolanaCluster;
+interface TreasuryStrategiesCardProps {
+  devnetError: unknown;
+  devnetLoading: boolean;
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
-  onClusterChange: (cluster: SolanaCluster) => void;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[] | undefined;
   unrecordedShareMints: ReadonlySet<string> | undefined;
+}
+
+function DevnetCatalogueStatus({
+  error,
+  hasStrategies,
+  isLoading,
+}: {
+  error: unknown;
+  hasStrategies: boolean;
+  isLoading: boolean;
 }) {
   const t = useTranslations();
+  if (!hasStrategies) return null;
+  if (error) {
+    return (
+      <div
+        className="flex items-center gap-2 border-b border-warning-border bg-warning-bg px-6 py-3 text-xs leading-5 text-warning"
+        role="alert"
+      >
+        <InfoIcon aria-hidden="true" className="size-4 shrink-0" />
+        <p>{t("DashboardMarkets.treasury.devnetStrategiesUnavailable")}</p>
+      </div>
+    );
+  }
+  if (!isLoading) return null;
+  return (
+    <div
+      className="flex items-center gap-2 border-b border-border-default bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary"
+      role="status"
+    >
+      <RefreshCwIcon aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
+      <p>{t("DashboardMarkets.treasury.devnetStrategiesLoading")}</p>
+    </div>
+  );
+}
+
+function TreasuryStrategiesCardBody({
+  devnetError,
+  devnetLoading,
+  environment,
+  error,
+  isLoading,
+  onDeposit,
+  positions,
+  providerAccess,
+  strategies,
+  unrecordedShareMints,
+}: Omit<TreasuryStrategiesCardProps, "onRefresh">) {
+  const t = useTranslations();
+  if (isLoading) {
+    return (
+      <div className="grid gap-3 px-6 py-5">
+        <SkeletonBlock className="h-14 rounded-xl" />
+        <SkeletonBlock className="h-14 rounded-xl" />
+        <SkeletonBlock className="h-14 rounded-xl" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <ListEmptyState
+        description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
+        icon={<InfoIcon aria-hidden="true" className="size-5" />}
+        message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
+      />
+    );
+  }
+  const availableStrategies = strategies ?? [];
+  return (
+    <>
+      <DevnetCatalogueStatus
+        error={devnetError}
+        hasStrategies={availableStrategies.length > 0}
+        isLoading={devnetLoading}
+      />
+      {availableStrategies.length === 0 ? (
+        <ListEmptyState
+          description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
+          icon={<InfoIcon aria-hidden="true" className="size-5" />}
+          message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
+        />
+      ) : (
+        <StrategyTable
+          environment={environment}
+          onDeposit={onDeposit}
+          positions={positions}
+          providerAccess={providerAccess}
+          strategies={availableStrategies}
+          unrecordedShareMints={unrecordedShareMints}
+        />
+      )}
+    </>
+  );
+}
+
+function treasuryStrategiesDisclosureKey(
+  depositsEnabled: boolean,
+  providerAccess: EarnProviderAccess | null
+) {
+  if (providerAccess === null) return "DashboardMarkets.treasury.accessDisclosure" as const;
+  if (depositsEnabled) return "DashboardMarkets.treasury.rateDisclosure" as const;
+  return "DashboardMarkets.treasury.productionDisclosure" as const;
+}
+
+function TreasuryStrategiesCard({
+  onRefresh,
+  providerAccess,
+  ...bodyProps
+}: TreasuryStrategiesCardProps) {
+  const t = useTranslations();
   const depositsEnabled = SURFACED_VAULT_DIRECT_EARN_PROVIDERS.some((provider) =>
-    isVaultDirectDepositEnabled(environment, provider)
+    isVaultDirectDepositEnabled(bodyProps.environment, provider)
   );
 
   return (
@@ -1183,32 +1378,10 @@ function TreasuryStrategiesCard({
         <h2 className="flex items-center gap-1 text-[19px] leading-6 font-medium text-primary">
           {t("DashboardMarkets.treasury.strategiesTitle")}
           <TreasuryInfoTip
-            label={t(
-              providerAccess === null
-                ? "DashboardMarkets.treasury.accessDisclosure"
-                : depositsEnabled
-                  ? "DashboardMarkets.treasury.rateDisclosure"
-                  : "DashboardMarkets.treasury.productionDisclosure"
-            )}
+            label={t(treasuryStrategiesDisclosureKey(depositsEnabled, providerAccess))}
           />
         </h2>
         <div className="flex items-center gap-2">
-          {environment === "sandbox" ? (
-            // Sandbox only (PRO-1742): production has no other shelf to
-            // offer, so the control must not render there at all — reviewing
-            // the mainnet catalogue IS what production shows by default.
-            <SegmentedControl
-              aria-label={t("DashboardMarkets.treasury.clusterToggleLabel")}
-              items={SOLANA_CLUSTERS.map((option) => ({
-                value: option,
-                label: SOLANA_CLUSTER_LABELS[option],
-              }))}
-              value={cluster}
-              // Re-clicking the active segment can emit an empty value from
-              // the underlying toggle group; a shelf always has a selection.
-              onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
-            />
-          ) : null}
           <Button
             iconLeft={<RefreshCwIcon />}
             onClick={onRefresh}
@@ -1221,34 +1394,7 @@ function TreasuryStrategiesCard({
         </div>
       </div>
       <Card className="overflow-hidden rounded-2xl py-0">
-        {isLoading ? (
-          <div className="grid gap-3 px-6 py-5">
-            <SkeletonBlock className="h-14 rounded-xl" />
-            <SkeletonBlock className="h-14 rounded-xl" />
-            <SkeletonBlock className="h-14 rounded-xl" />
-          </div>
-        ) : error ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
-            icon={<InfoIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
-          />
-        ) : (strategies ?? []).length === 0 ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
-            icon={<InfoIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
-          />
-        ) : (
-          <StrategyTable
-            environment={environment}
-            onDeposit={onDeposit}
-            positions={positions}
-            providerAccess={providerAccess}
-            strategies={strategies ?? []}
-            unrecordedShareMints={unrecordedShareMints}
-          />
-        )}
+        <TreasuryStrategiesCardBody providerAccess={providerAccess} {...bodyProps} />
       </Card>
     </section>
   );
@@ -1358,12 +1504,12 @@ function treasurySummaryLoading(input: {
 interface TreasuryWorkspaceContentProps {
   activeWallets: readonly EarnFundingWallet[];
   allocation: TreasuryAllocation;
-  catalogueCluster: SolanaCluster;
   catalogueError: unknown;
   catalogueLoading: boolean;
   catalogueStrategies: readonly EarnStrategy[] | undefined;
+  devnetCatalogueError: unknown;
+  devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
-  onCatalogueClusterChange: (cluster: SolanaCluster) => void;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   onWithdrawPosition: (position: EarnVaultPosition) => void;
@@ -1387,12 +1533,12 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   const {
     activeWallets,
     allocation,
-    catalogueCluster,
     catalogueError,
     catalogueLoading,
     catalogueStrategies,
+    devnetCatalogueError,
+    devnetCatalogueLoading,
     environment,
-    onCatalogueClusterChange,
     onDeposit,
     onRefresh,
     onWithdrawPosition,
@@ -1440,11 +1586,11 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
       />
 
       <TreasuryStrategiesCard
-        cluster={catalogueCluster}
+        devnetError={devnetCatalogueError}
+        devnetLoading={devnetCatalogueLoading}
         environment={environment}
         error={catalogueError}
         isLoading={catalogueLoading}
-        onClusterChange={onCatalogueClusterChange}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
         positions={positionsError ? undefined : positions}
@@ -1467,6 +1613,23 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   );
 }
 
+function mergeStrategyCatalogues(
+  mainnet: readonly EarnStrategy[] | undefined,
+  devnet: readonly EarnStrategy[] | undefined
+): EarnStrategy[] | undefined {
+  if (!mainnet) return undefined;
+  if (!devnet) return [...mainnet];
+
+  const combined = [...mainnet];
+  const seen = new Set(mainnet.map((strategy) => strategy.id));
+  for (const strategy of devnet) {
+    if (seen.has(strategy.id)) continue;
+    seen.add(strategy.id);
+    combined.push(strategy);
+  }
+  return combined;
+}
+
 export function TreasurySolutionsWorkspace({
   providerAccess,
 }: {
@@ -1485,25 +1648,29 @@ export function TreasurySolutionsWorkspace({
     isLoading: strategiesLoading,
     refresh: refreshStrategies,
   } = useEarnStrategies();
-  // PRO-1742: the strategies card's cluster opt-in, sandbox-only by
-  // construction — production always reads its default shelf. The card's read
-  // is SEPARATE from `strategies` above on purpose: that read doubles as the
-  // share-mint vocabulary behind the allocation summary, and browsing the
-  // mirrored mainnet shelf must not blank the devnet vocabulary under it. On
-  // the default shelf both hooks share one SWR key, so no second fetch happens
-  // until the toggle leaves it. `undefined` means "the default shelf", and the
-  // toggle handler below normalizes the environment's own cluster back to it,
-  // so toggling away and back re-joins the shared key instead of keeping a
-  // second, permanently distinct cache entry of the identical shelf.
-  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(undefined);
-  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
-  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
+  // The allocation summary still reads the environment's actionable shelf.
+  // Sandbox automatically combines that devnet shelf with the mirrored
+  // mainnet catalogue, preserving the API's `fundable: false` response on
+  // mainnet rows. Production's default shelf is already mainnet.
+  const catalogueCluster = sdpEnvironment === "sandbox" ? "mainnet-beta" : undefined;
   const {
-    strategies: catalogueStrategies,
-    error: catalogueError,
-    isLoading: catalogueLoading,
+    strategies: baseCatalogueStrategies,
+    error: baseCatalogueError,
+    isLoading: baseCatalogueLoading,
     refresh: refreshCatalogue,
-  } = useEarnStrategies({ cluster: strategiesCluster });
+  } = useEarnStrategies({ cluster: catalogueCluster });
+  const catalogueStrategies = useMemo(
+    () =>
+      sdpEnvironment === "sandbox"
+        ? mergeStrategyCatalogues(baseCatalogueStrategies, strategiesError ? undefined : strategies)
+        : baseCatalogueStrategies,
+    [baseCatalogueStrategies, sdpEnvironment, strategies, strategiesError]
+  );
+  const catalogueError = baseCatalogueError;
+  const devnetCatalogueError = sdpEnvironment === "sandbox" ? strategiesError : undefined;
+  const devnetCatalogueLoading = sdpEnvironment === "sandbox" && strategiesLoading;
+  const catalogueLoading =
+    baseCatalogueLoading || (sdpEnvironment === "sandbox" && strategiesLoading);
   const {
     positions,
     error: positionsError,
@@ -1768,19 +1935,17 @@ export function TreasurySolutionsWorkspace({
       <TreasuryWorkspaceContent
         activeWallets={activeWallets}
         allocation={allocation}
-        catalogueCluster={strategiesCluster ?? environmentCluster}
         catalogueError={catalogueError}
         catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
         catalogueStrategies={catalogueStrategies}
+        devnetCatalogueError={devnetCatalogueError}
+        devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
-        onCatalogueClusterChange={(cluster) =>
-          setCatalogueCluster(cluster === environmentCluster ? undefined : cluster)
-        }
         onDeposit={setDepositStrategy}
         onRefresh={() => {
           refreshWalletBalances();
           refreshStrategies();
-          if (strategiesCluster !== undefined) refreshCatalogue();
+          if (catalogueCluster !== undefined) refreshCatalogue();
           refreshPositions();
           refreshPrograms();
         }}
