@@ -280,6 +280,7 @@ vi.mock("../earn/earn-program-data", () => ({
                 : { shareMint: mocks.corruptStableShareMint ? USDC_MINT : CATALOGUE_SHARE_MINT }),
               apyType: "variable",
               currentApy: "0.041",
+              riskMetadata: { tvlUsd: 25_000_000 },
               liquidityTerm: "instant",
               status: "active",
               hostCluster: "devnet",
@@ -1264,7 +1265,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(delayedRow.textContent).not.toMatch(/\d%/);
   });
 
-  it("sorts active balances and strategy APYs while keeping unavailable values last", async () => {
+  it("sorts active balances, strategy APYs, and TVLs while keeping unavailable values last", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
@@ -1299,7 +1300,9 @@ describe("TreasurySolutionsWorkspace", () => {
     ]);
 
     const apyHeader = within(strategiesTable).getByRole("columnheader", { name: "APY" });
+    const tvlHeader = within(strategiesTable).getByRole("columnheader", { name: "TVL" });
     expect(apyHeader.getAttribute("aria-sort")).toBe("descending");
+    expect(tvlHeader.getAttribute("aria-sort")).toBe("none");
     expect(firstColumn(strategiesTable)).toEqual([
       "Kamino USDC VaultKamino",
       "Kamino PYUSD VaultKamino",
@@ -1311,6 +1314,23 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(firstColumn(strategiesTable)).toEqual([
       "Kamino PYUSD VaultKamino",
       "Kamino USDC VaultKamino",
+      "Veda Treasury FundVeda",
+    ]);
+
+    await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
+    expect(apyHeader.getAttribute("aria-sort")).toBe("none");
+    expect(tvlHeader.getAttribute("aria-sort")).toBe("descending");
+    expect(firstColumn(strategiesTable)).toEqual([
+      "Kamino PYUSD VaultKamino",
+      "Kamino USDC VaultKamino",
+      "Veda Treasury FundVeda",
+    ]);
+
+    await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
+    expect(tvlHeader.getAttribute("aria-sort")).toBe("ascending");
+    expect(firstColumn(strategiesTable)).toEqual([
+      "Kamino USDC VaultKamino",
+      "Kamino PYUSD VaultKamino",
       "Veda Treasury FundVeda",
     ]);
   });

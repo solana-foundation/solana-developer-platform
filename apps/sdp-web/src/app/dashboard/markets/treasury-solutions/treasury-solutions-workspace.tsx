@@ -17,8 +17,10 @@ import {
 } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
 import {
+  ArrowDownIcon,
   ArrowDownLeftIcon,
   ArrowUpDownIcon,
+  ArrowUpIcon,
   ArrowUpRightIcon,
   InfoIcon,
   RefreshCwIcon,
@@ -149,6 +151,8 @@ const TREASURY_AVAILABILITY_LABELS = {
 } as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
 
 type NumericSortDirection = "ascending" | "descending";
+type NumericSortState = NumericSortDirection | "none";
+type StrategySortField = "apy" | "tvl";
 
 function sortByOptionalDecimal<Item>(
   items: readonly Item[],
@@ -184,9 +188,16 @@ function SortableNumericTableHead({
 }: {
   children: ReactNode;
   className?: string;
-  direction: NumericSortDirection;
+  direction: NumericSortState;
   onToggle: () => void;
 }) {
+  const SortIcon =
+    direction === "ascending"
+      ? ArrowUpIcon
+      : direction === "descending"
+        ? ArrowDownIcon
+        : ArrowUpDownIcon;
+
   return (
     <TableHead aria-sort={direction} className={className}>
       <button
@@ -194,11 +205,19 @@ function SortableNumericTableHead({
         onClick={onToggle}
         type="button"
       >
-        <ArrowUpDownIcon aria-hidden="true" className="size-4 shrink-0 text-tertiary" />
+        <SortIcon
+          aria-hidden="true"
+          className={`size-4 shrink-0 ${direction === "none" ? "text-tertiary" : "text-secondary"}`}
+        />
         <span>{children}</span>
       </button>
     </TableHead>
   );
+}
+
+function strategyTvlUsd(strategy: EarnStrategy): string | undefined {
+  const tvl = strategy.riskMetadata?.tvlUsd;
+  return typeof tvl === "number" && Number.isFinite(tvl) && tvl >= 0 ? String(tvl) : undefined;
 }
 
 function replaceTrackedVaultMovement<
@@ -710,11 +729,26 @@ function StrategyTable({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const [apySortDirection, setApySortDirection] = useState<NumericSortDirection>("descending");
+  const [strategySort, setStrategySort] = useState<{
+    direction: NumericSortDirection;
+    field: StrategySortField;
+  }>({ direction: "descending", field: "apy" });
   const sortedStrategies = useMemo(
-    () => sortByOptionalDecimal(strategies, (strategy) => strategy.currentApy, apySortDirection),
-    [apySortDirection, strategies]
+    () =>
+      sortByOptionalDecimal(
+        strategies,
+        strategySort.field === "apy" ? (strategy) => strategy.currentApy : strategyTvlUsd,
+        strategySort.direction
+      ),
+    [strategies, strategySort]
   );
+  const toggleStrategySort = (field: StrategySortField) => {
+    setStrategySort((current) => ({
+      direction:
+        current.field === field && current.direction === "descending" ? "ascending" : "descending",
+      field,
+    }));
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -729,16 +763,18 @@ function StrategyTable({
             <TableHead className="w-[16%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
             <SortableNumericTableHead
               className="w-[12%]"
-              direction={apySortDirection}
-              onToggle={() =>
-                setApySortDirection((current) =>
-                  current === "descending" ? "ascending" : "descending"
-                )
-              }
+              direction={strategySort.field === "apy" ? strategySort.direction : "none"}
+              onToggle={() => toggleStrategySort("apy")}
             >
               {t("DashboardMarkets.treasury.apy")}
             </SortableNumericTableHead>
-            <TableHead className="w-[18%]">{t("DashboardMarkets.treasury.tvl")}</TableHead>
+            <SortableNumericTableHead
+              className="w-[18%]"
+              direction={strategySort.field === "tvl" ? strategySort.direction : "none"}
+              onToggle={() => toggleStrategySort("tvl")}
+            >
+              {t("DashboardMarkets.treasury.tvl")}
+            </SortableNumericTableHead>
             <TableHead align="right" className="w-[14%]">
               {t("DashboardMarkets.treasury.actions")}
             </TableHead>
@@ -757,9 +793,7 @@ function StrategyTable({
             );
             const canDeposit = availability === "available";
             const provider = earnProviderLabel(strategy.provider);
-            const tvl = strategy.riskMetadata?.tvlUsd;
-            const tvlUsd =
-              typeof tvl === "number" && Number.isFinite(tvl) && tvl >= 0 ? String(tvl) : undefined;
+            const tvlUsd = strategyTvlUsd(strategy);
             return (
               <TableRow key={strategy.id}>
                 <TableCell>
