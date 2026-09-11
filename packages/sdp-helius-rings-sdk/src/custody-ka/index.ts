@@ -3,4 +3,3 @@ export {
   createCustodyMaterialSource,
 } from "./derivation.js";
 export { derivationMessageBase64, fetchDerivationSeed, type SignMessage } from "./seed.js";
-export { clearSeedCache, invalidateCachedSeed, type SeedCacheConfig } from "./seed-cache.js";
