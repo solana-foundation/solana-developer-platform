@@ -1246,19 +1246,7 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
   return `${watch.programId}:${watch.withdrawalRef}`;
 }
 
-function TreasuryStrategiesCard({
-  devnetError,
-  devnetLoading,
-  environment,
-  error,
-  isLoading,
-  onDeposit,
-  onRefresh,
-  positions,
-  providerAccess,
-  strategies,
-  unrecordedShareMints,
-}: {
+interface TreasuryStrategiesCardProps {
   devnetError: unknown;
   devnetLoading: boolean;
   environment: SdpEnvironment;
@@ -1270,10 +1258,118 @@ function TreasuryStrategiesCard({
   providerAccess: EarnProviderAccess | null;
   strategies: readonly EarnStrategy[] | undefined;
   unrecordedShareMints: ReadonlySet<string> | undefined;
+}
+
+function DevnetCatalogueStatus({
+  error,
+  hasStrategies,
+  isLoading,
+}: {
+  error: unknown;
+  hasStrategies: boolean;
+  isLoading: boolean;
 }) {
   const t = useTranslations();
+  if (!hasStrategies) return null;
+  if (error) {
+    return (
+      <div
+        className="flex items-center gap-2 border-b border-warning-border bg-warning-bg px-6 py-3 text-xs leading-5 text-warning"
+        role="alert"
+      >
+        <InfoIcon aria-hidden="true" className="size-4 shrink-0" />
+        <p>{t("DashboardMarkets.treasury.devnetStrategiesUnavailable")}</p>
+      </div>
+    );
+  }
+  if (!isLoading) return null;
+  return (
+    <div
+      className="flex items-center gap-2 border-b border-border-default bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary"
+      role="status"
+    >
+      <RefreshCwIcon aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
+      <p>{t("DashboardMarkets.treasury.devnetStrategiesLoading")}</p>
+    </div>
+  );
+}
+
+function TreasuryStrategiesCardBody({
+  devnetError,
+  devnetLoading,
+  environment,
+  error,
+  isLoading,
+  onDeposit,
+  positions,
+  providerAccess,
+  strategies,
+  unrecordedShareMints,
+}: Omit<TreasuryStrategiesCardProps, "onRefresh">) {
+  const t = useTranslations();
+  if (isLoading) {
+    return (
+      <div className="grid gap-3 px-6 py-5">
+        <SkeletonBlock className="h-14 rounded-xl" />
+        <SkeletonBlock className="h-14 rounded-xl" />
+        <SkeletonBlock className="h-14 rounded-xl" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <ListEmptyState
+        description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
+        icon={<InfoIcon aria-hidden="true" className="size-5" />}
+        message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
+      />
+    );
+  }
+  const availableStrategies = strategies ?? [];
+  return (
+    <>
+      <DevnetCatalogueStatus
+        error={devnetError}
+        hasStrategies={availableStrategies.length > 0}
+        isLoading={devnetLoading}
+      />
+      {availableStrategies.length === 0 ? (
+        <ListEmptyState
+          description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
+          icon={<InfoIcon aria-hidden="true" className="size-5" />}
+          message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
+        />
+      ) : (
+        <StrategyTable
+          environment={environment}
+          onDeposit={onDeposit}
+          positions={positions}
+          providerAccess={providerAccess}
+          strategies={availableStrategies}
+          unrecordedShareMints={unrecordedShareMints}
+        />
+      )}
+    </>
+  );
+}
+
+function treasuryStrategiesDisclosureKey(
+  depositsEnabled: boolean,
+  providerAccess: EarnProviderAccess | null
+) {
+  if (providerAccess === null) return "DashboardMarkets.treasury.accessDisclosure" as const;
+  if (depositsEnabled) return "DashboardMarkets.treasury.rateDisclosure" as const;
+  return "DashboardMarkets.treasury.productionDisclosure" as const;
+}
+
+function TreasuryStrategiesCard({
+  onRefresh,
+  providerAccess,
+  ...bodyProps
+}: TreasuryStrategiesCardProps) {
+  const t = useTranslations();
   const depositsEnabled = SURFACED_VAULT_DIRECT_EARN_PROVIDERS.some((provider) =>
-    isVaultDirectDepositEnabled(environment, provider)
+    isVaultDirectDepositEnabled(bodyProps.environment, provider)
   );
 
   return (
@@ -1282,13 +1378,7 @@ function TreasuryStrategiesCard({
         <h2 className="flex items-center gap-1 text-[19px] leading-6 font-medium text-primary">
           {t("DashboardMarkets.treasury.strategiesTitle")}
           <TreasuryInfoTip
-            label={t(
-              providerAccess === null
-                ? "DashboardMarkets.treasury.accessDisclosure"
-                : depositsEnabled
-                  ? "DashboardMarkets.treasury.rateDisclosure"
-                  : "DashboardMarkets.treasury.productionDisclosure"
-            )}
+            label={t(treasuryStrategiesDisclosureKey(depositsEnabled, providerAccess))}
           />
         </h2>
         <div className="flex items-center gap-2">
@@ -1304,58 +1394,7 @@ function TreasuryStrategiesCard({
         </div>
       </div>
       <Card className="overflow-hidden rounded-2xl py-0">
-        {isLoading ? (
-          <div className="grid gap-3 px-6 py-5">
-            <SkeletonBlock className="h-14 rounded-xl" />
-            <SkeletonBlock className="h-14 rounded-xl" />
-            <SkeletonBlock className="h-14 rounded-xl" />
-          </div>
-        ) : error ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
-            icon={<InfoIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
-          />
-        ) : (
-          <>
-            {devnetError && (strategies ?? []).length > 0 ? (
-              <div
-                className="flex items-center gap-2 border-b border-warning-border bg-warning-bg px-6 py-3 text-xs leading-5 text-warning"
-                role="alert"
-              >
-                <InfoIcon aria-hidden="true" className="size-4 shrink-0" />
-                <p>{t("DashboardMarkets.treasury.devnetStrategiesUnavailable")}</p>
-              </div>
-            ) : devnetLoading && (strategies ?? []).length > 0 ? (
-              <div
-                className="flex items-center gap-2 border-b border-border-default bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary"
-                role="status"
-              >
-                <RefreshCwIcon
-                  aria-hidden="true"
-                  className="size-4 shrink-0 motion-safe:animate-spin"
-                />
-                <p>{t("DashboardMarkets.treasury.devnetStrategiesLoading")}</p>
-              </div>
-            ) : null}
-            {(strategies ?? []).length === 0 ? (
-              <ListEmptyState
-                description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
-                icon={<InfoIcon aria-hidden="true" className="size-5" />}
-                message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
-              />
-            ) : (
-              <StrategyTable
-                environment={environment}
-                onDeposit={onDeposit}
-                positions={positions}
-                providerAccess={providerAccess}
-                strategies={strategies ?? []}
-                unrecordedShareMints={unrecordedShareMints}
-              />
-            )}
-          </>
-        )}
+        <TreasuryStrategiesCardBody providerAccess={providerAccess} {...bodyProps} />
       </Card>
     </section>
   );
