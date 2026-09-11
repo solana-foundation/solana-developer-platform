@@ -71,8 +71,8 @@ describe("useDvpCreateForm", () => {
   it("starts with both parties and both mints unselected", () => {
     const { result } = setup();
 
-    expect(result.current.values.partyA).toEqual({ mode: "address", address: "" });
-    expect(result.current.values.partyB).toEqual({ mode: "address", address: "" });
+    expect(result.current.values.partyA).toEqual({ mode: "wallet", walletId: "" });
+    expect(result.current.values.partyB).toEqual({ mode: "wallet", walletId: "" });
     expect(result.current.asset.token).toBeNull();
     expect(result.current.asset.mint).toBe("");
     expect(result.current.cash.token).toBeNull();

@@ -11,6 +11,7 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -28,6 +29,7 @@ function withI18n({ children }: { children: ReactNode }) {
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const originalFetch = global.fetch;
 
@@ -54,7 +56,6 @@ describe("useDvpTradeActions", () => {
     await act(async () => await result.current.act("settle"));
 
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-    expect(result.current.error).toBeNull();
     expect(result.current.awaitingApproval).toBe(false);
   });
 
@@ -67,7 +68,6 @@ describe("useDvpTradeActions", () => {
     await act(async () => await result.current.act("cancel"));
 
     expect(result.current.awaitingApproval).toBe(true);
-    expect(result.current.error).toBeNull();
     // Nothing landed on chain, so nothing to re-read.
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -78,7 +78,10 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("fund"));
 
-    expect(result.current.error).toBe("Leg already funded.");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Leg already funded.",
+      expect.objectContaining({ position: "bottom-right" })
+    );
   });
 
   // A body that is not JSON must still produce something an operator can act
@@ -95,7 +98,10 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("settle"));
 
-    expect(result.current.error).toBe("Request failed (500).");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Request failed (500).",
+      expect.objectContaining({ position: "bottom-right" })
+    );
   });
 
   it("reports a transport failure", async () => {
@@ -104,7 +110,10 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("settle"));
 
-    expect(result.current.error).toBe("socket hang up");
+    expect(toast.error).toHaveBeenCalledWith(
+      "socket hang up",
+      expect.objectContaining({ position: "bottom-right" })
+    );
     expect(result.current.pending).toBeNull();
   });
 
@@ -141,19 +150,5 @@ describe("useDvpTradeActions", () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
     expect(init.body).toBeUndefined();
-  });
-
-  // A second attempt after a refusal must not still show the first refusal.
-  it("clears the previous error when the action is retried", async () => {
-    global.fetch = respond(409, { error: { message: "Nope." } }) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
-
-    await act(async () => await result.current.act("settle"));
-    expect(result.current.error).toBe("Nope.");
-
-    global.fetch = respond(200) as never;
-    await act(async () => await result.current.act("settle"));
-
-    expect(result.current.error).toBeNull();
   });
 });

@@ -32,6 +32,7 @@ function leg(escrow: string, overrides: Partial<DvpInboundLeg> = {}): DvpInbound
     amount: "250000000",
     decimals: 6,
     symbol: "DUSD",
+    name: "Digital USD",
     escrow,
     observedAmount: null,
     frozen: false,

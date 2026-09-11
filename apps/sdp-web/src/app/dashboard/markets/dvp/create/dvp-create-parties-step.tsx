@@ -11,7 +11,7 @@ import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./
 import type { DvpCreateForm, DvpPartySlot } from "./use-dvp-create-form";
 
 /**
- * One side's fields: the party picker and mint as one row, then the amount.
+ * One side's fields: the party picker on its own row, then the amount and mint.
  * The parties are symmetric but the legs are not — side "a" delivers the
  * asset, side "b" the cash — so each row is captioned and optioned per side.
  *
@@ -38,20 +38,31 @@ function LegRow({
   const leg = a ? form.asset : form.cash;
   return (
     <div className="grid gap-4">
-      {/* items-start, not items-end: the party picker grows an error line
+      <PartySlotPicker
+        counterpartyAccounts={context.counterpartyAccounts}
+        // The same-address correction sits under the buyer's slot — the one
+        // whose pick usually completes the collision.
+        error={!a && form.sameAddress ? t("DashboardMarkets.dvp.fieldPartiesAreSame") : null}
+        id={`dvp-party-${side}`}
+        label={t(
+          a ? "DashboardMarkets.dvp.partySlotLabelA" : "DashboardMarkets.dvp.partySlotLabelB"
+        )}
+        onChange={(next) => onPartyChange(next)}
+        slot={a ? form.partyA : form.partyB}
+        wallets={context.wallets}
+      />
+      {/* items-start, not items-end: the amount grows a conversion line
           below itself, which must not drag the mint field down with it. */}
-      <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_180px]">
-        <PartySlotPicker
-          counterpartyAccounts={context.counterpartyAccounts}
-          // The same-address correction sits under the buyer's slot — the one
-          // whose pick usually completes the collision.
-          error={!a && form.sameAddress ? t("DashboardMarkets.dvp.fieldPartiesAreSame") : null}
-          id={`dvp-party-${side}`}
-          label={t(
-            a ? "DashboardMarkets.dvp.partySlotLabelA" : "DashboardMarkets.dvp.partySlotLabelB"
-          )}
-          onChange={(next) => onPartyChange(next)}
-          slot={a ? form.partyA : form.partyB}
+      <div className="grid items-start gap-4 sm:grid-cols-2">
+        <AmountField
+          decimals={leg.decimals}
+          disabled={leg.mint === ""}
+          id={`dvp-amount-${side}`}
+          label={t(a ? "DashboardMarkets.dvp.fieldAmountA" : "DashboardMarkets.dvp.fieldAmountB")}
+          onChange={leg.setAmount}
+          symbol={leg.symbol}
+          tokenName={leg.name}
+          value={leg.amount}
         />
         <MintField
           choice={leg.choice}
@@ -65,16 +76,6 @@ function LegRow({
           options={a ? context.tokens : form.cashOptions}
         />
       </div>
-      <AmountField
-        decimals={leg.decimals}
-        disabled={leg.mint === ""}
-        id={`dvp-amount-${side}`}
-        label={t(a ? "DashboardMarkets.dvp.fieldAmountA" : "DashboardMarkets.dvp.fieldAmountB")}
-        onChange={leg.setAmount}
-        symbol={leg.symbol}
-        tokenName={leg.name}
-        value={leg.amount}
-      />
     </div>
   );
 }
@@ -170,14 +171,28 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
       // side's destination — a stale address must never outlive the party
       // that seeded it. Clearing to "" leaves the payout unusable until it is
       // re-picked, which blocks submit: the safe direction.
-      const account =
-        next.mode === "counterparty"
-          ? context.counterpartyAccounts.find(
-              (candidate) => candidate.counterpartyAccountId === next.counterpartyAccountId
-            )
-          : undefined;
-      const address =
-        account === undefined ? (next.mode === "address" ? next.address : "") : account.address;
+      let address: string;
+      switch (next.mode) {
+        case "wallet": {
+          const wallet = context.wallets.find((candidate) => candidate.id === next.walletId);
+          address = wallet === undefined ? "" : wallet.address;
+          break;
+        }
+        case "counterparty": {
+          const account = context.counterpartyAccounts.find(
+            (candidate) => candidate.counterpartyAccountId === next.counterpartyAccountId
+          );
+          address = account === undefined ? "" : account.address;
+          break;
+        }
+        case "address":
+          address = next.address;
+          break;
+        default: {
+          const exhausted: never = next;
+          return exhausted;
+        }
+      }
       (side === "a" ? form.destinations.a : form.destinations.b).setAddress(address);
     }
   };

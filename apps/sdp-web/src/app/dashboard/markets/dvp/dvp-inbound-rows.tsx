@@ -65,7 +65,7 @@ function InboundFundAction({
   tradeId: string;
 }) {
   const t = useTranslations();
-  const { act, awaitingApproval, error, pending } = useDvpTradeActions(tradeId);
+  const { act, awaitingApproval, pending } = useDvpTradeActions(tradeId);
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
@@ -82,7 +82,6 @@ function InboundFundAction({
           ? t("DashboardMarkets.dvp.inboundFunding")
           : t("DashboardMarkets.dvp.inboundFundAction")}
       </Button>
-      {error ? <span className="max-w-56 text-error text-xs">{error}</span> : null}
     </span>
   );
 }

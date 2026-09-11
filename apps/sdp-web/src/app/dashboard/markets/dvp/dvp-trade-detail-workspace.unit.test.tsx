@@ -90,7 +90,7 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    const fundAt = html.indexOf("Fund this leg");
+    const fundAt = html.indexOf(">Fund<");
     expect(fundAt).toBeGreaterThan(html.indexOf("Asset leg"));
     expect(fundAt).toBeLessThan(html.indexOf("Cash leg"));
   });
@@ -110,7 +110,7 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    const fundAt = html.indexOf("Fund this leg");
+    const fundAt = html.indexOf(">Fund<");
     expect(fundAt).toBeGreaterThan(html.indexOf("Cash leg"));
     expect(fundAt).toBeLessThan(html.indexOf("Asset leg"));
   });
@@ -134,9 +134,9 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html.indexOf("Fund this leg")).toBeGreaterThan(html.indexOf("Asset leg"));
-    expect(html.lastIndexOf("Fund this leg")).toBeGreaterThan(html.indexOf("Cash leg"));
-    expect(html.match(/Fund this leg/g)?.length).toBe(2);
+    expect(html.indexOf(">Fund<")).toBeGreaterThan(html.indexOf("Asset leg"));
+    expect(html.lastIndexOf(">Fund<")).toBeGreaterThan(html.indexOf("Cash leg"));
+    expect(html.match(/>Fund</g)?.length).toBe(2);
   });
 
   /** Agent trades: the caller set the terms and holds neither leg. */
@@ -144,7 +144,7 @@ describe("DvpTradeDetailWorkspace", () => {
     const agent = () => trade({ kind: "agent" });
 
     it("offers no funding action, because neither leg is ours to fund", () => {
-      expect(renderDetail(agent())).not.toContain("Fund this leg");
+      expect(renderDetail(agent())).not.toContain(">Fund<");
     });
 
     it("still publishes both escrow addresses, which are the whole integration", () => {
@@ -232,7 +232,7 @@ describe("DvpTradeDetailWorkspace", () => {
     // transfer at the counterparty's escrow.
     it("offers funding on the leg the party holds", () => {
       const html = renderDetail(asParty());
-      const fundAt = html.indexOf("Fund this leg");
+      const fundAt = html.indexOf(">Fund<");
 
       expect(fundAt).toBeGreaterThan(-1);
       expect(fundAt).toBeGreaterThan(html.indexOf("Cash leg"));
@@ -255,7 +255,7 @@ describe("DvpTradeDetailWorkspace", () => {
         })
       );
 
-      expect(html).not.toContain("Fund this leg");
+      expect(html).not.toContain(">Fund<");
     });
   });
 
@@ -318,7 +318,7 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html).not.toContain("Fund this leg");
+    expect(html).not.toContain(">Fund<");
   });
 
   // A transfer into a frozen escrow bounces. Offering the button would spend a
@@ -339,7 +339,7 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html).not.toContain("Fund this leg");
+    expect(html).not.toContain(">Fund<");
     expect(html).toContain("Escrow is frozen");
   });
 
@@ -389,7 +389,7 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(html).toContain("Refunded to depositor");
     expect(html).toContain("Deposits returned");
     expect(html).not.toContain("Delivered");
-    expect(html).not.toContain("Fund this address");
+    expect(html).not.toContain(LEG_ESCROW_B);
   });
 
   // Expired is not closed: the escrow still holds the deposit until a cancel
@@ -413,7 +413,7 @@ describe("DvpTradeDetailWorkspace", () => {
 
     expect(html).toContain("Expired, deposits await refund");
     expect(html).not.toContain("Delivered");
-    expect(html).not.toContain("Fund this address");
+    expect(html).not.toContain(LEG_ESCROW_B);
   });
 
   it("shows delivery only on a settled trade", () => {
@@ -462,7 +462,7 @@ describe("DvpTradeDetailWorkspace", () => {
   it("offers no actions on a settled trade", () => {
     const html = renderDetail(trade({ status: "settled" }));
 
-    expect(html).not.toContain("Fund this leg");
+    expect(html).not.toContain(">Fund<");
     expect(html).not.toContain("Both legs must be funded");
   });
 
@@ -482,7 +482,26 @@ describe("DvpTradeDetailWorkspace", () => {
     );
 
     expect(html).toContain('src="https://cdn.example.test/atd.png"');
-    // The fixture symbol "ATD" monograms to its first character.
-    expect(html).toContain(">A</div>");
+    // The fixture symbol "ATD" is short enough to be the monogram itself.
+    expect(html).toContain(">ATD</span>");
+  });
+
+  it("shows a distinct token name and omits absent or symbol-identical names", () => {
+    const named = renderDetail(
+      trade({
+        legs: {
+          a: testLeg({ name: "Circle Reserve Fund" }),
+          b: testLeg({ name: null, symbol: "DUSD" }),
+        },
+      })
+    );
+    const identical = renderDetail(
+      trade({ legs: { a: testLeg({ name: "ATD", symbol: "ATD" }), b: testLeg({ name: null }) } })
+    );
+
+    expect(named).toContain('<p class="mt-1 text-secondary text-sm">Circle Reserve Fund</p>');
+    expect(named).not.toContain('<p class="mt-1 text-secondary text-sm">DUSD</p>');
+    expect(named).not.toContain('<p class="mt-1 text-secondary text-sm">ATD</p>');
+    expect(identical).not.toContain('<p class="mt-1 text-secondary text-sm">ATD</p>');
   });
 });

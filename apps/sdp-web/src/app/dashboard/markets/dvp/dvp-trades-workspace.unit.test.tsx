@@ -119,6 +119,7 @@ function inboundTrade(): DvpInboundTrade {
     amount: "250000000",
     decimals: 6,
     symbol: "DUSD",
+    name: "Digital USD",
     escrow: "BjmS3uaKPVzUmJ41t54Kgw8hVF7e8mrMFmj8Zgxqg5xJ",
     observedAmount: null,
     frozen: false,
