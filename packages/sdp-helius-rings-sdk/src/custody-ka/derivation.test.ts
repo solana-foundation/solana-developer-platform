@@ -88,4 +88,46 @@ describe("createCustodyMaterialSource", () => {
 
     expect(signMessage).toHaveBeenCalledExactlyOnceWith(expect.any(String), TEST_OWNER);
   });
+
+  /**
+   * The contract that replaced the seed cache, asserted on ONE source: every
+   * use fetches its own seed. Holding a seed between uses is what let a
+   * non-reproducible signer look healthy until the entry expired, so a cache
+   * reintroduced here has to fail a test rather than quietly restore that.
+   */
+  describe("no seed is held between uses", () => {
+    it("signs again for a second use of one source", async () => {
+      const signMessage = vi.fn(testSignMessage);
+      const uncached = source(signMessage);
+
+      await uncached.withMaterial(TEST_REQUEST, async () => undefined);
+      await uncached.withMaterial(TEST_REQUEST, async () => undefined);
+
+      expect(signMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it("signs per concurrent use rather than joining one fetch", async () => {
+      const signMessage = vi.fn(testSignMessage);
+      const uncached = source(signMessage);
+
+      await Promise.all(
+        Array.from({ length: 4 }, () => uncached.withMaterial(TEST_REQUEST, async () => undefined))
+      );
+
+      // In-flight de-duplication went with the cache: four uses, four calls.
+      expect(signMessage).toHaveBeenCalledTimes(4);
+    });
+
+    it("derives one identity across uses despite re-signing each time", async () => {
+      const uncached = source();
+      const read = () =>
+        uncached.withMaterial(TEST_REQUEST, async (material) =>
+          canonicalShieldedIdentity(material.shieldedAddress)
+        );
+
+      // The seed is zeroed after each use; a copy cleared in place would leave
+      // the next use deriving from zeroes — well-formed, and a wrong identity.
+      expect(await read()).toBe(await read());
+    });
+  });
 });
