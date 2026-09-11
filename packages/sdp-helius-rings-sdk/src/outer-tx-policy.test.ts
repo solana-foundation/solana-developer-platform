@@ -53,7 +53,11 @@ import {
   type OuterTransactionPolicyInput,
   validateOuterTransaction,
 } from "./outer-tx-policy.js";
-import { derivedIdentity, TEST_REQUEST, withDerived } from "./test/shielded-identity-fixtures.js";
+import {
+  derivedIdentity,
+  TEST_FOREIGN_REQUEST,
+  withDerived,
+} from "./test/shielded-identity-fixtures.js";
 
 const OWNER = address("GsbwXfJraMomNxBcjK1DiP5Mth8ZmQpDUFTmKfhtiHgo");
 const OTHER = address("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
@@ -1060,10 +1064,7 @@ describe("validateOuterTransaction", () => {
         "a view tag bound to a recipient other than the intent's",
         async () =>
           shieldPolicy(await ringDepositWire(), {
-            expectedShieldedAddress: await derivedIdentity({
-              ...TEST_REQUEST,
-              walletId: "hrw_other",
-            }),
+            expectedShieldedAddress: await derivedIdentity(TEST_FOREIGN_REQUEST),
             ringProgramId: RING_PROGRAM,
           }),
       ],

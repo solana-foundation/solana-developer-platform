@@ -115,6 +115,115 @@ export async function getProviderCredentialInstallation(
   return { connection: projectConnection(c.env, loaded) };
 }
 
+export async function deactivateCustodyConnection(
+  c: Context<{ Bindings: Env }>,
+  connectionId: string
+): Promise<{ custodyConnection: SafeInstallationConnection }> {
+  const context = createInstallationContext(c);
+  const loaded = await loadInstallation(context, connectionId);
+  if (loaded.target.status === "deactivated") {
+    return { custodyConnection: projectConnection(c.env, loaded) };
+  }
+  if (loaded.target.status !== "failed" && loaded.target.status !== "active") {
+    throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+  }
+  if (
+    await context.store.hasActiveInstallationWallet(
+      context.organizationId,
+      context.projectId,
+      connectionId
+    )
+  ) {
+    throw conflict("Connection cannot be deactivated while it has active wallets");
+  }
+  const intent = await context.audit.beginCritical(c, {
+    organizationId: context.organizationId,
+    userId: context.userId,
+    action: "deactivate",
+    resourceType: "custody_connection",
+    resourceId: connectionId,
+    metadata: { event: "custody_connection_deactivation_started", provider: "privy" },
+  });
+  let changed = false;
+  let result: SafeInstallationConnection;
+  try {
+    result = await context.db.transaction(async (tx) => {
+      const store = new ProviderCredentialStore(tx);
+      if (
+        !(await store.lockAuthorizedProjects(context.organizationId, context.userId, [
+          context.projectId,
+        ]))
+      ) {
+        throw forbidden("Requested project is not accessible");
+      }
+      const target = await store.findInstallationConnection(
+        context.organizationId,
+        context.projectId,
+        connectionId,
+        { lock: true }
+      );
+      if (!target) throw notFound("Custody Connection");
+      if (target.status !== "deactivated") {
+        if (target.status !== "failed" && target.status !== "active") {
+          throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+        }
+        if (
+          await store.hasActiveInstallationWallet(
+            context.organizationId,
+            context.projectId,
+            connectionId
+          )
+        ) {
+          throw conflict("Connection cannot be deactivated while it has active wallets");
+        }
+        if (
+          !(await store.deactivateInstallationConnection({
+            organizationId: context.organizationId,
+            projectId: context.projectId,
+            connectionId,
+            credentialId: target.provider_credential_id,
+            credentialStatus: target.credential_status,
+            observedStatus: target.status,
+          }))
+        ) {
+          throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+        }
+        changed = true;
+      }
+      const deactivated = { ...target, status: "deactivated" as const };
+      return projectConnection(c.env, {
+        target: deactivated,
+        decisions: decideInstallation(
+          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), false)
+        ),
+      });
+    });
+  } catch (error) {
+    if (changed) {
+      // Preserve the durable intent when the commit outcome cannot be established.
+      throw providerUnavailable("Connection deactivation outcome is temporarily unknown");
+    }
+    await completeInstallationCriticalNoop(
+      context,
+      intent,
+      "custody_connection_deactivation_not_committed"
+    );
+    throw error;
+  }
+  if (changed) {
+    await context.audit.completeCritical(c, intent, {
+      metadata: { event: "custody_connection_deactivated", provider: "privy" },
+    });
+  } else {
+    await completeInstallationCriticalNoop(
+      context,
+      intent,
+      "custody_connection_deactivation_replayed"
+    );
+  }
+  return { custodyConnection: result };
+}
+
 export async function completeProviderCredentialInstallation(
   c: Context<{ Bindings: Env }>,
   connectionId: string

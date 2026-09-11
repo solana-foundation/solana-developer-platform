@@ -30,6 +30,7 @@ import { TEST_OWNER } from "./test/shielded-identity-fixtures.js";
 const createAuditorKey = vi.fn();
 const ringRpcConstructed = vi.fn();
 const fetchRingLookupTable = vi.fn();
+const listRegisteredRings = vi.fn();
 const buildRingLookupTableTransaction = vi.fn();
 
 vi.mock("@heliuslabs/zolana/ring", async (importOriginal) => ({
@@ -43,6 +44,7 @@ vi.mock("@heliuslabs/zolana/ring", async (importOriginal) => ({
     }
   },
   fetchRingLookupTable: (...args: unknown[]) => fetchRingLookupTable(...args),
+  listRegisteredRings: (...args: unknown[]) => listRegisteredRings(...args),
   buildRingLookupTableTransaction: (...args: unknown[]) => buildRingLookupTableTransaction(...args),
 }));
 
@@ -196,7 +198,84 @@ describe("provisionCustomRing", () => {
     // A landed or recorded table verifies complete by default; the not-found
     // and incomplete paths override per test.
     fetchRingLookupTable.mockResolvedValue(Object.freeze([]));
+    // The pool registry answers "registered, not paused" by default; the
+    // paused and unreadable paths override per test.
+    listRegisteredRings.mockResolvedValue(Object.freeze([]));
     buildRingLookupTableTransaction.mockImplementation(realRing.buildRingLookupTableTransaction);
+  });
+
+  describe("a ring the pool has paused", () => {
+    /** A ring mid-bring-up: program and programdata exist, the rest lands as it goes. */
+    async function bringingUp() {
+      const {
+        configAddress,
+        configBump,
+        grantRecord,
+        grantRecordBump,
+        programDataAddress,
+        ringAuth,
+      } = await derivedAddresses();
+      const accounts = new Map<string, unknown>([
+        [RING_PROGRAM, programAccount(programDataAddress)],
+        [programDataAddress, programDataAccount(AUTHORITY)],
+      ]);
+      const { deps } = harness(accounts);
+      deps.submitTransaction.mockImplementation(async () => {
+        if (!accounts.has(configAddress)) {
+          accounts.set(configAddress, configAccount(AUTHORITY, configBump));
+        } else if (!accounts.has(ringAuth)) {
+          accounts.set(ringAuth, ringAuthAccount());
+        } else if (!accounts.has(grantRecord)) {
+          accounts.set(grantRecord, grantRecordAccount(grantRecordBump));
+        }
+        return "sig";
+      });
+      return deps;
+    }
+
+    function listed(paused: boolean) {
+      return [
+        {
+          configAddress: TREE,
+          programId: RING_PROGRAM,
+          authority: AUTHORITY,
+          ringAuthorityTransactIsEnabled: true,
+          paused,
+        },
+      ];
+    }
+
+    it("refuses bring-up rather than binding deposits to a frozen ring", async () => {
+      const deps = await bringingUp();
+      listRegisteredRings.mockResolvedValue(listed(true));
+
+      // Nothing raises a typed error for `paused`: on chain every ring
+      // instruction is refused, so an unchecked ring fails only after the proof
+      // is built and the fee is paid.
+      await expect(
+        provisionCustomRing(deps, { ringProgramId: RING_PROGRAM })
+      ).rejects.toMatchObject({ code: "conflict" });
+    });
+
+    it("proceeds for a ring the registry lists as not paused", async () => {
+      const deps = await bringingUp();
+      listRegisteredRings.mockResolvedValue(listed(false));
+
+      await expect(
+        provisionCustomRing(deps, { ringProgramId: RING_PROGRAM })
+      ).resolves.toBeDefined();
+    });
+
+    it("refuses when the registry cannot be read, rather than skipping the check", async () => {
+      const deps = await bringingUp();
+      listRegisteredRings.mockRejectedValue(new Error("getProgramAccounts is not supported"));
+
+      // Bring-up is the one deliberate moment this is decided, so an unreadable
+      // registry is a configuration failure, not a silent pass.
+      await expect(
+        provisionCustomRing(deps, { ringProgramId: RING_PROGRAM })
+      ).rejects.toMatchObject({ code: "config_error" });
+    });
   });
 
   it("refuses a ring id that is not an address", async () => {

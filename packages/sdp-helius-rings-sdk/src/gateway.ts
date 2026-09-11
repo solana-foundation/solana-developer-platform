@@ -20,11 +20,7 @@ import {
 } from "@sdp/helius-rings";
 import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
-import {
-  createDeterministicMaterialSource,
-  DETERMINISTIC_KA_SEED,
-  warnDeterministicKeyAuthority,
-} from "./deterministic-ka/index.js";
+import { createCustodyMaterialSource } from "./custody-ka/index.js";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";
@@ -44,11 +40,19 @@ export interface RingsGatewayConfig {
   readonly signTransaction: (unsignedTxBase64: string, owner: string) => Promise<string>;
   readonly submitTransaction: (signedTxBase64: string) => Promise<string>;
   /**
-   * Signs a raw message with the custody key for `owner`. Only ring bring-up
-   * needs it — the auditor-key attestation is a signed message, not a
-   * transaction — so the rest of the gateway stays constructible without it.
+   * Signs a raw message with the custody key for `owner`.
+   *
+   * Required, because it is what roots the shielded keys: the owner's signature
+   * over Zolana's derivation message is the seed they expand from. Ring bring-up
+   * uses the same callback for its auditor-key attestation.
    */
-  readonly signMessage?: (messageBase64: string, owner: string) => Promise<string>;
+  readonly signMessage: (messageBase64: string, owner: string) => Promise<string>;
+  /**
+   * Overrides where shielded key material comes from. Absent, the gateway roots
+   * it in custody through {@link signMessage}. This is the seam an enclave-backed
+   * holder would arrive through, and the one tests inject at.
+   */
+  readonly material?: ShieldedMaterialSource;
   /** Helius ring RPC that mints custom-ring auditor keys. Only bring-up needs it. */
   readonly ringRpcUrl?: string;
   /**
@@ -102,14 +106,11 @@ function readQueryValues(endpointUrl: string): string[] {
  */
 function requireRingBringUpConfig(config: RingsGatewayConfig): {
   ringRpcUrl: string;
-  signMessage: NonNullable<RingsGatewayConfig["signMessage"]>;
+  signMessage: RingsGatewayConfig["signMessage"];
 } {
   const { ringRpcUrl, signMessage } = config;
   if (!ringRpcUrl) {
     throw new HeliusRingsError("config_error", "ring bring-up needs a ring RPC URL");
-  }
-  if (!signMessage) {
-    throw new HeliusRingsError("config_error", "ring bring-up needs a custody message signer");
   }
 
   let protocol: string;
@@ -133,10 +134,8 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
   let materialSource: ShieldedMaterialSource | undefined;
 
   function requireMaterial(): ShieldedMaterialSource {
-    if (!materialSource) {
-      warnDeterministicKeyAuthority();
-      materialSource = createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED });
-    }
+    materialSource ??=
+      config.material ?? createCustodyMaterialSource({ signMessage: config.signMessage });
     return materialSource;
   }
 

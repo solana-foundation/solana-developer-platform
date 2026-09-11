@@ -144,6 +144,11 @@ export async function createRingsConnection(
       submitTransaction: async () => {
         throw new Error("probe does not submit");
       },
+      // Required because shielded keys derive from a custody signature, but a
+      // health probe reads no wallet and so derives nothing.
+      signMessage: async () => {
+        throw new Error("probe does not sign");
+      },
     }).probeHealth(),
     normalized.ringRpcUrl
       ? probeRingRpcHealth({
@@ -299,6 +304,11 @@ export async function testRingsConnection(c: AppContext, connectionId: string) {
       },
       submitTransaction: async () => {
         throw new Error("probe does not submit");
+      },
+      // Required because shielded keys derive from a custody signature, but a
+      // health probe reads no wallet and so derives nothing.
+      signMessage: async () => {
+        throw new Error("probe does not sign");
       },
     }).probeHealth(),
     connection.ringRpcUrl

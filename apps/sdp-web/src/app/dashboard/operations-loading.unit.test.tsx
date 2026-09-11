@@ -149,10 +149,9 @@ describe("operations route loading states", () => {
     expect(markup).toContain("data-loading-desktop-table");
     expect(markup).toContain("data-loading-metadata-rail");
     expect(markup).toContain("data-loading-api-key-table");
-    // The organization/RPC card moved to Integrations (HOO-787), so the
-    // settings route is members + appearance; a skeleton still reserving the
-    // form leaves a gap that never fills.
+    // Settings reserves space for onboarding and members, not the retired RPC form.
     expect(markup).not.toContain("data-loading-settings-form");
+    expect(markup).toContain("data-loading-settings-onboarding");
     expect(markup).toContain("data-loading-settings-members");
     expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(2);
     expect(markup.match(/data-loading-action-bar/g)).toHaveLength(3);

@@ -1,6 +1,7 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import { checkedTransactionSize } from "@heliuslabs/zolana/interface";
+import { fetchUserRecord, resolvedAddressFromRecord } from "@heliuslabs/zolana/wallet";
 import {
   type BuildOperationInput,
   type BuildOperationResult,
@@ -35,7 +36,11 @@ import {
 import { buildShieldTransaction } from "./flows/shield.js";
 import { buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
 import { spendKeys } from "./keys.js";
-import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
+import {
+  assertProvisionedIdentity,
+  canonicalShieldedIdentity,
+  type ShieldedMaterialSource,
+} from "./material.js";
 import { hydrateWallet } from "./wallet.js";
 
 /**
@@ -306,18 +311,31 @@ async function liftRecipientShieldedAddress(
     );
   }
   const recipient = input.recipient;
-  return deps.material.withMaterial(
-    {
-      organizationId: deps.organizationId,
-      projectId: deps.projectId,
-      walletId: recipient.walletId,
-      owner: recipient.owner,
-    },
-    async (recipientMaterial) => {
-      assertProvisionedIdentity(recipientMaterial, recipient.expectedShieldedAddress);
-      return recipientMaterial.shieldedAddress;
-    }
-  );
+
+  // Read the recipient off the registry rather than deriving it. Every half of a
+  // recipient's identity is public and already published on chain, so a sender
+  // needs none of their key material — which is what makes a recipient in another
+  // project, or another tenant's custody entirely, resolvable at all.
+  const record = await fetchUserRecord({ rpc: deps.client, owner: address(recipient.owner) });
+  if (!record) {
+    throw new HeliusRingsError(
+      "conflict",
+      `the Rings recipient ${recipient.owner} has no published user record; provision the recipient wallet first`
+    );
+  }
+
+  const resolved = resolvedAddressFromRecord(address(recipient.owner), record);
+  const published = canonicalShieldedIdentity(resolved.address);
+  if (published !== recipient.expectedShieldedAddress) {
+    // The registry moved under a persisted recipient: either it was re-keyed, or
+    // the caller named an identity this owner never published.
+    throw new HeliusRingsError(
+      "conflict",
+      `the Rings recipient ${recipient.owner} now publishes a different shielded identity; re-read the recipient wallet before transferring to it`
+    );
+  }
+
+  return resolved.address;
 }
 
 /** Fee payer, blockhash, instructions — what the low-level rail leaves to us. */

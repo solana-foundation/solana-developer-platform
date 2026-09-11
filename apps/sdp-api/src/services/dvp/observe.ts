@@ -44,6 +44,10 @@ export interface DvpTradeExpectation {
    * before this was recorded, which stay ambiguous rather than being guessed at.
    */
   createLastValidBlockHeight: string | null;
+  /** Signature attached when sponsorship completed, or null for an orphaned claim. */
+  createSignature: string | null;
+  /** Claim creation time used only to age unsigned orphaned claims. */
+  createdAt: string;
 }
 
 /**
@@ -76,6 +80,46 @@ const CLOSABLE: ReadonlySet<DvpTradeStatus> = new Set([
   "funded",
   "expired",
 ]);
+
+/** Grace period covering a request that is still waiting on Kora's timeout. */
+export const DVP_CREATE_CLAIM_GRACE_MS = 15 * 60 * 1_000;
+
+/**
+ * Derives a status when the SwapDvp account is absent from chain.
+ *
+ * @param observation - Chain reading carrying the current block height.
+ * @param trade - Stored claim and lifecycle state.
+ * @param nowMs - Current wall-clock time.
+ * @returns The status justified by the missing account.
+ */
+function deriveMissingTradeAccountStatus(
+  observation: DvpTradeObservation,
+  trade: DvpTradeExpectation,
+  nowMs: number
+): DvpTradeStatus {
+  // A decoded close beats every inference below: the transaction that closed
+  // the account says exactly which terminal path it took. It also lifts a
+  // `closed_unknown` written by an earlier tick that found no history yet.
+  if (
+    observation.closeResolution !== null &&
+    (trade.status === "creating" || trade.status === "closed_unknown" || CLOSABLE.has(trade.status))
+  ) {
+    return observation.closeResolution.status;
+  }
+  if (trade.status === "creating") {
+    if (trade.createSignature === null && trade.createLastValidBlockHeight === null) {
+      // Nothing was signed, so nothing can be on chain. The grace period only
+      // protects a live request that is still waiting for Kora.
+      const orphaned = nowMs - Date.parse(trade.createdAt) >= DVP_CREATE_CLAIM_GRACE_MS;
+      return orphaned ? "create_failed" : "creating";
+    }
+    const expiry = trade.createLastValidBlockHeight;
+    return expiry !== null && observation.blockHeight > BigInt(expiry)
+      ? "create_failed"
+      : "creating";
+  }
+  return CLOSABLE.has(trade.status) ? "closed_unknown" : trade.status;
+}
 
 /**
  * Derives the status a trade should now hold.
@@ -114,35 +158,7 @@ export function deriveDvpTradeState(
   if (!observation.tradeAccountExists) {
     // Nothing at the address. Two very different reasons, and the row's own
     // status is what tells them apart.
-    // A decoded close is the most informed answer there is, so it also lifts
-    // a `closed_unknown` written by an earlier tick that found no history yet.
-    if (
-      observation.closeResolution !== null &&
-      (trade.status === "creating" ||
-        trade.status === "closed_unknown" ||
-        CLOSABLE.has(trade.status))
-    ) {
-      return { status: observation.closeResolution.status, ...flags };
-    }
-    if (trade.status === "creating") {
-      // The create was signed and recorded but never seen to land. Whether it
-      // still CAN land is not a question about elapsed time — it is decided by
-      // the blockhash the transaction was signed against. Past that height the
-      // cluster can never accept it; before it, the transaction may yet appear.
-      //
-      // A row with no recorded height stays `creating` forever rather than
-      // being guessed at. That is deliberate: a wrong `create_failed` reports
-      // no escrow exists while its address sits on chain awaiting funds.
-      const expiry = trade.createLastValidBlockHeight;
-      const expired = expiry !== null && observation.blockHeight > BigInt(expiry);
-      return { status: expired ? "create_failed" : "creating", ...flags };
-    }
-    if (CLOSABLE.has(trade.status)) {
-      return { status: "closed_unknown", ...flags };
-    }
-    // Already terminal. A reconciler must never walk a trade backwards out of
-    // a state something better-informed put it in.
-    return { status: trade.status, ...flags };
+    return { status: deriveMissingTradeAccountStatus(observation, trade, nowMs), ...flags };
   }
 
   // The account is there, so whatever else is true, the create landed.

@@ -14,8 +14,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeterministicMaterialSource } from "./deterministic-ka/index.js";
-import { TEST_SEED } from "./test/shielded-identity-fixtures.js";
+import { TEST_OWNER, testMaterialSource } from "./test/shielded-identity-fixtures.js";
 
 const buildWithdrawal = vi.fn();
 const hydrateWallet = vi.fn();
@@ -52,7 +51,7 @@ vi.mock("./wallet.js", () => ({
 
 const { buildRingsOperation } = await import("./build.js");
 
-const OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const OWNER = TEST_OWNER;
 const BLOCKHASH = "5DjPMLBWWLbNw3TRUEbCwPFvpXqhkdVv2VUb3RJhZmpJ";
 const PROTOCOL_PROGRAM = address("11111111111111111111111111111111");
 const COMPUTE_BUDGET_PROGRAM = address("ComputeBudget111111111111111111111111111111");
@@ -206,7 +205,7 @@ describe("buildRingsOperation ring-bound operations", () => {
           lastValidBlockHeight: 1_000n,
         }),
       } as never,
-      material: createDeterministicMaterialSource({ seed: TEST_SEED }),
+      material: testMaterialSource(),
     };
   }
 

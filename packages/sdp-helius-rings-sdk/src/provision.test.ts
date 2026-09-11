@@ -19,39 +19,26 @@ vi.mock("@solana/kit", async (importOriginal) => ({
   getTransactionEncoder: () => ({ encode: () => new Uint8Array([1, 2, 3]) }),
 }));
 
-const { createDeterministicMaterialSource } = await import("./deterministic-ka/index.js");
-const { deriveMaterial } = await import("./deterministic-ka/derivation.js");
 const { provisionRingsIdentity } = await import("./provision.js");
+const {
+  honestRecord: derivedRecord,
+  TEST_OWNER,
+  TEST_REQUEST,
+  testMaterialSource,
+} = await import("./test/shielded-identity-fixtures.js");
 
-const SEED = new Uint8Array(32).fill(7);
-const OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
-const REQUEST = {
-  organizationId: "org_1",
-  projectId: "proj_1",
-  walletId: "hrw_1",
-  owner: OWNER,
-};
+const OWNER = TEST_OWNER;
+const REQUEST = TEST_REQUEST;
 
-/** The record the seed above genuinely derives, so a match is a real match. */
-async function honestRecord() {
-  const material = await deriveMaterial(SEED, REQUEST);
-  try {
-    return {
-      owner: OWNER,
-      nullifierPublicKey: material.nullifierKey.publicKey(),
-      viewingPublicKey: material.viewingKey.publicKey().toBytes(),
-      mergingEnabled: true,
-      bump: 255,
-    };
-  } finally {
-    material.destroy();
-  }
+/** The record the test signer genuinely derives, so a match is a real match. */
+function honestRecord() {
+  return derivedRecord({ mergingEnabled: true, request: REQUEST });
 }
 
 function deps(overrides: Partial<Parameters<typeof provisionRingsIdentity>[0]> = {}) {
   return {
     client: { confirmTransaction: vi.fn().mockResolvedValue(1n) } as never,
-    material: createDeterministicMaterialSource({ seed: SEED }),
+    material: testMaterialSource(),
     signTransaction: vi.fn(async (unsigned: string) => `signed:${unsigned}`),
     submitTransaction: vi.fn(async (signed: string) => `sig-for-${signed.length}`),
     organizationId: "org_1",

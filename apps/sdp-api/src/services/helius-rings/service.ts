@@ -331,6 +331,23 @@ export class HeliusRingsService {
       sdpAddress: input.sdpAddress,
     });
 
+    if (provision.registrationSignatures.length === 0) {
+      // Nothing was registered, so the record already existed and matched. Either
+      // a retry after a crash past registration, or this custody wallet already
+      // backs a Rings identity somewhere else and this wallet just adopted it —
+      // the shielded keys derive from the owner key alone, so two wallets over
+      // one custody wallet converge by construction. Benign either way, and
+      // invisible without this line.
+      getLogger().warn(
+        {
+          walletId: wallet.id,
+          owner: input.sdpAddress,
+          shieldedAddress: provision.identity.shieldedAddress,
+        },
+        "rings wallet adopted an already-published shielded identity"
+      );
+    }
+
     const provisioned = await this.wallets.markProvisioned({
       ...this.tenant,
       id: wallet.id,
