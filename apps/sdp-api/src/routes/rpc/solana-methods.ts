@@ -1,19 +1,18 @@
 /**
- * The Solana JSON-RPC HTTP surface the relay forwards. The relay exists to
- * reach Solana nodes, so anything outside the published HTTP API — vendor
- * extensions, node admin methods, other chains' namespaces — is refused at
- * the boundary rather than forwarded to whatever the upstream happens to be.
+ * The published Solana JSON-RPC HTTP methods — the only surface the relay
+ * forwards; vendor extensions and other chains' namespaces are refused at the
+ * boundary rather than handed to whatever the upstream happens to be.
  */
-export const SOLANA_RPC_METHODS: ReadonlySet<string> = new Set([
+const METHODS = [
   "getAccountInfo",
   "getBalance",
   "getBlock",
   "getBlockCommitment",
   "getBlockHeight",
   "getBlockProduction",
-  "getBlockTime",
   "getBlocks",
   "getBlocksWithLimit",
+  "getBlockTime",
   "getClusterNodes",
   "getEpochInfo",
   "getEpochSchedule",
@@ -38,8 +37,8 @@ export const SOLANA_RPC_METHODS: ReadonlySet<string> = new Set([
   "getProgramAccounts",
   "getRecentPerformanceSamples",
   "getRecentPrioritizationFees",
-  "getSignatureStatuses",
   "getSignaturesForAddress",
+  "getSignatureStatuses",
   "getSlot",
   "getSlotLeader",
   "getSlotLeaders",
@@ -52,6 +51,7 @@ export const SOLANA_RPC_METHODS: ReadonlySet<string> = new Set([
   "getTokenSupply",
   "getTransaction",
   "getTransactionCount",
+  "getTransactionsForAddress",
   "getVersion",
   "getVoteAccounts",
   "isBlockhashValid",
@@ -59,4 +59,6 @@ export const SOLANA_RPC_METHODS: ReadonlySet<string> = new Set([
   "requestAirdrop",
   "sendTransaction",
   "simulateTransaction",
-]);
+] as const;
+
+export const SOLANA_RPC_METHODS: ReadonlySet<(typeof METHODS)[number] | string> = new Set(METHODS);

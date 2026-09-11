@@ -48,7 +48,15 @@ rpc.post(
   requirePermissions("tokens:write"),
   validateQuery(rpcProjectQuerySchema),
   validateBody(rpcRelayPayloadSchema),
-  meteredQuota(RPC_QUOTA),
+  // A batch of N is N node calls charged as N, so the ceiling means what it
+  // says regardless of how requests are packed.
+  meteredQuota({
+    ...RPC_QUOTA,
+    units: (c) => {
+      const payload = (c.req as unknown as { valid: (t: "json") => unknown }).valid("json");
+      return Array.isArray(payload) ? payload.length : 1;
+    },
+  }),
   relayRpcRequest
 );
 

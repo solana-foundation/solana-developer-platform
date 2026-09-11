@@ -151,11 +151,16 @@ describe("customer egress limits", () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("keeps the caller's signal when one is given", () => {
+  it("keeps the time bound even when the caller supplies a signal", () => {
+    // The Kit transport path always passes a signal; if that replaced the
+    // ceiling instead of joining it, the 30s bound would never apply there.
     const controller = new AbortController();
+    const init = relayGuardInit({ headers: {}, body: "{}", signal: controller.signal });
 
-    expect(relayGuardInit({ headers: {}, body: "{}", signal: controller.signal }).signal).toBe(
-      controller.signal
-    );
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).not.toBe(controller.signal);
+    expect(init.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(init.signal?.aborted).toBe(true);
   });
 });

@@ -57,15 +57,26 @@ export function isCustomerSuppliedTarget(target: RpcEgressTarget): boolean {
  * relay made before, except that a customer-supplied target resolves under the
  * guard on every hop.
  */
+/**
+ * The time bound joins the caller's signal rather than yielding to it: the
+ * Kit transport path always supplies one, and a caller's cancellation must
+ * not disable the ceiling.
+ */
+function boundedSignal(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(RELAY_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 /** The guarded init for a customer-supplied relay target, limits applied. */
 export function relayGuardInit(init: RpcEgressInit): GuardedFetchInit {
   return {
     method: "POST",
     headers: init.headers,
     body: init.body,
-    signal: init.signal ?? AbortSignal.timeout(RELAY_TIMEOUT_MS),
+    signal: boundedSignal(init.signal),
     maxRedirects: RELAY_MAX_REDIRECTS,
     maxResponseBytes: RELAY_MAX_RESPONSE_BYTES,
+    rejectOversizeResponse: true,
   };
 }
 
@@ -83,7 +94,7 @@ export async function fetchRpcRelayTarget(
     method: "POST",
     headers: init.headers,
     body: init.body,
-    signal: init.signal ?? AbortSignal.timeout(RELAY_TIMEOUT_MS),
+    signal: boundedSignal(init.signal),
   });
 }
 

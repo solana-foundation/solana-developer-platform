@@ -930,6 +930,99 @@ describe("RPC Relay Routes", () => {
       expect(response.status).toBe(400);
     });
 
+
+    it("answers a distinct code when the upstream times out", async () => {
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+        .run();
+      rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      rpcEnv.SOLANA_RPC_TRITON_API_KEY = "triton_key";
+
+      const timeoutError = new DOMException("The operation timed out.", "TimeoutError");
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(timeoutError);
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: [] }),
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+      expect(response.status).toBe(504);
+      const body = await response.json();
+      expect(body.error.code).toBe("SOLANA_RPC_TIMEOUT");
+    });
+
+    it("answers a distinct code when the upstream body exceeds the relay bound", async () => {
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+        .run();
+      rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      rpcEnv.SOLANA_RPC_TRITON_API_KEY = "triton_key";
+
+      const { EgressResponseTooLargeError } = await import("@/services/guarded-egress");
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new EgressResponseTooLargeError("rpc.example"));
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }),
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+      expect(response.status).toBe(502);
+      const body = await response.json();
+      expect(body.error.code).toBe("UPSTREAM_RESPONSE_TOO_LARGE");
+    });
+
+    it("charges the quota by batch size", async () => {
+      // One admitted batch of N is N node calls; the pool must see N, or the
+      // per-minute ceiling is really ceiling × batch cap.
+      await seedRateLimit(
+        env,
+        `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`,
+        299
+      );
+
+      const batch = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify([
+            { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] },
+            { jsonrpc: "2.0", id: 2, method: "getSlot", params: [] },
+          ]),
+        },
+        env
+      );
+
+      expect(batch.status).toBe(429);
+    });
+
     it("429s the connectivity test once the actor's quota is exhausted", async () => {
       await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
 

@@ -18,6 +18,7 @@ import {
   getProviderSetupDefinition,
 } from "@/services/provider-setup-registry";
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
+import { EgressResponseTooLargeError } from "@/services/guarded-egress";
 import { fetchRpcRelayTarget } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, type rpcRelayPayloadSchema } from "./schemas";
@@ -118,6 +119,27 @@ function buildRelayResponse(
   };
 }
 
+
+// `AbortSignal.timeout` rejects with a DOMException, which Node does not put
+// on Error's prototype chain — matched by name, not instanceof.
+function isTimeoutError(error: unknown): boolean {
+  const name = error && typeof error === "object" ? (error as { name?: unknown }).name : null;
+  return name === "TimeoutError" || name === "AbortError";
+}
+
+// The caller can safely resend the same signed bytes on a timeout, but only
+// if it can tell "the upstream never answered" apart from "the upstream said
+// no" — hence distinct codes instead of one generic relay error.
+function toRelayError(error: unknown, fallback: string): AppError {
+  if (error instanceof EgressResponseTooLargeError) {
+    return new AppError("UPSTREAM_RESPONSE_TOO_LARGE", error.message);
+  }
+  if (isTimeoutError(error)) {
+    return new AppError("SOLANA_RPC_TIMEOUT");
+  }
+  return new AppError("SOLANA_RPC_ERROR", error instanceof Error ? error.message : fallback);
+}
+
 export const getRpcProviders = async (c: AppContext) => {
   const auth = getAuth(c);
   const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
@@ -203,10 +225,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
       return success(c, lastResponse);
     }
 
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      lastError instanceof Error ? lastError.message : "RPC relay request failed"
-    );
+    throw toRelayError(lastError, "RPC relay request failed");
   }
 
   const target = await resolveRpcTarget({
@@ -234,10 +253,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
       origin: getTelemetryOrigin(c),
     }).catch(() => {});
 
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "RPC relay request failed"
-    );
+    throw toRelayError(error, "RPC relay request failed");
   }
 };
 
@@ -305,9 +321,6 @@ export const testRpcConnection = async (c: AppContext) => {
       origin: getTelemetryOrigin(c),
     }).catch(() => {});
 
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "RPC connectivity test failed"
-    );
+    throw toRelayError(error, "RPC connectivity test failed");
   }
 };
