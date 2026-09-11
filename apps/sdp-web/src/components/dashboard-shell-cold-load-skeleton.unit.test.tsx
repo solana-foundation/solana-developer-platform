@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { getDashboardPageConfig } from "./dashboard-header";
+import { DashboardLoadingScreen } from "./dashboard-loading-screen";
 import { DashboardShell } from "./dashboard-shell";
-import { FullscreenLoadingIndicator } from "./fullscreen-loading-indicator";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/dashboard" }));
 const authMock = vi.hoisted(() => ({ isLoaded: false }));
@@ -28,6 +28,7 @@ vi.mock("@/i18n/provider", () => ({
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => undefined,
   useDashboardWorkspace: () => ({
     dashboardAccess: {
       capabilities: { canReadApprovals: true, canManageOrgSettings: true },
@@ -139,11 +140,22 @@ describe("dashboard cold load", () => {
     );
   });
 
-  it("keeps the generic silhouette for callers that have no route in scope", () => {
-    const markup = renderToStaticMarkup(<FullscreenLoadingIndicator />);
+  it("uses identical frames during preparation and client authentication", () => {
+    for (const pathname of ["/dashboard", "/dashboard/payments/transactions"]) {
+      const preparation = renderToStaticMarkup(<DashboardLoadingScreen pathname={pathname} />);
+      expect(preparation).toBe(renderColdLoad(pathname));
+    }
+  });
 
-    expect(markup).toContain("data-shell-loading-skeleton");
-    expect(markup).toContain("data-shell-loading-generic-content");
-    expect(markup).not.toContain("data-loading-layout");
+  it("keeps deep links route-specific and preserves a collapsed sidebar", () => {
+    const markup = renderToStaticMarkup(
+      <DashboardLoadingScreen
+        pathname="/dashboard/wallets?view=list#activity"
+        isSidebarOpen={false}
+      />
+    );
+    expect(markup).toContain('data-wallet-loading-layout="wallets-overview"');
+    expect(markup).not.toContain('data-loading-layout="home"');
+    expect(markup).toContain("width:64px");
   });
 });
