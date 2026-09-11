@@ -14,6 +14,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { env } from "@/test/helpers/env";
@@ -379,6 +380,6 @@ describe("toDvpLegFundingClaim", () => {
   });
 
   it("refuses a side outside a and b", () => {
-    expect(() => toDvpLegFundingClaim({ ...row, side: "c" })).toThrow(/side/);
+    expect(() => toDvpLegFundingClaim({ ...row, side: "c" })).toThrow(ZodError);
   });
 });

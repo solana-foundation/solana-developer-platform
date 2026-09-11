@@ -1,5 +1,6 @@
 import { type Address, address, signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -177,11 +178,10 @@ describe("DvpTradeRepository (postgres)", () => {
     }
 
     expect(() => mapDvpTradeRow({ ...row, close_resolution_attempts: "corrupt" })).toThrow(
-      /close_resolution_attempts/
+      ZodError
     );
-    expect(() => mapDvpTradeRow({ ...row, close_resolution_after: 7 })).toThrow(
-      /close_resolution_after/
-    );
+    expect(() => mapDvpTradeRow({ ...row, close_resolution_after: 7 })).toThrow(ZodError);
+    expect(() => mapDvpTradeRow({ ...row, symbol_a: 7 })).toThrow(ZodError);
     expect(mapDvpTradeRow(row).id).toBe(created.id);
   });
 

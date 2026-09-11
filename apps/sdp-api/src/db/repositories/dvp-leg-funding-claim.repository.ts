@@ -8,9 +8,19 @@
  * ordinary tenant isolation.
  */
 
-import { internalError } from "@/lib/errors";
-import { assertRepositoryNullableString, assertRepositoryString } from "./assertions";
+import { z } from "zod";
 import type { RepositoryDbClient } from "./base";
+
+const dvpLegFundingClaimRowSchema = z.object({
+  trade_id: z.string(),
+  side: z.enum(["a", "b"]),
+  organization_id: z.string(),
+  project_id: z.string(),
+  custody_wallet_id: z.string(),
+  signature: z.string(),
+  expiry_height: z.string(),
+  funding_tx: z.string().nullable(),
+});
 
 export interface DvpLegFundingClaim {
   tradeId: string;
@@ -88,44 +98,23 @@ export interface DvpLegFundingClaimRepository {
 }
 
 /**
- * Maps a raw `dvp_leg_funding_claims` row onto the repository shape, asserting
- * every column's type. Exported so the assertions can be tested with hand-built
- * rows: Postgres will not store a value of the wrong type, so a corrupt row
- * cannot be produced through the database itself.
+ * Parses a raw `dvp_leg_funding_claims` row with the Zod row schema and maps it
+ * onto the repository shape, so a corrupt column throws instead of flowing.
  *
  * @param row - One claim row as the driver returns it.
  * @returns The typed claim.
  */
 export function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
-  const side = assertRepositoryString(row.side, "DvP leg funding claim", "side");
-  if (side !== "a" && side !== "b") {
-    throw internalError(`DvP leg funding claim side is invalid: ${side}`);
-  }
+  const parsed = dvpLegFundingClaimRowSchema.parse(row);
   return {
-    tradeId: assertRepositoryString(row.trade_id, "DvP leg funding claim", "trade_id"),
-    side,
-    organizationId: assertRepositoryString(
-      row.organization_id,
-      "DvP leg funding claim",
-      "organization_id"
-    ),
-    projectId: assertRepositoryString(row.project_id, "DvP leg funding claim", "project_id"),
-    custodyWalletId: assertRepositoryString(
-      row.custody_wallet_id,
-      "DvP leg funding claim",
-      "custody_wallet_id"
-    ),
-    signature: assertRepositoryString(row.signature, "DvP leg funding claim", "signature"),
-    expiryHeight: assertRepositoryString(
-      row.expiry_height,
-      "DvP leg funding claim",
-      "expiry_height"
-    ),
-    fundingTx: assertRepositoryNullableString(
-      row.funding_tx,
-      "DvP leg funding claim",
-      "funding_tx"
-    ),
+    tradeId: parsed.trade_id,
+    side: parsed.side,
+    organizationId: parsed.organization_id,
+    projectId: parsed.project_id,
+    custodyWalletId: parsed.custody_wallet_id,
+    signature: parsed.signature,
+    expiryHeight: parsed.expiry_height,
+    fundingTx: parsed.funding_tx,
   };
 }
 
