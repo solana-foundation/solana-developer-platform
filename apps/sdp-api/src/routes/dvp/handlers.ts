@@ -498,7 +498,6 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     tradeId: resolved.trade.id,
     action,
     signature: result.signature,
-    createdAccounts: result.createdAccounts,
   });
 };
 

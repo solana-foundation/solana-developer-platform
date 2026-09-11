@@ -21,18 +21,19 @@ import {
   SolanaError,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { env } from "@/test/helpers/env";
+import { deriveDvpSettleAtas } from "./settle-atas";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const getFeePayer = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
-const getAccountInfo = vi.hoisted(() => vi.fn());
 const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
@@ -60,30 +61,11 @@ vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
-  getAccountInfo,
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,
   }),
   sendTransaction,
-}));
-vi.mock("./settle-preflight", async (importOriginal) => ({
-  ...(await importOriginal()),
-  findMissingSettleAtas: async (
-    rpc: unknown,
-    atas: Record<string, string>,
-    _parties: unknown,
-    keys: readonly string[]
-  ) =>
-    new Set(
-      (
-        await Promise.all(
-          keys.map(async (key) => ({ key, account: await getAccountInfo(rpc, atas[key]) }))
-        )
-      )
-        .filter(({ account }) => account === null)
-        .map(({ key }) => key)
-    ),
 }));
 
 const { closeDvpTrade } = await import("./settle");
@@ -199,8 +181,6 @@ describe("closeDvpTrade", () => {
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
     });
-    // Every required account already exists unless a test says otherwise.
-    getAccountInfo.mockResolvedValue({ owner: T22, data: new Uint8Array(165) });
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
@@ -265,31 +245,62 @@ describe("closeDvpTrade", () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  describe("required accounts", () => {
-    it("creates the accounts settlement needs when they are missing", async () => {
-      getAccountInfo.mockResolvedValue(null);
+  describe("instruction order", () => {
+    it("appends four create-ATA instructions before settle for the derived accounts", async () => {
+      const row = trade();
+      const atas = await deriveDvpSettleAtas(row);
 
-      const result = await closeDvpTrade(context, trade(), "settle");
+      await closeDvpTrade(context, row, "settle");
 
-      // All four: both delivery destinations and both surplus-refund accounts.
-      expect(result.createdAccounts).toHaveLength(4);
-      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      expect(message.instructions).toHaveLength(5);
+      expect(
+        message.instructions.slice(0, 4).map((instruction) => {
+          assert(instruction.accountIndices);
+          return message.staticAccounts[instruction.accountIndices[1]];
+        })
+      ).toEqual([
+        atas.userADestinationAtaB,
+        atas.userBDestinationAtaA,
+        atas.userAAtaA,
+        atas.userBAtaB,
+      ]);
+      expect(
+        message.instructions
+          .slice(0, 4)
+          .map((instruction) => message.staticAccounts[instruction.programAddressIndex])
+      ).toEqual(Array.from({ length: 4 }, () => ASSOCIATED_TOKEN_PROGRAM_ADDRESS));
+      expect(message.staticAccounts[message.instructions[4].programAddressIndex]).not.toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS
+      );
     });
 
-    it("creates nothing when every account already exists", async () => {
-      const result = await closeDvpTrade(context, trade(), "settle");
+    it("appends two create-ATA instructions before cancel for the refund accounts", async () => {
+      const row = trade();
+      const atas = await deriveDvpSettleAtas(row);
 
-      expect(result.createdAccounts).toEqual([]);
-    });
+      await closeDvpTrade(context, row, "cancel");
 
-    // Cancel delivers nothing, so a missing delivery destination must not block
-    // it — that would make the escape hatch depend on an account it never uses.
-    it("creates only the refund accounts for a cancel", async () => {
-      getAccountInfo.mockResolvedValue(null);
-
-      const result = await closeDvpTrade(context, trade(), "cancel");
-
-      expect(result.createdAccounts).toHaveLength(2);
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      expect(message.instructions).toHaveLength(3);
+      expect(
+        message.instructions.slice(0, 2).map((instruction) => {
+          assert(instruction.accountIndices);
+          return message.staticAccounts[instruction.accountIndices[1]];
+        })
+      ).toEqual([atas.userAAtaA, atas.userBAtaB]);
+      expect(
+        message.instructions
+          .slice(0, 2)
+          .map((instruction) => message.staticAccounts[instruction.programAddressIndex])
+      ).toEqual(Array.from({ length: 2 }, () => ASSOCIATED_TOKEN_PROGRAM_ADDRESS));
+      expect(message.staticAccounts[message.instructions[2].programAddressIndex]).not.toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS
+      );
     });
   });
 
@@ -298,7 +309,6 @@ describe("closeDvpTrade", () => {
   it("delivers each leg to the counter-party's destination", async () => {
     const signer = await generateKeyPairSigner();
     const row = trade();
-    const { deriveDvpSettleAtas } = await import("./settle-preflight");
     const atas = await deriveDvpSettleAtas({
       userA: row.userA,
       userB: row.userB,
@@ -350,9 +360,7 @@ describe("closeDvpTrade", () => {
       expect(transaction.signatures[authority.address]).not.toBeNull();
     });
 
-    it("uses the sponsor as payer for every missing ATA", async () => {
-      getAccountInfo.mockResolvedValue(null);
-
+    it("uses the sponsor as payer for every create-ATA instruction", async () => {
       await closeDvpTrade(context, trade(), "settle");
 
       const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);

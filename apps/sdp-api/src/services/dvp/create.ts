@@ -377,7 +377,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // Resolved once, here, and used for the terms check, the row and the ATA
   // derivations alike. The program treats an omitted destination as the party's
   // own address, so mirroring that now means nothing downstream has to branch
-  // on null — `settle-preflight` can derive an ATA from a column that is always
+  // on null — `settle-atas` can derive an ATA from a column that is always
   // populated.
   const destinationA =
     input.userASettlementDestination === null ? userA : input.userASettlementDestination;

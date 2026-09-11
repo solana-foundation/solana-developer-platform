@@ -303,8 +303,4 @@ export const dvpCloseResponseSchema = z.object({
       "settle delivers each leg to the other party; cancel refunds each leg to whoever deposited it. Both close the trade permanently.",
   }),
   signature: z.string().openapi({ description: "Signature of the closing transaction." }),
-  createdAccounts: z.array(z.string()).openapi({
-    description:
-      "Token accounts this transaction had to create because settlement requires them to already exist. They cost rent from the settlement wallet.",
-  }),
 });

@@ -3,7 +3,9 @@
  *
  * The project's settlement authority signs only as the authority. Kora's
  * sponsor is the fee payer and pays rent for any token account the close
- * creates, and the close is submitted through the owned-sponsorship lifecycle.
+ * creates. The close creates every token account it touches idempotently and
+ * leaves account validation to the DvP program. It is submitted through the
+ * owned-sponsorship lifecycle.
  * Settle delivers each leg to the other party; Cancel refunds each leg to
  * whoever deposited it. Nothing else can do either — the parties can only
  * unwind their own leg.
@@ -38,12 +40,12 @@ import {
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { readDvpAccounts } from "./read-chain";
+import { deriveDvpSettleAtas } from "./settle-atas";
 import {
   buildCancelInstruction,
-  buildMissingAtaInstructions,
+  buildRequiredAtaInstructions,
   buildSettleInstruction,
 } from "./settle-instructions";
-import { type DvpSettleAtas, deriveDvpSettleAtas, findMissingSettleAtas } from "./settle-preflight";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 
 /** Statuses from which a trade can still be acted on. */
@@ -57,9 +59,8 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
 export type DvpCloseAction = "settle" | "cancel";
 
 export interface DvpCloseResult {
+  /** Signature of the sponsored closing transaction. */
   signature: Signature;
-  /** Accounts this transaction created because settlement required them. */
-  createdAccounts: string[];
 }
 
 /**
@@ -68,7 +69,7 @@ export interface DvpCloseResult {
  * @param c - Request context, needed for the approved-operation effect fence.
  * @param trade - The trade to close, as stored.
  * @param action - Whether to deliver both legs or refund them.
- * @returns The broadcast signature and any accounts created along the way.
+ * @returns The broadcast signature.
  */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
@@ -135,14 +136,12 @@ export async function closeDvpTrade(
       `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
     );
   }
-  const missing = await resolveMissingAtas(rpc, atas, trade, action);
-
   // Sponsorship is resolved only after every local refusal above, as in create.
   const feePayment = createRequestSponsorshipFeePayment(c);
   const sponsor = await feePayment.getFeePayer();
 
   const instructions = [
-    ...buildMissingAtaInstructions(trade, atas, createNoopSigner(sponsor), missing),
+    ...buildRequiredAtaInstructions(trade, atas, createNoopSigner(sponsor), action),
     action === "settle"
       ? buildSettleInstruction(trade, atas, signer)
       : buildCancelInstruction(trade, atas, signer),
@@ -177,28 +176,5 @@ export async function closeDvpTrade(
     store,
   });
 
-  return {
-    signature,
-    createdAccounts: [...missing].map((key) => atas[key]),
-  };
-}
-
-/**
- * Which of Settle's required accounts are missing and must be created first.
- *
- * Cancel needs only the two refund accounts, so it is not held up by a missing
- * delivery destination — a trade being unwound has nothing to deliver, and
- * requiring an account it will never use would block the escape hatch.
- */
-async function resolveMissingAtas(
-  rpc: solanaRpc.SolanaRpc,
-  atas: DvpSettleAtas,
-  trade: DvpTradeRow,
-  action: DvpCloseAction
-): Promise<ReadonlySet<keyof DvpSettleAtas>> {
-  const relevant: ReadonlyArray<keyof DvpSettleAtas> =
-    action === "settle"
-      ? ["userADestinationAtaB", "userBDestinationAtaA", "userAAtaA", "userBAtaB"]
-      : ["userAAtaA", "userBAtaB"];
-  return findMissingSettleAtas(rpc, atas, trade, relevant);
+  return { signature };
 }

@@ -11,43 +11,52 @@ import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import type { DvpTradeRow } from "@/db/repositories";
 import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
-import type { DvpSettleAtas } from "./settle-preflight";
+import type { DvpCloseAction } from "./settle";
+import type { DvpSettleAtas } from "./settle-atas";
 
 /**
- * Creates any of Settle's four required token accounts that are missing.
+ * Creates every token account touched by the requested close action.
  *
- * Idempotent by construction, which is what makes checking-then-creating safe:
- * an account that appears between the pre-flight read and the broadcast makes
- * these no-ops rather than failing the transaction.
+ * The instructions are unconditional and idempotent, so existing accounts are
+ * no-ops and dust at an uninitialized ATA address is absorbed by the associated
+ * token program.
  *
  * The whole list fits alongside Settle — measured at 706 bytes against the 1232
  * limit — so there is no reason to make an operator run a separate preparation
  * step for accounts the trade cannot settle without.
+ *
+ * @param trade - The stored trade whose token accounts are required.
+ * @param atas - The derived token accounts touched by the close.
+ * @param payer - The sponsor paying rent for any accounts created.
+ * @param action - Whether the close delivers both legs or refunds them.
+ * @returns Idempotent create instructions in DvP instruction account order.
  */
-export function buildMissingAtaInstructions(
+export function buildRequiredAtaInstructions(
   trade: DvpTradeRow,
   atas: DvpSettleAtas,
   payer: TransactionSigner,
-  missing: ReadonlySet<keyof DvpSettleAtas>
+  action: DvpCloseAction
 ): Instruction[] {
-  const specs: ReadonlyArray<[keyof DvpSettleAtas, Address, Address, Address]> = [
+  const settleSpecs: ReadonlyArray<[keyof DvpSettleAtas, Address, Address, Address]> = [
     ["userADestinationAtaB", trade.userASettlementDestination, trade.mintB, trade.tokenProgramB],
     ["userBDestinationAtaA", trade.userBSettlementDestination, trade.mintA, trade.tokenProgramA],
     ["userAAtaA", trade.userA, trade.mintA, trade.tokenProgramA],
     ["userBAtaB", trade.userB, trade.mintB, trade.tokenProgramB],
   ];
+  // Cancel needs only the two refund accounts, so it is not held up by a
+  // delivery destination — a trade being unwound has nothing to deliver, and
+  // requiring an account it will never use would block the escape hatch.
+  const specs = action === "settle" ? settleSpecs : settleSpecs.slice(2);
 
-  return specs
-    .filter(([key]) => missing.has(key))
-    .map(([key, owner, mint, tokenProgram]) =>
-      getCreateAssociatedTokenIdempotentInstruction({
-        payer,
-        owner,
-        mint,
-        ata: atas[key],
-        tokenProgram,
-      })
-    );
+  return specs.map(([key, owner, mint, tokenProgram]) =>
+    getCreateAssociatedTokenIdempotentInstruction({
+      payer,
+      owner,
+      mint,
+      ata: atas[key],
+      tokenProgram,
+    })
+  );
 }
 
 /**
