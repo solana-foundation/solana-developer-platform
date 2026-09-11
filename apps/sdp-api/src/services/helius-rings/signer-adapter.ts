@@ -297,11 +297,15 @@ async function resolveOwnerSigner(
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
   }
   if (!RAW_MESSAGE_SIGNING_PROVIDERS.has(wallet.provider)) {
-    // Non-retryable on purpose: no amount of retrying changes how a provider
-    // signs, and the wallet has to move providers before Rings can use it.
-    throw new SigningError(
-      `custody provider ${wallet.provider} cannot reproducibly sign raw messages, which Rings requires to derive shielded keys`,
-      "INVALID_REQUEST"
+    // Raised as its own failure code rather than as a signer failure: nothing
+    // signed and nothing broke, so "custody could not sign" would send an
+    // operator looking for an outage. Names the provider, the requirement it
+    // does not meet, and the providers that do — the only fix is moving the
+    // wallet, and the message has to be able to say so on its own.
+    throw new RingsAdapterError(
+      "provider_unsupported",
+      `custody provider ${wallet.provider} cannot back a Rings private wallet: its shielded keys are re-derived from an owner custody signature on every use, which needs a provider that signs raw messages and returns the same signature every time. Providers that do: ${[...RAW_MESSAGE_SIGNING_PROVIDERS].join(", ")}.`,
+      { retryable: false }
     );
   }
 

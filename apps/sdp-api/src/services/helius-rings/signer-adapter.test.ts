@@ -216,10 +216,19 @@ describe("signRingsOuterTransaction", () => {
 
         const error = await rejection(signRingsOuterTransaction(signInput()));
 
-        // Non-retryable: no retry changes how a provider signs.
-        expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
-        expect((error as Error).message).toContain(provider);
+        // Its own code, not signer_failed: nothing signed and nothing broke, so
+        // this must not read as an outage. Non-retryable, because no retry
+        // changes how a provider signs.
+        expect(error).toMatchObject({ failureCode: "provider_unsupported", retryable: false });
         expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+
+        // The message is the remedy: an operator has to move the wallet, so it
+        // names the provider refused and the ones that would work.
+        const message = (error as Error).message;
+        expect(message).toContain(provider);
+        for (const supported of ["local", "privy", "turnkey"]) {
+          expect(message).toContain(supported);
+        }
       }
     );
 
@@ -333,7 +342,10 @@ describe("signRingsMessage", () => {
     expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
   });
 
-  it("refuses a provider that cannot sign raw messages", async () => {
+  // The gate on the path that actually roots the keys: this is the call whose
+  // signature becomes the shielded identity, so a provider that cannot serve it
+  // has to be refused here and not only on the transaction path.
+  it("refuses a provider that cannot reproducibly sign raw messages", async () => {
     findActiveWalletByPublicKey.mockResolvedValue({
       id: "cw_owner",
       publicKey: FEE_PAYER,
@@ -342,7 +354,8 @@ describe("signRingsMessage", () => {
 
     const error = await rejection(signRingsMessage(messageInput()));
 
-    expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+    expect(error).toMatchObject({ failureCode: "provider_unsupported", retryable: false });
+    expect((error as Error).message).toContain("coinbase_cdp");
   });
 });
 
