@@ -29,6 +29,7 @@ const MODULE_METADATA = [
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/jupiter-lend",
+      "@sdp/ondo",
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
@@ -128,6 +129,19 @@ const MODULE_METADATA = [
     directory: "packages/sdp-jupiter-lend",
     purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
     allowedDependencies: ["@sdp/earn", "@sdp/types"],
+  },
+  {
+    name: "@sdp/ondo",
+    directory: "packages/sdp-ondo",
+    purpose:
+      "Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port.",
+    // The arrow points INWARD and only inward, same as @sdp/kamino and
+    // @sdp/veda. This package carries NO chain SDK and no Jupiter client of its
+    // own: executable instructions come through a port the API injects, so the
+    // Jupiter instruction trust boundary stays single-owner in the API's
+    // jupiter-swap.service. The Ondo deployment registry lives in @sdp/types,
+    // which @sdp/earn's catalogue client reaches without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/veda",

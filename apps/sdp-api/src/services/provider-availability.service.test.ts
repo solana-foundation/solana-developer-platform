@@ -704,6 +704,7 @@ describe("provider-availability.service", () => {
       ground: false,
       kamino: false,
       jupiter_lend: false,
+      ondo: false,
     });
   });
 

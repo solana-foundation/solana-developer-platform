@@ -86,7 +86,7 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
  * keys on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
-type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda" | "jupiter_lend">;
+type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda" | "jupiter_lend" | "ondo">;
 
 /**
  * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
@@ -340,6 +340,12 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
     kamino: publicApiDefinition("Kamino"),
     jupiter_lend: publicApiDefinition("Jupiter Lend"),
+    // Keyless: the catalogue reads the chain and the execution half swaps on
+    // the open market. The Jupiter swap credential it uses is PLATFORM
+    // configuration (JUPITER_SWAP_API_KEY, shared with swap-funded deposits),
+    // not an Ondo tenant to select, so there is no per-provider key to gate
+    // on — a missing Jupiter key fails the build closed at request time.
+    ondo: publicApiDefinition("Ondo"),
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

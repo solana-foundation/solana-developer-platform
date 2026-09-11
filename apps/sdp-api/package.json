@@ -58,6 +58,7 @@
     "@sdp/issuance": "workspace:*",
     "@sdp/kamino": "workspace:*",
     "@sdp/jupiter-lend": "workspace:*",
+    "@sdp/ondo": "workspace:*",
     "@sdp/payments": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",

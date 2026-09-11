@@ -11,6 +11,10 @@ import {
   JupiterLendVaultDirectClient,
 } from "@sdp/jupiter-lend";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
+import {
+  assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
+  OndoVaultDirectClient,
+} from "@sdp/ondo";
 import { resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
@@ -25,6 +29,7 @@ import {
 } from "@sdp/veda";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
+import { createOndoSwapPort } from "./ondo-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
 
 /**
@@ -203,6 +208,13 @@ export function resolveEarnExecutionClient(
     const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
     assertVedaNotPortfolioProvider(client);
     return instrumentVendorPort("veda", client);
+  }
+  if (provider === "ondo") {
+    const client = new OndoVaultDirectClient(provenRpcUrl, runOperation, () =>
+      createOndoSwapPort(env)
+    );
+    assertOndoNotPortfolioProvider(client);
+    return instrumentVendorPort("ondo", client);
   }
   return null;
 }
