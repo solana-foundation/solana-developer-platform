@@ -864,22 +864,16 @@ function ActiveVaultPositionsCard({
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-primary tabular-nums">
-                        <span data-earn-vault-balance={balanceProjection ? "projected" : "live"}>
-                          {balanceProjection ? "≈" : ""}
+                        <span
+                          className={
+                            balanceProjection
+                              ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100"
+                              : undefined
+                          }
+                          data-earn-vault-balance={balanceProjection ? "projected" : "live"}
+                        >
                           {formatProviderAmount(displayedBalance, locale)}
                         </span>
-                        {balanceProjection ? (
-                          <span
-                            className="mt-1 flex items-center gap-1.5 text-xs text-tertiary"
-                            role="status"
-                          >
-                            <span
-                              aria-hidden="true"
-                              className="size-1.5 animate-pulse rounded-full bg-success motion-reduce:animate-none"
-                            />
-                            {t("DashboardMarkets.treasury.balanceSyncing")}
-                          </span>
-                        ) : null}
                       </TableCell>
                       <TableCell className="text-sm text-secondary">
                         {wallet?.label?.trim() ||

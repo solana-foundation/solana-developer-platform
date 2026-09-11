@@ -911,9 +911,9 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
-    expect(screen.getByText("≈135.25")).toBeTruthy();
-    expect(screen.getByText("Syncing exact balance")).toBeTruthy();
-    expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeTruthy();
+    const projectedBalance = document.querySelector('[data-earn-vault-balance="projected"]');
+    expect(projectedBalance?.textContent).toBe("135.25");
+    expect(projectedBalance?.className).toContain("animate-pulse");
 
     mocks.livePositionTokenValue = "135.25";
     view.rerender(
@@ -928,7 +928,6 @@ describe("TreasurySolutionsWorkspace", () => {
       expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
     );
     expect(screen.getAllByText("135.25").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Syncing exact balance")).toBeNull();
   });
 
   it("refreshes uncached wallet balances when a vault movement settles", async () => {
@@ -1063,8 +1062,8 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
-    expect(within(positionRow).getByText("≈119.25")).toBeTruthy();
-    expect(within(positionRow).getByText("Syncing exact balance")).toBeTruthy();
+    const projectedBalance = within(positionRow).getByText("119.25");
+    expect(projectedBalance.className).toContain("animate-pulse");
     expect(
       within(positionRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
