@@ -88,7 +88,9 @@ function ReviewPartySide({
           {resolved.label ?? shortenAddress(resolved.address ?? "")}
         </p>
         {resolved.address === null ? null : (
-          <p className="break-all text-tertiary text-sm">{resolved.address}</p>
+          <p className="text-tertiary text-sm" title={resolved.address}>
+            {shortenAddress(resolved.address)}
+          </p>
         )}
       </div>
       <dl className="grid gap-3 border-border-default border-t pt-4">
