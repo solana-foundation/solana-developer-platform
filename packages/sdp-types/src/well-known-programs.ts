@@ -1,4 +1,4 @@
-import { address } from "@solana/kit";
+import { address } from "@solana/addresses";
 
 /**
  * SPL Memo. Passed alongside token transfers so a destination with MemoTransfer

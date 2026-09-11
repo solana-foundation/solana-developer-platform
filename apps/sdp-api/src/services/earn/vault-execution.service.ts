@@ -1,7 +1,7 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
   type AddressesByLookupTableAddress,
@@ -29,7 +29,6 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import { assertSponsorSignedSameMessage } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./execution-registry";

@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { createRpcFromTransport, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -20,7 +21,6 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {

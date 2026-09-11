@@ -21,7 +21,7 @@
  */
 
 import { isAddress } from "@sdp/solana/address";
-import type { PrivateChannelInstance } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type PrivateChannelInstance } from "@sdp/types";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   mapPrivateChannelInstanceRow,
@@ -30,7 +30,6 @@ import {
 } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, walletNotFound } from "@/lib/errors";
-import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";

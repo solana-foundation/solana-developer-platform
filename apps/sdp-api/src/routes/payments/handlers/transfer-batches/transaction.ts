@@ -1,4 +1,5 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
@@ -20,7 +21,6 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
-import { MEMO_PROGRAM_ADDRESS } from "@/lib/solana-programs";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
