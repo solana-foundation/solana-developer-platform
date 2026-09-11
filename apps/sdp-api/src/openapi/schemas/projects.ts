@@ -1,6 +1,7 @@
 import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
+  projectRpcEndpointSchema,
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
 } from "../../routes/projects/schemas";
@@ -23,8 +24,9 @@ export const projectSettingsSchema = z
         "Preferred RPC provider for this project. Defaults to `default` (round-robin managed providers). Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
       example: "default",
     }),
-    rpcEndpoint: z.string().url().optional().openapi({
-      description: "Custom Solana RPC endpoint for the project (used when rpcProvider=custom).",
+    rpcEndpoint: projectRpcEndpointSchema.optional().openapi({
+      description:
+        "Custom Solana RPC endpoint for the project (used when rpcProvider=custom). Must be https, without embedded credentials, and must not point at a private or reserved address.",
       example: "https://rpc.example.com",
     }),
     webhookUrl: z.string().url().optional().openapi({
