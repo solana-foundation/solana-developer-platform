@@ -132,7 +132,7 @@ describe("PrivateWalletsCard retry provision", () => {
 
     await userEvent.setup().click(retryButton());
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("owner unfunded");
+    expect((await screen.findByRole("alert")).textContent).toContain("owner unfunded");
     await waitFor(() => expect(onWalletsChanged).toHaveBeenCalledTimes(1));
     expect(retryButton().disabled).toBe(false);
   });
