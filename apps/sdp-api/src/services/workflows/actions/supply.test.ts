@@ -361,4 +361,30 @@ describe("supply actions honor the token's operational status", () => {
     expect(mintTo).not.toHaveBeenCalled();
     expect(result).toMatchObject({ status: "failed", retryable: false });
   });
+
+  it("refuses to burn from a paused token", async () => {
+    const result = await runBurn(env, executionFixture(), { params: { amount: "1" } } as never);
+
+    expect(burn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "failed", retryable: false });
+  });
+
+  // Paused is one refusal branch; a token that never reached active (or was
+  // revoked) is the other, and both must stop short of the chain call.
+  it("refuses every supply operation on a non-active token", async () => {
+    tokenOverrides.value = { status: "revoked" };
+
+    const seize = await runSeize(env, executionFixture(), {
+      params: { amount: "1", destination: TREASURY },
+    } as never);
+    const forced = await runForceBurn(env, executionFixture(), {
+      params: { amount: "1" },
+    } as never);
+
+    expect(forceTransfer).not.toHaveBeenCalled();
+    expect(forceBurn).not.toHaveBeenCalled();
+    expect(seize).toMatchObject({ status: "failed", retryable: false });
+    expect(forced).toMatchObject({ status: "failed", retryable: false });
+    expect(String((seize as { error: string }).error)).toContain("active");
+  });
 });
