@@ -77,11 +77,13 @@ export async function fetchRpcRelayTarget(
     return guardedFetch(target.endpoint, relayGuardInit(init));
   }
 
+  // A managed provider is trusted with its response, not with the caller's
+  // time: a stalled upstream must not hold the request open indefinitely.
   return fetch(target.endpoint, {
     method: "POST",
     headers: init.headers,
     body: init.body,
-    signal: init.signal,
+    signal: init.signal ?? AbortSignal.timeout(RELAY_TIMEOUT_MS),
   });
 }
 

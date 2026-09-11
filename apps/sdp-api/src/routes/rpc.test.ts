@@ -909,6 +909,27 @@ describe("RPC Relay Routes", () => {
       expect(body.error.code).toBe("RATE_LIMITED");
     });
 
+    it("refuses an invalid query without charging the exhausted quota's answer", async () => {
+      // Validation runs before the quota: a request the route would reject
+      // must answer 400, not spend the pool and answer 429.
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
+
+      const response = await app.request(
+        "/v1/rpc/proxy?projectId=",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+    });
+
     it("429s the connectivity test once the actor's quota is exhausted", async () => {
       await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
 
