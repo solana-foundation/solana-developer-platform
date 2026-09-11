@@ -86,9 +86,11 @@ function WizardFooter({
 export function DvpCreateWorkspace({
   cluster,
   context,
+  sandbox = false,
 }: {
   cluster: SolanaCluster;
   context: DvpCreateContext;
+  sandbox?: boolean;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -134,7 +136,7 @@ export function DvpCreateWorkspace({
       <div className="grid gap-5">
         {context.error ? <Callout variant="danger">{context.error}</Callout> : null}
 
-        {cluster === "devnet" ? null : (
+        {cluster === "devnet" || sandbox ? null : (
           <Callout variant="warning">
             {t("DashboardMarkets.dvp.wrongClusterWarning", { cluster })}
           </Callout>

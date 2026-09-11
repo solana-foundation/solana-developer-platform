@@ -16,7 +16,9 @@
  */
 
 import { isAddress } from "@sdp/solana";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { useEffect, useState } from "react";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 const DEBOUNCE_MS = 350;
 
@@ -64,6 +66,7 @@ interface PastedMintLookup {
 }
 
 export function usePastedMint(address: string): PastedMintState {
+  const sandbox = useOptionalDashboardWorkspace()?.sdpEnvironment === "sandbox";
   // ONLY the completed lookup is state. Everything the caller sees is worked
   // out below from this plus the current address.
   //
@@ -89,6 +92,24 @@ export function usePastedMint(address: string): PastedMintState {
     // been edited can never land after a newer one and overwrite it.
     const controller = new AbortController();
     const timer = setTimeout(async () => {
+      if (sandbox) {
+        const known = WELL_KNOWN_TOKEN_BY_MINT.get(wanted);
+        setLookup({
+          address: wanted,
+          mint: {
+            decimals: known?.decimals ?? 6,
+            name: known?.name ?? null,
+            symbol: known?.symbol ?? null,
+            tokenProgram: known
+              ? SPL_TOKEN_PROGRAMS[known.tokenProgram]
+              : SPL_TOKEN_PROGRAMS["token-2022"],
+            eligible: true,
+            blockedBy: null,
+          },
+          notFound: false,
+        });
+        return;
+      }
       try {
         const response = await fetch(
           `/api/dashboard/markets/dvp/mints/${encodeURIComponent(wanted)}`,
@@ -116,7 +137,7 @@ export function usePastedMint(address: string): PastedMintState {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [address]);
+  }, [address, sandbox]);
 
   return {
     // Never the previous mint's metadata: an unanswered address reads as null.

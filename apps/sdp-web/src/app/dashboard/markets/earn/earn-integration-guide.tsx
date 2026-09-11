@@ -45,6 +45,10 @@ type EarnIntegrationGuideProps = {
   strategyId?: string;
 };
 
+type LiveEarnIntegrationGuideProps = EarnIntegrationGuideProps & {
+  sandboxExperience?: boolean;
+};
+
 /** These are reference tabs, not wizard steps: engineers can jump to any part of the flow. */
 const GUIDE_SECTIONS = [
   {
@@ -130,23 +134,27 @@ function strategyOptionState(
   };
 }
 
-export function EarnIntegrationGuide({
+export function LiveEarnIntegrationGuide({
   apiBaseUrl,
   earnHref,
   providerAccess,
+  sandboxExperience = false,
   strategyCluster: initialCluster,
   strategyId: initialStrategyId,
-}: EarnIntegrationGuideProps) {
+}: LiveEarnIntegrationGuideProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
   const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
-  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(() =>
-    initialCluster === environmentCluster ? undefined : initialCluster
-  );
-  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
+  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(() => {
+    if (sandboxExperience) return "mainnet-beta";
+    return initialCluster === environmentCluster ? undefined : initialCluster;
+  });
+  const strategiesCluster =
+    sandboxExperience || sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
   const activeCluster = strategiesCluster ?? environmentCluster;
-  const previewingMainnet = sdpEnvironment === "sandbox" && activeCluster === "mainnet-beta";
+  const previewingMainnet =
+    !sandboxExperience && sdpEnvironment === "sandbox" && activeCluster === "mainnet-beta";
   const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategiesCluster });
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(
     initialStrategyId ?? null
@@ -158,6 +166,14 @@ export function EarnIntegrationGuide({
 
   const rows = strategies ?? [];
   const options = rows.map((strategy) => {
+    if (sandboxExperience) {
+      return {
+        availability:
+          strategy.status === "active" ? ("available" as const) : ("strategy_unavailable" as const),
+        selectable: strategy.status === "active",
+        strategy,
+      };
+    }
     const { availability, selectable } = strategyOptionState(
       strategy,
       sdpEnvironment,
@@ -204,13 +220,18 @@ export function EarnIntegrationGuide({
           onStrategyChange={setSelectedStrategyId}
           options={options}
           previewingMainnet={previewingMainnet}
-          sdpEnvironment={sdpEnvironment}
+          sdpEnvironment={sandboxExperience ? "production" : sdpEnvironment}
           selectedOption={selectedOption}
           selectionIssue={selectionIssue}
         />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+export function EarnIntegrationGuide(props: EarnIntegrationGuideProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
+  return <LiveEarnIntegrationGuide {...props} sandboxExperience={sdpEnvironment === "sandbox"} />;
 }
 
 type StrategyOption = {
