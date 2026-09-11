@@ -458,14 +458,15 @@ afterEach(() => {
 describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
   it.each(
     ["false", "true"].flatMap((byokEnabled) =>
-      ["inactive-wallet", "inactive-config", "provider-denied"].map((state) => ({
-        byokEnabled,
-        state,
-      }))
+      [
+        { state: "inactive-wallet", status: 409, reason: "runtime_execution_unavailable" },
+        { state: "inactive-config", status: 409, reason: "runtime_execution_unavailable" },
+        { state: "provider-denied", status: 403, reason: "provider_not_entitled" },
+      ].map((expectation) => ({ byokEnabled, ...expectation }))
     )
   )(
-    "preserves legacy approval before $state execution failure with BYOK $byokEnabled",
-    async ({ byokEnabled, state }) => {
+    "keeps a new Config approval pending with a $state wallet and BYOK $byokEnabled",
+    async ({ byokEnabled, state, status, reason }) => {
       await seedAuth();
       const headers = await seedApprover();
       await seedWallet({
@@ -484,6 +485,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       const body = z
         .object({ error: z.object({ details: z.object({ approvalRequestId: z.string() }) }) })
         .parse(await held.json());
+      const path = `/v1/wallets/approval-requests/${body.error.details.approvalRequestId}`;
 
       if (state === "inactive-wallet") {
         await getDb(env)
@@ -506,14 +508,18 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
           .run();
       }
 
-      const response = await app.request(
-        `/v1/wallets/approval-requests/${body.error.details.approvalRequestId}/approve`,
-        { method: "POST", headers },
-        env
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        data: { approvalRequest: { status: "approved", operation: { status: "failed" } } },
+      const response = await app.request(`${path}/approve`, { method: "POST", headers }, env);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { details: { reason } } });
+      const detail = await app.request(path, { headers }, env);
+      expect(await detail.json()).toMatchObject({
+        data: {
+          approvalRequest: {
+            status: "pending",
+            resolvedAt: null,
+            operation: { status: "pending_approval", executionStartedAt: null },
+          },
+        },
       });
       expect(depositIntoVault).not.toHaveBeenCalled();
     }

@@ -199,11 +199,11 @@ export const approveApprovalRequest = async (c: AppContext) => {
     approvalRequestId,
     "approve"
   );
-  // New Connection approvals need admission. Configs and existing approvals
-  // retain their execution and recorded-result replay contract.
+  // A new approval admits its pinned wallet before the decision, like every
+  // other new execution attempt. Existing approvals keep their replay contract.
   if (current.approval_status === "pending") {
     if (current.custody_wallet_id) {
-      await createSigningService(c.env, getRequestTenantScope(c)).admitConnectionApproval(
+      await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
         current.organization_id,
         current.project_id ?? undefined,
         current.custody_wallet_id

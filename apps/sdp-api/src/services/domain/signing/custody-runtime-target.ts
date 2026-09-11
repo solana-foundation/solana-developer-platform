@@ -336,38 +336,6 @@ export class CustodyRuntimeTargets {
     await assertCustodyProviderEntitled(this.env, this.db, params.organizationId, target.provider);
   }
 
-  async admitConnectionApproval(params: {
-    organizationId: string;
-    projectId?: string;
-    custodyWalletId: string;
-  }): Promise<void> {
-    const target = await this.resolveRetainedWalletRecord(
-      params.organizationId,
-      params.projectId,
-      params.custodyWalletId
-    );
-    if (!target) {
-      this.logMissingExactWallet(params);
-      throw notFound("Custody wallet");
-    }
-    // Only a proven Config owner keeps the legacy approve-then-execute flow.
-    if (target.kind === "config") return;
-    this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
-    try {
-      await assertCustodyProviderEntitled(
-        this.env,
-        this.db,
-        params.organizationId,
-        target.provider
-      );
-    } catch (error) {
-      if (error instanceof AppError && error.code === "FORBIDDEN") {
-        throw new AppError(error.code, error.message, { reason: "provider_not_entitled" });
-      }
-      throw error;
-    }
-  }
-
   async listWallets(params: {
     organizationId: string;
     projectId?: string;
