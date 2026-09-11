@@ -122,8 +122,23 @@ export interface KaminoVault {
 export interface KaminoVaultMetrics {
   /** Vault pubkey this row describes — the join key back to `KaminoVault`. */
   kvault: string;
-  /** Current blended APY as a decimal fraction string ("0.0592…" = 5.92%). */
+  /**
+   * INSTANTANEOUS blended APY as a decimal fraction string ("0.0592…" = 5.92%).
+   * Tracks Klend reserve utilization minute to minute: on 2026-09-10 the Main
+   * Market USDC reserve hit ~97% utilization and this read 18-23% on six USDC
+   * vaults whose trailing figures sat at 3-7% (PRO-1922). Carried as
+   * `riskMetadata.spotApy`, never as the shelf's `currentApy`.
+   */
   apy?: string | null;
+  /**
+   * Trailing seven-day APY, same units. THE figure the shelf stores as
+   * `currentApy`: it is what a depositor actually accrues over a horizon that
+   * matters, it is at least as smooth as Kamino's own vault-page headline
+   * ("quoted APYs are trailing averages"), and it makes the 3x jump bound in
+   * `EARN_FIGURE_BOUNDS` mean something. A missing `apy7d` is "no rate", not a
+   * cue to fall back to the spot figure.
+   */
+  apy7d?: string | null;
   /** Idle balance, USD. */
   tokensAvailableUsd?: string | null;
   /** Balance deployed into Klend reserves, USD. */
@@ -290,6 +305,18 @@ export function kaminoTvlUsd(metrics: KaminoVaultMetrics): number | undefined {
   return Number.isFinite(total) ? total : undefined;
 }
 
+/**
+ * The instantaneous rate as a risk-metadata fragment, so the UI can one day
+ * show "current" beside the trailing headline the way Kamino's vault page
+ * does. Kept OUT of `currentApy` on purpose (see `KaminoVaultMetrics.apy`).
+ * Empty when Kamino reports none, so the merge on refresh does not write a
+ * null over a figure the sync stored.
+ */
+function kaminoSpotApy(metrics: KaminoVaultMetrics): { spotApy?: string } {
+  const spotApy = truncateKaminoApy(metrics.apy);
+  return spotApy === undefined ? {} : { spotApy };
+}
+
 // --- Distillation ---
 
 /** Why distillation kept a raw Kamino vault out of the strategy catalogue. */
@@ -382,7 +409,7 @@ export function distillKaminoVault(
       ...(shareMint ? { shareMint } : {}),
       hostCluster: KAMINO_HOST_CLUSTER,
       apyType: "variable",
-      currentApy: truncateKaminoApy(metrics.apy),
+      currentApy: truncateKaminoApy(metrics.apy7d),
       // A K-Vault withdrawal is atomic in one transaction and auto-disinvests
       // from a Klend reserve when the vault's idle balance is short — Kamino's
       // withdraw docs are explicit, and there is no redemption queue and no
@@ -396,6 +423,7 @@ export function distillKaminoVault(
       // the protocol itself reports.
       riskMetadata: {
         tvlUsd,
+        ...kaminoSpotApy(metrics),
         ...(metrics.numberOfHolders == null ? {} : { holders: metrics.numberOfHolders }),
         ...(vault.state.managementFeeBps == null
           ? {}
@@ -623,8 +651,8 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
   /**
    * Live figures for the whole shelf — the short-cadence half of the catalogue.
    *
-   * Kamino is a natural fit for this capability: `apy` moves continuously with
-   * the underlying Klend reserve rates, and the BULK metrics endpoint carries
+   * Kamino is a natural fit for this capability: the rates move continuously
+   * with the underlying Klend reserve rates, and the BULK metrics endpoint carries
    * every figure for every vault in two requests. There is no vault-list fetch
    * here at all (the 348KB call `listStrategies` makes) because none of what it
    * returns can change between hourly syncs — name, mints and share mint are
@@ -653,9 +681,10 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
       const tvlUsd = kaminoTvlUsd(metrics);
       return {
         providerReference: metrics.kvault,
-        currentApy: truncateKaminoApy(metrics.apy),
+        currentApy: truncateKaminoApy(metrics.apy7d),
         riskMetadata: {
           ...(tvlUsd === undefined ? {} : { tvlUsd }),
+          ...kaminoSpotApy(metrics),
           ...(metrics.numberOfHolders == null ? {} : { holders: metrics.numberOfHolders }),
         },
       };
