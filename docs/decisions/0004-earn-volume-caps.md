@@ -151,8 +151,13 @@ declares at STRIDE onboarding (PRD §4.4) times a generous multiple.
 - Partners see caps as preview blocking issues, the same channel that already
   carries slippage and liquidity issues.
 - One vault's failure costs SDP customers at most a known number.
-- Caps add one ledger aggregate per deposit admission. It is bounded by a
-  short TTL cache and indexed on (organization, direction, created_at).
+- Caps add one ledger aggregate per deposit admission, indexed for the
+  aggregate. Admissions read the ledger fresh so an enforced verdict never
+  rests on a cached figure; only previews use the short in-process cache.
+- Velocity windows count only decided, still-live operations. An operation
+  awaiting its own decision does not count, so concurrent requests cannot
+  veto each other; the overshoot concurrency can cause is bounded by the
+  in-flight set, which is the failure direction this ADR prefers.
 
 ## Rejected
 

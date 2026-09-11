@@ -56,8 +56,10 @@ A rolling-window volume cap (ADR 0004, layer 2):
 Semantics, and the one deliberate difference from `amount`:
 
 - The projected total is the sum of prior wallet operations in the window for
-  the scope and asset (excluding `failed` and `canceled` rows and the
-  operation under evaluation) plus this operation's amount.
+  the scope and asset (excluding `failed`, `canceled` and still-undecided
+  `created` rows, and the operation under evaluation) plus this operation's
+  amount. Undecided rows are left out so two concurrent requests cannot each
+  count the other and both breach a window one of them fits in.
 - If the projected total exceeds `max`, the rule's decision is `action`
   (default `deny`). **`action` is the decision ON BREACH**, so a tier default
   can set `approval_required` and route the outlier into the approval flow

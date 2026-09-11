@@ -210,6 +210,35 @@ describe("createVaultExposureReader", () => {
     expect(sum).toHaveBeenCalledTimes(2);
   });
 
+  it("bypasses the cache on a fresh read and refreshes it", async () => {
+    const sum = vi.fn().mockResolvedValueOnce("10").mockResolvedValueOnce("25");
+    const reader = createVaultExposureReader({ sum, ttlMs: 30_000, now: () => 0 });
+
+    expect(await reader.read(db, key)).toBe("10");
+    expect(await reader.read(db, key, { fresh: true })).toBe("25");
+    expect(sum).toHaveBeenCalledTimes(2);
+    expect(await reader.read(db, key)).toBe("25");
+    expect(sum).toHaveBeenCalledTimes(2);
+  });
+
+  it("reserves an admitted amount into a live cache entry only", async () => {
+    let clock = 0;
+    const sum = vi.fn().mockResolvedValue("10");
+    const reader = createVaultExposureReader({ sum, ttlMs: 30_000, now: () => clock });
+
+    reader.reserve(key, "5");
+    expect(await reader.read(db, key)).toBe("10");
+    reader.reserve(key, "5");
+    expect(await reader.read(db, key)).toBe("15");
+    reader.reserve(key, "not-a-number");
+    expect(await reader.read(db, key)).toBe("15");
+
+    clock += 30_000;
+    reader.reserve(key, "5");
+    expect(await reader.read(db, key)).toBe("10");
+    expect(sum).toHaveBeenCalledTimes(2);
+  });
+
   it("keys the cache on environment, provider and vault", async () => {
     const sum = vi.fn().mockResolvedValue("1");
     const reader = createVaultExposureReader({ sum, now: () => 0 });
@@ -271,6 +300,7 @@ describe("assessVaultExposure", () => {
     });
     expect(verdict).toEqual({
       enforced: false,
+      key: { environment: "sandbox", provider: "kamino", vaultAddress: CAPPED_VAULT },
       evaluation: expect.objectContaining({ wouldBlock: false, projected: "60", limit: "100" }),
     });
     expect(evaluatedEvents()).toEqual([
@@ -305,6 +335,7 @@ describe("assessVaultExposure", () => {
     const shadow = await assessVaultExposure({ ...input, env: {} as Env });
     expect(shadow).toEqual({
       enforced: false,
+      key: { environment: "sandbox", provider: "kamino", vaultAddress: CAPPED_VAULT },
       evaluation: expect.objectContaining({ wouldBlock: true, projected: "105", limit: "100" }),
     });
     expect(vaultExposureBlockingIssue(shadow)).toBeNull();

@@ -520,7 +520,11 @@ organization's own custody wallets.
     honesty notes: withdrawals are ledgered in SHARES, so the figure is gross
     inflow (never subtracts exits, so it errs toward refusing); and it is
     token units against a USD TVL, which is dollar-for-dollar only because V1
-    vaults are stablecoins. The read is cached 30s per vault in-process.
+    vaults are stablecoins. Previews read a 30s in-process cache; the
+    ADMISSION always reads the ledger fresh and folds the admitted amount back
+    into the cache, so an enforced verdict is never decided on a stale figure
+    (residual overshoot is bounded by deposits admitted before their own
+    `requested` row lands).
   - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
     binding must not be able to spend. Note this is the first `earn:*` scope
     asserted on a BINDING: a selected-scope key provisioned only with

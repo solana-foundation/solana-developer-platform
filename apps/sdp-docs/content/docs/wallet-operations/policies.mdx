@@ -143,7 +143,7 @@ A `velocity` rule caps volume over a rolling window instead of per operation:
 - `scope` chooses whose history counts: `wallet` (default), `organization`, or `api_key`.
 - `window` is an ISO 8601 duration using days, hours and minutes (`PT1H`, `P1D`, `P1DT12H`). Weeks, months, years and seconds are rejected.
 - `max` is a UI-unit decimal string in the asset's units. Like `amount`, the rule must name at least one mint.
-- The window sums every non-failed, non-canceled wallet operation for the scope and mint, optionally narrowed by `operationTypes`.
+- The window sums every decided, non-failed, non-canceled wallet operation for the scope and mint, optionally narrowed by `operationTypes`. Operations still awaiting their own policy decision do not count, so concurrent requests never block each other.
 - `action` is the decision **on breach** (default `deny`). Within the limit the rule abstains rather than allowing, so a velocity rule never overrides a stricter rule beside it. Set `action: "approval_required"` to route outliers into the approval flow instead of refusing them.
 - A `Dry-Run: true` request reports the velocity verdict against current history without recording anything.
 

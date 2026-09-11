@@ -814,10 +814,10 @@ describe("PolicyRepository (postgres)", () => {
     );
   });
 
-  it("sums velocity windows from wallet_operations, skipping failed and canceled rows and the operation under evaluation", async () => {
+  it("sums velocity windows from wallet_operations, skipping failed, canceled and undecided rows and the operation under evaluation", async () => {
     const service = policyStores(repo);
     const enforcement = new PostgresPolicyEnforcementStore(repo, TEST_SCOPE);
-    const record = (amount: string, status?: "failed" | "canceled") =>
+    const record = (amount: string, status?: "failed" | "canceled" | "evaluated" | "created") =>
       service.recordWalletOperation({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
@@ -832,10 +832,13 @@ describe("PolicyRepository (postgres)", () => {
         status,
       });
 
-    await record("60000");
-    await record("0.25");
+    await record("60000", "evaluated");
+    await record("0.25", "evaluated");
     await record("500", "failed");
     await record("700", "canceled");
+    // A concurrent contender that has not been decided yet must not count,
+    // or two simultaneous requests would each veto the other.
+    await record("40000", "created");
     const current = await record("50000");
     await service.recordWalletOperation({
       organizationId: TEST_ORG.id,
@@ -848,6 +851,7 @@ describe("PolicyRepository (postgres)", () => {
       asset: "USDC",
       amount: "9",
       legs: [],
+      status: "evaluated",
     });
     await getDb(env)
       .prepare(
@@ -884,7 +888,9 @@ describe("PolicyRepository (postgres)", () => {
     const dryRun = await enforcement.loadVelocityObservations({ ...current, id: undefined }, [
       { kind: "velocity", scope: "organization", window: "P1D", max: "1", asset: "USDC" },
     ]);
-    expect(dryRun[0]?.total).toBe("110009");
+    // The row under evaluation is itself still `created`, so a dry run that
+    // cannot exclude it by id reaches the same total by status.
+    expect(dryRun[0]?.total).toBe("60009");
 
     const otherAsset = await enforcement.loadVelocityObservations(current, [
       { kind: "velocity", scope: "organization", window: "P1D", max: "1", asset: "USDG" },

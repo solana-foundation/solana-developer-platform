@@ -113,8 +113,10 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
    * Measure the rolling totals the velocity rules in play need, one per rule
    * asset, de-duplicated by key. Totals come from `wallet_operations`, the
    * generic ledger every policy-gated route writes, so payments can adopt the
-   * rule unchanged; failed and canceled rows never count, and the operation
-   * under evaluation (already inserted by enforcement) is excluded by id.
+   * rule unchanged; failed, canceled and still-undecided (`created`) rows
+   * never count, so concurrent contenders do not veto each other, and the
+   * operation under evaluation (already inserted by enforcement) is excluded
+   * by id as well.
    * A rule whose window does not parse gets no observation and reviews.
    *
    * @param candidate - The candidate whose scopes narrow the sums.
