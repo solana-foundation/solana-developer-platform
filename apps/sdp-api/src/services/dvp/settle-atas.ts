@@ -29,14 +29,6 @@ export interface DvpSettleAtas {
   userBAtaB: Address;
 }
 
-/**
- * Derives an associated token address for an owner, mint, and token program.
- *
- * @param owner - Owner of the associated token account.
- * @param mint - Mint held by the associated token account.
- * @param tokenProgram - Token program that owns the mint and token account.
- * @returns The derived associated token address.
- */
 async function ata(owner: Address, mint: Address, tokenProgram: Address): Promise<Address> {
   const [derived] = await findAssociatedTokenPda({ owner, mint, tokenProgram });
   return derived;

@@ -66,13 +66,6 @@ function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
 }
 
-/**
- * Parses a raw `dvp_trades` row with the Zod row schema and maps it onto the
- * repository shape, so a corrupt column throws instead of flowing downstream.
- *
- * @param row - One `dvp_trades` row as the driver returns it.
- * @returns The typed trade row.
- */
 function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
   const parsed = dvpTradeRowSchema.parse(row);
   return {

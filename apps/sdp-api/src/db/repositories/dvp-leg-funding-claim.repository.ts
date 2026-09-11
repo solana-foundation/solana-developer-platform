@@ -97,13 +97,6 @@ export interface DvpLegFundingClaimRepository {
   deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
 }
 
-/**
- * Parses a raw `dvp_leg_funding_claims` row with the Zod row schema and maps it
- * onto the repository shape, so a corrupt column throws instead of flowing.
- *
- * @param row - One claim row as the driver returns it.
- * @returns The typed claim.
- */
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
   const parsed = dvpLegFundingClaimRowSchema.parse(row);
   return {
