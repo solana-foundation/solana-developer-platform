@@ -26,7 +26,7 @@ export default defineConfig({
   testDir: "./playwright/tests",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: 0,
+  retries: useExternalApi ? 2 : 0,
   timeout: 180_000,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
