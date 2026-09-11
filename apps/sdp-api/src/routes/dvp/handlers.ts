@@ -485,13 +485,18 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   const result = await closeDvpTrade(c, resolved.trade, action);
 
   // We broadcast it, so we know the outcome — not `closed_unknown` from the sweep.
-  await createDvpTradeRepository(c.env).recordClose(
+  const closed = await createDvpTradeRepository(c.env).recordClose(
     resolved.trade.id,
     action === "settle" ? "settled" : "cancelled",
     result.signature
   );
 
-  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+  // The observation is a compare-and-swap on the row's status, so it has to
+  // see the closed row, not the one read before the close. A null means the
+  // reconciler already moved the row from a chain read, which beats this.
+  if (closed !== null) {
+    await observeDvpTradeNow(c.env, closed, result.signature);
+  }
 
   return success(c, {
     tradeId: resolved.trade.id,

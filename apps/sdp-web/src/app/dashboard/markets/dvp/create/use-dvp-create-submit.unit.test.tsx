@@ -1,16 +1,12 @@
 // @vitest-environment jsdom
-
 /**
  * The create request, and above all its idempotency key.
  *
- * The key has to do two opposite things: make a double submit a replay, and
- * make a genuinely different trade a different request. Getting the second one
- * wrong is not a missed optimisation — the API compares a replay's fingerprint
- * against the stored one and refuses a mismatch, so a key that ignores a field
- * the fingerprint includes turns a valid trade into
- * "Idempotency key already used with different request payload".
+ * The key has to do two opposite things: make a retry of the same request a
+ * replay, and make a second trade on identical terms a new request. The
+ * server fingerprint guards the key against reuse with different terms; the
+ * client's only job is to hand each logical request exactly one key.
  */
-
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -33,7 +29,6 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 const T22 = SPL_TOKEN_PROGRAMS["token-2022"];
-const LEGACY = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const WALLET_A = "cwlt_a";
 const ADDRESS_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 const ADDRESS_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
@@ -119,106 +114,56 @@ describe("useDvpCreateSubmit idempotency key", () => {
     vi.clearAllMocks();
   });
 
-  it("is stable for the same trade, so a double submit replays", async () => {
-    expect((await requestFor()).idempotencyKey).toBe((await requestFor()).idempotencyKey);
+  function keyOf(fetchMock: ReturnType<typeof vi.fn>, call: number): string {
+    const init = fetchMock.mock.calls[call]?.[1] as { headers?: Record<string, string> };
+    return init.headers?.["Idempotency-Key"] ?? "";
+  }
+
+  it("is well formed", async () => {
+    expect((await requestFor()).idempotencyKey).toMatch(/^dvp-create-[0-9a-f]{32}$/);
   });
 
-  // Each of these was previously absent from the key while being present in the
-  // API's fingerprint, so two distinct trades collided and the second was
-  // refused. One case per field, because a single combined case would still
-  // pass with all but one of them restored.
-  describe("distinguishes trades that differ only by", () => {
-    const base = requestFor().then((value) => value.idempotencyKey);
-
-    it.each([
-      ["the asset mint", { mintA: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE" }],
-      ["the cash mint", { mintB: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1" }],
-      [
-        "the party A reference kind",
-        {
-          parties: {
-            a: { ref: { address: ADDRESS_A }, address: ADDRESS_A },
-            b: { ref: { address: ADDRESS_B }, address: ADDRESS_B },
-          },
-        },
-      ],
-      [
-        "the party B address",
-        {
-          parties: {
-            a: { ref: { walletId: WALLET_A }, address: ADDRESS_A },
-            b: { ref: { address: `${ADDRESS_B}1` }, address: `${ADDRESS_B}1` },
-          },
-        },
-      ],
-      ["the asset token program", { tokenProgramA: LEGACY }],
-      ["the cash token program", { tokenProgramB: LEGACY }],
-      ["the reference", { refString: "invoice-42" }],
-      // Where the proceeds go is a term of the trade. Same wallet, same
-      // amounts, same parties, different payee is a DIFFERENT trade, and
-      // the API fingerprints it as one — so a key that ignored these would
-      // send the second request into a mismatched replay and get it refused.
-      [
-        "where the asset side is paid",
-        { userASettlementDestination: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" },
-      ],
-      [
-        "where the cash side is paid",
-        { userBSettlementDestination: "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh" },
-      ],
-    ])("%s", async (_label, overrides) => {
-      expect((await requestFor(overrides)).idempotencyKey).not.toBe(await base);
-    });
-  });
-
-  // The fields that were already covered, kept under test so a refactor of the
-  // digest cannot quietly drop one.
-  describe("still distinguishes trades that differ by", () => {
-    it.each([
-      ["the asset amount", { amountA: "1001" }],
-      ["the cash amount", { amountB: "2001" }],
-      ["the expiry", { expiry: "2027-01-02T23:59" }],
-    ])("%s", async (_label, overrides) => {
-      expect((await requestFor(overrides)).idempotencyKey).not.toBe(
-        (await requestFor()).idempotencyKey
-      );
-    });
-  });
-
-  // A pasted mint carries no program and defaults to Token-2022 at submit. The
-  // key must reflect what is SENT, or an explicit T22 and a pasted address
-  // would hash differently while creating the identical trade.
-  it("treats an unspecified token program as the Token-2022 default it sends", async () => {
-    expect((await requestFor({ tokenProgramA: null })).idempotencyKey).toBe(
-      (await requestFor({ tokenProgramA: T22 })).idempotencyKey
-    );
-  });
-
-  // `crypto.subtle` exists only in a secure context, so a dashboard reached
-  // over plain http on a LAN address does not have it. An earlier version of
-  // this derived the key with `subtle.digest` and threw on every create in any
-  // environment without it — CI included, which is how it was caught.
-  it("derives the key without crypto.subtle", async () => {
-    const original = globalThis.crypto;
-    Object.defineProperty(globalThis, "crypto", {
-      configurable: true,
-      value: { getRandomValues: original.getRandomValues.bind(original) },
-    });
-    try {
-      await expect(requestFor()).resolves.toMatchObject({
-        idempotencyKey: /^dvp-create-[0-9a-f]{32}$/,
+  it("reuses the key when the request got no response, so the retry replays", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { trade: { id: "dvp_1" } } }),
       });
-    } finally {
-      Object.defineProperty(globalThis, "crypto", { configurable: true, value: original });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
+  });
+
+  it.each([
+    [
+      "accepted",
+      { ok: true, status: 200, json: async () => ({ data: { trade: { id: "dvp_1" } } }) },
+    ],
+    ["rejected", { ok: false, status: 400, json: async () => ({ error: { message: "no" } }) }],
+  ])(
+    "rotates the key once a response arrives (%s), so identical terms make a second trade",
+    async (_label, response) => {
+      const fetchMock = vi.fn().mockResolvedValue(response);
+      vi.stubGlobal("fetch", fetchMock);
+      const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
+      await act(async () => {
+        await result.current.submit(request());
+      });
+      await act(async () => {
+        await result.current.submit(request());
+      });
+
+      expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
     }
-  });
-
-  // Free text, and the separator problem it creates: a plain join would let
-  // a reference containing the separator impersonate a different field split.
-  it("does not collide when a reference contains the field separator", async () => {
-    const a = await requestFor({ refString: 'a", "b' });
-    const b = await requestFor({ refString: 'a\\", \\"b' });
-
-    expect(a.idempotencyKey).not.toBe(b.idempotencyKey);
-  });
+  );
 });
