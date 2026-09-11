@@ -5,13 +5,21 @@
 A Rings private wallet is backed by an SDP custody wallet. SDP stores no shielded key
 material at rest. Every time it needs the wallet's keys (a balance read, a shield, a
 withdraw), it asks the custody provider to sign a fixed derivation message from the
-Helius SDK (`TSPP/derive/v1`) and expands the keys from the 64 signature bytes:
+Helius SDK and expands the keys from the 64 signature bytes:
 
-    custody wallet signs "TSPP/derive/v1" → 64-byte signature → viewing + nullifier keys
-                                                              → shielded address
+    custody wallet signs the derivation message → 64-byte signature
+        → viewing + nullifier keys → shielded address
 
 The signature is used as a password, not an authorization. The scheme works only if the
 provider returns the exact same bytes every time it signs that message.
+
+**Sign the envelope, not the payload.** The bytes are Zolana's 99-byte Solana
+off-chain-message v0 envelope, which wraps the `TSPP/derive/v1` payload and binds it to
+the owner address — not the bare string a browser wallet would sign. The two produce
+different seeds and therefore different shielded identities, with no way back. Get the
+exact bytes from `derivationMessageBase64(owner)`
+(`packages/sdp-helius-rings-sdk/src/custody-ka/seed.ts`); anything probing a provider or
+persisting a seed has to sign those and nothing else.
 
 ## The problem
 
@@ -39,6 +47,21 @@ lists only the providers whose signing is reproducible: `local`, `privy`, `turnk
 Everyone else is refused at provisioning with an error naming the provider.
 (`coinbase_cdp`, `utila` and `anchorage` were already excluded for a cruder reason:
 they cannot sign the raw derivation bytes at all.)
+
+## Known limitation: custom ring administration
+
+The gate sits on custody signer resolution, which every Rings signature goes through —
+including the ones that bring up and adopt a custom ring (the auditor-key attestation,
+the registration transactions, the adoption challenge). Those need a valid signature,
+not a reproducible one, so the requirement is stricter there than it has to be: a ring
+whose authority custody wallet lives on an unsupported provider cannot be brought up,
+even when every private wallet in the project is on a supported one.
+
+Not fixed, because the configuration it blocks (an MPC-held ring authority beside
+supported private wallets) does not exist yet, and the shape of the fix should follow a
+real need. When one appears, the split is between the capability (signs raw messages)
+and the requirement (signs them reproducibly): ring administration would check the
+first, and only shielded-key derivation the second.
 
 ## Options for MPC providers later
 
