@@ -18,12 +18,7 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals } from "./earn-decimal";
-import {
-  EarnFlowStepper,
-  EarnFlowTransition,
-  EarnOutcomeMark,
-  EarnProcessingFrame,
-} from "./earn-flow-motion";
+import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd } from "./earn-format";
 import { earnMintAsset, shortenMarketAddress } from "./earn-market-presentation";
 import {
@@ -996,7 +991,6 @@ export function EarnVaultWithdrawModal({
         size="md"
       >
         <div className="p-6" ref={contentRef}>
-          {movementProcessing ? <EarnProcessingFrame /> : null}
           <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
             <WithdrawalResult

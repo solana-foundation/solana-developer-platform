@@ -40,7 +40,8 @@
   will-change: transform;
 }
 
-.earn-processing-border {
+.earn-processing-modal::before {
+  content: "";
   position: absolute;
   inset: -1px;
   z-index: 20;
@@ -68,11 +69,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .earn-processing-modal,
-  .earn-processing-border {
+  .earn-processing-modal::before {
     animation: none;
   }
 
-  .earn-processing-border {
+  .earn-processing-modal::before {
     background: var(--color-warning-border);
     filter: none;
   }

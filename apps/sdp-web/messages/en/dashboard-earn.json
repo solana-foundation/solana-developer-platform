@@ -695,6 +695,8 @@
       "vaultSwapNotice": "Your {source} is swapped to {target} through Jupiter inside the same transaction, so the swap and the deposit land together or not at all. The deposit is sized to the swap's guaranteed minimum ({pct}% tolerance); anything better stays in your wallet as {target}.",
       "vaultSwapRow": "Swap",
       "vaultSwapVia": "{source} → {target} via Jupiter",
+      "vaultSwapReviewTitle": "Swap required before deposit",
+      "vaultSwapReviewBody": "Your {source} will be swapped to the vault's underlying {target} through Jupiter, then deposited in the same transaction.",
       "vaultStrategy": "Vault",
       "vaultBacking": "Backing",
       "vaultFrom": "From wallet",

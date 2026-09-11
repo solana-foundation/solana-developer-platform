@@ -78,6 +78,9 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultSwapNotice": "Swap {source} to {target} at {pct}% tolerance.",
   "DashboardEarn.deposit.vaultSwapRow": "Swap",
   "DashboardEarn.deposit.vaultSwapVia": "{source} to {target} via Jupiter",
+  "DashboardEarn.deposit.vaultSwapReviewTitle": "Swap required before deposit",
+  "DashboardEarn.deposit.vaultSwapReviewBody":
+    "Your {source} will be swapped to the vault's underlying {target} through Jupiter, then deposited in the same transaction.",
   "DashboardEarn.deposit.vaultConfirmNote":
     "The selected custody wallet signs the vault deposit transaction.",
   "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
@@ -338,6 +341,7 @@ describe("EarnVaultDepositModal", () => {
 
     expect(screen.getByText("$1.25")).toBeTruthy();
     expect(screen.getByText("Treasury wallet")).toBeTruthy();
+    expect(screen.queryByText("Swap required before deposit")).toBeNull();
     expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
@@ -369,6 +373,13 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Swap required before deposit")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your USDG will be swapped to the vault's underlying USDC through Jupiter, then deposited in the same transaction."
+      )
+    ).toBeTruthy();
+    expect(document.querySelector('[data-earn-swap-review="true"]')).toBeTruthy();
     await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
@@ -786,7 +797,7 @@ describe("EarnVaultDepositModal", () => {
 
       expect(await screen.findByText(title)).toBeTruthy();
       expect(screen.getByText(statusLabel)).toBeTruthy();
-      expect(Boolean(document.querySelector('[data-earn-processing-border="true"]'))).toBe(
+      expect(Boolean(document.querySelector(".earn-processing-modal"))).toBe(
         status !== "confirmed"
       );
       expect(document.querySelector('[data-earn-processing="true"]')).toBeNull();

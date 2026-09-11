@@ -172,7 +172,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/Signed and recorded/)).toBeTruthy();
     expect(screen.getByText("Processing")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
-    expect(document.querySelector('[data-earn-processing-border="true"]')).toBeTruthy();
+    expect(document.querySelector(".earn-processing-modal")).toBeTruthy();
     expect(document.querySelector('[data-earn-processing="true"]')).toBeNull();
     expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();

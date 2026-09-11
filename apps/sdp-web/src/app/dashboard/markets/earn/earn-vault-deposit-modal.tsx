@@ -9,7 +9,7 @@ import {
   earnSwapSourceTokens,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { ArrowRightLeftIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -29,12 +29,7 @@ import {
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
-import {
-  EarnFlowStepper,
-  EarnFlowTransition,
-  EarnOutcomeMark,
-  EarnProcessingFrame,
-} from "./earn-flow-motion";
+import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
 import { shortenMarketAddress, sumDecimalStrings } from "./earn-market-presentation";
 import {
@@ -970,6 +965,40 @@ function DepositSwapSummaryRow({
   );
 }
 
+function DepositSwapReviewNotice({
+  active,
+  fundingSymbol,
+  symbol,
+}: {
+  active: boolean;
+  fundingSymbol: string;
+  symbol: string;
+}) {
+  const t = useTranslations();
+  if (!active) return null;
+
+  return (
+    <div
+      className="mt-5 flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3"
+      data-earn-swap-review="true"
+      role="note"
+    >
+      <ArrowRightLeftIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardEarn.deposit.vaultSwapReviewTitle")}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-secondary">
+          {t("DashboardEarn.deposit.vaultSwapReviewBody", {
+            source: fundingSymbol,
+            target: symbol,
+          })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function DepositReviewDetails({
   amount,
   backing,
@@ -1215,6 +1244,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
   return (
     <>
       <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.deposit.progressReview")}</p>
+      <DepositSwapReviewNotice active={swapActive} fundingSymbol={fundingSymbol} symbol={symbol} />
       <DepositReviewDetails
         amount={amount}
         backing={backing}
@@ -1592,7 +1622,6 @@ export function EarnVaultDepositModal({
         size="sm"
       >
         <div className="p-6" ref={contentRef}>
-          {movementProcessing ? <EarnProcessingFrame /> : null}
           <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
             <DepositResult outcome={visibleOutcome} symbol={fundingSymbol} onClose={onClose} />
