@@ -61,9 +61,13 @@ function renderColdLoad(pathname: string): string {
   );
 }
 
+// SAFETY: the page config only ever calls t(key) and uses the returned string,
+// so an identity function stands in for the translator in these assertions.
+const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
+
 /** What the settled shell puts on its centred content column, per dashboard-shell.tsx. */
 function settledContentWidthClassFor(pathname: string): string {
-  const config = getDashboardPageConfig(pathname, ((key: string) => key) as never, false, false);
+  const config = getDashboardPageConfig(pathname, identityTranslate, false, false);
   return config.contentWidthClass ?? "max-w-5xl";
 }
 
@@ -92,10 +96,25 @@ describe("dashboard cold load", () => {
     expect(transactions).not.toBe(policies);
   });
 
+  it("paints Helius Rings and the Members redirect with their own skeletons, not Home's", () => {
+    const helius = renderColdLoad("/dashboard/helius-rings");
+    const members = renderColdLoad("/dashboard/members");
+
+    expect(helius).toContain('data-loading-layout="helius-rings"');
+    expect(helius).not.toContain('data-loading-layout="home"');
+    expect(members).toContain('data-loading-layout="settings"');
+    expect(members).not.toContain('data-loading-layout="home"');
+  });
+
   it("holds the skeleton to the same content width the settled route uses", () => {
     // A hardcoded width here paints the skeleton at a different measure from the
     // page that follows, which is the layout jump wearing a different costume.
-    for (const pathname of ["/dashboard", "/dashboard/policies", "/dashboard/api-keys/new"]) {
+    for (const pathname of [
+      "/dashboard",
+      "/dashboard/policies",
+      "/dashboard/api-keys/new",
+      "/dashboard/helius-rings",
+    ]) {
       const settledWidth = settledContentWidthClassFor(pathname);
 
       expect(contentWidthClassOf(renderColdLoad(pathname))).toBe(settledWidth);
@@ -107,6 +126,17 @@ describe("dashboard cold load", () => {
 
     expect(markup).toContain("px-3 py-5 md:p-6");
     expect(markup).not.toContain("px-6 py-8");
+  });
+
+  it("titles Helius Rings and the Members redirect instead of falling through to Home", () => {
+    const t = identityTranslate;
+
+    expect(getDashboardPageConfig("/dashboard/helius-rings", t, false, false).title).toBe(
+      "Shared.dashboardShell.heliusRings"
+    );
+    expect(getDashboardPageConfig("/dashboard/members", t, false, false).title).toBe(
+      "Shared.dashboardShell.settings"
+    );
   });
 
   it("keeps the generic silhouette for callers that have no route in scope", () => {
