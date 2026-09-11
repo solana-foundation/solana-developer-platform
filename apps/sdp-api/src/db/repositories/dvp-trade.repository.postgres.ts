@@ -73,7 +73,7 @@ function escapeLikePattern(value: string): string {
  * @param row - One `dvp_trades` row as the driver returns it.
  * @returns The typed trade row.
  */
-export function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
+function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
   const parsed = dvpTradeRowSchema.parse(row);
   return {
     id: parsed.id,

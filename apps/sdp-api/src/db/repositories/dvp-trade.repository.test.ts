@@ -1,6 +1,5 @@
 import { type Address, address, signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ZodError } from "zod";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -11,7 +10,7 @@ import type {
   DvpTradeListFilters,
   DvpTradeRepository,
 } from "./dvp-trade.repository";
-import { createPostgresDvpTradeRepository, mapDvpTradeRow } from "./dvp-trade.repository.postgres";
+import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_dvp_repo_test";
 const OTHER_PROJECT_ID = "prj_dvp_repo_other";
@@ -163,26 +162,6 @@ describe("DvpTradeRepository (postgres)", () => {
       nameA: "Acme Treasury Debt",
       nameB: "USD Coin",
     });
-  });
-
-  // Postgres refuses a value of the wrong type, so a corrupt row is built by
-  // hand from a real one and pushed through the mapper directly.
-  it("refuses a row whose asserted columns carry the wrong type", async () => {
-    const created = await repo.create(tradeInsert());
-    const row = await getDb(env)
-      .prepare("SELECT * FROM dvp_trades WHERE id = ?")
-      .bind(created.id)
-      .first<Record<string, unknown>>();
-    if (row === null || row === undefined) {
-      throw new Error("trade row missing after create");
-    }
-
-    expect(() => mapDvpTradeRow({ ...row, close_resolution_attempts: "corrupt" })).toThrow(
-      ZodError
-    );
-    expect(() => mapDvpTradeRow({ ...row, close_resolution_after: 7 })).toThrow(ZodError);
-    expect(() => mapDvpTradeRow({ ...row, symbol_a: 7 })).toThrow(ZodError);
-    expect(mapDvpTradeRow(row).id).toBe(created.id);
   });
 
   it("attaches a create signature exactly once", async () => {

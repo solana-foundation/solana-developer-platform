@@ -104,7 +104,7 @@ export interface DvpLegFundingClaimRepository {
  * @param row - One claim row as the driver returns it.
  * @returns The typed claim.
  */
-export function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
+function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
   const parsed = dvpLegFundingClaimRowSchema.parse(row);
   return {
     tradeId: parsed.trade_id,
