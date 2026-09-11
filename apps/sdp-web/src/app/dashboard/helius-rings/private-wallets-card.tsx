@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type MouseEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -202,6 +202,67 @@ export function PrivateWalletsCard({
   );
 }
 
+/**
+ * Replays POST /wallets for a pending row. Create is idempotent on the bound
+ * custody wallet, so this is how a failed registration (empty owner balance,
+ * simulation reject) is retried after the owner is funded. The create form
+ * cannot do it: a pending row already holds the slot.
+ */
+function RetryProvisionButton({
+  wallet,
+  onRetried,
+}: {
+  wallet: RingsWallet;
+  onRetried: () => Promise<void>;
+}) {
+  const t = useTranslations();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const handleRetry = useCallback(
+    async (event: MouseEvent) => {
+      event.stopPropagation();
+      setRetrying(true);
+      setRetryError(null);
+      try {
+        const result = await createRingsWallet({
+          walletId: wallet.sdpWalletId,
+          name: wallet.name,
+        });
+        if (!result.wallet) {
+          setRetryError(result.error ?? t("DashboardHeliusRings.wallets.createFailed"));
+        }
+      } catch {
+        setRetryError(t("DashboardHeliusRings.wallets.createFailed"));
+      } finally {
+        setRetrying(false);
+      }
+      await onRetried();
+    },
+    [wallet.sdpWalletId, wallet.name, onRetried, t]
+  );
+
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={retrying}
+        onClick={(event) => void handleRetry(event)}
+      >
+        {t(
+          retrying ? "DashboardHeliusRings.wallets.creating" : "DashboardHeliusRings.wallets.retry"
+        )}
+      </Button>
+      {retryError ? (
+        <Callout variant="danger" live>
+          {retryError}
+        </Callout>
+      ) : null}
+    </div>
+  );
+}
+
 function PrivateWalletRow({
   wallet,
   selected,
@@ -239,6 +300,9 @@ function PrivateWalletRow({
             {/* Paused counts as well as pending: a re-key claims the row before
                 it rotates, so a failed rotation leaves a wallet paused with no
                 address, and this check is where an operator sees why. */}
+            {wallet.status === "pending" ? (
+              <RetryProvisionButton wallet={wallet} onRetried={onWalletsChanged} />
+            ) : null}
             {wallet.status === "pending" || wallet.status === "paused" ? (
               <WalletIdentityCheck wallet={wallet} onRekeyed={onWalletsChanged} />
             ) : null}
