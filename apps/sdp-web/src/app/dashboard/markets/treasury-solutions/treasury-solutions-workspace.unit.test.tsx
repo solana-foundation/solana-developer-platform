@@ -141,6 +141,7 @@ const mocks = vi.hoisted(() => ({
   livePositionTokenValue: "125.25" as string | undefined,
   positionsError: false,
   positionsEmpty: false,
+  strategiesLoading: false,
   strategiesUnavailable: false,
   strategiesStaleError: false,
   strategyMissingShareMint: false,
@@ -240,14 +241,15 @@ vi.mock("../earn/earn-program-data", () => ({
         ],
       };
     }
+    const strategiesUnavailable = mocks.strategiesUnavailable || mocks.strategiesLoading;
     return {
       error:
         mocks.strategiesUnavailable || mocks.strategiesStaleError
           ? new Error("catalogue unavailable")
           : undefined,
-      isLoading: false,
+      isLoading: mocks.strategiesLoading,
       refresh: mocks.refreshStrategies,
-      strategies: mocks.strategiesUnavailable
+      strategies: strategiesUnavailable
         ? undefined
         : [
             {
@@ -577,6 +579,7 @@ beforeEach(() => {
   mocks.livePositionTokenValue = "125.25";
   mocks.positionsError = false;
   mocks.positionsEmpty = false;
+  mocks.strategiesLoading = false;
   mocks.strategiesUnavailable = false;
   mocks.strategiesStaleError = false;
   mocks.secondWalletBalances = undefined;
@@ -1483,7 +1486,8 @@ describe("TreasurySolutionsWorkspace", () => {
   it("treats a stale catalogue behind a failed revalidation as incomplete", () => {
     // SWR keeps the stale rows and sets the error. Stale means possibly
     // MISSING a newly added strategy's share mint, so no deployed figure can
-    // be certified, and the strategy table already shows its error state here.
+    // be certified. The strategy card keeps its mainnet shelf and surfaces the
+    // failed Devnet refresh without leaving stale Devnet deposit actions open.
     mocks.strategiesStaleError = true;
     renderWorkspace();
 
@@ -1829,6 +1833,41 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(screen.queryByRole("switch")).toBeNull();
     // Production's default shelf is already mainnet, so no explicit cluster is needed.
     expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
+  });
+
+  it("keeps mainnet strategies visible while the Devnet catalogue loads", () => {
+    mocks.strategiesLoading = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
+    expect(catalogue.queryByText("Kamino USDC Vault")).toBeNull();
+    expect(
+      catalogue.getByText("Loading Devnet strategies. Mainnet strategies remain available.")
+    ).toBeTruthy();
+  });
+
+  it("keeps mainnet strategies visible when the Devnet catalogue fails", () => {
+    mocks.strategiesUnavailable = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
+    expect(catalogue.queryByText("Kamino USDC Vault")).toBeNull();
+    expect(
+      catalogue.getByText(
+        "Devnet strategies could not be loaded. Mainnet strategies remain available."
+      )
+    ).toBeTruthy();
+    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
   });
 
   it("refreshes the environment and mainnet shelves once each", async () => {

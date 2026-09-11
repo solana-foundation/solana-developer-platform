@@ -1247,6 +1247,8 @@ function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
 }
 
 function TreasuryStrategiesCard({
+  devnetError,
+  devnetLoading,
   environment,
   error,
   isLoading,
@@ -1257,6 +1259,8 @@ function TreasuryStrategiesCard({
   strategies,
   unrecordedShareMints,
 }: {
+  devnetError: unknown;
+  devnetLoading: boolean;
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
@@ -1312,21 +1316,45 @@ function TreasuryStrategiesCard({
             icon={<InfoIcon aria-hidden="true" className="size-5" />}
             message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
           />
-        ) : (strategies ?? []).length === 0 ? (
-          <ListEmptyState
-            description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
-            icon={<InfoIcon aria-hidden="true" className="size-5" />}
-            message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
-          />
         ) : (
-          <StrategyTable
-            environment={environment}
-            onDeposit={onDeposit}
-            positions={positions}
-            providerAccess={providerAccess}
-            strategies={strategies ?? []}
-            unrecordedShareMints={unrecordedShareMints}
-          />
+          <>
+            {devnetError && (strategies ?? []).length > 0 ? (
+              <div
+                className="flex items-center gap-2 border-b border-warning-border bg-warning-bg px-6 py-3 text-xs leading-5 text-warning"
+                role="alert"
+              >
+                <InfoIcon aria-hidden="true" className="size-4 shrink-0" />
+                <p>{t("DashboardMarkets.treasury.devnetStrategiesUnavailable")}</p>
+              </div>
+            ) : devnetLoading && (strategies ?? []).length > 0 ? (
+              <div
+                className="flex items-center gap-2 border-b border-border-default bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary"
+                role="status"
+              >
+                <RefreshCwIcon
+                  aria-hidden="true"
+                  className="size-4 shrink-0 motion-safe:animate-spin"
+                />
+                <p>{t("DashboardMarkets.treasury.devnetStrategiesLoading")}</p>
+              </div>
+            ) : null}
+            {(strategies ?? []).length === 0 ? (
+              <ListEmptyState
+                description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
+                icon={<InfoIcon aria-hidden="true" className="size-5" />}
+                message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
+              />
+            ) : (
+              <StrategyTable
+                environment={environment}
+                onDeposit={onDeposit}
+                positions={positions}
+                providerAccess={providerAccess}
+                strategies={strategies ?? []}
+                unrecordedShareMints={unrecordedShareMints}
+              />
+            )}
+          </>
         )}
       </Card>
     </section>
@@ -1440,6 +1468,8 @@ interface TreasuryWorkspaceContentProps {
   catalogueError: unknown;
   catalogueLoading: boolean;
   catalogueStrategies: readonly EarnStrategy[] | undefined;
+  devnetCatalogueError: unknown;
+  devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
@@ -1467,6 +1497,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     catalogueError,
     catalogueLoading,
     catalogueStrategies,
+    devnetCatalogueError,
+    devnetCatalogueLoading,
     environment,
     onDeposit,
     onRefresh,
@@ -1515,6 +1547,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
       />
 
       <TreasuryStrategiesCard
+        devnetError={devnetCatalogueError}
+        devnetLoading={devnetCatalogueLoading}
         environment={environment}
         error={catalogueError}
         isLoading={catalogueLoading}
@@ -1544,7 +1578,8 @@ function mergeStrategyCatalogues(
   mainnet: readonly EarnStrategy[] | undefined,
   devnet: readonly EarnStrategy[] | undefined
 ): EarnStrategy[] | undefined {
-  if (!mainnet || !devnet) return undefined;
+  if (!mainnet) return undefined;
+  if (!devnet) return [...mainnet];
 
   const combined = [...mainnet];
   const seen = new Set(mainnet.map((strategy) => strategy.id));
@@ -1588,12 +1623,13 @@ export function TreasurySolutionsWorkspace({
   const catalogueStrategies = useMemo(
     () =>
       sdpEnvironment === "sandbox"
-        ? mergeStrategyCatalogues(baseCatalogueStrategies, strategies)
+        ? mergeStrategyCatalogues(baseCatalogueStrategies, strategiesError ? undefined : strategies)
         : baseCatalogueStrategies,
-    [baseCatalogueStrategies, sdpEnvironment, strategies]
+    [baseCatalogueStrategies, sdpEnvironment, strategies, strategiesError]
   );
-  const catalogueError =
-    baseCatalogueError ?? (sdpEnvironment === "sandbox" ? strategiesError : undefined);
+  const catalogueError = baseCatalogueError;
+  const devnetCatalogueError = sdpEnvironment === "sandbox" ? strategiesError : undefined;
+  const devnetCatalogueLoading = sdpEnvironment === "sandbox" && strategiesLoading;
   const catalogueLoading =
     baseCatalogueLoading || (sdpEnvironment === "sandbox" && strategiesLoading);
   const {
@@ -1863,6 +1899,8 @@ export function TreasurySolutionsWorkspace({
         catalogueError={catalogueError}
         catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
         catalogueStrategies={catalogueStrategies}
+        devnetCatalogueError={devnetCatalogueError}
+        devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
         onDeposit={setDepositStrategy}
         onRefresh={() => {

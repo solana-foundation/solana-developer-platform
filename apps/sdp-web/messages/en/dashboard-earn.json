@@ -102,6 +102,8 @@
       "productionUnavailable": "Sandbox only",
       "clusterUnavailable": "{cluster} only",
       "mainnetDepositUnavailable": "Mainnet vaults are view-only in Sandbox.",
+      "devnetStrategiesLoading": "Loading Devnet strategies. Mainnet strategies remain available.",
+      "devnetStrategiesUnavailable": "Devnet strategies could not be loaded. Mainnet strategies remain available.",
       "providerWithdrawalUnavailable": "Provider withdrawal unavailable",
       "strategiesErrorTitle": "Markets data unavailable",
       "strategiesErrorDescription": "Strategies or live vault positions could not be loaded. Refresh to try again.",
