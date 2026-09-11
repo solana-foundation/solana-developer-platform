@@ -308,14 +308,9 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
 
-  // Markets module gate (parent) and its sub-module gates (children). Each
-  // sub-module needs both; clearing MARKETS_ENABLED dark-launches them all.
+  // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
-  // Atomic delivery-versus-payment settlement. The on-chain program is deployed
-  // on devnet only, so this stays off anywhere pointed at mainnet until Exo
-  // deploys there (PRO-1798).
-  DVP_ENABLED?: string;
   // Settlement authority for DvP trades. Only this key can Settle or Cancel;
   // the parties can only unwind. It cannot be either party or an executable
   // account. Where it ultimately lives is still an open decision (PRO-1796).

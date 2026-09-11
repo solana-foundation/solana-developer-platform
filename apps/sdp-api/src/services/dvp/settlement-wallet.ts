@@ -27,14 +27,7 @@ export interface DvpSettlementWallet {
   custodyWalletId: string;
   /** The on-chain address, which is what the PDA seeds use. */
   address: Address;
-  /**
-   * `custody_wallets.wallet_id` — the PROVIDER's id for this wallet.
-   *
-   * A third identifier for the same wallet, and the one a policy candidate's
-   * `walletId` means: the wallet-operations ownership check matches on
-   * `w.wallet_id` (`policy.repository.postgres.ts:1044`), so passing the
-   * address there finds no row and the operation is refused as un-owned.
-   */
+  /** `custody_wallets.wallet_id` — the custody provider's wallet identifier. */
   providerWalletId: string;
 }
 
@@ -94,8 +87,7 @@ export async function getOrCreateDvpSettlementWallet(
     // in a project fail, because creating one provisions this wallet.
     legacyConfigProjectId: scope.projectId,
     label: SETTLEMENT_WALLET_LABEL,
-    // Marked, so policy and the wallets list can treat it as the privileged
-    // account it is rather than showing it beside somebody's transfer wallets.
+    // Marked so the wallets list treats it as privileged rather than a transfer wallet.
     purpose: "dvp_settlement_authority",
   });
 

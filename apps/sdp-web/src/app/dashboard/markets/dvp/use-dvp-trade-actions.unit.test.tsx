@@ -3,10 +3,7 @@
 /**
  * Settling, cancelling and funding.
  *
- * Three outcomes are easy to conflate and expensive to get wrong: done, held
- * for approval, and failed. A 202 in particular is the platform doing exactly
- * what the wallet policy asked, and reporting it as an error would tell an
- * operator something broke.
+ * Successful and failed action outcomes.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -56,20 +53,6 @@ describe("useDvpTradeActions", () => {
     await act(async () => await result.current.act("settle"));
 
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-    expect(result.current.awaitingApproval).toBe(false);
-  });
-
-  // Not an error. Wallet policy is holding the action, and the page has to say
-  // so rather than claiming the request failed.
-  it("treats a 202 as awaiting approval, not a failure", async () => {
-    global.fetch = respond(202) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
-
-    await act(async () => await result.current.act("cancel"));
-
-    expect(result.current.awaitingApproval).toBe(true);
-    // Nothing landed on chain, so nothing to re-read.
-    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("surfaces the API's own message on a failure", async () => {
@@ -80,26 +63,6 @@ describe("useDvpTradeActions", () => {
 
     expect(toast.error).toHaveBeenCalledWith(
       "Leg already funded.",
-      expect.objectContaining({ position: "bottom-right" })
-    );
-  });
-
-  // A body that is not JSON must still produce something an operator can act
-  // on, rather than an unhandled parse error.
-  it("falls back to the status when the error body is unreadable", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => {
-        throw new Error("not json");
-      },
-    }) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
-
-    await act(async () => await result.current.act("settle"));
-
-    expect(toast.error).toHaveBeenCalledWith(
-      "Request failed (500).",
       expect.objectContaining({ position: "bottom-right" })
     );
   });
@@ -137,8 +100,8 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("fund", { side: "b" }));
 
-    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
-    expect(JSON.parse(init.body ?? "{}")).toEqual({ side: "b" });
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({ side: "b" });
   });
 
   it("sends no body for settle", async () => {

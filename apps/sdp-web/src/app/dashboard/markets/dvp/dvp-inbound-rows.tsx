@@ -48,8 +48,7 @@ function InboundLegCell({ leg, yours }: { leg: DvpInboundLeg; yours: boolean }) 
  *
  * Clicked, not held: paying into an escrow is a step forward rather than
  * something to walk back, and hold-to-confirm is reserved for destroying
- * something. Still governed by this organization's own wallet policy, so it may
- * come back held for approval.
+ * something.
  *
  * Its own component so each row owns its pending state; one hook above the rows
  * would put every row into "Funding…" at once.
@@ -65,14 +64,14 @@ function InboundFundAction({
   tradeId: string;
 }) {
   const t = useTranslations();
-  const { act, awaitingApproval, pending } = useDvpTradeActions(tradeId);
+  const { act, pending } = useDvpTradeActions(tradeId);
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
-        disabled={frozen || pending.has(`fund:${side}`) || awaitingApproval}
+        disabled={frozen || pending.has(`fund:${side}`)}
         onClick={() => act("fund", { side })}
         size="sm"
         type="button"

@@ -34,7 +34,6 @@ import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositorie
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   assertSponsorSignedSameMessage,
@@ -71,7 +70,7 @@ interface DvpSdpLeg {
 /**
  * One leg of a trade by side; the custody lookup decides who may fund it.
  */
-export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
+function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
   const isA = side === "a";
   return {
     side,
@@ -83,32 +82,12 @@ export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
 }
 
 /**
- * The outstanding base-unit shortfall of one leg, per the chain now. Exported
- * for the policy extractor — the approver is shown what will actually move.
- */
-export async function readDvpLegShortfall(
-  env: Env,
-  trade: DvpTradeRow,
-  side: DvpTradeSide
-): Promise<bigint> {
-  const leg = legOfSide(trade, side);
-  const state = await readEscrowState(solanaRpc.createRpc(env), leg, trade.swapDvp, trade.id);
-  if (state === null) {
-    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
-  }
-  const held = state.amount;
-  return held >= leg.amount ? 0n : leg.amount - held;
-}
-
-/**
  * Who signs a funding transfer, and where its lock lives. One plan shape for
  * every funder — creator and counterparty run the same safety properties, so
  * they cannot drift apart.
  */
 export interface DvpFundingPlan {
   leg: DvpSdpLeg;
-  /** Maximum shortfall authorized by policy for this execution. */
-  approvedAmount: bigint;
   /** Whose wallet authorizes the transfer. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
   /** Takes the lock on this leg. False when somebody else already holds it. */
@@ -132,13 +111,11 @@ export function fundingPlan(
   env: Env,
   trade: DvpTradeRow,
   side: DvpTradeSide,
-  approvedAmount: bigint,
   signer: { organizationId: string; projectId: string; custodyWalletId: string }
 ): DvpFundingPlan {
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   return {
     leg: legOfSide(trade, side),
-    approvedAmount,
     signer,
     claim: (signature, expiryHeight) =>
       claims.claim({
@@ -165,9 +142,7 @@ export function fundingPlan(
 }
 
 /**
- * Funds one side from the caller's already-resolved custody wallet. Mechanical
- * by design: the custody lookup and re-read belong to the caller, so they run
- * at the right point relative to the policy gate.
+ * Funds one side from the caller's already-resolved custody wallet.
  */
 export async function fundDvpTradeLeg(
   c: Context<{ Bindings: Env }>,
@@ -177,13 +152,12 @@ export async function fundDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
-    approvedAmount: bigint;
   }
 ): Promise<DvpFundResult> {
   return executeDvpFunding(
     c,
     trade,
-    fundingPlan(c.env, trade, params.side, params.approvedAmount, {
+    fundingPlan(c.env, trade, params.side, {
       organizationId: params.organizationId,
       projectId: params.projectId,
       custodyWalletId: params.custodyWalletId,
@@ -307,12 +281,6 @@ export async function executeDvpFunding(
   // revert the whole settlement. Funding a partly funded leg has to top it up
   // exactly.
   const outstanding = amount - held;
-  if (outstanding > plan.approvedAmount) {
-    throw conflict(
-      `DvP trade ${trade.id}: the shortfall grew to ${outstanding} after approval for ${plan.approvedAmount}; re-authorize`
-    );
-  }
-
   const signer = await createOrgSignerForCustodyWallet(
     env,
     plan.signer.organizationId,
@@ -358,8 +326,7 @@ export async function executeDvpFunding(
   // a transfer-hook mint can revert the whole Settle. The claim below cannot
   // help with this one: it serialises OUR requests, not a stranger's transfer.
   //
-  // Placed BEFORE the claim and the approval fence deliberately, so aborting
-  // costs neither a claim to release nor a consumed approval lease.
+  // Placed before the claim so aborting costs no claim to release.
   //
   // This NARROWS the window to one read; it does not close it, and it cannot be
   // closed from here. Funding is a bare `TransferChecked` with the program
@@ -413,20 +380,6 @@ export async function executeDvpFunding(
   const claimed = await plan.claim(claimSignature, lastValidBlockHeight.toString());
   if (!claimed) {
     throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`);
-  }
-
-  // Past this the tokens may have moved, so an approved operation that dies
-  // here needs reconciling by hand rather than replaying: a blind retry would
-  // over-fund.
-  //
-  // The fence itself is the exception. It runs before anything is broadcast, so
-  // a failure here changed nothing on chain, and keeping the claim would leave
-  // the leg permanently unfundable over an error that cost nothing.
-  try {
-    await beginApprovedWalletOperationEffect(c);
-  } catch (error) {
-    await plan.release(claimSignature);
-    throw error;
   }
 
   let heldSignature: Signature = claimSignature;

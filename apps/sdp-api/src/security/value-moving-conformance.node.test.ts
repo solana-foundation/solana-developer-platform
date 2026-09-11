@@ -221,21 +221,17 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /**
-     * DvP settle and cancel. Registered WITH the routes rather than after them,
-     * following the Earn exit's example: a money-moving surface born governed,
-     * not retrofitted once someone notices.
-     */
+    /** DvP settle and cancel resolve tenant-scoped signing authority in the handler. */
     family: "dvp",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/dvp/policy.ts",
+      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
       evidence: "const settlement = await readDvpSettlementWallet(c.env, {",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/dvp/index.ts",
-      section: '"/trades/:tradeId/settle",',
-      before: 'extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle")',
-      after: "settleTrade",
+      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
+      section: "const closeTrade =",
+      before: "await assertFreshApiKeyCustodyWalletAccess(",
+      after: "const result = await closeDvpTrade(",
     },
     replay: [
       {

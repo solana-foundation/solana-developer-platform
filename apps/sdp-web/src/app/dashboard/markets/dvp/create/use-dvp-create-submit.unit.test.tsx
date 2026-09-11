@@ -123,15 +123,30 @@ describe("useDvpCreateSubmit idempotency key", () => {
     expect((await requestFor()).idempotencyKey).toMatch(/^dvp-create-[0-9a-f]{32}$/);
   });
 
-  it("reuses the key when the request got no response, so the retry replays", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: { trade: { id: "dvp_1" } } }),
-      });
+  // A server error can arrive after the first attempt started broadcasting;
+  // only a replay under the same key can find out what became of it.
+  it.each([
+    ["no response", () => vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))],
+    [
+      "a server error",
+      () =>
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => ({ error: { message: "boom" } }),
+        }),
+    ],
+    [
+      "a rejection",
+      () =>
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 400,
+          json: async () => ({ error: { message: "no" } }),
+        }),
+    ],
+  ])("reuses the key after %s, so the retry replays", async (_label, mockFetch) => {
+    const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
     await act(async () => {
@@ -144,26 +159,21 @@ describe("useDvpCreateSubmit idempotency key", () => {
     expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
   });
 
-  it.each([
-    [
-      "accepted",
-      { ok: true, status: 200, json: async () => ({ data: { trade: { id: "dvp_1" } } }) },
-    ],
-    ["rejected", { ok: false, status: 400, json: async () => ({ error: { message: "no" } }) }],
-  ])(
-    "rotates the key once a response arrives (%s), so identical terms make a second trade",
-    async (_label, response) => {
-      const fetchMock = vi.fn().mockResolvedValue(response);
-      vi.stubGlobal("fetch", fetchMock);
-      const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
-      await act(async () => {
-        await result.current.submit(request());
-      });
-      await act(async () => {
-        await result.current.submit(request());
-      });
+  it("rotates the key once a trade was created, so identical terms make a second trade", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { trade: { id: "dvp_1" } } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
 
-      expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
-    }
-  );
+    expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
+  });
 });

@@ -301,7 +301,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
     )
   );
 
-  // The DvP job checks the flag itself and returns early, so it is registered
+  // The DvP job checks the Markets flag itself and returns early, so it is registered
   // unconditionally: an open trade holds a counterparty's money in escrow, and
   // must keep being observed even if the flag is turned off during an incident.
   // Through scheduleSystemTask like every other sweep, NOT a bare schedule().

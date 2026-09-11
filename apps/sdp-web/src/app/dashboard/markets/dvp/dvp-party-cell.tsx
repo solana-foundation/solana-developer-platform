@@ -16,7 +16,7 @@ import { shortenAddress } from "../../payments/payments-overview.utils";
 import type { DvpPartyRef } from "./dvp-trade";
 
 /** A truncated address with the full value one copy-click away. */
-function AddressWithCopy({ address }: { address: string }) {
+export function AddressWithCopy({ address }: { address: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       <span className="sr-only">{address}</span>

@@ -137,9 +137,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
     const reread = await getOrCreateDvpSettlementWallet(env, scope);
 
     expect(reread.address).toBe("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
-    // All three, and all different. `providerWalletId` is what a policy
-    // candidate's `walletId` means — the wallet-operations ownership check
-    // matches on it, so handing it the address refuses the operation.
+    // All three identifiers are distinct.
     expect(reread.custodyWalletId).toBe("cwlt_first");
     expect(reread.providerWalletId).toBe("provider_cwlt_first");
   });
@@ -201,7 +199,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
 
   // The authority is not an ordinary transfer wallet: it holds the only key
   // that can close any trade in the project and is a PDA seed on every one of
-  // them. Marking it lets policy and the wallets list say so.
+  // them. Marking it lets the wallets list say so.
   it("marks the wallet as a settlement authority, not a transfer wallet", async () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });

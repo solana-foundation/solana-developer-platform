@@ -22,7 +22,6 @@ import type { Context } from "hono";
 import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
@@ -139,15 +138,11 @@ export async function closeDvpTrade(
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const bytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  // The fence sits between the sponsor signature and the broadcast: a sponsor
-  // refusal leaves the approval retryable, while anything past markStarted may
-  // have landed and is recovered by the reconciler from chain history.
   const store: SignedSubmissionStore = {
     persistSigned: async ({ signature }) => {
       getLogger().info({ tradeId: trade.id, action, signature }, "DvP close signed");
     },
-    markStarted: () => beginApprovedWalletOperationEffect(c),
-    // Consulted only when markStarted throws; a lost lease is not a started effect.
+    markStarted: async () => {},
     hasStarted: async () => false,
   };
 

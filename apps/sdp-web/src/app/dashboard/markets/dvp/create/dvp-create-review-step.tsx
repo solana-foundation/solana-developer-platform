@@ -7,6 +7,7 @@ import { Callout } from "@/components/ui/callout";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
+import { AddressWithCopy } from "../dvp-party-cell";
 import { Field, ReferenceField } from "./dvp-create-fields";
 import type { DvpCreateForm } from "./use-dvp-create-form";
 import type { DvpLeg } from "./use-dvp-leg";
@@ -88,8 +89,8 @@ function ReviewPartySide({
           {resolved.label ?? shortenAddress(resolved.address ?? "")}
         </p>
         {resolved.address === null ? null : (
-          <p className="text-tertiary text-sm" title={resolved.address}>
-            {shortenAddress(resolved.address)}
+          <p className="text-tertiary text-sm">
+            <AddressWithCopy address={resolved.address} />
           </p>
         )}
       </div>

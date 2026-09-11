@@ -58,10 +58,12 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One key per logical request. It survives a throw (a dropped connection, a
-  // timeout) so the retry replays instead of drawing a second trade at a second
-  // address, and rotates once any response arrives, so a second trade on the
-  // same terms is a new request rather than a replay of the first.
+  // One key per logical request. It rotates only once a trade was created, so
+  // a second trade on the same terms is a new request rather than a replay of
+  // the first. Every other outcome keeps it: a throw or a server error may have
+  // left the first attempt broadcasting, and the retry has to replay it rather
+  // than draw a second trade at a second address; a rejection stored nothing,
+  // so the key is still free.
   const idempotencyKey = useRef(freshIdempotencyKey());
 
   async function submit(request: DvpCreateRequest) {
@@ -103,8 +105,6 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
         }),
       });
 
-      idempotencyKey.current = freshIdempotencyKey();
-
       // Status before body. A non-2xx response carries an error envelope, not
       // a trade, and reading it as one would navigate to `undefined`.
       if (!response.ok) {
@@ -119,6 +119,7 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
         data?: { trade?: { id?: string } };
       };
       const id = body.data?.trade?.id;
+      idempotencyKey.current = freshIdempotencyKey();
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement

@@ -796,7 +796,7 @@ export function DvpTradeDetailWorkspace({
 }) {
   const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
-  const { act, awaitingApproval, pending } = useDvpTradeActions(trade.id);
+  const { act, pending } = useDvpTradeActions(trade.id);
   const partyView = isDvpPartyView(trade);
   const expiry = new Date(Number(trade.expiryTimestamp) * 1000).toISOString();
 
@@ -872,11 +872,6 @@ export function DvpTradeDetailWorkspace({
 
         <TradeWarnings trade={trade} />
 
-        {awaitingApproval ? (
-          <Callout live title={t("DashboardMarkets.dvp.approvalPending")} variant="info">
-            {t("DashboardMarkets.dvp.approvalPendingDescription")}
-          </Callout>
-        ) : null}
         {/* Only the settlement authority can settle or cancel, and a party
             reading somebody else's trade is not it. Offering the buttons put
             two irreversible-looking actions in front of somebody whose click

@@ -34,7 +34,6 @@ const getFeePayer = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
-const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
 
@@ -54,9 +53,6 @@ vi.mock("@/services/sponsorship.service", async () => {
     }),
   };
 });
-vi.mock("@/services/policy/approved-operation-replay", () => ({
-  beginApprovedWalletOperationEffect,
-}));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
@@ -182,7 +178,6 @@ describe("closeDvpTrade", () => {
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
     });
-    beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
     );
@@ -358,24 +353,12 @@ describe("closeDvpTrade", () => {
       }
     });
 
-    it("fences after the sponsor signs and before the bytes go out", async () => {
-      await closeDvpTrade(context, trade(), "settle");
-
-      expect(prepareOwnedSubmission.mock.invocationCallOrder[0]).toBeLessThan(
-        beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]
-      );
-      expect(beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]).toBeLessThan(
-        sendTransaction.mock.invocationCallOrder[0]
-      );
-    });
-
-    it("leaves the approval unfenced when the sponsor refuses to sign", async () => {
+    it("does not broadcast when the sponsor refuses to sign", async () => {
       prepareOwnedSubmission.mockRejectedValueOnce(new Error("sponsor rate limited"));
 
       await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
         "sponsor rate limited"
       );
-      expect(beginApprovedWalletOperationEffect).not.toHaveBeenCalled();
       expect(sendTransaction).not.toHaveBeenCalled();
     });
 

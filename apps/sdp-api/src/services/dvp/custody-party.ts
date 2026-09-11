@@ -6,6 +6,7 @@
 // caller's key-scope allowlist as an explicit input.
 
 import type { Address } from "@solana/kit";
+import type { DatabaseClient } from "@/db/client";
 import { getDb } from "@/db/client";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { Env } from "@/types/env";
@@ -18,6 +19,12 @@ import type { Env } from "@/types/env";
  * match `allowedWalletIds` admits (null = unrestricted, [] = deny-all, the
  * repo-wide allowlist convention).
  *
+ * @param env - Runtime bindings used to resolve operational custody targets.
+ * @param params - Tenant scope for the custody lookup.
+ * @param params.organizationId - Organization that owns the custody wallet.
+ * @param params.projectId - Project containing the custody wallet.
+ * @param partyAddress - On-chain party address the wallet must hold.
+ * @param allowedWalletIds - Permitted custody wallet IDs, or null when unrestricted.
  * @returns The `custody_wallets.id` to act as, or null.
  */
 export async function custodyWalletForParty(
@@ -37,4 +44,31 @@ export async function custodyWalletForParty(
   });
   const match = ids.find((id) => allowedWalletIds === null || allowedWalletIds.includes(id));
   return match === undefined ? null : match;
+}
+
+/**
+ * Resolves a named active wallet only when it holds the party address.
+ *
+ * @param db - Database client used to read the custody wallet.
+ * @param env - Runtime bindings used to resolve the operational target.
+ * @param params - Tenant scope for the custody lookup.
+ * @param params.organizationId - Organization that owns the custody wallet.
+ * @param params.projectId - Project containing the custody wallet.
+ * @param walletId - Custody wallet ID explicitly selected by the caller.
+ * @param partyAddress - On-chain party address the wallet must hold.
+ * @returns The custody wallet ID when it is active and holds the address, otherwise null.
+ */
+export async function walletIdIfHoldsAddress(
+  db: DatabaseClient,
+  env: Env,
+  params: { organizationId: string; projectId: string },
+  walletId: string,
+  partyAddress: string
+): Promise<string | null> {
+  const wallet = await new CustodyRuntimeTargets(db, env, new Map()).findOperationalWalletById({
+    organizationId: params.organizationId,
+    projectId: params.projectId,
+    custodyWalletId: walletId,
+  });
+  return wallet !== null && wallet.publicKey === partyAddress ? wallet.id : null;
 }
