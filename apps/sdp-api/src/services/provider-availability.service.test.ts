@@ -170,7 +170,7 @@ describe("provider-availability.service", () => {
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
       statusCode: 403,
-      details: undefined,
+      details: { reason: "provider_not_entitled" },
     });
     expect(warn).toHaveBeenCalledExactlyOnceWith(
       {
