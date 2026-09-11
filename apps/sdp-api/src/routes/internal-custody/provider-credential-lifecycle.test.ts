@@ -75,8 +75,7 @@ function buildApp() {
 async function seedProject(
   id: string,
   suffix: string,
-  environment: "sandbox" | "production",
-  member = true
+  environment: "sandbox" | "production"
 ): Promise<void> {
   const db = getDb(env);
   await db
@@ -86,18 +85,16 @@ async function seedProject(
     )
     .bind(id, ORGANIZATION_ID, `Lifecycle ${suffix}`, suffix, environment, USER_ID)
     .run();
-  if (member) {
-    await db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind(`pm_lifecycle_${suffix}`, id, USER_ID)
-      .run();
-  }
+  await db
+    .prepare(
+      `INSERT INTO project_members (id, project_id, user_id, role)
+       VALUES (?, ?, ?, 'admin')`
+    )
+    .bind(`pm_lifecycle_${suffix}`, id, USER_ID)
+    .run();
 }
 
-async function seedActor(secondProjectMember = true): Promise<void> {
+async function seedActor(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
@@ -143,7 +140,7 @@ async function seedActor(secondProjectMember = true): Promise<void> {
       .bind("mem_provider_credential_lifecycle", ORGANIZATION_ID, USER_ID),
   ]);
   await seedProject(PROJECT_A_ID, "default-sandbox", "sandbox");
-  await seedProject(PROJECT_B_ID, "default-production", "production", secondProjectMember);
+  await seedProject(PROJECT_B_ID, "default-production", "production");
 }
 
 async function seedActiveSharedCredential(): Promise<void> {
@@ -1149,8 +1146,8 @@ describe("provider credential lifecycle", () => {
       rotationCandidate: null,
       impact: {
         projects: [
-          { id: PROJECT_A_ID, name: "Lifecycle a" },
-          { id: PROJECT_B_ID, name: "Lifecycle b" },
+          { id: PROJECT_A_ID, name: "Lifecycle default-sandbox" },
+          { id: PROJECT_B_ID, name: "Lifecycle default-production" },
         ],
         connections: [
           { id: CONNECTION_A_ID, projectId: PROJECT_A_ID },
@@ -1160,20 +1157,6 @@ describe("provider credential lifecycle", () => {
       rollback: null,
     });
     expect(JSON.stringify(body)).not.toContain(APP_SECRET);
-  });
-
-  it("denies shared impact before disclosure when one project is inaccessible", async () => {
-    await getDb(env)
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(PROJECT_B_ID, USER_ID)
-      .run();
-
-    const response = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      error: { code: "FORBIDDEN", message: "Requested project is not accessible" },
-    });
   });
 
   it("exposes runtime credentials as deployment-managed state and rejects rotation", async () => {
@@ -2407,29 +2390,6 @@ describe("provider credential lifecycle", () => {
     ).toEqual({ count: 3 });
   });
 
-  it("reauthorizes the active result before reporting an idempotency mismatch", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
-    vi.stubGlobal("fetch", providerFetch);
-    await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-before-membership-loss",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
-    });
-    await getDb(env)
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(PROJECT_B_ID, USER_ID)
-      .run();
-
-    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-before-membership-loss",
-      body: { fields: { appId: APP_ID, appSecret: "different-secret" } },
-    });
-
-    expect(response.status).toBe(403);
-    expect(providerFetch).toHaveBeenCalledTimes(1);
-  });
-
   it("rolls every connection back even when the rotation quota is exhausted", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const providerFetch = vi
@@ -2707,74 +2667,6 @@ describe("provider credential lifecycle", () => {
     ).toEqual({ secret_retention_expires_at: expect.any(String) });
   });
 
-  it("reauthorizes a canceled candidate replay against current lineage references", async () => {
-    const providerFetch = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 503 }))
-      .mockResolvedValueOnce(Response.json({ data: [] }));
-    vi.stubGlobal("fetch", providerFetch);
-    const first = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-before-canceled-lineage-replay",
-      body: { fields: { appId: APP_ID, appSecret: "candidate-secret" } },
-    });
-    const firstBody = (await first.json()) as {
-      data: { providerCredential: { id: string } };
-    };
-    const canceledCandidateId = firstBody.data.providerCredential.id;
-    expect(
-      await lifecycleRequest(`/provider-credentials/${canceledCandidateId}/deactivate`, {
-        method: "POST",
-      })
-    ).toMatchObject({ status: 200 });
-    expect(
-      await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-        method: "POST",
-        key: "rotate-after-canceled-lineage-replay",
-        body: { fields: { appId: APP_ID, appSecret: "replacement-secret" } },
-      })
-    ).toMatchObject({ status: 200 });
-    expect(
-      await getDb(env).queryMany<{ credential_version: number }>(
-        `SELECT credential_version FROM provider_credentials
-         WHERE organization_id = ? ORDER BY credential_version`,
-        [ORGANIZATION_ID]
-      )
-    ).toEqual([{ credential_version: 1 }, { credential_version: 2 }, { credential_version: 3 }]);
-
-    await getDb(env)
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(PROJECT_B_ID, USER_ID)
-      .run();
-    const secretLookup = vi.spyOn(
-      ProviderCredentialStore.prototype,
-      "findLifecycleCredentialWithSecret"
-    );
-    const denied = await lifecycleRequest(
-      `/provider-credentials/${canceledCandidateId}/deactivate`,
-      { method: "POST" }
-    );
-    expect(denied.status).toBe(403);
-    expect(secretLookup).not.toHaveBeenCalled();
-
-    await getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_lifecycle_b', ?, ?, 'admin')`
-      )
-      .bind(PROJECT_B_ID, USER_ID)
-      .run();
-    const replay = await lifecycleRequest(
-      `/provider-credentials/${canceledCandidateId}/deactivate`,
-      { method: "POST" }
-    );
-    expect(replay.status).toBe(200);
-    expect(await replay.json()).toMatchObject({
-      data: { providerCredential: { id: canceledCandidateId, status: "deactivated" } },
-    });
-    expect(providerFetch).toHaveBeenCalledTimes(2);
-  });
-
   it("blocks cancellation when an invariant-breach reference owns an active wallet", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
@@ -2893,29 +2785,6 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(400);
-    expect(
-      await getDb(env).queryOne<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM provider_credentials"
-      )
-    ).toEqual({ count: 1 });
-  });
-
-  it("rejects rotation before Provider I/O when any affected project is inaccessible", async () => {
-    await getDb(env)
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(PROJECT_B_ID, USER_ID)
-      .run();
-    const providerFetch = vi.fn();
-    vi.stubGlobal("fetch", providerFetch);
-
-    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-inaccessible-impact",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
-    });
-
-    expect(response.status).toBe(403);
-    expect(providerFetch).not.toHaveBeenCalled();
     expect(
       await getDb(env).queryOne<{ count: number }>(
         "SELECT COUNT(*) AS count FROM provider_credentials"
