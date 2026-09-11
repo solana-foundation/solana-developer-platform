@@ -238,9 +238,9 @@ describe("fundDvpTradeLeg", () => {
   it("fences the approved operation before the bytes go out", async () => {
     const order: string[] = [];
     beginApprovedWalletOperationEffect.mockImplementation(async () => void order.push("fence"));
-    sendTransaction.mockImplementation(async () => {
+    sendTransaction.mockImplementation(async (_rpc, bytes) => {
       order.push("send");
-      return "sig";
+      return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
     });
 
     await fundDvpTradeLeg(context, trade(), FUNDER_A);
