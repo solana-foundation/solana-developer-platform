@@ -32,10 +32,12 @@ describe("workspace preparation", () => {
     });
     const view = render(ui());
     expect(view.getByRole("status").textContent).toContain("Preparing your SDP workspace");
+    expect(view.getByRole("status").classList.contains("sr-only")).toBe(false);
     expect(view.container.querySelector('[data-loading-layout="home"]')).toBeTruthy();
     expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(view.getByRole("status").textContent).toContain("Your workspace is still being set up");
+    expect(view.getByRole("status").classList.contains("sr-only")).toBe(false);
     const count = fetchMock.mock.calls.length;
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(fetchMock).toHaveBeenCalledTimes(count);

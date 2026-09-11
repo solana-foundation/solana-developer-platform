@@ -24,3 +24,8 @@ keep the balance and activity skeleton.
 ![Desktop dark loading](desktop-dark-loading.png)
 ![Desktop light loading](desktop-light-loading.png)
 ![Mobile dark loading](mobile-dark-loading.png)
+
+The explicit preparation message remains visible without changing the content position.
+
+![Desktop preparation](desktop-dark-preparing.png)
+![Mobile preparation](mobile-dark-preparing.png)

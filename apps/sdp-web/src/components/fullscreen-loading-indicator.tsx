@@ -100,7 +100,7 @@ export function FullscreenLoadingIndicator({
           role="status"
           aria-live="polite"
           className={
-            recoveryAction
+            recoveryAction || statusMessage
               ? "sticky bottom-20 mx-auto flex max-w-xl items-center justify-between gap-4 rounded-xl border border-border-default bg-surface-raised p-4 shadow-sm md:bottom-6"
               : "sr-only"
           }
