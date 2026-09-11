@@ -35,7 +35,6 @@ const getFeePayer = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
-const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
 const getRecentBlockhash = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -60,7 +59,6 @@ vi.mock("@/services/sponsorship.service", async () => {
     }),
   };
 });
-vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
@@ -185,21 +183,12 @@ describe("closeDvpTrade", () => {
         return submission;
       }
     );
-    getOrCreateDvpSettlementWallet.mockResolvedValue({
-      custodyWalletId: "cwlt_settlement",
-      address: SETTLEMENT_AUTHORITY,
-    });
     sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
     );
   });
 
-  it("keeps the authorized wallet when the project selects another record at the same address", async () => {
-    getOrCreateDvpSettlementWallet.mockResolvedValue({
-      ...settlement,
-      custodyWalletId: "cwlt_replacement",
-    });
-
+  it("requests the signer for the wallet the handler authorized", async () => {
     await closeDvpTrade(context, trade(), "settle", settlement);
 
     expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
@@ -208,11 +197,10 @@ describe("closeDvpTrade", () => {
       "prj_x",
       "cwlt_settlement"
     );
-    expect(getOrCreateDvpSettlementWallet).not.toHaveBeenCalled();
   });
 
   it.each(["settle", "cancel"] as const)(
-    "refuses %s without provisioning or sponsorship when the authorized wallet becomes unavailable",
+    "refuses %s without sponsorship when the authorized wallet becomes unavailable",
     async (action) => {
       const denial = conflict("Custody wallet is unavailable", {
         reason: "runtime_execution_unavailable",
@@ -221,7 +209,6 @@ describe("closeDvpTrade", () => {
 
       await expect(closeDvpTrade(context, trade(), action, settlement)).rejects.toBe(denial);
 
-      expect(getOrCreateDvpSettlementWallet).not.toHaveBeenCalled();
       expect(getFeePayer).not.toHaveBeenCalled();
       expect(sendTransaction).not.toHaveBeenCalled();
     }
