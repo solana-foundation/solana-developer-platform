@@ -28,6 +28,7 @@ import {
   useEarnFundingWallets,
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
+import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
@@ -1069,6 +1070,7 @@ interface DepositDetailsStepProps {
   onAmountChange: (value: string) => void;
   onContinue: () => void;
   onFundingSelect: (mint: string) => void;
+  onMax: () => void;
   onWalletSelect: (walletId: string) => void;
   overKnownBalance: boolean;
   selectedWallet: EarnFundingWallet | undefined;
@@ -1092,6 +1094,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
     onAmountChange,
     onContinue,
     onFundingSelect,
+    onMax,
     onWalletSelect,
     overKnownBalance,
     selectedWallet,
@@ -1137,6 +1140,18 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
           maxLength={MAX_AMOUNT_LENGTH}
           onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountChange(event.target.value)}
           placeholder="0.00"
+          action={
+            <EarnAmountMaxButton
+              disabled={
+                submitting ||
+                !selectedWallet ||
+                selectedWalletBalance === undefined ||
+                compareUnsignedDecimals(selectedWalletBalance, "0") !== 1
+              }
+              label={t("DashboardEarn.vaultWithdraw.max")}
+              onClick={onMax}
+            />
+          }
           value={amountInput}
         />
         <div id="earn-vault-deposit-balance" className="sr-only">
@@ -1642,6 +1657,11 @@ export function EarnVaultDepositModal({
               }}
               onFundingSelect={(mint) => {
                 setFundingMint(mint);
+                setSubmitError(null);
+              }}
+              onMax={() => {
+                if (selectedWalletBalance === undefined) return;
+                setAmountInput(selectedWalletBalance);
                 setSubmitError(null);
               }}
               onWalletSelect={(selectedWalletId) => {

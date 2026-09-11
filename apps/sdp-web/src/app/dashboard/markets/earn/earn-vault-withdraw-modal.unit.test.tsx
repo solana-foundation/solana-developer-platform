@@ -96,9 +96,12 @@ describe("EarnVaultWithdrawModal", () => {
     ).toEqual(["Details", "Review", "Processing", "Complete"]);
     expect(screen.getByText("$")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Max" }));
+    const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
+    const maxButton = screen.getByRole("button", { name: "Max" });
+    expect(amountInput.parentElement?.contains(maxButton)).toBe(true);
+    await user.click(maxButton);
 
-    expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("6");
+    expect(amountInput.value).toBe("6");
     expect(screen.getByText(/\$6.00 available of \$10.00 total/)).toBeTruthy();
   });
 

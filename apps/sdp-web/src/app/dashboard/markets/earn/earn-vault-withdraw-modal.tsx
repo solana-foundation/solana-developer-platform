@@ -17,6 +17,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
+import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd } from "./earn-format";
@@ -590,21 +591,21 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
   return (
     <>
       <div className="mt-5 flex flex-col gap-2">
-        <div className="flex items-end justify-between gap-3">
-          <Label htmlFor="earn-vault-withdraw-amount">
-            {t("DashboardEarn.vaultWithdraw.amountLabel")}
-          </Label>
-          <Button
-            disabled={submitting || availableAmount === undefined}
-            onClick={onMax}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t("DashboardEarn.vaultWithdraw.max")}
-          </Button>
-        </div>
+        <Label htmlFor="earn-vault-withdraw-amount">
+          {t("DashboardEarn.vaultWithdraw.amountLabel")}
+        </Label>
         <Input
+          action={
+            <EarnAmountMaxButton
+              disabled={
+                submitting ||
+                availableAmount === undefined ||
+                compareUnsignedDecimals(availableAmount, "0") !== 1
+              }
+              label={t("DashboardEarn.vaultWithdraw.max")}
+              onClick={onMax}
+            />
+          }
           aria-describedby="earn-vault-withdraw-balance"
           aria-invalid={amountError ? true : undefined}
           disabled={submitting}

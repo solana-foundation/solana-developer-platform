@@ -45,6 +45,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.withdraw.done": "Done",
   "DashboardEarn.withdraw.amountLabel": "Amount",
   "DashboardEarn.withdraw.errorAmountRequired": "Enter an amount greater than zero.",
+  "DashboardEarn.vaultWithdraw.max": "Max",
   "DashboardEarn.deposit.cancel": "Cancel",
   "DashboardEarn.deposit.back": "Back",
   "DashboardEarn.deposit.continueAction": "Continue",
@@ -310,7 +311,8 @@ describe("exact vault amount helpers", () => {
 });
 
 describe("EarnVaultDepositModal", () => {
-  it("removes setup copy and auto-selects the only wallet and stablecoin", async () => {
+  it("auto-selects the only wallet and stablecoin and fills its balance with Max", async () => {
+    const user = userEvent.setup();
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -325,7 +327,12 @@ describe("EarnVaultDepositModal", () => {
       (screen.getByRole("radio", { name: /Treasury wallet/ }) as HTMLInputElement).checked
     ).toBe(true);
     expect(screen.queryByText("Pay with")).toBeNull();
-    expect((screen.getByLabelText("Amount") as HTMLInputElement).disabled).toBe(false);
+    const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
+    const maxButton = screen.getByRole("button", { name: "Max" });
+    expect(amountInput.disabled).toBe(false);
+    expect(amountInput.parentElement?.contains(maxButton)).toBe(true);
+    await user.click(maxButton);
+    expect(amountInput.value).toBe("2.5");
     expect(screen.getByText("$")).toBeTruthy();
     expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
   });
