@@ -357,6 +357,11 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     organizationId: input.organizationId,
     projectId: input.projectId,
   });
+  await new CustodyRuntimeTargets(getDb(env), env, new Map()).admitRuntimeExecution({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    custodyWalletId: settlement.custodyWalletId,
+  });
   const settlementAuthority = settlement.address;
 
   const userA = resolvedA.address;
