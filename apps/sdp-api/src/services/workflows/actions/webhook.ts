@@ -1,4 +1,5 @@
 import type { WorkflowExecutionRow } from "@/db/repositories";
+import { EgressBlockedError, guardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 import { readActionSecret } from "../action-secret";
 import { resolveWebhookUrl } from "../webhook-url";
@@ -9,6 +10,9 @@ const REQUEST_TIMEOUT_MS = 10_000;
 // Deliveries are one-shot POSTs; a chain of redirects is far more likely to be an
 // SSRF pivot than a real endpoint move, so we follow at most one and re-validate it.
 const MAX_REDIRECTS = 1;
+// The delivery reads nothing but the status; a receiver's body is buffered only to
+// release the socket, so it gets a hard cap.
+const MAX_RESPONSE_BYTES = 64 * 1024;
 const encoder = new TextEncoder();
 
 // HMAC-SHA256 hex signature over the payload — the outbound mirror of the inbound
@@ -32,7 +36,7 @@ async function signPayload(secret: string, payload: string): Promise<string> {
 // against the SSRF rules before we connect to it.
 async function deliver(
   target: string,
-  init: RequestInit,
+  init: { method: string; headers: Record<string, string>; body: string },
   signal: AbortSignal
 ): Promise<{ ok: true; response: Response } | { ok: false; result: ActionExecutionResult }> {
   let current = target;
@@ -43,13 +47,31 @@ async function deliver(
       // retrying re-runs the same lookup, so fail permanently.
       return { ok: false, result: permanentFail(`BLOCKED_URL:${checked.reason}`) };
     }
-    const response = await fetch(checked.url, { ...init, redirect: "manual", signal });
+    // The lookup above is advisory — it gives the issuer a readable rejection.
+    // The transport is the boundary: it resolves again at connect time, so a
+    // record that flips between the check and the connection is still refused,
+    // and its response is buffered under the cap, so no drain is needed.
+    let response: Response;
+    try {
+      response = await guardedFetch(checked.url.toString(), {
+        method: init.method,
+        headers: init.headers,
+        body: init.body,
+        signal,
+        maxResponseBytes: MAX_RESPONSE_BYTES,
+      });
+    } catch (error) {
+      // The transport refusing the dialled address is the same condition as a
+      // pre-flight block — a retry re-runs the same refusal.
+      if (error instanceof EgressBlockedError) {
+        return { ok: false, result: permanentFail("BLOCKED_URL:PRIVATE_HOST") };
+      }
+      throw error;
+    }
     if (response.status < 300 || response.status >= 400) {
       return { ok: true, response };
     }
     const location = response.headers.get("location");
-    // Drain before abandoning the connection.
-    await response.arrayBuffer().catch(() => undefined);
     if (!location) {
       return { ok: true, response };
     }
@@ -112,8 +134,6 @@ export async function runSendWebhook(
       return delivery.result;
     }
     const { response } = delivery;
-    // The body is never used, but leaving it unread holds the socket open.
-    await response.arrayBuffer().catch(() => undefined);
     if (!response.ok) {
       // 5xx / 408 / 429 may clear on their own — retry with backoff. Other 4xx are
       // endpoint config errors (bad path, auth) that retrying can't fix.
