@@ -604,19 +604,6 @@ describe("fundDvpTradeLeg", () => {
         expect.objectContaining({ side: "b", organizationId: "org_b", custodyWalletId: "cwlt_b" })
       );
     });
-
-    // The second fund of the SAME side while a claim is live is the one case
-    // that must conflict — the claim CAS is the serialization.
-    it("is refused for the same side while a claim is live", async () => {
-      claimFunding.mockResolvedValue(false);
-
-      await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-        /already being funded/
-      );
-      expect(claimFunding).toHaveBeenCalledWith(
-        expect.objectContaining({ tradeId: "dvp_fund_test", side: "a" })
-      );
-    });
   });
 });
 

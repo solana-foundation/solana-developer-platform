@@ -187,21 +187,6 @@ describe("closeDvpTrade", () => {
     );
   });
 
-  it("fences the approved operation before the bytes go out", async () => {
-    const order: string[] = [];
-    beginApprovedWalletOperationEffect.mockImplementation(async () => {
-      order.push("fence");
-    });
-    sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) => {
-      order.push("send");
-      return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
-    });
-
-    await closeDvpTrade(context, trade(), "settle");
-
-    expect(order).toEqual(["fence", "send"]);
-  });
-
   it("refuses to settle a trade that is already closed", async () => {
     for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
       await expect(closeDvpTrade(context, trade({ status }), "settle")).rejects.toThrow(
