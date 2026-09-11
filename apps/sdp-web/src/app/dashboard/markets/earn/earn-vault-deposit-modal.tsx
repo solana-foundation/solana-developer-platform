@@ -29,7 +29,12 @@ import {
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
-import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
+import {
+  EarnFlowStepper,
+  EarnFlowTransition,
+  EarnOutcomeMark,
+  EarnProcessingFrame,
+} from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
 import { shortenMarketAddress, sumDecimalStrings } from "./earn-market-presentation";
 import {
@@ -685,12 +690,17 @@ function DepositMovementResult({
 
   return (
     <>
-      <EarnOutcomeMark
-        processing={processing}
-        tone={
-          statusVariant === "success" ? "success" : statusVariant === "warning" ? "warning" : "info"
-        }
-      />
+      {processing ? null : (
+        <EarnOutcomeMark
+          tone={
+            statusVariant === "success"
+              ? "success"
+              : statusVariant === "warning"
+                ? "warning"
+                : "info"
+          }
+        />
+      )}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -1574,13 +1584,16 @@ export function EarnVaultDepositModal({
 
   if (visibleOutcome) {
     return (
-      <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="sm">
+      <Modal
+        isOpen
+        ariaLabel={modalLabel}
+        contentClassName={movementProcessing ? "earn-processing-modal" : undefined}
+        onClose={onClose}
+        size="sm"
+      >
         <div className="p-6" ref={contentRef}>
-          <EarnFlowStepper
-            currentStep={progressStep}
-            processing={movementProcessing}
-            steps={progressSteps}
-          />
+          {movementProcessing ? <EarnProcessingFrame /> : null}
+          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
             <DepositResult outcome={visibleOutcome} symbol={fundingSymbol} onClose={onClose} />
           </EarnFlowTransition>

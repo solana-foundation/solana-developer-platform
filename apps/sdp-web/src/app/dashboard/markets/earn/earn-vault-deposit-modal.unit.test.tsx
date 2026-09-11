@@ -786,12 +786,16 @@ describe("EarnVaultDepositModal", () => {
 
       expect(await screen.findByText(title)).toBeTruthy();
       expect(screen.getByText(statusLabel)).toBeTruthy();
-      expect(Boolean(document.querySelector('[data-earn-processing="true"]'))).toBe(
+      expect(Boolean(document.querySelector('[data-earn-processing-border="true"]'))).toBe(
         status !== "confirmed"
       );
-      expect(Boolean(document.querySelector('[data-earn-step-processing="true"]'))).toBe(
-        status !== "confirmed"
-      );
+      expect(document.querySelector('[data-earn-processing="true"]')).toBeNull();
+      expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
+      if (status === "confirmed") {
+        const confirmation = document.querySelector('[data-earn-outcome="success"]');
+        expect(confirmation).toBeTruthy();
+        expect(confirmation?.className).toContain("mx-auto");
+      }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(
         `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`

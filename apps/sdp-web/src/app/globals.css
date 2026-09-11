@@ -11,6 +11,73 @@
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
 
+@property --earn-processing-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes earn-processing-border-race {
+  to {
+    --earn-processing-angle: 360deg;
+  }
+}
+
+@keyframes earn-processing-modal-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.003);
+  }
+}
+
+.earn-processing-modal {
+  isolation: isolate;
+  border-color: transparent;
+  animation: earn-processing-modal-breathe 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+.earn-processing-border {
+  position: absolute;
+  inset: -1px;
+  z-index: 20;
+  border-radius: inherit;
+  padding: 2px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--earn-processing-angle),
+    transparent 0deg,
+    transparent 248deg,
+    color-mix(in srgb, var(--color-warning-border) 55%, transparent) 282deg,
+    var(--color-warning-border) 316deg,
+    var(--color-warning) 338deg,
+    transparent 360deg
+  );
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-warning) 28%, transparent));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: earn-processing-border-race 1.55s linear infinite;
+  will-change: --earn-processing-angle;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .earn-processing-modal,
+  .earn-processing-border {
+    animation: none;
+  }
+
+  .earn-processing-border {
+    background: var(--color-warning-border);
+    filter: none;
+  }
+}
+
 :root {
   --sdp-shell-bg: var(--surface);
   --sdp-field-radius: var(--input-radius-xl, 12px);

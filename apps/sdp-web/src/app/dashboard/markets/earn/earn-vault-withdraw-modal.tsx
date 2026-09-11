@@ -18,7 +18,12 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals } from "./earn-decimal";
-import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
+import {
+  EarnFlowStepper,
+  EarnFlowTransition,
+  EarnOutcomeMark,
+  EarnProcessingFrame,
+} from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd } from "./earn-format";
 import { earnMintAsset, shortenMarketAddress } from "./earn-market-presentation";
 import {
@@ -445,7 +450,7 @@ function WithdrawalMovementResult({
 
   return (
     <>
-      <EarnOutcomeMark processing={processing} tone={outcomeTone(statusVariant)} />
+      {processing ? null : <EarnOutcomeMark tone={outcomeTone(statusVariant)} />}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -983,13 +988,16 @@ export function EarnVaultWithdrawModal({
 
   if (visibleOutcome) {
     return (
-      <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
+      <Modal
+        isOpen
+        ariaLabel={modalLabel}
+        contentClassName={movementProcessing ? "earn-processing-modal" : undefined}
+        onClose={onClose}
+        size="md"
+      >
         <div className="p-6" ref={contentRef}>
-          <EarnFlowStepper
-            currentStep={progressStep}
-            processing={movementProcessing}
-            steps={progressSteps}
-          />
+          {movementProcessing ? <EarnProcessingFrame /> : null}
+          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
             <WithdrawalResult
               environment={environment}
