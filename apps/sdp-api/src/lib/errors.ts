@@ -43,6 +43,8 @@ export type ErrorCode =
   | "ACCOUNT_NOT_FROZEN"
   | "MAX_SUPPLY_EXCEEDED"
   | "SOLANA_RPC_ERROR"
+  | "SOLANA_RPC_TIMEOUT"
+  | "UPSTREAM_RESPONSE_TOO_LARGE"
   | "CUSTODY_ERROR"
   // Transaction errors
   | "TRANSACTION_FAILED"
@@ -99,6 +101,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   ACCOUNT_NOT_FROZEN: 400,
   MAX_SUPPLY_EXCEEDED: 400,
   SOLANA_RPC_ERROR: 502,
+  SOLANA_RPC_TIMEOUT: 504,
+  UPSTREAM_RESPONSE_TOO_LARGE: 502,
   CUSTODY_ERROR: 502,
   // Transaction errors
   TRANSACTION_FAILED: 400,
@@ -147,6 +151,9 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   ACCOUNT_NOT_FROZEN: "Account is not frozen",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
+  SOLANA_RPC_TIMEOUT:
+    "The RPC upstream did not answer in time; the request's outcome is unknown",
+  UPSTREAM_RESPONSE_TOO_LARGE: "The RPC upstream answered with a body larger than the relay returns",
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",

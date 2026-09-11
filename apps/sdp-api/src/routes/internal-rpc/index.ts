@@ -4,7 +4,10 @@ import { z } from "zod";
 import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { rpcAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { validateParams } from "@/middleware/validate";
+import { RPC_QUOTA } from "@/routes/rpc";
 import {
   activateRpcConnection,
   deactivateRpcConnection,
@@ -171,15 +174,22 @@ internalRpc.post("/connections/:connectionId/rotate", async (c) => {
   return success(c, await rotateRpcConnection(c, params.data.connectionId, parsed.data));
 });
 
-// Checks the stored credential and writes nothing (HOO-1228).
-internalRpc.post("/connections/:connectionId/test", async (c) => {
-  const params = connectionParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
-  }
+// Checks the stored credential and writes nothing (HOO-1228). It still dials
+// the tenant's endpoint, so it draws from the same quota pool as the relay —
+// after validation, so a rejected request cannot spend it.
+internalRpc.post(
+  "/connections/:connectionId/test",
+  validateParams(connectionParamsSchema),
+  meteredQuota(RPC_QUOTA),
+  async (c) => {
+    const params = connectionParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
 
-  return success(c, await testRpcConnection(c, params.data.connectionId));
-});
+    return success(c, await testRpcConnection(c, params.data.connectionId));
+  }
+);
 
 internalRpc.delete("/connections/:connectionId", async (c) => {
   const params = connectionParamsSchema.safeParse(c.req.param());

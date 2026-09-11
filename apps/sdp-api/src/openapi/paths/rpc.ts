@@ -47,7 +47,7 @@ export function registerRpcPaths(registry: OpenAPIRegistry) {
         description: "Proxy response",
         content: jsonContent(rpcRelayResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 413, 429, 500, 502, 504]),
     },
   });
 }

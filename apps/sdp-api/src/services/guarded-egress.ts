@@ -24,6 +24,13 @@ import { isBlockedAddress } from "@sdp/rpc/blocked-address";
 
 export { isBlockedAddress };
 
+export class EgressResponseTooLargeError extends Error {
+  constructor(host: string) {
+    super(`The endpoint ${host} answered with a body larger than the caller accepts`);
+    this.name = "EgressResponseTooLargeError";
+  }
+}
+
 export class EgressBlockedError extends Error {
   constructor(host: string) {
     super(`The RPC endpoint host ${host} resolves to an address SDP will not connect to`);
@@ -77,12 +84,14 @@ export interface GuardedFetchInit {
    */
   maxRedirects?: number;
   /**
-   * Stop buffering the response body past this many bytes. Callers that relay
-   * an upstream payload leave it off; a probe that only reads a status and a
-   * short reason sets it, so a hostile endpoint cannot answer a health check
-   * with a body large enough to matter.
+   * Stop buffering the response body past this many bytes. A probe that only
+   * reads a status and a short reason takes the silent truncation; a caller
+   * that hands the body onward sets `rejectOversizeResponse` with it, because
+   * for a relay a shorter body under a 2xx is corruption, not a bound.
    */
   maxResponseBytes?: number;
+  /** Fail with `EgressResponseTooLargeError` instead of truncating at the cap. */
+  rejectOversizeResponse?: boolean;
   /**
    * Set only for a destination that matched an exact operator-approved
    * allowlist entry which is itself plaintext or a private literal — the public
@@ -215,6 +224,7 @@ async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Resp
       (res) => {
         const chunks: Buffer[] = [];
         let buffered = 0;
+        let truncated = false;
         res.on("data", (chunk: Buffer) => {
           // Past the cap the stream is drained rather than destroyed: an
           // aborted read races the `end` this promise settles on, and the
@@ -223,12 +233,20 @@ async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Resp
             init.maxResponseBytes === undefined
               ? chunk.length
               : Math.max(0, init.maxResponseBytes - buffered);
-          if (room === 0) return;
+          if (room === 0) {
+            truncated = true;
+            return;
+          }
+          if (room < chunk.length) truncated = true;
           chunks.push(room < chunk.length ? chunk.subarray(0, room) : chunk);
           buffered += Math.min(room, chunk.length);
         });
         res.on("error", reject);
         res.on("end", () => {
+          if (truncated && init.rejectOversizeResponse) {
+            reject(new EgressResponseTooLargeError(target.hostname));
+            return;
+          }
           const status = res.statusCode ?? 502;
           const headers = new Headers();
           for (const [key, value] of Object.entries(res.headers)) {
