@@ -384,9 +384,11 @@ describe("closeDvpTrade", () => {
     });
 
     it("fetches a fresh blockhash for every attempt", async () => {
-      sendTransaction.mockRejectedValueOnce(new Error("socket hang up"));
+      sendTransaction.mockRejectedValueOnce(preflightError());
 
-      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow("socket hang up");
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toMatchObject({
+        code: "TRANSACTION_FAILED",
+      } satisfies Partial<AppError>);
       await closeDvpTrade(context, trade(), "settle");
 
       expect(getRecentBlockhash).toHaveBeenCalledTimes(2);
