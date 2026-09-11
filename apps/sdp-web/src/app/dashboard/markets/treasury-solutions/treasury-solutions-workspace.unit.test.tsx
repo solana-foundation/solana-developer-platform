@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
 
-// jsdom implements no matchMedia, and the design-system SegmentedControl (the
-// PRO-1742 cluster toggle) reads it through motion's useReducedMotion.
+// jsdom implements no matchMedia, while the workspace's motion components read
+// it through useReducedMotion.
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
     matches: false,
@@ -211,8 +211,8 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
 vi.mock("../earn/earn-program-data", () => ({
   useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
     mocks.strategiesClusterRequests.push(options?.cluster);
-    // The mirrored mainnet shelf (PRO-1742), served only on the explicit
-    // opt-in — rows arrive `fundable: false`, exactly as the API derives them.
+    // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
+    // list. Rows arrive `fundable: false`, exactly as the API derives them.
     if (options?.cluster === "mainnet-beta") {
       return {
         error: undefined,
@@ -543,8 +543,8 @@ vi.mock("../earn/earn-withdraw-modal", () => ({
   ),
 }));
 
-function renderWorkspace() {
-  return render(
+function renderWorkspace({ includeDevnet = true }: { includeDevnet?: boolean } = {}) {
+  const view = render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <TreasurySolutionsWorkspace
         providerAccess={{
@@ -553,6 +553,12 @@ function renderWorkspace() {
       />
     </I18nProvider>
   );
+  // Most legacy behavior tests exercise the actionable sandbox strategies.
+  // Product-default catalogue tests opt out and assert the mainnet-first view.
+  if (includeDevnet && mocks.environment === "sandbox") {
+    fireEvent.click(screen.getByRole("switch", { name: "Include devnet strategies" }));
+  }
+  return view;
 }
 
 beforeEach(() => {
@@ -1304,34 +1310,38 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(apyHeader.getAttribute("aria-sort")).toBe("descending");
     expect(tvlHeader.getAttribute("aria-sort")).toBe("none");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino USDC VaultKamino",
-      "Kamino PYUSD VaultKamino",
-      "Veda Treasury FundVeda",
+      "Kamino JLP VaultKamino · Mainnet",
+      "Kamino USDC VaultKamino · Devnet",
+      "Kamino PYUSD VaultKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "APY" }));
     expect(apyHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino PYUSD VaultKamino",
-      "Kamino USDC VaultKamino",
-      "Veda Treasury FundVeda",
+      "Kamino PYUSD VaultKamino · Devnet",
+      "Kamino USDC VaultKamino · Devnet",
+      "Kamino JLP VaultKamino · Mainnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
     expect(apyHeader.getAttribute("aria-sort")).toBe("none");
     expect(tvlHeader.getAttribute("aria-sort")).toBe("descending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino PYUSD VaultKamino",
-      "Kamino USDC VaultKamino",
-      "Veda Treasury FundVeda",
+      "Kamino JLP VaultKamino · Mainnet",
+      "Kamino PYUSD VaultKamino · Devnet",
+      "Kamino USDC VaultKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
     expect(tvlHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino USDC VaultKamino",
-      "Kamino PYUSD VaultKamino",
-      "Veda Treasury FundVeda",
+      "Kamino USDC VaultKamino · Devnet",
+      "Kamino PYUSD VaultKamino · Devnet",
+      "Kamino JLP VaultKamino · Mainnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
   });
 
@@ -1782,70 +1792,86 @@ describe("TreasurySolutionsWorkspace", () => {
   });
 });
 
-describe("TreasurySolutionsWorkspace — catalogue cluster toggle (PRO-1742)", () => {
-  it("browses the mirrored mainnet shelf behind the toggle, naming the cluster on the row", async () => {
+describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)", () => {
+  it("shows mainnet by default and explains its disabled sandbox deposit", async () => {
     const user = userEvent.setup();
-    renderWorkspace();
+    renderWorkspace({ includeDevnet: false });
 
-    // Default view: the environment's own shelf, no opt-in sent to the seam.
-    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
-    expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
-
-    const toggle = screen.getByLabelText("Catalogue cluster");
-    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
-
-    // The card re-reads with the explicit opt-in…
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const catalogue = within(section as HTMLElement);
+    expect(catalogue.queryByText("Kamino USDC Vault")).toBeNull();
     expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
+    expect(
+      catalogue
+        .getByRole("switch", { name: "Include devnet strategies" })
+        .getAttribute("aria-checked")
+    ).toBe("false");
 
-    // …and the mirrored row renders provider TVL while Deposit remains disabled.
-    const row = screen.getByText("Kamino JLP Vault").closest("tr");
+    const row = catalogue.getByText("Kamino JLP Vault").closest("tr");
     expect(row).not.toBeNull();
     const cells = within(row as HTMLTableRowElement);
     expect(cells.getByText("$32,000,000.00")).toBeTruthy();
+    expect(cells.getByText(/Mainnet/)).toBeTruthy();
     const deposit = cells.getByRole("button", { name: "Deposit" });
     expect(deposit.hasAttribute("disabled")).toBe(true);
-    expect(cells.getByText("Mainnet only")).toBeTruthy();
+    expect(cells.queryByText("Mainnet only")).toBeNull();
+
+    const reason = "Mainnet vaults are view-only in Sandbox.";
+    const disabledTrigger = cells.getByRole("note", { name: reason });
+    await user.hover(disabledTrigger);
+    expect(await screen.findByText(reason)).toBeTruthy();
   });
 
-  it("renders no cluster toggle in production — there is no other shelf to offer", () => {
+  it("appends devnet strategies to the same list without enabling mainnet deposits", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({ includeDevnet: false });
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const catalogue = within(section as HTMLElement);
+    const includeDevnet = catalogue.getByRole("switch", { name: "Include devnet strategies" });
+    await user.click(includeDevnet);
+
+    expect(includeDevnet.getAttribute("aria-checked")).toBe("true");
+    const mainnetRow = catalogue.getByText("Kamino JLP Vault").closest("tr");
+    const devnetRow = catalogue.getByText("Kamino USDC Vault").closest("tr");
+    expect(mainnetRow).not.toBeNull();
+    expect(devnetRow).not.toBeNull();
+    expect(
+      within(mainnetRow as HTMLTableRowElement)
+        .getByRole("button", { name: "Deposit" })
+        .hasAttribute("disabled")
+    ).toBe(true);
+    expect(
+      within(devnetRow as HTMLTableRowElement)
+        .getByRole("button", { name: "Deposit" })
+        .hasAttribute("disabled")
+    ).toBe(false);
+    expect(screen.queryByLabelText("Catalogue cluster")).toBeNull();
+  });
+
+  it("renders no devnet inclusion switch in production", () => {
     mocks.environment = "production";
     renderWorkspace();
 
-    expect(screen.queryByLabelText("Catalogue cluster")).toBeNull();
-    expect(screen.queryByText("Devnet")).toBeNull();
-    // Production reads its default shelf; the opt-in never reaches the seam.
+    expect(screen.queryByRole("switch", { name: "Include devnet strategies" })).toBeNull();
+    // Production's default shelf is already mainnet, so no explicit cluster is needed.
     expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
   });
 
-  it("normalizes toggling back to the environment's own cluster into the shared default key", async () => {
-    // Selecting Devnet after Mainnet must re-join the environment-default SWR
-    // key (cluster: undefined) rather than pinning a second, permanently
-    // distinct cache entry of the identical shelf under the literal "devnet".
+  it("refreshes the environment and mainnet shelves once each", async () => {
     const user = userEvent.setup();
-    renderWorkspace();
+    renderWorkspace({ includeDevnet: false });
 
-    const toggle = screen.getByLabelText("Catalogue cluster");
-    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
-    expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
-
-    await user.click(within(toggle).getByRole("button", { name: "Devnet" }));
-    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
-    expect(mocks.strategiesClusterRequests).not.toContain("devnet");
-  });
-
-  it("refreshes the shared default shelf ONCE per click, and the mirror separately once toggled", async () => {
-    const user = userEvent.setup();
-    renderWorkspace();
-
-    // On the default shelf both strategy hooks share one SWR key: one click,
-    // one revalidation of it (the paged fetch must not run twice).
     await user.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
 
-    // Once the toggle leaves the default, the mirror shelf is a second key and
-    // earns its own refresh.
-    const toggle = screen.getByLabelText("Catalogue cluster");
-    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
+    await user.click(screen.getByRole("switch", { name: "Include devnet strategies" }));
     mocks.refreshStrategies.mockClear();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
