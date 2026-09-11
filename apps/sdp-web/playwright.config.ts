@@ -26,7 +26,7 @@ export default defineConfig({
   testDir: "./playwright/tests",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: useExternalApi ? 2 : 0,
+  retries: 0,
   timeout: 180_000,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
@@ -86,6 +86,7 @@ export default defineConfig({
     {
       name: "auth-setup",
       testMatch: /auth\.global\.setup\.ts/,
+      retries: useExternalApi ? 2 : 0,
       use: {
         ...devices["Desktop Chrome"],
       },
@@ -125,6 +126,7 @@ export default defineConfig({
       name: "gcp-read-only",
       testMatch: /.*gcp-read-only.*\.e2e\.spec\.ts/,
       dependencies: ["auth-setup"],
+      retries: useExternalApi ? 2 : 0,
       use: {
         ...devices["Desktop Chrome"],
         storageState: authStatePath,
