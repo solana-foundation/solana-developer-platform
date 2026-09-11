@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
-    "@clerk/nextjs": "7.8.2",
+    "@clerk/nextjs": "7.8.3",
     "@flags-sdk/vercel": "1.4.7",
     "@sdp/issuance": "workspace:*",
     "@sdp/policy": "workspace:*",
@@ -29,7 +29,7 @@
     "@sdp/redaction": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
-    "@sentry/nextjs": "10.71.0",
+    "@sentry/nextjs": "10.72.0",
     "@solana/design-system": "1.0.1",
     "@solana/fixed-points": "7.1.1",
     "@solana/qr-code-styling": "1.6.0",
@@ -37,7 +37,7 @@
     "clsx": "2.1.1",
     "date-fns": "4.4.0",
     "flags": "4.3.0",
-    "lucide-react": "1.35.0",
+    "lucide-react": "1.38.0",
     "motion": "13.1.1",
     "next": "16.3.3",
     "next-themes": "0.4.6",
@@ -50,11 +50,11 @@
     "sonner": "2.0.8",
     "swr": "2.5.1",
     "tailwind-merge": "3.6.0",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
-    "@clerk/backend": "3.16.12",
-    "@clerk/testing": "2.2.30",
+    "@clerk/backend": "3.16.13",
+    "@clerk/testing": "2.2.31",
     "@playwright/test": "1.62.1",
     "@solana-program/system": "catalog:",
     "@solana/kit": "catalog:",
