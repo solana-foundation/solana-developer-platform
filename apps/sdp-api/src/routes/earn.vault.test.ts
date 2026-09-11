@@ -714,6 +714,111 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     expect(Number(operationCount?.count ?? 0)).toBe(0);
   });
 
+  it("reports the velocity verdict on a policy dry-run without writing an operation", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedConnectionWallet();
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    const repo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const profile = await repo.createWalletControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: "cwlt_earn_vault_connection",
+      name: "Daily deposit volume",
+      createdBy: TEST_USER.id,
+    });
+    if (!profile) throw new Error("Failed to create wallet control profile");
+    const revision = await repo.createWalletControlProfileRevision({
+      profileId: profile.id,
+      rules: [
+        {
+          id: "daily-volume",
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "100",
+          asset: USDC_MINT,
+          action: "approval_required",
+        },
+      ],
+      defaultAction: "allow",
+      createdBy: TEST_USER.id,
+    });
+    if (!revision) throw new Error("Failed to create wallet control profile revision");
+    await repo.activateWalletControlProfileRevision({
+      profileId: profile.id,
+      revisionId: revision.id,
+    });
+    // Prior history inside the window: 95 already deposited today.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO wallet_operations (
+           id, organization_id, project_id, custody_wallet_id, wallet_id, api_key_id,
+           source, operation_family, operation_type, asset, amount, status
+         ) VALUES (?, ?, ?, 'cwlt_earn_vault_connection', 'privy_earn_vault_connection', ?,
+                   'earn_vault_deposit', 'program', 'earn_vault_deposit', ?, '95', 'completed')`
+      )
+      .bind("wop_earn_vault_prior", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, USDC_MINT)
+      .run();
+
+    const dryRun = (amount: string) =>
+      app.request(
+        "/v1/earn/vault-deposits",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "Dry-Run": "true",
+          },
+          body: JSON.stringify({
+            strategyId: strategy.id,
+            custodyWalletId: "cwlt_earn_vault_connection",
+            amount,
+          }),
+        },
+        env
+      );
+
+    const within = await dryRun("5");
+    expect(within.status).toBe(200);
+    expect(await within.json()).toMatchObject({
+      data: {
+        decision: "allow",
+        criteria: expect.arrayContaining([
+          expect.objectContaining({ kind: "velocity", ruleId: "daily-volume", matched: false }),
+        ]),
+      },
+    });
+
+    const breach = await dryRun("10");
+    expect(breach.status).toBe(200);
+    expect(await breach.json()).toMatchObject({
+      data: {
+        decision: "approval_required",
+        criteria: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "velocity",
+            ruleId: "daily-volume",
+            matched: true,
+            action: "approval_required",
+            reason: expect.stringContaining("Window total 95 plus operation amount 10"),
+          }),
+        ]),
+      },
+    });
+
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM wallet_operations")
+      .first<{ count: number | string }>();
+    expect(Number(operationCount?.count ?? 0)).toBe(1);
+  });
+
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const strategy = await seedStrategy();

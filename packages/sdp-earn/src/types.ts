@@ -552,9 +552,14 @@ export interface EarnVaultDepositQuoteInput {
   amount: string;
 }
 
-/** A provider-reported condition that would block the quoted deposit. */
+/**
+ * A condition that would block the quoted deposit. Usually the provider's,
+ * passed through; the API appends SDP's own platform refusals in the same
+ * channel (today `VAULT_EXPOSURE_CAP`, ADR 0004) so one `blockingIssues`
+ * handler covers both.
+ */
 export interface EarnVaultDepositQuoteIssue {
-  /** The provider's own stable code (e.g. `TELLER_PAUSED`), passed through. */
+  /** A stable code: the provider's own (e.g. `TELLER_PAUSED`) or SDP's. */
   code: string;
   /** The provider's own sentence for it. */
   message: string;

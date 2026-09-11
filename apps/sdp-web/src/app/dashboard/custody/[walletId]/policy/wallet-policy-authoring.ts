@@ -294,6 +294,7 @@ function amountRuleAssets(rule: Extract<PolicyRule, { kind: "amount" }>): string
 export function categoryForRule(rule: PolicyRule): RestrictionCategory | null {
   switch (rule.kind) {
     case "amount":
+    case "velocity":
       return "limits";
     case "asset":
       return "assets";

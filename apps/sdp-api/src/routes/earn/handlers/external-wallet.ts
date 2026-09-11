@@ -55,10 +55,6 @@ import {
 } from "@/services/earn/vault-external-wallet.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
@@ -72,7 +68,7 @@ import {
   type earnExternalWalletWithdrawalTransactionSchema,
   type earnVaultWithdrawalPreviewSchema,
 } from "../schemas";
-import { assertStrategyDepositable } from "./admission";
+import { assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -579,16 +575,14 @@ export async function createEarnExternalWalletDepositTransaction(
     );
   }
 
-  assertEarnProviderSurfaced(provider);
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    provider,
-    environment === "sandbox"
-  );
-  assertStrategyDepositable(strategy, environment);
+  // Surfacing, entitlement, catalogue admission and the SDP-wide exposure cap
+  // (ADR 0004 layer 1), in the custody deposit's order and from the same
+  // function, so the two money-in paths cannot drift. The deposit style and
+  // provider registration were already asserted above with this route's own
+  // wording; the shared predicate re-checks them for free. `body.amount` is
+  // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
+  // dollar-for-dollar by design.
+  await assertVaultDepositAdmissible(c, strategy, body.amount);
 
   const swap = resolveDepositSwapRequest(
     {

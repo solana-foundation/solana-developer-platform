@@ -1,3 +1,4 @@
+export { isIsoDuration, parseIsoDurationMs } from "./duration";
 export {
   enforceWalletOperationPolicy,
   type WalletOperationPolicyEnforcement,
@@ -16,6 +17,21 @@ export type {
   EffectiveOperationPolicies,
   PolicyEnforcementStore,
   RecordPolicyEvaluationInput,
+  VelocityCandidate,
 } from "./ports";
-export { evaluatePolicyRule, type RuleEvaluation } from "./rules";
+export {
+  evaluatePolicyRule,
+  type PolicyRuleEvaluationContext,
+  type RuleEvaluation,
+} from "./rules";
 export { policyRuleRestricts } from "./rules/restricts";
+export {
+  collectVelocityRules,
+  createVelocityLookup,
+  DEFAULT_VELOCITY_SCOPE,
+  type PolicyEvaluationVelocity,
+  serializeVelocityObservationKey,
+  type VelocityObservation,
+  type VelocityObservationKey,
+  velocityObservationKeys,
+} from "./velocity";

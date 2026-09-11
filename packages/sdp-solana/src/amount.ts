@@ -124,6 +124,42 @@ export const compareDecimalAmounts = (left: string, right: string): number => {
 };
 
 /**
+ * Adds two decimal amount strings exactly, at their maximum shared scale.
+ *
+ * @param left - First decimal amount string; surrounding whitespace is ignored.
+ * @param right - Second decimal amount string; surrounding whitespace is ignored.
+ * @returns The canonical decimal sum (trailing zeros trimmed).
+ * @throws {AmountError} When either string fails the parse guards.
+ */
+export const addDecimalAmounts = (left: string, right: string): string => {
+  const decimals = Math.max(decimalScale(left), decimalScale(right));
+  const sum = parseDecimalAmount(left, decimals) + parseDecimalAmount(right, decimals);
+  return formatDecimalAmount(sum, decimals);
+};
+
+/**
+ * Scales a decimal amount string by a basis-point share, rounding DOWN to the
+ * amount's own scale. `scaleDecimalAmountByBps("50000000", 1000)` is
+ * `"5000000"` (10%). Truncation is deliberate: the one caller is a ceiling
+ * derived from a share of a total, and rounding a ceiling up would admit more
+ * than the share allows.
+ *
+ * @param value - Decimal amount string; surrounding whitespace is ignored.
+ * @param bps - Non-negative integer basis points (10000 = 100%).
+ * @returns The canonical scaled decimal string (trailing zeros trimmed).
+ * @throws {AmountError} When the string fails the parse guards or `bps` is not
+ * a non-negative integer.
+ */
+export const scaleDecimalAmountByBps = (value: string, bps: number): string => {
+  if (!Number.isInteger(bps) || bps < 0) {
+    throw new AmountError("Invalid basis points");
+  }
+  const decimals = decimalScale(value);
+  const scaled = (parseDecimalAmount(value, decimals) * BigInt(bps)) / 10_000n;
+  return formatDecimalAmount(scaled, decimals);
+};
+
+/**
  * Formats base units at the given scale as a canonical decimal string,
  * trimming trailing zeros and dropping the decimal point for whole numbers.
  *

@@ -18,6 +18,10 @@ describe("policyRuleRestricts", () => {
   it("classifies default-action kinds by their evaluator defaults", () => {
     assert.equal(policyRuleRestricts({ kind: "approval" }), true);
     assert.equal(policyRuleRestricts({ kind: "amount", max: "100" }), true);
+    assert.equal(
+      policyRuleRestricts({ kind: "velocity", window: "P1D", max: "100", asset: "USDC" }),
+      true
+    );
     assert.equal(policyRuleRestricts({ kind: "destination", allowlist: ["x"] }), true);
     assert.equal(policyRuleRestricts({ kind: "always" }), false);
     assert.equal(policyRuleRestricts({ kind: "asset", asset: "USDC" }), false);

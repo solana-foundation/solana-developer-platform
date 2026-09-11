@@ -4,12 +4,20 @@ import type {
   EffectiveOperationPolicies,
   PolicyEnforcementStore,
   RecordPolicyEvaluationInput,
+  VelocityCandidate,
+  VelocityObservation,
 } from "@sdp/policy";
-import { IMPLICIT_DEFAULT_ALLOW_POLICY } from "@sdp/policy";
+import {
+  IMPLICIT_DEFAULT_ALLOW_POLICY,
+  parseIsoDurationMs,
+  serializeVelocityObservationKey,
+  velocityObservationKeys,
+} from "@sdp/policy";
 import {
   type EffectiveApiKeyPolicy,
   type PolicyCandidate,
   type PolicyEvaluation,
+  type VelocityPolicyRule,
   WALLET_OPERATION_FAMILIES,
   WALLET_OPERATION_TYPES,
   type WalletOperationActor,
@@ -99,6 +107,57 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
       walletPolicy,
       apiKeyPolicy,
     };
+  }
+
+  /**
+   * Measure the rolling totals the velocity rules in play need, one per rule
+   * asset, de-duplicated by key. Totals come from `wallet_operations`, the
+   * generic ledger every policy-gated route writes, so payments can adopt the
+   * rule unchanged; failed, canceled and still-undecided (`created`) rows
+   * never count, so concurrent contenders do not veto each other, and the
+   * operation under evaluation (already inserted by enforcement) is excluded
+   * by id as well.
+   * A rule whose window does not parse gets no observation and reviews.
+   *
+   * @param candidate - The candidate whose scopes narrow the sums.
+   * @param rules - The velocity rules across both effective policies.
+   * @returns One observation per distinct key.
+   */
+  async loadVelocityObservations(
+    candidate: VelocityCandidate,
+    rules: VelocityPolicyRule[]
+  ): Promise<VelocityObservation[]> {
+    assertTenantClaim(this.scope, candidate, "PolicyEnforcementStore.loadVelocityObservations");
+    const now = Date.now();
+    const observations = new Map<string, VelocityObservation>();
+
+    for (const rule of rules) {
+      for (const key of velocityObservationKeys(rule)) {
+        const serialized = serializeVelocityObservationKey(key);
+        if (observations.has(serialized)) {
+          continue;
+        }
+        const windowMs = parseIsoDurationMs(key.window);
+        if (windowMs === null) {
+          continue;
+        }
+        const total = await this.repository.sumWalletOperationAmounts({
+          organizationId: candidate.organizationId,
+          projectId: candidate.projectId,
+          scope: key.scope,
+          custodyWalletId: candidate.custodyWalletId,
+          walletId: candidate.walletId,
+          apiKeyId: candidate.apiKeyId,
+          asset: key.asset,
+          operationTypes: key.operationTypes,
+          since: new Date(now - windowMs).toISOString(),
+          excludeWalletOperationId: candidate.id ?? null,
+        });
+        observations.set(serialized, { ...key, total });
+      }
+    }
+
+    return [...observations.values()];
   }
 
   async createApprovalRequest(input: CreateApprovalRequestInput) {

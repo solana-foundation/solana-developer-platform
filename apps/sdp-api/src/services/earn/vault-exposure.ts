@@ -1,0 +1,424 @@
+import type { EarnVaultDepositQuoteIssue } from "@sdp/earn/types";
+import {
+  addDecimalAmounts,
+  compareDecimalAmounts,
+  isDecimalString,
+  scaleDecimalAmountByBps,
+} from "@sdp/solana/amount";
+import type { EarnProviderId, SdpEnvironment, SolanaCluster } from "@sdp/types";
+import type { Context } from "hono";
+import { type AppDb, getDb } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { serviceUnavailable, vaultExposureCapExceeded } from "@/lib/errors";
+import { isEarnVolumeCapsEnforced } from "@/lib/feature-flags";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import {
+  DEFAULT_VAULT_EXPOSURE_CAP,
+  VAULT_EXPOSURE_CAPS,
+  type VaultExposureCap,
+} from "@/routes/earn/handlers/curation";
+import { describeError, logEvent } from "@/runtime/money-path-events";
+import type { Env } from "@/types/env";
+import { earnClusterFor } from "./execution-registry";
+
+/**
+ * ADR 0004, layer 1: SDP-wide exposure per vault, checked at deposit admission.
+ *
+ * Bounds how much SDP's customers may COLLECTIVELY hold in one vault, so one
+ * vault's exploit, depeg or liquidity crunch costs SDP customers at most a
+ * known number, and SDP stays a small enough share of any vault that its
+ * customers can always leave (EARN-015). The config is curation-as-code beside
+ * `CURATED_VAULTS` (`handlers/curation.ts`); the check runs as the LAST step of
+ * the single money-in admission predicate (`assertVaultDepositAdmissible`), so
+ * both the custody and the external-wallet deposit paths meet it with no new
+ * gate ordering.
+ *
+ * Posture, in the ADR's words:
+ * - **Deposits only.** Nothing here is ever consulted on a withdrawal (ADR
+ *   0002: exits never trap funds). A vault over its cap is exit-only.
+ * - **Shadow first.** `EARN_VOLUME_CAPS_ENFORCED` off (the default) evaluates
+ *   and emits `sdp_api_earn_volume_cap_evaluated` with `would_block`, refuses
+ *   nothing, and the preview does NOT report a blocking issue: a preview that
+ *   says "blocked" while the deposit lands is a lie.
+ * - **Fail closed on the inputs, in every mode.** An exposure read that
+ *   throws refuses the deposit with a 503, shadow mode included. Same posture
+ *   as a database outage today.
+ *
+ * Units: the vault's DEPOSIT-TOKEN units throughout (no price oracle; every V1
+ * vault is a dollar stablecoin). The catalogue TVL is USD, so the share bound
+ * compares token units against dollars, which for a stablecoin vault is the
+ * same approximation. A swap-funded deposit's `amount` is in the SOURCE
+ * stablecoin's units, one more dollar-for-dollar approximation of the same
+ * kind. See `VaultExposureCap` for the full statement.
+ */
+
+/** The `blockingIssues` code the deposit preview reports for this cap. */
+export const VAULT_EXPOSURE_CAP_ISSUE_CODE = "VAULT_EXPOSURE_CAP";
+
+/** The structured event every evaluation emits, blocked or not. */
+export const EARN_VOLUME_CAP_EVALUATED_EVENT = "sdp_api_earn_volume_cap_evaluated";
+
+/** How long one vault's exposure figure is reused before the ledger is re-read. */
+export const VAULT_EXPOSURE_CACHE_TTL_MS = 30_000;
+
+export interface VaultExposureKey {
+  environment: SdpEnvironment;
+  provider: string;
+  vaultAddress: string;
+}
+
+export interface VaultExposureEvaluation {
+  /** True when admitting `amount` would push SDP-wide holdings past the cap. */
+  wouldBlock: boolean;
+  /** Which bound decided, in words: for the event and the refusal message. */
+  reason: string;
+  /** The binding ceiling in deposit-token units; null when the vault is uncapped. */
+  limit: string | null;
+  /** SDP-wide holdings before this deposit, deposit-token units. */
+  exposure: string;
+  /** `exposure + amount`, the figure compared against `limit`. */
+  projected: string;
+}
+
+/**
+ * The cap for one vault: the explicit entry when there is one (including an
+ * explicit `null`, which means uncapped), else the platform default. Absence
+ * is NOT uncapped; that asymmetry is the whole reason `null` exists.
+ */
+export function resolveVaultExposureCap(
+  cluster: SolanaCluster,
+  provider: string,
+  vaultAddress: string
+): VaultExposureCap | null {
+  const key = `${provider as EarnProviderId}:${vaultAddress}` as const;
+  const entries = VAULT_EXPOSURE_CAPS[cluster];
+  if (entries && key in entries) {
+    return entries[key] ?? null;
+  }
+  return DEFAULT_VAULT_EXPOSURE_CAP;
+}
+
+/**
+ * The pure verdict. `tvl` is the catalogue's USD figure as a decimal string,
+ * or null when the row carries none (devnet rows never do); without one the
+ * absolute ceiling stands alone and the reason says so, because a cap that
+ * silently became looser is the failure this exists to prevent.
+ *
+ * `wouldBlock` is strict: a deposit landing EXACTLY on the ceiling is admitted.
+ */
+export function evaluateVaultExposure(input: {
+  cap: VaultExposureCap | null;
+  exposure: string;
+  tvl: string | null;
+  amount: string;
+}): VaultExposureEvaluation {
+  const projected = addDecimalAmounts(input.exposure, input.amount);
+  if (input.cap === null) {
+    return {
+      wouldBlock: false,
+      reason: "uncapped",
+      limit: null,
+      exposure: input.exposure,
+      projected,
+    };
+  }
+
+  let limit = input.cap.maxAbsolute;
+  let reason = "absolute";
+  if (input.tvl !== null && isDecimalString(input.tvl)) {
+    const shareLimit = scaleDecimalAmountByBps(input.tvl, input.cap.maxShareOfTvlBps);
+    if (compareDecimalAmounts(shareLimit, limit) < 0) {
+      limit = shareLimit;
+      reason = "share_of_tvl";
+    }
+  } else {
+    reason = "absolute_tvl_unavailable";
+  }
+
+  return {
+    wouldBlock: compareDecimalAmounts(projected, limit) > 0,
+    reason,
+    limit,
+    exposure: input.exposure,
+    projected,
+  };
+}
+
+/**
+ * The catalogue's TVL for the share bound: `risk_metadata.tvlUsd` when it is a
+ * finite non-negative JSON number (the same guard the ranked list applies),
+ * else null. Rendered without exponent so it parses as a decimal string.
+ */
+export function strategyTvlForExposure(
+  strategy: Pick<EarnStrategyRow, "risk_metadata">
+): string | null {
+  const raw = strategy.risk_metadata?.tvlUsd;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return null;
+  // `String` renders an exponent above 1e21, which then fails the decimal
+  // grammar and reads as "no figure" rather than a wrong one.
+  const rendered = String(raw);
+  return isDecimalString(rendered) ? rendered : null;
+}
+
+type ExposureSum = (db: AppDb, key: VaultExposureKey) => Promise<string>;
+
+interface CacheEntry {
+  value: string;
+  expiresAt: number;
+}
+
+/**
+ * A ledger-backed exposure reader with a short in-process cache for PREVIEWS,
+ * so a burst of them does not re-aggregate the vault on every keystroke.
+ *
+ * The cache is advisory only. An ADMISSION reads `fresh`: it bypasses the
+ * cache, hits the ledger, and refreshes the cached figure, so an enforced cap
+ * is never decided on a stale number. Admission also `reserve`s the admitted
+ * amount into the cache, so previews issued right after an admission in the
+ * same process already see it. What remains is the window between admission
+ * and the deposit's own `requested` row landing in the ledger; two deposits
+ * admitted inside that window can together overshoot by one deposit, which
+ * is the bound a non-transactional check has and the failure direction ADR
+ * 0004 accepts. A failed read is never cached. Negative sums cannot come out
+ * of the current query (it sums deposits only) but are clamped and logged
+ * anyway: a negative figure is ledger drift, and a cap must never be loosened
+ * by it.
+ */
+export function createVaultExposureReader(options: {
+  sum: ExposureSum;
+  ttlMs?: number;
+  now?: () => number;
+}) {
+  const ttlMs = options.ttlMs ?? VAULT_EXPOSURE_CACHE_TTL_MS;
+  const now = options.now ?? Date.now;
+  const cache = new Map<string, CacheEntry>();
+
+  const cacheKeyOf = (key: VaultExposureKey) =>
+    `${key.environment} ${key.provider} ${key.vaultAddress}`;
+
+  return {
+    async read(
+      db: AppDb,
+      key: VaultExposureKey,
+      readOptions: { fresh?: boolean } = {}
+    ): Promise<string> {
+      const cacheKey = cacheKeyOf(key);
+      const hit = cache.get(cacheKey);
+      if (!readOptions.fresh && hit && hit.expiresAt > now()) {
+        return hit.value;
+      }
+      let value = await options.sum(db, key);
+      if (!isDecimalString(value)) {
+        // A leading "-" fails the unsigned decimal grammar, which is the one
+        // way a SUM over validated amount columns can come back non-decimal.
+        logEvent("warn", {
+          event: "sdp_api_earn_vault_exposure_negative",
+          environment: key.environment,
+          provider: key.provider,
+          vault_address: key.vaultAddress,
+          exposure: value,
+        });
+        value = "0";
+      }
+      cache.set(cacheKey, { value, expiresAt: now() + ttlMs });
+      return value;
+    },
+    /**
+     * Fold an admitted deposit into the cached figure so previews in this
+     * process see it before the ledger row lands. Only bumps a live entry;
+     * an expired or absent one is re-read on the next call anyway.
+     */
+    reserve(key: VaultExposureKey, amount: string): void {
+      const cacheKey = cacheKeyOf(key);
+      const hit = cache.get(cacheKey);
+      if (!hit || hit.expiresAt <= now() || !isDecimalString(amount)) return;
+      cache.set(cacheKey, { ...hit, value: addDecimalAmounts(hit.value, amount) });
+    },
+    clear(): void {
+      cache.clear();
+    },
+  };
+}
+
+/**
+ * SDP-wide exposure is a cross-tenant fact, so the aggregate runs under the
+ * system database identity: under the request's tenant identity row-level
+ * security would hide every other organization's deposits and the cap would
+ * only ever see the caller's own. The read collapses into one number; no
+ * other tenant's row reaches the response.
+ */
+const ledgerSum: ExposureSum = (db, key) =>
+  runWithSystemDatabaseIdentity("earn:vault-exposure-cap", () =>
+    createPostgresEarnMovementsRepository(db).sumVaultDepositExposure(key)
+  );
+
+const defaultReader = createVaultExposureReader({ sum: ledgerSum });
+
+/**
+ * SDP-wide exposure to one vault, in deposit-token units. Cached for previews;
+ * pass `fresh` for an admission so the enforced verdict reads the ledger.
+ */
+export function readVaultExposure(
+  db: AppDb,
+  key: VaultExposureKey,
+  options: { fresh?: boolean } = {}
+): Promise<string> {
+  return defaultReader.read(db, key, options);
+}
+
+/** Fold an admitted deposit into the cached exposure (see reader `reserve`). */
+export function reserveVaultExposure(key: VaultExposureKey, amount: string): void {
+  defaultReader.reserve(key, amount);
+}
+
+/** Drops the process-wide exposure cache. Tests only. */
+export function resetVaultExposureCacheForTesting(): void {
+  defaultReader.clear();
+}
+
+export interface VaultExposureVerdict {
+  evaluation: VaultExposureEvaluation;
+  /** Whether a `wouldBlock` verdict refuses (true) or only reports (false). */
+  enforced: boolean;
+  /** The vault the verdict is about, for the admission's cache reservation. */
+  key: VaultExposureKey;
+}
+
+/**
+ * Evaluate the cap for one deposit and ALWAYS emit the evaluated event; the
+ * caller decides what to do with the verdict. Throws a 503 when the exposure
+ * cannot be read, in every enforcement mode.
+ */
+export async function assessVaultExposure(input: {
+  env: Pick<Env, "EARN_VOLUME_CAPS_ENFORCED">;
+  environment: SdpEnvironment;
+  strategy: Pick<EarnStrategyRow, "provider" | "provider_reference" | "risk_metadata">;
+  amount: string;
+  readExposure: (key: VaultExposureKey) => Promise<string>;
+}): Promise<VaultExposureVerdict> {
+  const { environment, strategy, amount } = input;
+  const enforced = isEarnVolumeCapsEnforced(input.env);
+  const cap = resolveVaultExposureCap(
+    earnClusterFor(environment),
+    strategy.provider,
+    strategy.provider_reference
+  );
+  const tvl = strategyTvlForExposure(strategy);
+  const key: VaultExposureKey = {
+    environment,
+    provider: strategy.provider,
+    vaultAddress: strategy.provider_reference,
+  };
+
+  let exposure: string;
+  try {
+    exposure = await input.readExposure(key);
+  } catch (error) {
+    logEvent("error", {
+      event: EARN_VOLUME_CAP_EVALUATED_EVENT,
+      cap: "vault_exposure",
+      environment,
+      provider: key.provider,
+      vault_address: key.vaultAddress,
+      tvl,
+      amount,
+      enforced,
+      ...describeError(error),
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+    // Fail closed on deposits, never on exits (ADR 0004). A cap whose input
+    // cannot be read is a cap that cannot be honoured, and admitting on a
+    // guess is the one thing the shadow flag must not be able to do.
+    throw serviceUnavailable("Vault exposure could not be verified; the deposit was not admitted.");
+  }
+
+  const evaluation = evaluateVaultExposure({ cap, exposure, tvl, amount });
+  logEvent(evaluation.wouldBlock ? "warn" : "info", {
+    event: EARN_VOLUME_CAP_EVALUATED_EVENT,
+    cap: "vault_exposure",
+    environment,
+    provider: key.provider,
+    vault_address: key.vaultAddress,
+    exposure: evaluation.exposure,
+    tvl,
+    amount,
+    projected: evaluation.projected,
+    limit: evaluation.limit,
+    reason: evaluation.reason,
+    would_block: evaluation.wouldBlock,
+    enforced,
+  });
+  return { evaluation, enforced, key };
+}
+
+type ExposureContext = Context<{ Bindings: Env }>;
+
+/**
+ * Request-scoped form of `assessVaultExposure`. Previews read through the
+ * cache; an admission passes `fresh` and reads the ledger. Non-throwing on the
+ * verdict; throws 503 on an unreadable exposure.
+ */
+export function checkVaultExposure(
+  c: ExposureContext,
+  strategy: EarnStrategyRow,
+  amount: string,
+  options: { fresh?: boolean } = {}
+): Promise<VaultExposureVerdict> {
+  return assessVaultExposure({
+    env: c.env,
+    environment: resolveSdpEnvironment(c),
+    strategy,
+    amount,
+    readExposure: (key) => readVaultExposure(getDb(c.env), key, options),
+  });
+}
+
+/**
+ * The admission step: read the ledger FRESH (never the preview cache),
+ * evaluate, emit, and refuse with the typed 409 when the verdict blocks AND
+ * caps are enforced. An admitted deposit is reserved into the cache so the
+ * next preview in this process sees it. In shadow mode this only ever emits.
+ * Never call it on a withdrawal.
+ */
+export async function assertVaultExposureWithinCap(
+  c: ExposureContext,
+  strategy: EarnStrategyRow,
+  amount: string
+): Promise<VaultExposureVerdict> {
+  const verdict = await checkVaultExposure(c, strategy, amount, { fresh: true });
+  if (!(verdict.evaluation.wouldBlock && verdict.enforced)) {
+    reserveVaultExposure(verdict.key, amount);
+  }
+  if (verdict.evaluation.wouldBlock && verdict.enforced) {
+    throw vaultExposureCapExceeded(
+      "This deposit would take SDP's total holdings in the vault past its exposure cap. " +
+        "The vault is exit-only for new money until other positions leave; existing positions are unaffected.",
+      {
+        vaultAddress: strategy.provider_reference,
+        limit: verdict.evaluation.limit,
+        exposure: verdict.evaluation.exposure,
+        projected: verdict.evaluation.projected,
+      }
+    );
+  }
+  return verdict;
+}
+
+/**
+ * The preview's `blockingIssues` entry for a blocking verdict, or null. Only
+ * an ENFORCED block is reported: in shadow mode the deposit would succeed, and
+ * a preview must never claim otherwise.
+ */
+export function vaultExposureBlockingIssue(
+  verdict: VaultExposureVerdict
+): EarnVaultDepositQuoteIssue | null {
+  if (!(verdict.evaluation.wouldBlock && verdict.enforced)) return null;
+  return {
+    code: VAULT_EXPOSURE_CAP_ISSUE_CODE,
+    message:
+      `This deposit would take SDP's total holdings in the vault to ${verdict.evaluation.projected}, ` +
+      `past its exposure cap of ${verdict.evaluation.limit}. The vault is exit-only for new money right now.`,
+  };
+}

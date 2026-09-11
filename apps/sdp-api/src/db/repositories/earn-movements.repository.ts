@@ -430,6 +430,32 @@ export interface EarnMovementsRepository {
     >
   >;
   /**
+   * SDP-wide money INTO one vault, summed across every organization on the
+   * environment (ADR 0004 layer 1, PRO-1934): non-failed vault deposits
+   * (`requested`, `submitted`, `confirmed`, `finalized`) in the vault's
+   * deposit-token units. In-flight deposits count on purpose, so a burst of
+   * concurrent deposits cannot each see the pre-burst figure. Never negative.
+   *
+   * Withdrawals are deliberately NOT subtracted: a vault exit is ledgered in
+   * SHARES (`denomination` = the share mint, and `amount_settled` is stamped
+   * from `amount_requested` on finalization, also shares), so the ledger holds
+   * no token-denominated figure for money OUT, and this table's own rule is
+   * that no read sums across denominations. The result is therefore GROSS
+   * inflow: an over-estimate of exposure that only ever errs toward refusing a
+   * deposit, never toward admitting one, which is the ADR's fail-closed side.
+   * Recording the observed token payout at exit settlement is the follow-up
+   * that turns this into a net figure (the earnings read has the same gap,
+   * `withdrawals_not_valued`).
+   *
+   * Cross-tenant by design; the caller runs it under the system database
+   * identity and folds the answer into one aggregate.
+   */
+  sumVaultDepositExposure(params: {
+    environment: SdpEnvironment;
+    provider: string;
+    vaultAddress: string;
+  }): Promise<string>;
+  /**
    * The cross-provider movement feed: one chronological history spanning both
    * execution models, which is what neither legacy table could serve alone.
    *
@@ -1272,6 +1298,30 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         });
       }
       return totals;
+    },
+
+    async sumVaultDepositExposure(params) {
+      // Postgres numeric is exact and every summed row shares the vault's
+      // deposit-token denomination (the deposit insert writes the token mint),
+      // so the cast loses nothing. Vault rows carry `vault_address` directly
+      // on the movement, for both the custody and external-wallet signers, so
+      // no join through earn_positions is needed. Served by
+      // idx_earn_movements_vault_exposure (migration 0096).
+      const row = await db
+        .prepare(
+          `SELECT COALESCE(SUM(COALESCE(amount_settled, amount_requested)::numeric), 0)::text
+                  AS exposure
+             FROM earn_movements
+            WHERE environment = ?
+              AND provider = ?
+              AND vault_address = ?
+              AND execution_model = 'vault_direct'
+              AND direction = 'deposit'
+              AND status IN ('requested', 'submitted', 'confirmed', 'finalized')`
+        )
+        .bind(params.environment, params.provider, params.vaultAddress)
+        .first<{ exposure: string }>();
+      return row?.exposure ?? "0";
     },
 
     async listMovements(params) {

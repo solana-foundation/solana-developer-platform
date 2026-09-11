@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AmountError,
+  addDecimalAmounts,
   compareDecimalAmounts,
   formatDecimalAmount,
   parseDecimalAmount,
+  scaleDecimalAmountByBps,
   toMosaicAmount,
   toNumberAmount,
 } from "./amount";
@@ -119,6 +121,32 @@ describe("kit-backed amount helpers", () => {
     assert.equal(compareDecimalAmounts("1.5", "1.50"), 0);
     assert.equal(compareDecimalAmounts("0.1", "0.09"), 1);
     assert.equal(compareDecimalAmounts("0.09", "0.1"), -1);
+  });
+
+  it("adds amounts exactly across unequal scales", () => {
+    assert.equal(addDecimalAmounts("1.5", "2.25"), "3.75");
+    assert.equal(addDecimalAmounts("0", "100000"), "100000");
+    assert.equal(addDecimalAmounts("99999.999999", "0.000001"), "100000");
+    assert.equal(addDecimalAmounts("0.1", "0.2"), "0.3");
+  });
+
+  it("rejects an invalid addend", () => {
+    assert.throws(() => addDecimalAmounts("1.0", "abc"), AmountError);
+  });
+
+  it("scales by basis points, truncating to the amount's own scale", () => {
+    assert.equal(scaleDecimalAmountByBps("50000000", 1000), "5000000");
+    assert.equal(scaleDecimalAmountByBps("1234.56", 10000), "1234.56");
+    assert.equal(scaleDecimalAmountByBps("100", 0), "0");
+    // 0.15 * 33.33% = 0.049995, truncated at two decimals, never rounded up.
+    assert.equal(scaleDecimalAmountByBps("0.15", 3333), "0.04");
+    assert.equal(scaleDecimalAmountByBps("7", 5000), "3");
+  });
+
+  it("rejects an invalid scale input", () => {
+    assert.throws(() => scaleDecimalAmountByBps("abc", 1000), AmountError);
+    assert.throws(() => scaleDecimalAmountByBps("10", -1), AmountError);
+    assert.throws(() => scaleDecimalAmountByBps("10", 1.5), AmountError);
   });
 
   it("compares high-scale inputs that kit's assertValidDecimals must accept", () => {

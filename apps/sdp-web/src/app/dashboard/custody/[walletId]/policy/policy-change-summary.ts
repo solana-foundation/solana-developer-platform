@@ -234,6 +234,7 @@ function ruleItems(rule: PolicyRule, formatting: PolicyRuleFormatting): string[]
       return [...orEmpty(rule.operationTypes), ...singleton(rule.operationType)];
     case "asset":
     case "amount":
+    case "velocity":
       return [...orEmpty(rule.assets), ...singleton(rule.asset)].map((mint) =>
         formatAsset(mint, formatting)
       );
@@ -313,6 +314,9 @@ function ruleScalarSummary(rule: PolicyRule, formatting: PolicyRuleFormatting): 
     if (rule.max !== undefined) {
       parts.push(`max ${rule.max}`);
     }
+  }
+  if (rule.kind === "velocity") {
+    parts.push(`max ${rule.max} per ${rule.window}`, rule.scope ?? "wallet");
   }
   if (rule.kind === "approval" && rule.approvalGroupId !== undefined) {
     parts.push(rule.approvalGroupId);

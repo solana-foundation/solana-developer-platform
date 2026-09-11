@@ -21,6 +21,8 @@ export function policyRuleRestricts(rule: PolicyRule): boolean {
       return true;
     case "amount":
       return true;
+    case "velocity":
+      return true;
     case "destination":
       return true;
     case "asset":

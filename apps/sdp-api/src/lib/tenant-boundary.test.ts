@@ -86,6 +86,10 @@ describe("tenant data-access boundary", () => {
       // BOLA guard: must see every organization's ledger rows to 404 a
       // foreign withdrawal ref before any provider call.
       "routes/earn/handlers/program.ts",
+      // ADR 0004 vault exposure cap: SDP-wide holdings in one vault are a
+      // cross-tenant SUM by definition; the read folds into one number and no
+      // other tenant's row reaches the response.
+      "services/earn/vault-exposure.ts",
     ];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))
