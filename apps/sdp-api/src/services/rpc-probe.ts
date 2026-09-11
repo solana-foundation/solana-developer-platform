@@ -36,7 +36,7 @@ async function readBodyBounded(response: Response, maxBytes: number): Promise<st
     const room = maxBytes - buffered;
     chunks.push(value.length > room ? value.subarray(0, room) : value);
     buffered += Math.min(value.length, room);
-    if (value.length > room) {
+    if (buffered >= maxBytes) {
       await reader.cancel();
       break;
     }
