@@ -14,7 +14,7 @@ import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup
 import { scanGcpCredentialContainers } from "@/services/jobs/provider-credential-container-cleanup";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -1129,8 +1129,8 @@ describe("provider credential lifecycle", () => {
       rotationCandidate: null,
       impact: {
         projects: [
-          { id: PROJECT_A_ID, name: "Lifecycle default-sandbox" },
-          { id: PROJECT_B_ID, name: "Lifecycle default-production" },
+          { id: PROJECT_A_ID, name: DEFAULT_PROJECT_NAME.sandbox },
+          { id: PROJECT_B_ID, name: DEFAULT_PROJECT_NAME.production },
         ],
         connections: [
           { id: CONNECTION_A_ID, projectId: PROJECT_A_ID },

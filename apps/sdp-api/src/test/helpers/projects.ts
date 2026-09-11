@@ -36,7 +36,8 @@ export interface SeededDefaultProjects {
 
 /**
  * Seed an organization's two default projects — the only project shape the product allows —
- * and enroll the given users in both.
+ * and enroll the given users in both. Idempotent per row id, so fixtures that upsert their
+ * organization across tests without truncating can call it in every `beforeEach`.
  *
  * @param db - Test database client.
  * @param input - Organization, creator, members and optional row ids.
@@ -64,7 +65,8 @@ export async function seedDefaultProjects(
       db
         .prepare(
           `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, 'active', ?)`
+           VALUES (?, ?, ?, ?, ?, 'active', ?)
+           ON CONFLICT (id) DO NOTHING`
         )
         .bind(
           ids[environment],
@@ -80,7 +82,8 @@ export async function seedDefaultProjects(
         db
           .prepare(
             `INSERT INTO project_members (id, project_id, user_id, role)
-             VALUES (?, ?, ?, 'admin')`
+             VALUES (?, ?, ?, 'admin')
+             ON CONFLICT (project_id, user_id) DO NOTHING`
           )
           .bind(`pm_${ids[environment]}_${userId}`, ids[environment], userId)
       )
