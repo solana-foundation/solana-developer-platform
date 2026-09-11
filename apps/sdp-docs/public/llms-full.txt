@@ -2540,6 +2540,45 @@ The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **R
 
 `review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
 
+## Rule kinds
+
+A control profile revision is an ordered list of rules. Each rule either abstains or contributes a decision; the strictest matched decision wins and the revision's `defaultAction` applies when nothing matches. For every kind except `velocity`, `action` is the decision a match produces.
+
+| Kind | Matches | Fields |
+| --- | --- | --- |
+| `operation_family` | Operations in the named families. | `family`, `families` |
+| `operation_type` | Operations of the named types. | `operationType`, `operationTypes` |
+| `asset` | Operations moving one of the named mints. | `asset`, `assets` |
+| `destination` | Destinations on the allowlist, or off the blocklist. | `allowlist`, `blocklist`, `destination`, `destinations` |
+| `amount` | A single operation's amount inside `[min, max]` for the named mints. Outside the bounds the rule denies. | `min`, `max`, `asset`, `assets` |
+| `velocity` | The rolling sum of prior operations plus this one exceeds `max` for the named mints. | `scope`, `window`, `max`, `asset`, `assets`, `operationTypes` |
+| `approval` | Selectors match; holds the operation for an approval group. | `families`, `operationTypes`, `assets`, `approvalGroupId` |
+| `always` | Every operation. | none |
+
+### Velocity limits
+
+A `velocity` rule caps volume over a rolling window instead of per operation:
+
+```json title="velocity-rule.json"
+{
+  "id": "daily-usdc-deposits",
+  "kind": "velocity",
+  "scope": "organization",
+  "window": "P1D",
+  "max": "100000",
+  "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "operationTypes": ["earn_vault_deposit"],
+  "action": "approval_required"
+}
+```
+
+- `scope` chooses whose history counts: `wallet` (default), `organization`, or `api_key`.
+- `window` is an ISO 8601 duration using days, hours and minutes (`PT1H`, `P1D`, `P1DT12H`). Weeks, months, years and seconds are rejected.
+- `max` is a UI-unit decimal string in the asset's units. Like `amount`, the rule must name at least one mint.
+- The window sums every decided, non-failed, non-canceled wallet operation for the scope and mint, optionally narrowed by `operationTypes`. Operations still awaiting their own policy decision do not count, so concurrent requests never block each other.
+- `action` is the decision **on breach** (default `deny`). Within the limit the rule abstains rather than allowing, so a velocity rule never overrides a stricter rule beside it. Set `action: "approval_required"` to route outliers into the approval flow instead of refusing them.
+- A `Dry-Run: true` request reports the velocity verdict against current history without recording anything.
+
 ## Operation permissions
 
 Wallet policies can match operations at two levels:
