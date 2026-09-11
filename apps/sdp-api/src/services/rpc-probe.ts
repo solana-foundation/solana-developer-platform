@@ -9,6 +9,11 @@
  */
 import { guardedFetch } from "@/services/guarded-egress";
 
+// A probe reads a status and a short JSON-RPC answer; a hostile endpoint gets
+// neither unbounded time nor an unbounded body out of a health check.
+const PROBE_TIMEOUT_MS = 10_000;
+const PROBE_MAX_RESPONSE_BYTES = 64 * 1024;
+
 export interface RpcProbeTarget {
   endpoint: string;
   headers: Record<string, string>;
@@ -62,7 +67,13 @@ export async function probeRpcEndpoint(
   });
 
   const upstream = options.enforcePublicEgress
-    ? await guardedFetch(target.endpoint, { method: "POST", headers, body })
+    ? await guardedFetch(target.endpoint, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        maxResponseBytes: PROBE_MAX_RESPONSE_BYTES,
+      })
     : await fetch(target.endpoint, {
         method: "POST",
         // A validated host can still redirect; following it would land the

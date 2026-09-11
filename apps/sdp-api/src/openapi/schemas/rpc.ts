@@ -1,4 +1,8 @@
 import { ORGANIZATION_RPC_PROVIDERS, PROJECT_RPC_PROVIDERS } from "@sdp/types";
+import {
+  RPC_RELAY_MAX_BATCH,
+  rpcRelayPayloadSchema as relayPayloadSchemaBase,
+} from "../../routes/rpc/schemas";
 import { z } from "./base";
 
 const managedRpcProviderIdSchema = z.enum(ORGANIZATION_RPC_PROVIDERS).openapi({
@@ -77,15 +81,13 @@ export const rpcProvidersResponseSchema = z
   })
   .openapi({ description: "RPC provider list and selection summary." });
 
-const rpcRelayPayloadSchema = z
-  .union([
-    z.object({ method: z.string().min(1) }).passthrough(),
-    z.array(z.object({ method: z.string().min(1) }).passthrough()).min(1),
-  ])
-  .openapi({
-    description: "JSON-RPC payload proxied to the selected upstream provider.",
-    example: { jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [] },
-  });
+const rpcRelayPayloadSchema = relayPayloadSchemaBase.openapi({
+  description:
+    "JSON-RPC payload proxied to the selected upstream provider. Methods are limited to the Solana JSON-RPC API; a batch carries at most " +
+    String(RPC_RELAY_MAX_BATCH) +
+    " requests.",
+  example: { jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [] },
+});
 
 export const rpcRelayRequestSchema = rpcRelayPayloadSchema;
 

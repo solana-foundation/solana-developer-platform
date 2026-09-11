@@ -3,7 +3,12 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EgressBlockedError } from "@/services/guarded-egress";
 import { checkResolvedRpcTargetConnection } from "@/services/provider-setup-registry";
-import { createRpcTransportForTarget, fetchRpcRelayTarget } from "@/services/rpc-egress";
+import {
+  createRpcTransportForTarget,
+  fetchRpcRelayTarget,
+  RELAY_MAX_RESPONSE_BYTES,
+  relayGuardInit,
+} from "@/services/rpc-egress";
 
 /**
  * Both directions matter. A guard that refused everything would pass a
@@ -134,5 +139,23 @@ describe("checkResolvedRpcTargetConnection", () => {
         },
       })
     ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+});
+
+describe("customer egress limits", () => {
+  it("bounds redirects, response size and time on the relay path", () => {
+    const init = relayGuardInit({ headers: {}, body: "{}" });
+
+    expect(init.maxRedirects).toBe(3);
+    expect(init.maxResponseBytes).toBe(RELAY_MAX_RESPONSE_BYTES);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("keeps the caller's signal when one is given", () => {
+    const controller = new AbortController();
+
+    expect(relayGuardInit({ headers: {}, body: "{}", signal: controller.signal }).signal).toBe(
+      controller.signal
+    );
   });
 });

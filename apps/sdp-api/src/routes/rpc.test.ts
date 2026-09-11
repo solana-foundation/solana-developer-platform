@@ -8,6 +8,7 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_PROJECT_ID = "prj_rpc_relay";
 const TEST_API_KEY_ID = "key_rpc_relay";
@@ -841,5 +842,88 @@ describe("RPC Relay Routes", () => {
     expect(tritonProvider.stats.errorsTotal).toBe(0);
     expect(tritonProvider.stats.lastMethod).toBe("sendTransaction");
     expect(tritonProvider.stats.origins["https://wallet.example.com"]).toBe(1);
+  });
+
+  describe("relay boundaries", () => {
+    it("refuses a method outside the Solana JSON-RPC surface without dialling upstream", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "qn_fetchNFTs", params: [] }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("refuses an oversized body before parsing it", async () => {
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "getVersion",
+            params: ["x".repeat(1024 * 1024 + 1024)],
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(413);
+    });
+
+    it("429s the relay once the actor's quota is exhausted", async () => {
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(429);
+      const body = await response.json();
+      expect(body.error.code).toBe("RATE_LIMITED");
+    });
+
+    it("429s the connectivity test once the actor's quota is exhausted", async () => {
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
+
+      const response = await app.request(
+        "/v1/rpc/test",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+        },
+        env
+      );
+
+      expect(response.status).toBe(429);
+    });
   });
 });
