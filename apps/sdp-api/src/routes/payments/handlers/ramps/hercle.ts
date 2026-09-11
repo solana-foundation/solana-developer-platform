@@ -142,6 +142,11 @@ export async function advanceHercleCounterparty(
       );
     }
 
+    // The moment SDP attests the consent, which is not the moment the business gave it: the collect step
+    // carries the two flags as booleans and no timestamp, so provisioning time is the earliest instant this
+    // side can evidence. Carrying the real one would mean a timestamped consent field on the collect schema.
+    const attestedAt = new Date().toISOString();
+
     const jurisdiction = hercleJurisdictionForCountry(countryCode);
     if (jurisdiction === undefined) {
       return unsupportedCounterparty(
@@ -162,9 +167,9 @@ export async function advanceHercleCounterparty(
         accountLabel: counterparty.display_name,
         externalReference: counterparty.id,
         consents: {
-          termsAndConditions: true,
-          privacyPolicy: true,
-          acceptedAt: new Date().toISOString(),
+          termsAndConditions: termsAccepted,
+          privacyPolicy: privacyAccepted,
+          acceptedAt: attestedAt,
         },
       },
       // Content-addressed: a retried POST replays the same Hercle account instead of duplicating it.

@@ -1224,7 +1224,10 @@ describe("Payments routes — ramps", () => {
     acceptHerclePrivacy: "true",
   };
 
-  async function advanceHercle(counterpartyId: string): Promise<Response> {
+  async function advanceHercle(
+    counterpartyId: string,
+    collected: Record<string, string> = hercleCollectedData
+  ): Promise<Response> {
     return app.request(
       `/v1/counterparties/${counterpartyId}/requirements`,
       {
@@ -1236,7 +1239,7 @@ describe("Payments routes — ramps", () => {
         body: JSON.stringify({
           provider: "hercle",
           direction: "onramp",
-          collectedData: hercleCollectedData,
+          collectedData: collected,
         }),
       },
       env
@@ -1282,8 +1285,8 @@ describe("Payments routes — ramps", () => {
       "/partner/v1/accounts",
       `/partner/v1/accounts/${accountId}/verifications`,
     ]);
-    // Hercle opens no account without the attested consents; SDP passes them straight through, stamped
-    // with the moment the business submitted them.
+    // Hercle opens no account without the attested consents; SDP forwards what the business actually
+    // ticked, stamped with the moment SDP attests them — the collect step carries no timestamp of its own.
     const [, createInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(createInit.body as string).consents).toEqual({
       termsAndConditions: true,
@@ -1327,6 +1330,32 @@ describe("Payments routes — ramps", () => {
       .bind(counterpartyId)
       .first<{ provider_data: unknown }>();
     expect(JSON.stringify(stored?.provider_data ?? {})).not.toContain("hercle");
+
+    fetchSpy.mockRestore();
+  });
+
+  // The consents forwarded to Hercle are whatever the business ticked, so the guard that refuses an
+  // unticked one is what keeps the attestation honest — without it a `false` would ride through as a `false`
+  // and Hercle would reject the account anyway, but only after SDP had claimed the business had consented.
+  it("refuses to provision a Hercle account before the business accepts the terms", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "hercle_customer_no_consent",
+      entityType: "business",
+      displayName: "Acme Ltd",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    // Declined rather than absent: an absent field is still an incomplete collect step, which the route
+    // answers by asking for it again. A submitted "false" is the case that reaches the handler.
+    const res = await advanceHercle(counterpartyId, {
+      ...hercleCollectedData,
+      acceptHercleTerms: "false",
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("Terms & Conditions");
+    // Refused before any credential leaves the process.
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     fetchSpy.mockRestore();
   });
