@@ -32,11 +32,11 @@ function isInterruptedNavigation(error: unknown): boolean {
 
 export async function getClerkBearerToken(page: Page): Promise<string> {
   // The proxy's workspace-loading bounce (307 + client return) can land while
-  // this goto is still in flight; the return navigation is the page we want.
+  // this goto is still in flight; Clerk is readable from either page.
   await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" }).catch((error) => {
     if (!isInterruptedNavigation(error)) throw error;
   });
-  await page.waitForURL(/\/dashboard\/issuance/, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("domcontentloaded");
   let token: string | null = null;
   // The readiness gate can navigate between Clerk becoming available and the
   // token read. Retry the whole read, not a separate session-presence check.
