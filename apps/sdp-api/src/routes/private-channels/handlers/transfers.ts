@@ -1,16 +1,20 @@
-import { mapPrivateChannelTransferRow } from "@/db/repositories";
+import { mapPrivateChannelTransferRow, type PrivateChannelTransferRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
+import { isAbandonedReservation } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createChannelTransfer, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { resolveAbandonedTransferReservation } from "@/services/private-channels/transfer";
+import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelTransferRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { requireIdempotencyKey } from "../helpers";
+import { authorizeMovementReplay, matchesTransferReplay, requireMovementWrite } from "../replay";
 import {
   type createTransferBodySchema,
   transferChannelIdParamSchema,
@@ -49,11 +53,58 @@ export async function createPrivateChannelTransfer(
 
   try {
     const idempotencyKey = requireIdempotencyKey(c, "Private Channels transfers");
+    await requireMovementWrite(c);
+    const auth = getAuth(c);
+    const repo = getPrivateChannelTransferRepository(c);
+    const onReplay = async (row: PrivateChannelTransferRow) => {
+      matchesTransferReplay(row, { ...body, channelId });
+      const context = await authorizeMovementReplay(c, row, async () => {
+        const original = await resolveTransferCreateContext(c, {
+          channelId: row.channel_id,
+          walletId: row.sender_wallet_id,
+          recipientVerifiedWalletId: row.recipient_verified_wallet_id,
+        });
+        if (
+          original.actor.id !== row.sender_private_channel_user_id ||
+          original.recipient.pubkey !== row.recipient ||
+          original.recipient.privateChannelUserId !== row.recipient_private_channel_user_id
+        ) {
+          throw conflict("The original transfer's participants cannot be authorized");
+        }
+        return original;
+      });
+      if (isAbandonedReservation(row)) {
+        const gatewayAuth = await resolveGatewayAuth(c.env, {
+          instance: context.instance,
+          organizationId: auth.organizationId,
+          projectId: context.projectId,
+          userId: auth.userId,
+        });
+        return resolveAbandonedTransferReservation(c.env, repo, row, {
+          gatewayUrl: context.instance.gatewayUrl,
+          gatewayAuth,
+          sdpUserId: auth.id,
+        });
+      }
+      return mapPrivateChannelTransferRow(row);
+    };
+    const replay = await repo.findTransferByIdempotency({
+      organizationId: auth.organizationId,
+      projectId: requireProjectId(c),
+      idempotencyKey,
+    });
+    if (replay) return success(c, await onReplay(replay));
     const context = await resolveTransferCreateContext(c, {
       channelId,
       walletId: body.walletId,
       recipientVerifiedWalletId: body.recipientVerifiedWalletId,
     });
+    const signer = await createPrivateChannelSigner(
+      c.env,
+      context.auth.organizationId,
+      context.projectId,
+      context.wallet
+    );
     const gatewayAuth = await resolveGatewayAuth(c.env, {
       instance: context.instance,
       organizationId: context.auth.organizationId,
@@ -68,7 +119,8 @@ export async function createPrivateChannelTransfer(
       channelId,
       sdpUserId: context.auth.id,
       wallet: context.wallet,
-      signer: context.signer,
+      signer,
+      onReplay,
       recipient: context.recipient,
       amount: body.amount,
       mint: body.mint,

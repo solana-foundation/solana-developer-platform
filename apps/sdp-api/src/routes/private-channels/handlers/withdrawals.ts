@@ -1,5 +1,10 @@
+import {
+  mapPrivateChannelWithdrawalRow,
+  type PrivateChannelWithdrawalRow,
+} from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
+import { isAbandonedReservation } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -9,9 +14,15 @@ import {
   mapPrivateChannelError,
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
+import { resolveAbandonedWithdrawalReservation } from "@/services/private-channels/withdraw";
 import type { AppContext } from "../context";
-import { loadPrivateChannelProjectRpcClient } from "../context";
+import {
+  getPrivateChannelWithdrawalRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "../context";
 import { requireIdempotencyKey } from "../helpers";
+import { authorizeMovementReplay, matchesWithdrawalReplay, requireMovementWrite } from "../replay";
 import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
 import { resolveWithdrawalCreateContext } from "../value-movement-access";
 
@@ -39,10 +50,47 @@ export async function createPrivateChannelWithdrawal(
 
   try {
     const idempotencyKey = requireIdempotencyKey(c, "Private Channels withdrawals");
+    await requireMovementWrite(c);
+    const auth = getAuth(c);
+    const repo = getPrivateChannelWithdrawalRepository(c);
+    const onReplay = async (row: PrivateChannelWithdrawalRow) => {
+      matchesWithdrawalReplay(row, body);
+      const context = await authorizeMovementReplay(c, row, () =>
+        resolveWithdrawalCreateContext(c, {
+          walletId: row.wallet_id,
+          destination: row.destination,
+        })
+      );
+      if (isAbandonedReservation(row)) {
+        const gatewayAuth = await resolveGatewayAuth(c.env, {
+          instance: context.instance,
+          organizationId: auth.organizationId,
+          projectId: context.projectId,
+          userId: auth.userId,
+        });
+        return resolveAbandonedWithdrawalReservation(c.env, repo, row, {
+          gatewayUrl: context.instance.gatewayUrl,
+          gatewayAuth,
+        });
+      }
+      return mapPrivateChannelWithdrawalRow(row);
+    };
+    const replay = await repo.findWithdrawalByIdempotency({
+      organizationId: auth.organizationId,
+      projectId: requireProjectId(c),
+      idempotencyKey,
+    });
+    if (replay) return success(c, await onReplay(replay));
     const context = await resolveWithdrawalCreateContext(c, {
       walletId: body.walletId,
       destination: body.destination,
     });
+    const signer = await createPrivateChannelSigner(
+      c.env,
+      context.auth.organizationId,
+      context.projectId,
+      context.wallet
+    );
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
     // Auth-enabled instances JWT-gate the burn broadcast (write) + confirm (read).
@@ -61,6 +109,8 @@ export async function createPrivateChannelWithdrawal(
       // is null on every principal created since 0073.
       userId: context.auth.userId ?? null,
       wallet: context.wallet,
+      signer,
+      onReplay,
       amount: body.amount,
       mint: body.mint,
       destination: context.destination,
