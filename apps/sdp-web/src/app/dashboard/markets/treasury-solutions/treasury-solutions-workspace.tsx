@@ -106,59 +106,34 @@ import {
   type VaultShareMintVocabulary,
 } from "./treasury-allocation";
 
+interface VaultBalanceProjection {
+  baselineValue: string;
+  expiresAt: number;
+  projectedValue: string;
+}
+
 type TrackedVaultDeposit = Pick<
   EarnVaultDepositRecord,
   "failureReason" | "movementId" | "positionId" | "status"
-> & { createdAt?: string; observedOrder: number };
+> & {
+  balanceProjection?: VaultBalanceProjection;
+  createdAt?: string;
+  observedOrder: number;
+  provisionalPosition?: EarnVaultPosition;
+};
 
 type VaultDepositWatchInput = Omit<TrackedVaultDeposit, "observedOrder">;
 
 type TrackedVaultWithdrawal = Pick<
   EarnVaultWithdrawal,
   "createdAt" | "failureReason" | "movementId" | "positionId" | "status"
-> & { observedOrder: number };
+> & { balanceProjection?: VaultBalanceProjection; observedOrder: number };
 
 type VaultWithdrawalWatchInput = Omit<TrackedVaultWithdrawal, "observedOrder">;
 
 type TrackedVaultActivity =
   | { kind: "deposit"; movement: TrackedVaultDeposit }
   | { kind: "withdrawal"; movement: TrackedVaultWithdrawal };
-
-type VaultBalanceProjection =
-  | {
-      baselineValue: string;
-      expiresAt: number;
-      kind: "deposit";
-      movementId: string;
-      positionId: string;
-      projectedValue: string;
-      status: TrackedVaultDeposit["status"];
-    }
-  | {
-      baselineValue: string;
-      expiresAt: number;
-      kind: "withdrawal";
-      movementId: string;
-      positionId: string;
-      projectedValue: string;
-      status: TrackedVaultWithdrawal["status"];
-    };
-
-type VaultBalanceProjectionInput =
-  | {
-      amount: string;
-      kind: "deposit";
-      movementId: string;
-      positionId: string;
-      status: TrackedVaultDeposit["status"];
-    }
-  | {
-      amount: string;
-      kind: "withdrawal";
-      movementId: string;
-      positionId: string;
-      status: TrackedVaultWithdrawal["status"];
-    };
 
 const MAX_VISIBLE_VAULT_ACTIVITY = 50;
 const VAULT_BALANCE_PROJECTION_TTL_MS = 60_000;
@@ -249,41 +224,126 @@ function subtractUnsignedDecimalStrings(left: string, right: string): string | u
 function projectedVaultBalance(
   baselineValue: string,
   amount: string,
-  kind: VaultBalanceProjection["kind"]
+  kind: TrackedVaultActivity["kind"]
 ): string | undefined {
   return kind === "deposit"
     ? sumDecimalStrings([baselineValue, amount])
     : subtractUnsignedDecimalStrings(baselineValue, amount);
 }
 
-function balanceProjectionIsVisible(projection: VaultBalanceProjection): boolean {
-  return projection.kind === "deposit"
-    ? projection.status === "confirmed"
-    : projection.status === "finalized";
+function createVaultBalanceProjection(
+  baselineValue: string | undefined,
+  amount: string,
+  kind: TrackedVaultActivity["kind"]
+): VaultBalanceProjection | undefined {
+  if (baselineValue === undefined) return undefined;
+  const projectedValue = projectedVaultBalance(baselineValue, amount, kind);
+  if (projectedValue === undefined) return undefined;
+  return {
+    baselineValue,
+    expiresAt: Date.now() + VAULT_BALANCE_PROJECTION_TTL_MS,
+    projectedValue,
+  };
+}
+
+function trackedVaultBalanceProjection(
+  activity: TrackedVaultActivity | undefined
+): VaultBalanceProjection | undefined {
+  if (!activity?.movement.balanceProjection) return undefined;
+  const isVisible =
+    activity.kind === "deposit"
+      ? activity.movement.status === "confirmed"
+      : activity.movement.status === "finalized";
+  return isVisible && activity.movement.balanceProjection.expiresAt > Date.now()
+    ? activity.movement.balanceProjection
+    : undefined;
 }
 
 function balanceProjectionReachedProvider(
   projection: VaultBalanceProjection,
+  kind: TrackedVaultActivity["kind"],
   position: EarnVaultPosition | undefined
 ): boolean {
-  if (!position) return projection.kind === "withdrawal";
+  if (!position) return kind === "withdrawal";
   if (position.tokenValue === undefined) return false;
   const comparison = compareUnsignedDecimals(position.tokenValue, projection.projectedValue);
   if (comparison === undefined) return false;
-  return projection.kind === "deposit" ? comparison >= 0 : comparison <= 0;
+  return kind === "deposit" ? comparison >= 0 : comparison <= 0;
 }
 
-function updateVaultBalanceProjection(
-  current: readonly VaultBalanceProjection[],
-  movement: { movementId: string; status: string }
-): readonly VaultBalanceProjection[] {
-  if (movement.status === "failed") {
-    return current.filter((projection) => projection.movementId !== movement.movementId);
+function latestVaultActivityByPosition(
+  deposits: readonly TrackedVaultDeposit[],
+  withdrawals: readonly TrackedVaultWithdrawal[]
+): Map<string, TrackedVaultActivity> {
+  const latestActivityByPositionId = new Map<string, TrackedVaultActivity>();
+  const rememberLatest = (activity: TrackedVaultActivity) => {
+    const current = latestActivityByPositionId.get(activity.movement.positionId);
+    const activityCreatedAt = activity.movement.createdAt;
+    const currentCreatedAt = current?.movement.createdAt;
+    const isNewer =
+      current === undefined ||
+      (activityCreatedAt !== undefined && currentCreatedAt !== undefined
+        ? activityCreatedAt > currentCreatedAt ||
+          (activityCreatedAt === currentCreatedAt &&
+            activity.movement.observedOrder > current.movement.observedOrder)
+        : activity.movement.observedOrder > current.movement.observedOrder);
+    if (isNewer) latestActivityByPositionId.set(activity.movement.positionId, activity);
+  };
+  for (const deposit of deposits) rememberLatest({ kind: "deposit", movement: deposit });
+  for (const withdrawal of withdrawals) {
+    rememberLatest({ kind: "withdrawal", movement: withdrawal });
   }
-  return current.map((projection) =>
-    projection.movementId === movement.movementId
-      ? ({ ...projection, status: movement.status } as VaultBalanceProjection)
-      : projection
+  return latestActivityByPositionId;
+}
+
+function provisionalVaultPosition(
+  deposit: Pick<EarnVaultDepositRecord, "positionId"> & { createdAt?: string },
+  custodyWalletId: string,
+  strategy: EarnStrategy
+): EarnVaultPosition | undefined {
+  const shareMint = strategy.shareMint;
+  const tokenMint = strategy.depositMints[0];
+  if (!shareMint || !tokenMint) return undefined;
+  return {
+    id: deposit.positionId,
+    provider: strategy.provider,
+    providerReference: strategy.providerReference,
+    label: strategy.name,
+    custodyWalletId,
+    tokenMint,
+    shareMint,
+    createdAt: deposit.createdAt ?? new Date().toISOString(),
+    closedAt: null,
+    feeSponsored: strategy.feeSponsored,
+  };
+}
+
+function displayedVaultPositions(
+  positions: readonly EarnVaultPosition[] | undefined,
+  deposits: readonly TrackedVaultDeposit[]
+): EarnVaultPosition[] {
+  const displayed = [...(positions ?? [])];
+  const authoritativeIds = new Set(displayed.map(({ id }) => id));
+  for (const deposit of deposits) {
+    const provisional = deposit.provisionalPosition;
+    if (deposit.status === "failed" || !provisional || authoritativeIds.has(provisional.id))
+      continue;
+    displayed.push(provisional);
+    authoritativeIds.add(provisional.id);
+  }
+  return displayed;
+}
+
+function currentVaultBalance(
+  positionId: string,
+  positions: readonly EarnVaultPosition[] | undefined,
+  deposits: readonly TrackedVaultDeposit[],
+  withdrawals: readonly TrackedVaultWithdrawal[]
+): string | undefined {
+  const activity = latestVaultActivityByPosition(deposits, withdrawals).get(positionId);
+  return (
+    trackedVaultBalanceProjection(activity)?.projectedValue ??
+    positions?.find((position) => position.id === positionId)?.tokenValue
   );
 }
 
@@ -714,7 +774,6 @@ function StrategyTable({
 }
 
 function ActiveVaultPositionsCard({
-  balanceProjections,
   deposits,
   error,
   isLoading,
@@ -724,7 +783,6 @@ function ActiveVaultPositionsCard({
   wallets,
   withdrawals,
 }: {
-  balanceProjections: readonly VaultBalanceProjection[];
   deposits: readonly TrackedVaultDeposit[];
   error: unknown;
   isLoading: boolean;
@@ -738,34 +796,26 @@ function ActiveVaultPositionsCard({
   const locale = useLocale();
   const [balanceSortDirection, setBalanceSortDirection] =
     useState<NumericSortDirection>("descending");
+  const latestActivityByPositionId = useMemo(
+    () => latestVaultActivityByPosition(deposits, withdrawals),
+    [deposits, withdrawals]
+  );
+  const positionsWithProvisionalDeposits = useMemo(
+    () => displayedVaultPositions(positions, deposits),
+    [deposits, positions]
+  );
   const activePositions = useMemo(
     () =>
       sortByOptionalDecimal(
-        (positions ?? []).filter(isOpenVaultPosition),
-        (position) => position.tokenValue,
+        positionsWithProvisionalDeposits.filter(isOpenVaultPosition),
+        (position) =>
+          trackedVaultBalanceProjection(latestActivityByPositionId.get(position.id))
+            ?.projectedValue ?? position.tokenValue,
         balanceSortDirection
       ),
-    [balanceSortDirection, positions]
+    [balanceSortDirection, latestActivityByPositionId, positionsWithProvisionalDeposits]
   );
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
-  const latestActivityByPositionId = new Map<string, TrackedVaultActivity>();
-  const rememberLatest = (activity: TrackedVaultActivity) => {
-    const current = latestActivityByPositionId.get(activity.movement.positionId);
-    const activityCreatedAt = activity.movement.createdAt;
-    const currentCreatedAt = current?.movement.createdAt;
-    const isNewer =
-      current === undefined ||
-      (activityCreatedAt !== undefined && currentCreatedAt !== undefined
-        ? activityCreatedAt > currentCreatedAt ||
-          (activityCreatedAt === currentCreatedAt &&
-            activity.movement.observedOrder > current.movement.observedOrder)
-        : activity.movement.observedOrder > current.movement.observedOrder);
-    if (isNewer) latestActivityByPositionId.set(activity.movement.positionId, activity);
-  };
-  for (const deposit of deposits) rememberLatest({ kind: "deposit", movement: deposit });
-  for (const withdrawal of withdrawals) {
-    rememberLatest({ kind: "withdrawal", movement: withdrawal });
-  }
 
   return (
     <section>
@@ -845,11 +895,8 @@ function ActiveVaultPositionsCard({
                 {activePositions.map((position) => {
                   const asset = earnMintAsset(position.tokenMint);
                   const wallet = walletById.get(position.custodyWalletId);
-                  const balanceProjection = balanceProjections.find(
-                    (projection) =>
-                      projection.positionId === position.id &&
-                      balanceProjectionIsVisible(projection)
-                  );
+                  const activity = latestActivityByPositionId.get(position.id);
+                  const balanceProjection = trackedVaultBalanceProjection(activity);
                   const displayedBalance = balanceProjection?.projectedValue ?? position.tokenValue;
                   return (
                     <TableRow key={position.id}>
@@ -882,9 +929,7 @@ function ActiveVaultPositionsCard({
                           shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
                       </TableCell>
                       <TableCell>
-                        <TreasuryPositionStatusBadge
-                          activity={latestActivityByPositionId.get(position.id)}
-                        />
+                        <TreasuryPositionStatusBadge activity={activity} />
                       </TableCell>
                       <TableCell align="right">
                         {/*
@@ -1248,7 +1293,6 @@ function treasurySummaryLoading(input: {
 interface TreasuryWorkspaceContentProps {
   activeWallets: readonly EarnFundingWallet[];
   allocation: TreasuryAllocation;
-  balanceProjections: readonly VaultBalanceProjection[];
   catalogueCluster: SolanaCluster;
   catalogueError: unknown;
   catalogueLoading: boolean;
@@ -1278,7 +1322,6 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   const {
     activeWallets,
     allocation,
-    balanceProjections,
     catalogueCluster,
     catalogueError,
     catalogueLoading,
@@ -1321,7 +1364,6 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
       />
 
       <ActiveVaultPositionsCard
-        balanceProjections={balanceProjections}
         deposits={vaultDeposits}
         error={positionsError}
         isLoading={positionsLoading}
@@ -1426,9 +1468,6 @@ export function TreasurySolutionsWorkspace({
   const [vaultWithdrawalWatches, setVaultWithdrawalWatches] = useState<
     readonly TrackedVaultWithdrawal[]
   >([]);
-  const [vaultBalanceProjections, setVaultBalanceProjections] = useState<
-    readonly VaultBalanceProjection[]
-  >([]);
   const [settledVaultWithdrawalIds, setSettledVaultWithdrawalIds] = useState<ReadonlySet<string>>(
     () => new Set()
   );
@@ -1456,6 +1495,7 @@ export function TreasurySolutionsWorkspace({
           if (settledVaultDepositIds.has(deposit.movementId)) continue;
           if (existingIndex >= 0) {
             next[existingIndex] = {
+              ...next[existingIndex],
               ...deposit,
               observedOrder: next[existingIndex]?.observedOrder ?? deposit.observedOrder,
             };
@@ -1485,6 +1525,7 @@ export function TreasurySolutionsWorkspace({
           if (settledVaultWithdrawalIds.has(withdrawal.movementId)) continue;
           if (existingIndex >= 0) {
             next[existingIndex] = {
+              ...next[existingIndex],
               ...withdrawal,
               observedOrder: next[existingIndex]?.observedOrder ?? withdrawal.observedOrder,
             };
@@ -1513,70 +1554,88 @@ export function TreasurySolutionsWorkspace({
 
   const updateVaultDepositWatch = useCallback((updatedDeposit: EarnVaultDepositRecord) => {
     setVaultDepositWatches((current) => replaceTrackedVaultMovement(current, updatedDeposit));
-    setVaultBalanceProjections((current) => updateVaultBalanceProjection(current, updatedDeposit));
   }, []);
   const updateVaultWithdrawalWatch = useCallback((updatedWithdrawal: EarnVaultWithdrawal) => {
     setVaultWithdrawalWatches((current) => replaceTrackedVaultMovement(current, updatedWithdrawal));
-    setVaultBalanceProjections((current) =>
-      updateVaultBalanceProjection(current, updatedWithdrawal)
-    );
   }, []);
 
-  const addVaultBalanceProjection = useCallback(
-    (input: VaultBalanceProjectionInput) => {
-      setVaultBalanceProjections((current) => {
-        const previous = current.find(
-          (projection) =>
-            projection.positionId === input.positionId && balanceProjectionIsVisible(projection)
-        );
-        const baselineValue =
-          previous?.projectedValue ??
-          positions?.find((position) => position.id === input.positionId)?.tokenValue;
-        if (baselineValue === undefined) return current;
-        const projectedValue = projectedVaultBalance(baselineValue, input.amount, input.kind);
-        if (projectedValue === undefined) return current;
-        const next = {
-          ...input,
-          baselineValue,
-          expiresAt: Date.now() + VAULT_BALANCE_PROJECTION_TTL_MS,
-          projectedValue,
-        } as VaultBalanceProjection;
-        return [
-          ...current.filter((projection) => projection.positionId !== input.positionId),
-          next,
-        ];
-      });
-    },
-    [positions]
-  );
-
-  // A confirmed movement updates the row immediately. Provider hydration then
-  // replaces that short-lived projection as soon as it reaches the same value,
-  // with a bounded fallback so an unusual quote can never pin an estimate.
+  // Each movement owns its status, provisional row, and balance projection.
+  // Provider hydration only clears those presentation hints once it can replace
+  // them, so the modal and table never race separate client-side state stores.
   useEffect(() => {
-    setVaultBalanceProjections((current) => {
-      const remaining = current.filter((projection) => {
-        if (!balanceProjectionIsVisible(projection)) return true;
-        const position = positions?.find((candidate) => candidate.id === projection.positionId);
-        return !balanceProjectionReachedProvider(projection, position);
+    setVaultDepositWatches((current) => {
+      let changed = false;
+      const next = current.map((deposit) => {
+        const position = positions?.find((candidate) => candidate.id === deposit.positionId);
+        const clearProvisional =
+          deposit.provisionalPosition !== undefined && position !== undefined;
+        const clearProjection =
+          deposit.balanceProjection !== undefined &&
+          balanceProjectionReachedProvider(deposit.balanceProjection, "deposit", position);
+        if (!clearProvisional && !clearProjection) return deposit;
+        changed = true;
+        const { balanceProjection, provisionalPosition, ...movement } = deposit;
+        return {
+          ...movement,
+          ...(clearProjection ? {} : { balanceProjection }),
+          ...(clearProvisional ? {} : { provisionalPosition }),
+        };
       });
-      return remaining.length === current.length ? current : remaining;
+      return changed ? next : current;
+    });
+    setVaultWithdrawalWatches((current) => {
+      let changed = false;
+      const next = current.map((withdrawal) => {
+        const projection = withdrawal.balanceProjection;
+        if (
+          !projection ||
+          !balanceProjectionReachedProvider(
+            projection,
+            "withdrawal",
+            positions?.find((candidate) => candidate.id === withdrawal.positionId)
+          )
+        ) {
+          return withdrawal;
+        }
+        changed = true;
+        const { balanceProjection: _, ...movement } = withdrawal;
+        return movement;
+      });
+      return changed ? next : current;
     });
   }, [positions]);
 
   useEffect(() => {
-    if (vaultBalanceProjections.length === 0) return;
-    const nextExpiry = Math.min(...vaultBalanceProjections.map(({ expiresAt }) => expiresAt));
+    const projections = [...vaultDepositWatches, ...vaultWithdrawalWatches].flatMap(
+      ({ balanceProjection }) => (balanceProjection ? [balanceProjection] : [])
+    );
+    if (projections.length === 0) return;
+    const nextExpiry = Math.min(...projections.map(({ expiresAt }) => expiresAt));
     const timeout = window.setTimeout(
-      () =>
-        setVaultBalanceProjections((current) => {
-          const remaining = current.filter(({ expiresAt }) => expiresAt > Date.now());
-          return remaining.length === current.length ? current : remaining;
-        }),
+      () => {
+        const clearExpiredProjection = <
+          Movement extends { balanceProjection?: VaultBalanceProjection },
+        >(
+          current: readonly Movement[]
+        ): readonly Movement[] => {
+          let changed = false;
+          const next = current.map((movement) => {
+            if (!movement.balanceProjection || movement.balanceProjection.expiresAt > Date.now()) {
+              return movement;
+            }
+            changed = true;
+            const { balanceProjection: _, ...remaining } = movement;
+            return remaining as unknown as Movement;
+          });
+          return changed ? next : current;
+        };
+        setVaultDepositWatches(clearExpiredProjection);
+        setVaultWithdrawalWatches(clearExpiredProjection);
+      },
       Math.max(0, nextExpiry - Date.now())
     );
     return () => window.clearTimeout(timeout);
-  }, [vaultBalanceProjections]);
+  }, [vaultDepositWatches, vaultWithdrawalWatches]);
 
   const activeWallets = wallets ?? [];
   // Every share mint the page knows about, from positions AND the catalogue:
@@ -1644,7 +1703,6 @@ export function TreasurySolutionsWorkspace({
       <TreasuryWorkspaceContent
         activeWallets={activeWallets}
         allocation={allocation}
-        balanceProjections={vaultBalanceProjections}
         catalogueCluster={strategiesCluster ?? environmentCluster}
         catalogueError={catalogueError}
         catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
@@ -1687,16 +1745,33 @@ export function TreasurySolutionsWorkspace({
             // uncached balance read for a fast landing; the watch below reads
             // again once the chain has actually decided, which is the only
             // point at which the holding is real.
-            addVaultDepositWatches([deposit]);
-            if (intent.projectBalance) {
-              addVaultBalanceProjection({
-                amount: intent.amount,
-                kind: "deposit",
+            const authoritativePosition = positions?.find(
+              (position) => position.id === deposit.positionId
+            );
+            const provisionalPosition = authoritativePosition
+              ? undefined
+              : provisionalVaultPosition(deposit, intent.custodyWalletId, depositStrategy);
+            const baselineValue =
+              currentVaultBalance(
+                deposit.positionId,
+                positions,
+                vaultDepositWatches,
+                vaultWithdrawalWatches
+              ) ?? (provisionalPosition ? "0" : undefined);
+            const balanceProjection =
+              intent.projectBalance || provisionalPosition
+                ? createVaultBalanceProjection(baselineValue, intent.amount, "deposit")
+                : undefined;
+            addVaultDepositWatches([
+              {
+                balanceProjection,
+                failureReason: deposit.failureReason,
                 movementId: deposit.movementId,
                 positionId: deposit.positionId,
+                provisionalPosition,
                 status: deposit.status,
-              });
-            }
+              },
+            ]);
             refreshPositions();
             refreshWalletBalances();
           }}
@@ -1722,16 +1797,28 @@ export function TreasurySolutionsWorkspace({
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal, intent) => {
-            addVaultWithdrawalWatches([withdrawal]);
-            if (intent.projectBalance) {
-              addVaultBalanceProjection({
-                amount: intent.amount,
-                kind: "withdrawal",
+            const balanceProjection = intent.projectBalance
+              ? createVaultBalanceProjection(
+                  currentVaultBalance(
+                    withdrawal.positionId,
+                    positions,
+                    vaultDepositWatches,
+                    vaultWithdrawalWatches
+                  ),
+                  intent.amount,
+                  "withdrawal"
+                )
+              : undefined;
+            addVaultWithdrawalWatches([
+              {
+                balanceProjection,
+                createdAt: withdrawal.createdAt,
+                failureReason: withdrawal.failureReason,
                 movementId: withdrawal.movementId,
                 positionId: withdrawal.positionId,
                 status: withdrawal.status,
-              });
-            }
+              },
+            ]);
             refreshPositions();
             refreshWalletBalances();
           }}

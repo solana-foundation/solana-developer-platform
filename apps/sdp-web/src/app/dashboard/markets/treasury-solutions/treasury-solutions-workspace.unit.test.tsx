@@ -931,6 +931,84 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getAllByText("135.25").length).toBeGreaterThan(0);
   });
 
+  it("keeps a first deposit synced from pending row through provider reconciliation", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_movement_first_position";
+    mocks.positionsEmpty = true;
+    const view = renderWorkspace();
+    const strategyRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    if (!strategyRow) throw new Error("Expected strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    act(() => {
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        {
+          amount: "10",
+          custodyWalletId: "cwlt_live",
+          projectBalance: true,
+        }
+      );
+    });
+
+    const pendingRow = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!pendingRow) throw new Error("Expected provisional position row");
+    expect(
+      within(pendingRow).getByRole("button", {
+        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
+      })
+    ).toBeTruthy();
+    expect(within(pendingRow).getByText("—")).toBeTruthy();
+
+    act(() => {
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-01T17:22:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+
+    expect(
+      within(pendingRow).getByRole("button", { name: "Active: This position is active." })
+    ).toBeTruthy();
+    const projectedBalance = within(pendingRow).getByText("10");
+    expect(projectedBalance.getAttribute("data-earn-vault-balance")).toBe("projected");
+    expect(projectedBalance.className).toContain("animate-pulse");
+
+    mocks.positionsEmpty = false;
+    mocks.livePositionTokenValue = "10";
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <TreasurySolutionsWorkspace
+          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
+        />
+      </I18nProvider>
+    );
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
+    );
+    const reconciledRows = screen
+      .getAllByText("Kamino USDC Vault")
+      .map((element) => element.closest("tr"))
+      .filter((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    expect(reconciledRows).toHaveLength(1);
+    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("10")).toBeTruthy();
+  });
+
   it("refreshes uncached wallet balances when a vault movement settles", async () => {
     const movementId = "earn_vault_movement_live_balance";
     mocks.vaultDeposits = [
