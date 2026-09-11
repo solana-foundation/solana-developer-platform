@@ -24,12 +24,6 @@ import type { DvpSettleAtas } from "./settle-atas";
  * The whole list fits alongside Settle — measured at 706 bytes against the 1232
  * limit — so there is no reason to make an operator run a separate preparation
  * step for accounts the trade cannot settle without.
- *
- * @param trade - The stored trade whose token accounts are required.
- * @param atas - The derived token accounts touched by the close.
- * @param payer - The sponsor paying rent for any accounts created.
- * @param action - Whether the close delivers both legs or refunds them.
- * @returns Idempotent create instructions in DvP instruction account order.
  */
 export function buildRequiredAtaInstructions(
   trade: DvpTradeRow,

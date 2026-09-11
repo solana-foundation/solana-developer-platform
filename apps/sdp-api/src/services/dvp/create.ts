@@ -155,13 +155,8 @@ async function insertOrReplay(
 }
 
 /**
- * The catalogue's display metadata for a mint.
- *
  * The fallback for mints that carry no metadata of their own, which is every
  * legacy SPL token including the stablecoins most cash legs use.
- *
- * @param mint - Mint address to resolve in the registry.
- * @returns Its symbol and name, both null when the mint is not registered.
  */
 function wellKnownToken(mint: string): { symbol: string | null; name: string | null } {
   const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
@@ -171,13 +166,6 @@ function wellKnownToken(mint: string): { symbol: string | null; name: string | n
   return { symbol: token.symbol, name: token.name };
 }
 
-/**
- * Selects the immutable mint fields stored on a trade leg.
- *
- * @param inspected - Metadata read from the mint, or null when it could not be read.
- * @param registered - Well-known display metadata for the mint.
- * @returns Stored decimals, symbol, and name with explicit registry fallback.
- */
 function storedMintMetadata(
   inspected: Awaited<ReturnType<typeof inspectDvpMint>>,
   registered: ReturnType<typeof wellKnownToken>

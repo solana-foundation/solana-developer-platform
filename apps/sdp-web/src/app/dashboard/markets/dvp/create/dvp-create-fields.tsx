@@ -267,19 +267,6 @@ export function AmountField({
   );
 }
 
-/**
- * Selects one party by SDP wallet, registered counterparty, or pasted address.
- *
- * @param props - The picker's data and controlled state.
- * @param props.counterpartyAccounts - Registered counterparty accounts offered by the counterparty mode.
- * @param props.error - The same-address correction, or null when the slot is distinct.
- * @param props.id - The DOM id used by the pasted-address input.
- * @param props.label - The party slot's visible and accessible label.
- * @param props.onChange - Replaces the entire controlled party slot.
- * @param props.slot - The selected mode and its current value.
- * @param props.wallets - SDP wallets offered by the wallet mode.
- * @returns The tabbed party picker.
- */
 export function PartySlotPicker({
   counterpartyAccounts,
   error,

@@ -32,7 +32,6 @@ interface DvpInboundLegResponse {
   amount: string;
   decimals: number | null;
   symbol: string | null;
-  /** The mint's human name, or null when it carries no metadata. */
   name: string | null;
   /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
   imageUrl: string | null;

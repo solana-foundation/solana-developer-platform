@@ -1,15 +1,6 @@
 /**
  * Settling and cancelling a DvP trade.
  *
- * The project's settlement authority signs only as the authority. Kora's
- * sponsor is the fee payer and pays rent for any token account the close
- * creates. The close creates every token account it touches idempotently and
- * leaves account validation to the DvP program. It is submitted through the
- * owned-sponsorship lifecycle.
- * Settle delivers each leg to the other party; Cancel refunds each leg to
- * whoever deposited it. Nothing else can do either — the parties can only
- * unwind their own leg.
- *
  * The same safety order as create: build, sign, record intent, send. Here the
  * "record" step is the approved-operation effect fence, which is what makes a
  * crash mid-broadcast recoverable rather than ambiguous.
@@ -59,18 +50,10 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
 export type DvpCloseAction = "settle" | "cancel";
 
 export interface DvpCloseResult {
-  /** Signature of the sponsored closing transaction. */
   signature: Signature;
 }
 
-/**
- * Settles or cancels a trade on chain.
- *
- * @param c - Request context, needed for the approved-operation effect fence.
- * @param trade - The trade to close, as stored.
- * @param action - Whether to deliver both legs or refund them.
- * @returns The broadcast signature.
- */
+/** Settles or cancels a trade on chain. `c` carries the approved-operation fence context. */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,

@@ -59,9 +59,6 @@ export interface DvpTradeExpectation {
  * True once a close signature is stored AND the status says which close it was.
  * A `closed_unknown` row with a signature is not done: the decode is what lifts
  * it to settled, cancelled or rejected.
- *
- * @param trade - The stored status and close signature.
- * @returns True when `resolveDvpClose` would add nothing.
  */
 export function closeIsKnown(
   trade: Pick<DvpTradeExpectation, "status"> & { closeSignature: string | null }

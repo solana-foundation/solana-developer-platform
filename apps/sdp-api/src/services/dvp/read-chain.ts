@@ -95,13 +95,8 @@ function readLeg(
  * Exposed for the funding path, which needs a LIVE reading rather than the
  * reconciler's last sweep: that runs once a minute, so two funding requests
  * seconds apart would both believe the escrow was empty and between them
- * over-fund it.
- *
- * @param rpc - Solana RPC for the trade's cluster.
- * @param leg - Expected escrow address, mint, and token program.
- * @param swapDvp - Trade account that must own the escrow token account.
- * @param tradeId - Stored trade id used in a tampering conflict.
- * @returns The live balance, or null only when the account is genuinely absent.
+ * over-fund it. Null only when the account is genuinely absent; a tampered
+ * account is a conflict, never null.
  */
 export async function readEscrowState(
   rpc: SolanaRpc,
@@ -122,11 +117,6 @@ export async function readEscrowState(
 /**
  * Fetches a trade and both escrows at one slot for callers that must verify
  * terms before acting.
- *
- * @param rpc - Solana RPC for the trade's cluster.
- * @param swapDvp - The trade account address.
- * @param legs - Expected escrow identity for each leg.
- * @returns The encoded trade account and decoded escrow observations.
  */
 export async function readDvpAccounts(
   rpc: SolanaRpc,

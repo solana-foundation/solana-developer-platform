@@ -29,13 +29,6 @@ export type DvpCloseLookup =
   | { kind: "absent" }
   | { kind: "capped" };
 
-/**
- * Decodes a recognized close instruction that is bound to this trade.
- *
- * @param instruction - Parsed instruction from a successful transaction.
- * @param swapDvp - Trade account that must occupy the close account slot.
- * @returns The terminal status, or null when the instruction does not close this trade.
- */
 function readCloseStatus(
   instruction: ParsedInstruction,
   swapDvp: Address
@@ -75,15 +68,9 @@ function readCloseStatus(
 /**
  * Finds and decodes the transaction that closed a vanished DvP account.
  *
- * @param rpc - Solana RPC client.
- * @param swapDvp - The vanished trade account address.
- * @param createSignature - Signature that bounds this trade's relevant history.
- * SDP inserts the row before broadcasting create, and the PDA is only derivable
+ * `createSignature` bounds the history walk: SDP inserts the row before broadcasting create, and the PDA is only derivable
  * from the terms SDP publishes. Therefore no transaction concerning this trade
  * can precede `createdAt` by more than validator/API clock skew.
- *
- * @param createdAt - ISO creation time of the stored trade row.
- * @returns The resolved close, absence within the bounded window, or a page cap.
  */
 export async function resolveDvpClose(
   rpc: SolanaRpc,

@@ -34,14 +34,11 @@ export interface DvpTradeRow {
   /** Each leg's token symbol from mint metadata, or null when it carries none. */
   symbolA: string | null;
   symbolB: string | null;
-  /** Each leg's token name from mint metadata or the well-known registry, or null. */
   nameA: string | null;
   nameB: string | null;
   /** The transaction that settled or cancelled the trade. Null while open. */
   closeSignature: Signature | null;
-  /** Number of capped close-history scans used to calculate backoff. */
   closeResolutionAttempts: number;
-  /** ISO instant before which another close-history scan is deferred. */
   closeResolutionAfter: string | null;
 
   amountA: string;
@@ -225,12 +222,7 @@ export interface DvpTradeRepository {
    * observations never move it.
    */
   recordObservation(input: DvpTradeObservationUpdate): Promise<DvpTradeRow | null>;
-  /**
-   * Defers another close-history scan after a capped lookup.
-   *
-   * @param input - CAS status, next attempt count, and ISO retry instant.
-   * @returns Whether the row still had the expected status and was updated.
-   */
+  /** Defers the next close-history scan; false when the row no longer holds the expected status. */
   deferCloseResolution(input: {
     id: string;
     expectedStatus: DvpTradeStatus;

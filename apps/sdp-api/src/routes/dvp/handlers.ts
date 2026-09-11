@@ -197,7 +197,6 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     decimals: leg.decimals,
     /** The mint's symbol, or null when it carries no metadata. Never invented. */
     symbol: leg.symbol,
-    /** The mint's human name, or null when it carries no metadata. Never invented. */
     name: leg.name,
     /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
     imageUrl: leg.imageUrl,

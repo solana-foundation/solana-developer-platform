@@ -110,7 +110,6 @@ function CopyableAddress({
   );
 }
 
-/** The ends of a signature, enough to match it against an explorer row. */
 function shortenSignature(signature: string): string {
   return `${signature.slice(0, 8)}…${signature.slice(-8)}`;
 }

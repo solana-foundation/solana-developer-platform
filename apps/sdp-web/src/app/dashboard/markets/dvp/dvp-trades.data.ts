@@ -142,7 +142,6 @@ export interface DvpInboundLeg {
   amount: string;
   decimals: number | null;
   symbol: string | null;
-  /** The mint's human name, or null when it carries no metadata. */
   name: string | null;
   escrow: string;
   observedAmount: string | null;

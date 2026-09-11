@@ -10,10 +10,6 @@ const PROGRAM_ERROR_LINE = /^Program log: Error: /;
 /**
  * Converts a Solana send-transaction simulation rejection into an API error
  * while preserving the program diagnostic and simulation logs.
- *
- * @param error - The value thrown while submitting a signed transaction.
- * @param what - Human-readable description of the transaction being submitted.
- * @returns A transaction-failed API error for a preflight rejection, otherwise null.
  */
 export function preflightFailure(error: unknown, what: string): AppError | null {
   if (
