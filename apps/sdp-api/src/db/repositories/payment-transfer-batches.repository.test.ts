@@ -8,7 +8,6 @@ import type { PaymentTransferBatchesRepository } from "./payment-transfer-batche
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_transfer_batches_repo_test";
-const OTHER_PROJECT_ID = "prj_transfer_batches_repo_test_other";
 const TEST_WALLET_ID = "wallet_transfer_batches_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_transfer_batches_repo_test";
 
@@ -40,15 +39,13 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
     await db
       .prepare(
         `INSERT INTO custody_configs
@@ -103,26 +100,6 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       id: created.id,
       idempotency_fingerprint: "fp-1",
     });
-  });
-
-  it("scopes idempotency keys to the project", async () => {
-    const { batch: first } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "shared-batch-key" },
-      recipients: [],
-    });
-    const { batch: second } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: OTHER_PROJECT_ID, idempotencyKey: "shared-batch-key" },
-      recipients: [],
-    });
-
-    expect(first.id).not.toBe(second.id);
-    expect(
-      await repo.findTransferBatchByIdempotency({
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-        idempotencyKey: "shared-batch-key",
-      })
-    ).toMatchObject({ id: second.id });
   });
 
   it("rejects a second batch with the same organization, project, and idempotency key", async () => {

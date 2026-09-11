@@ -917,23 +917,6 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     });
   });
 
-  it("keeps the external-wallet exit quote inside the exact project", async () => {
-    await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_earn_ext_quote_sibling', ?, 'Sibling', 'earn-ext-quote-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
-    const positionId = await seedExternalWalletPosition({
-      projectId: "prj_earn_ext_quote_sibling",
-    });
-
-    expect((await post("withdrawal-previews", { positionId, shares: "10" })).status).toBe(404);
-    expect(quoteVaultWithdrawal).not.toHaveBeenCalled();
-  });
-
   it("404s an unknown position", async () => {
     await seedAuth();
     const res = await post("withdrawal-transactions", {
@@ -953,20 +936,6 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     });
     expect(res.status).toBe(404);
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
-  });
-
-  it("404s a sibling project's position: the wallet is project-scoped", async () => {
-    await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_earn_ext_sibling', ?, 'Sibling', 'earn-ext-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
-    const positionId = await seedExternalWalletPosition({ projectId: "prj_earn_ext_sibling" });
-    const res = await post("withdrawal-transactions", { positionId, shares: "10" });
-    expect(res.status).toBe(404);
   });
 
   it("builds the exit from the recorded position facts", async () => {

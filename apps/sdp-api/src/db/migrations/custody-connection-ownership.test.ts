@@ -327,7 +327,7 @@ describe("custody Connection constraints", () => {
       .prepare(
         `INSERT INTO projects
            (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Other custody project', ?, 'sandbox', 'active', ?)`
+         VALUES (?, ?, 'Other custody project', ?, 'production', 'active', ?)`
       )
       .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "custody-connection-constraints-other", USER_ID)
       .run();
@@ -424,7 +424,7 @@ describe("custody Connection constraints", () => {
            id, organization_id, name, slug, environment, status, created_by
          ) VALUES (
            'prj_foreign_connection_default', ?, 'Foreign default',
-           'foreign-connection-default', 'sandbox', 'active', ?
+           'foreign-connection-default', 'production', 'active', ?
          )`
       )
       .bind(ORGANIZATION_ID, USER_ID)

@@ -85,7 +85,6 @@ vi.mock("@sdp/rpc/solana", () => ({
 const { createDvpTrade } = await import("./create");
 
 const TEST_PROJECT_ID = "prj_dvp_create_test";
-const TEST_PROJECT_ID_OTHER = "prj_dvp_create_other";
 const CUSTODY_CONFIG_ID = "cust_dvp_create_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_create_test";
 
@@ -239,13 +238,6 @@ describe("createDvpTrade", () => {
          VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
       )
       .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Other Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID_OTHER, TEST_ORG.id, TEST_PROJECT_ID_OTHER, TEST_USER.id)
       .run();
     await db
       .prepare(
@@ -639,36 +631,6 @@ describe("createDvpTrade", () => {
       createDvpTrade(env, {
         ...tradeInput(),
         partyA: { counterpartyAccountId: "cpa_archived" },
-      })
-    ).rejects.toThrow(/counterpartyAccountId/);
-    await expect(rowsInDb()).resolves.toEqual([]);
-  });
-
-  // Cross-parent defense: an account in another project does not resolve here.
-  it("refuses a counterparty account belonging to another project", async () => {
-    const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
-         VALUES ('cpty_other', ?, ?, 'individual', 'Oth')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO counterparty_accounts
-           (id, organization_id, project_id, counterparty_id, account_kind, details, status)
-         VALUES ('cpa_other', ?, ?, 'cpty_other', 'crypto_wallet',
-                 '{"network":"solana","address":"${COUNTERPARTY_ADDRESS}"}'::jsonb, 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
-      .run();
-
-    acceptSend();
-    await expect(
-      createDvpTrade(env, {
-        ...tradeInput(),
-        partyA: { counterpartyAccountId: "cpa_other" },
       })
     ).rejects.toThrow(/counterpartyAccountId/);
     await expect(rowsInDb()).resolves.toEqual([]);

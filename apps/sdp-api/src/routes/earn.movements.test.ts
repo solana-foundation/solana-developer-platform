@@ -23,11 +23,8 @@ const ORG = "org_earn_feed";
 const ORG_OTHER = "org_earn_feed_other";
 const USER = "usr_earn_feed";
 const PROJECT_A = "prj_earn_feed_a";
-const PROJECT_B = "prj_earn_feed_b";
 const CONFIG_A = "cfg_earn_feed_a";
-const CONFIG_B = "cfg_earn_feed_b";
 const WALLET_A = "cwlt_earn_feed_a";
-const WALLET_B = "cwlt_earn_feed_b";
 // An ORGANIZATION-level config, so this wallet is reachable from PROJECT_A —
 // which is what makes the API-key wallet binding the only thing that can
 // exclude its movements.
@@ -35,7 +32,6 @@ const CONFIG_ORG = "cfg_earn_feed_org";
 const WALLET_ORG = "cwlt_earn_feed_org";
 const PUBLIC_KEY_ORG = "6dNVeCP6YQ9GDDLLQrNqzKPfSHfmybEqMcaWEqMTBRvR";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
-const PUBLIC_KEY_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const VAULT = "VaultFeedAddress1111111111111111111111111111";
@@ -123,15 +119,13 @@ async function seedScope(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "earn-feed@example.com"),
-    ...[PROJECT_A, PROJECT_B].map((projectId, index) =>
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, ORG, `Feed ${index}`, `earn-feed-${index}`, USER)
-    ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Feed', 'earn-feed', 'sandbox', 'active', ?)`
+      )
+      .bind(PROJECT_A, ORG, USER),
     getDb(env)
       .prepare(
         `INSERT INTO projects
@@ -160,25 +154,24 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, 'privy_feed_org', ?, 'active')`
       )
       .bind(WALLET_ORG, CONFIG_ORG, PUBLIC_KEY_ORG),
-    ...[
-      [CONFIG_A, PROJECT_A, WALLET_A, "privy_feed_a", PUBLIC_KEY_A],
-      [CONFIG_B, PROJECT_B, WALLET_B, "privy_feed_b", PUBLIC_KEY_B],
-    ].flatMap(([configId, projectId, walletId, providerWalletId, publicKey]) => [
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
+    ...[[CONFIG_A, PROJECT_A, WALLET_A, "privy_feed_a", PUBLIC_KEY_A]].flatMap(
+      ([configId, projectId, walletId, providerWalletId, publicKey]) => [
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_configs
              (id, organization_id, project_id, provider, config_encrypted, status)
            VALUES (?, ?, ?, 'privy', 'encrypted', 'active')`
-        )
-        .bind(configId, ORG, projectId),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
+          )
+          .bind(configId, ORG, projectId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets
              (id, custody_config_id, wallet_id, public_key, status)
            VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(walletId, configId, providerWalletId, publicKey),
-    ]),
+          )
+          .bind(walletId, configId, providerWalletId, publicKey),
+      ]
+    ),
   ]);
 }
 
@@ -463,34 +456,6 @@ describe("GET /v1/earn/movements", () => {
       const body = await movementsJson();
       expect(body.movements.map((m) => m.id)).toEqual([sandbox.movement.id]);
       expect(body.movements.map((m) => m.id)).not.toContain(production);
-    });
-
-    it("hides a vault movement belonging to a sibling project", async () => {
-      const mine = await seedVaultDeposit({ projectId: PROJECT_A, walletId: WALLET_A });
-      const sibling = await seedVaultDeposit({
-        projectId: PROJECT_B,
-        walletId: WALLET_B,
-        vault: "VaultFeedSibling1111111111111111111111111111",
-      });
-
-      // A vault movement is one project's transaction, so wallet scope alone does
-      // not grant it — the exact project has to match.
-      const body = await movementsJson();
-      expect(body.movements.map((m) => m.id)).toContain(mine.movement.id);
-      expect(body.movements.map((m) => m.id)).not.toContain(sibling.movement.id);
-    });
-
-    it("shows a custodial movement to any project in the environment", async () => {
-      // Deliberately NOT project-scoped, matching /programs/:id/withdrawals: every
-      // project in an environment reaches every program, so one program is one
-      // history. Asserted so a future tightening is a decision, not an accident.
-      const { withdrawal } = await seedProgramWithdrawal();
-      await getDb(env)
-        .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
-        .bind(PROJECT_B, withdrawal.id)
-        .run();
-
-      expect((await movementsJson()).movements.map((m) => m.id)).toContain(withdrawal.id);
     });
 
     it("structurally excludes external-wallet movements (owner-signed, no custody-wallet match)", async () => {

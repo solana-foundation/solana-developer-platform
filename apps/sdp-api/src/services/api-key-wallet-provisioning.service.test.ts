@@ -411,7 +411,7 @@ async function seedFixture(): Promise<void> {
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
          VALUES (?, ?, 'Foreign API key provisioning', 'api-key-provisioning-foreign',
-                 'sandbox', 'active', ?)`
+                 'production', 'active', ?)`
       )
       .bind(FOREIGN_PROJECT_ID, ORGANIZATION_ID, "usr_api_key_provisioning"),
     db

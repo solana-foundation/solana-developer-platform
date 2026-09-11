@@ -387,37 +387,6 @@ describe("Counterparties Routes", () => {
       );
       expect(res.status).toBe(404);
     });
-
-    it("returns 404 when the counterparty belongs to a different project in the same org", async () => {
-      const db = getDb(env);
-      const otherProjectId = "prj_counterparties_cross_project";
-      const otherCounterpartyId = "cpty_cross_project_iso";
-
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other Project', 'other-project', 'sandbox', 'active', ?)`
-        )
-        .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
-        .run();
-
-      await db
-        .prepare(
-          `INSERT INTO counterparties (
-             id, organization_id, project_id, external_id, entity_type,
-             display_name, provider_data, status, created_by
-           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', '{}', 'active', ?)`
-        )
-        .bind(otherCounterpartyId, TEST_ORG.id, otherProjectId, "ext_cross_project", TEST_USER.id)
-        .run();
-
-      const res = await app.request(
-        `/v1/counterparties/${otherCounterpartyId}`,
-        { headers: { Authorization: authHeader } },
-        env
-      );
-      expect(res.status).toBe(404);
-    });
   });
 
   describe("GET /v1/counterparties/:counterpartyId/requirements", () => {

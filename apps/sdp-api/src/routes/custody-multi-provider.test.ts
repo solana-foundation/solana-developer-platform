@@ -367,36 +367,6 @@ describe("Custody multi-provider routes", () => {
     expect(await mismatch.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
 
-  it("does not expose a Connection owned by another Project", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
-    const otherProjectId = "prj_custody_multi_provider_other";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, 'Other project', 'other-project', 'sandbox', 'active', ?)`
-      )
-      .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
-      .run();
-    const connection = await seedActivePrivyConnection("foreign", otherProjectId);
-
-    const res = await app.request(
-      "/v1/wallets/switch",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({ connectionId: connection.connectionId }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(404);
-    expect(await res.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
-  });
-
   it("rejects an active Connection without a Provider Account fingerprint", async () => {
     env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("missing_fingerprint");

@@ -68,11 +68,10 @@ vi.mock("@sdp/rpc/byok", async (importOriginal) => {
 const ORG_ID = "org_rpc_byok_e2e";
 const PROJECT_ID = "prj_rpc_byok_e2e";
 /**
- * Extra projects. One connection per project (HOO-1227) means each save needs
+ * The other environment project. One connection per project (HOO-1227) means each save needs
  * somewhere of its own, so the saving cases cannot share the fixture's.
  */
 const PROJECT_ID_2 = "prj_rpc_byok_e2e_2";
-const PROJECT_ID_3 = "prj_rpc_byok_e2e_3";
 const USER_ID = "usr_rpc_byok_e2e";
 const CREDENTIAL_ID = "pcred_rpc_byok_e2e";
 const CONNECTION_ID = "rconn_rpc_byok_e2e";
@@ -194,7 +193,7 @@ beforeAll(async () => {
   await db
     .prepare(
       `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E', 'byok-e2e', 'sandbox', ?)`
+       VALUES (?, ?, 'BYOK E2E', 'byok-e2e', 'production', ?)`
     )
     .bind(PROJECT_ID, ORG_ID, USER_ID)
     .run();
@@ -204,13 +203,6 @@ beforeAll(async () => {
        VALUES (?, ?, 'BYOK E2E Two', 'byok-e2e-2', 'sandbox', ?)`
     )
     .bind(PROJECT_ID_2, ORG_ID, USER_ID)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E Three', 'byok-e2e-3', 'sandbox', ?)`
-    )
-    .bind(PROJECT_ID_3, ORG_ID, USER_ID)
     .run();
 
   // The real secret path: encrypted through the configured backend.
@@ -294,6 +286,27 @@ describe("BYOK end to end", () => {
     expect(JSON.stringify(submitted)).not.toContain("submitted-key-9999");
   });
 
+  it("stores nothing when the provider rejects the key on save", async () => {
+    // The stand-in answers 401 for this one pass, which is what a wrong key
+    // looks like. Nothing may be written on the way out.
+    rejectNextProbe = true;
+    await expect(
+      submitRpcConnection(serviceContext(PROJECT_ID_2), {
+        provider: "helius",
+        scope: "project",
+        credentialLabel: "Never stored",
+        endpointUrl: endpointBase,
+        apiKey: "rejected-key-1111",
+      })
+    ).rejects.toThrow(/rejected this connection/i);
+
+    const stored = await getDb(appEnv)
+      .prepare("SELECT COUNT(*)::int AS count FROM provider_credentials WHERE label = ?")
+      .bind("Never stored")
+      .first<{ count: number }>();
+    expect(stored?.count).toBe(0);
+  });
+
   it("refuses a second key for the same provider, because that is a rotation", async () => {
     // Two credentials for one provider on one project have no way to be told
     // apart and no meaning in the relay, which reads the default.
@@ -331,27 +344,6 @@ describe("BYOK end to end", () => {
       network: "devnet",
     });
     expect(state.kind).toBe("active");
-  });
-
-  it("stores nothing when the provider rejects the key on save", async () => {
-    // The stand-in answers 401 for this one pass, which is what a wrong key
-    // looks like. Nothing may be written on the way out.
-    rejectNextProbe = true;
-    await expect(
-      submitRpcConnection(serviceContext(PROJECT_ID_3), {
-        provider: "helius",
-        scope: "project",
-        credentialLabel: "Never stored",
-        endpointUrl: endpointBase,
-        apiKey: "rejected-key-1111",
-      })
-    ).rejects.toThrow(/rejected this connection/i);
-
-    const stored = await getDb(appEnv)
-      .prepare("SELECT COUNT(*)::int AS count FROM provider_credentials WHERE label = ?")
-      .bind("Never stored")
-      .first<{ count: number }>();
-    expect(stored?.count).toBe(0);
   });
 
   it("takes the platform rail while a connection is only submitted", async () => {

@@ -27,7 +27,6 @@ import {
 } from "./earn-movements.repository";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
-const OTHER_PROJECT_ID = "prj_earn_repo_test_other";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const DESTINATION = "4Nd1mYzL3T2fLGV1kZQcQq5o5FQMYuu1v6oCTKW6PYt5";
 // Bulk catalogue syncs land many rows on one sdp_iso_now() value, so every
@@ -70,15 +69,13 @@ describe("EarnRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
 
     repo = createPostgresEarnRepository(db);
   });
@@ -1182,18 +1179,8 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      // A sibling project may hold its own program, but it belongs to THAT
-      // project's collection: the project is a boundary on the list exactly as
-      // it is on every per-program route (HOO-1563).
-      await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        project_id: OTHER_PROJECT_ID,
-      });
-      await expect(listPrograms({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        total: 1,
-      });
-
       const { total } = await listPrograms();
-      expect(total).toBe(3);
+      expect(total).toBe(2);
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {

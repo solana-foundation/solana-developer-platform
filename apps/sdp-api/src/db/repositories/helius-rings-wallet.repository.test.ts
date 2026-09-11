@@ -51,13 +51,16 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
+    for (const [projectId, environment] of [
+      [TEST_PROJECT_ID, "sandbox"],
+      [OTHER_PROJECT_ID, "production"],
+    ] as const) {
       await db
         .prepare(
           `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+           VALUES (?, ?, 'Test Project', ?, ?, 'active', ?)`
         )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
+        .bind(projectId, TEST_ORG.id, projectId, environment, TEST_USER.id)
         .run();
     }
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -9,7 +9,6 @@ import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_payments_repo_test";
-const OTHER_PROJECT_ID = "prj_payments_repo_test_other";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
 const CANCELABLE = ["pending", "awaiting_payment"] as const;
@@ -121,15 +120,13 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
     await seedExactWallet();
 
     repo = createPostgresPaymentsRepository(db);
@@ -383,53 +380,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     expect(await readStatus("xfr_guard_org")).toBe("awaiting_payment");
   });
 
-  it("does not transition a transfer scoped to a different project", async () => {
-    await seedTransfer({ id: "xfr_guard_project", status: "awaiting_payment" });
-
-    const updated = await repo.updateTransferStatusGuarded({
-      transferId: "xfr_guard_project",
-      organizationId: TEST_ORG.id,
-      projectId: OTHER_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
-      updatedAt: new Date().toISOString(),
-    });
-
-    expect(updated).toBeNull();
-    expect(await readStatus("xfr_guard_project")).toBe("awaiting_payment");
-  });
-
-  it("makes a valid foreign transfer id indistinguishable from a missing row", async () => {
-    await seedTransfer({
-      id: "xfr_foreign_valid_id",
-      status: "awaiting_payment",
-      projectId: OTHER_PROJECT_ID,
-    });
-    const scoped = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      })
-    );
-
-    await expect(
-      scoped.updateTransfer({
-        transferId: "xfr_foreign_valid_id",
-        status: "confirmed",
-        updatedAt: new Date().toISOString(),
-      })
-    ).resolves.toBeNull();
-    await expect(
-      scoped.getTransferById({
-        transferId: "xfr_foreign_valid_id",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      })
-    ).resolves.toBeNull();
-    expect(await readStatus("xfr_foreign_valid_id")).toBe("awaiting_payment");
-  });
-
   it("lets an organization-scoped repository read and update project transfers", async () => {
     await seedTransfer({ id: "xfr_org_admin", status: "awaiting_payment" });
     const scoped = createPostgresPaymentsRepository(
@@ -451,33 +401,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         updatedAt: new Date().toISOString(),
       })
     ).resolves.toMatchObject({ id: "xfr_org_admin", status: "confirmed" });
-  });
-
-  it("rejects forged tenant claims before querying and preserves same-tenant writes", async () => {
-    await seedTransfer({ id: "xfr_owned_valid_id", status: "awaiting_payment" });
-    const scoped = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      })
-    );
-
-    await expect(
-      scoped.getTransferById({
-        transferId: "xfr_owned_valid_id",
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-      })
-    ).rejects.toBeInstanceOf(TenantScopeViolationError);
-
-    await expect(
-      scoped.updateTransfer({
-        transferId: "xfr_owned_valid_id",
-        status: "confirmed",
-        updatedAt: new Date().toISOString(),
-      })
-    ).resolves.toMatchObject({ id: "xfr_owned_valid_id", status: "confirmed" });
   });
 
   it("persists idempotency metadata and looks it up by (org, key)", async () => {

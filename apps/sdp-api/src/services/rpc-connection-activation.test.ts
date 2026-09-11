@@ -63,7 +63,7 @@ async function seedScope(): Promise<void> {
       .prepare(
         `INSERT INTO projects
            (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'RPC activation other', ?, 'sandbox', 'active', ?)`
+         VALUES (?, ?, 'RPC activation other', ?, 'production', 'active', ?)`
       )
       .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "rpc-activation-other", USER_ID),
   ]);

@@ -48,8 +48,20 @@ export const API_KEY_CACHE_TTL_SECONDS = 3600; // 1 hour
 
 const TERMINAL_STATUSES: ReadonlySet<ApiKeyStatus> = new Set(["revoked", "deactivated", "expired"]);
 
+const CACHE_KEY_PREFIX = "key:";
+
 export function apiKeyCacheKey(keyHash: string): string {
-  return `key:${keyHash}`;
+  return `${CACHE_KEY_PREFIX}${keyHash}`;
+}
+
+/**
+ * Invert {@link apiKeyCacheKey} for a name returned by the store's `list()`.
+ *
+ * @param name - Cache entry name within the API-key namespace.
+ * @returns The key hash the entry caches, or null for a name this module did not write.
+ */
+export function apiKeyHashFromCacheKey(name: string): string | null {
+  return name.startsWith(CACHE_KEY_PREFIX) ? name.slice(CACHE_KEY_PREFIX.length) : null;
 }
 
 function isTerminalStatus(status: ApiKeyStatus): boolean {

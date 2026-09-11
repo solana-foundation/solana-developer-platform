@@ -48,7 +48,7 @@ async function seedScope(): Promise<void> {
       .prepare(
         `INSERT INTO projects
            (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'RPC constraints other', ?, 'sandbox', 'active', ?)`
+         VALUES (?, ?, 'RPC constraints other', ?, 'production', 'active', ?)`
       )
       .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "rpc-constraints-other", USER_ID),
   ]);

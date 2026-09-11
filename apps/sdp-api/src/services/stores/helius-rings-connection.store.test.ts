@@ -59,11 +59,14 @@ describe("HeliusRingsConnectionStore", () => {
       TEST_USER.id,
       TEST_USER.email,
     ]);
-    for (const projectId of [PROJECT_A, PROJECT_B]) {
+    for (const [projectId, environment] of [
+      [PROJECT_A, "sandbox"],
+      [PROJECT_B, "production"],
+    ] as const) {
       await db.execute(
-        `INSERT INTO projects (id, organization_id, name, slug, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [projectId, TEST_ORG.id, projectId, projectId, TEST_USER.id]
+        `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [projectId, TEST_ORG.id, projectId, projectId, environment, TEST_USER.id]
       );
     }
   });

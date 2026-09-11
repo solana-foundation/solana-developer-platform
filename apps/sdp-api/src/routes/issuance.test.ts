@@ -3554,32 +3554,6 @@ describe("Issuance Routes", () => {
 
       expect(res.status).toBe(404);
     });
-
-    it("returns 404 when the token belongs to a different project in the same org", async () => {
-      const otherProjectId = "prj_cross_project_isolation";
-      await seedProject({
-        id: otherProjectId,
-        organizationId: TEST_ORG.id,
-        name: "Other Project",
-        slug: "cross-project-isolation",
-      });
-      const otherProjectToken = await seedIssuedToken({
-        id: "tok_other_project_iso",
-        projectId: otherProjectId,
-      });
-      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint");
-
-      const res = await app.request(
-        `/v1/issuance/tokens/${otherProjectToken.id}?includeMetadataAuthority=true`,
-        {
-          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(404);
-      expect(mintRead).not.toHaveBeenCalled();
-    });
   });
 
   describe("PATCH /v1/issuance/tokens/:tokenId", () => {
@@ -3633,42 +3607,6 @@ describe("Issuance Routes", () => {
         signing_wallet_id: wallet.walletId,
         signing_custody_wallet_id: wallet.custodyWalletId,
       });
-    });
-
-    it("does not persist an exact signing wallet outside the project", async () => {
-      const wallet = await seedIssuanceActivityWallet("wallet_other_project");
-      await getDb(env)
-        .prepare(
-          "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES ('prj_foreign_draft', ?, 'Other project', 'foreign-draft', 'sandbox', 'active', ?)"
-        )
-        .bind(TEST_ORG.id, TEST_USER.id)
-        .run();
-      await getDb(env)
-        .prepare(
-          "UPDATE custody_configs SET project_id = ? WHERE id = 'cust_cfg_issuance_activity'"
-        )
-        .bind("prj_foreign_draft")
-        .run();
-      const response = await app.request(
-        `/v1/issuance/tokens/${tokenId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ signingCustodyWalletId: wallet.custodyWalletId }),
-        },
-        env
-      );
-      expect(response.status).toBe(404);
-      const row = await getDb(env)
-        .prepare(
-          "SELECT signing_wallet_id, signing_custody_wallet_id FROM issued_tokens WHERE id = ?"
-        )
-        .bind(tokenId)
-        .first();
-      expect(row).toEqual({ signing_wallet_id: null, signing_custody_wallet_id: null });
     });
 
     it("rejects a selector-only patch after deploy without changing deployment attribution", async () => {

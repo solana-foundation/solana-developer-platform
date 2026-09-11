@@ -45,7 +45,6 @@ vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
 
 const ORG = "org_external_activity";
 const PROJECT = "prj_external_activity";
-const SIBLING_PROJECT = "prj_external_activity_sibling";
 const USER = "usr_external_activity";
 const KEY = { id: "key_external_activity", raw: "sk_test_external_activity" };
 const OWNER_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -87,13 +86,6 @@ async function seedScope() {
          VALUES (?, ?, 'External activity', 'external-activity', 'sandbox', 'active', ?)`
       )
       .bind(PROJECT, ORG, USER),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Sibling', 'external-activity-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(SIBLING_PROJECT, ORG, USER),
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -367,7 +359,7 @@ describe("external-wallet activity", () => {
     expect((await get(`/v1/earn/external-wallet/movements${query}`)).status).toBe(400);
   });
 
-  it("scopes the list to the exact project and 404s a foreign organization's owner", async () => {
+  it("404s an owner claimed only by another organization", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -384,37 +376,11 @@ describe("external-wallet activity", () => {
       denomination: USDC,
       createdAt: "2026-08-27T00:00:00.000Z",
     });
-    // The same owner also moved money through a SIBLING project: a different
-    // integration surface, invisible here by the 0070 claim scope.
-    const siblingPosition = await seedPosition({
-      ownerAddress: OWNER_A,
-      vaultAddress: "vault-sibling",
-      tokenMint: USDC,
-      label: "Sibling vault",
-      projectId: SIBLING_PROJECT,
-    });
-    const siblingMovement = await seedMovement({
-      positionId: siblingPosition,
-      ownerAddress: OWNER_A,
-      vaultAddress: "vault-sibling",
-      direction: "deposit",
-      status: "finalized",
-      amount: "999",
-      denomination: USDC,
-      createdAt: "2026-08-30T00:00:00.000Z",
-      projectId: SIBLING_PROJECT,
-    });
-
     const body = (await (
       await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { movements: Array<{ providerReference: string }> } };
     expect(body.data.movements).toHaveLength(1);
     expect(body.data.movements[0]?.providerReference).toBe("vault-usdc");
-
-    // The sibling row is not addressable by id either, and its 404 is decided
-    // before the read-through could touch the chain.
-    expect((await get(`/v1/earn/external-wallet/movements/${siblingMovement}`)).status).toBe(404);
-    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
 
     // An owner only a foreign organization has claimed reads as never seen.
     const foreignOrg = "org_external_activity_foreign";

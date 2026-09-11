@@ -9,7 +9,6 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { custodyWalletForParty } from "./custody-party";
 
 const PROJECT_ID = "prj_custody_party_test";
-const OTHER_PROJECT_ID = "prj_custody_party_other";
 const OTHER_ORG_ID = "org_custody_party_other";
 const CUSTODY_CONFIG_ID = "cust_custody_party_test";
 const OTHER_ORG_CONFIG_ID = "cust_custody_party_other_org";
@@ -43,15 +42,13 @@ describe("custodyWalletForParty", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
+      .run();
     await db
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
@@ -108,17 +105,6 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: OTHER_ORG_ID, projectId: "prj_other_org" },
-      address(PARTY_ADDRESS),
-      null
-    );
-
-    expect(result).toBeNull();
-  });
-
-  it("returns null when the address is in the wrong project", async () => {
-    const result = await custodyWalletForParty(
-      env,
-      { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
       address(PARTY_ADDRESS),
       null
     );

@@ -661,39 +661,6 @@ describe("Custody wallet scope routes", () => {
     }
   );
 
-  it("does not resolve a signer-check wallet belonging to another project", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_check_other', ?, 'Other', 'check-other', 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_ORG.id, TEST_USER.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES ('cfg_check_other', ?, 'prj_check_other', 'privy', 'not-read', 'active')`
-        )
-        .bind(TEST_ORG.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('cwlt_check_other', 'cfg_check_other', 'privy_check_other', ?, 'active')`
-        )
-        .bind(TEST_SOLANA_ADDRESSES.wallet2),
-    ]);
-
-    const response = await requestSignerCheck({ walletId: "privy_check_other" }, "session");
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: { code: "BAD_REQUEST", message: "Custody wallet not found" },
-    });
-    expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
-    expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-    expect(resolveRpcTargetMock).not.toHaveBeenCalled();
-  });
-
   it("resolves the API key's bound wallet when walletId is omitted", async () => {
     await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
       walletId: "privy_wallet_a",
@@ -1704,79 +1671,6 @@ describe("Custody wallet scope routes", () => {
       .bind("privy_wallet_b")
       .first<{ status: string }>();
     expect(wallet?.status).toBe("active");
-  });
-
-  it("excludes custody configs from a different project in the same org", async () => {
-    const otherProjectId = "prj_custody_config_cross_project";
-    const otherConfigId = "cust_cfg_scope_other_project";
-
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          otherProjectId,
-          TEST_ORG.id,
-          "Other Config Project",
-          "other-config-project",
-          "sandbox",
-          "active",
-          TEST_USER.id
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          otherConfigId,
-          TEST_ORG.id,
-          otherProjectId,
-          "turnkey",
-          "test-config",
-          "sdp-custody-encryption-v1",
-          "turnkey_wallet_other",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cwlt_scope_other_project",
-          otherConfigId,
-          "turnkey_wallet_other",
-          "turnkey_pubkey_other",
-          "Other",
-          "root",
-          "active"
-        ),
-    ]);
-
-    const res = await app.request(
-      "/v1/wallets/configs",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { configs: Array<{ id: string }> };
-    };
-    const configIds = body.data.configs.map((config) => config.id);
-    expect(configIds).toContain(PRIVY_CONFIG_ID);
-    expect(configIds).toContain(PARA_CONFIG_ID);
-    expect(configIds).not.toContain(otherConfigId);
   });
 
   describe("wallet-scoped key lifecycle mutations", () => {

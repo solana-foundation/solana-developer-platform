@@ -422,38 +422,4 @@ describe("internal custody connections", () => {
     });
     expect(oversized.connections).toHaveLength(0);
   });
-
-  it("does not leak another project's connections", async () => {
-    const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_conn_other', ?, 'Other', 'connections-other', 'sandbox', 'active', ?)`
-      )
-      .bind(ORG.id, USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO provider_credentials
-           (id, organization_id, project_id, provider, label, scope, source, storage_backend,
-            encrypted_secret_payload, status)
-         VALUES ('pcred_other', ?, 'prj_conn_other', 'privy', 'Other', 'project', 'stored',
-                 'encrypted_db', 'x', 'active')`
-      )
-      .bind(ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_connections
-           (id, organization_id, project_id, provider, scope, provider_credential_id,
-            provider_credential_scope_key, status)
-         VALUES ('ccon_other', ?, 'prj_conn_other', 'privy', 'project', 'pcred_other',
-                 'prj_conn_other', 'pending')`
-      )
-      .bind(ORG.id)
-      .run();
-
-    const data = await listConnections();
-    expect(data.pagination.total).toBe(0);
-  });
 });

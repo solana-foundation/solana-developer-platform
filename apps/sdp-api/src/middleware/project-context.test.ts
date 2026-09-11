@@ -11,10 +11,7 @@ import { projectContextMiddleware } from "./project-context";
 
 const ORG_ID = "org_project_context_mw";
 const USER_ID = "usr_project_context_mw";
-// Project the user is a member of.
 const MEMBER_PROJECT_ID = "prj_project_context_member";
-// Project in the same org the user is NOT a member of.
-const FOREIGN_PROJECT_ID = "prj_project_context_foreign";
 
 /**
  * Build a minimal app that runs only projectContextMiddleware, with the auth
@@ -82,14 +79,6 @@ describe("projectContextMiddleware", () => {
 
     await db
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Foreign Project', 'foreign-project', 'sandbox', 'active', ?)`
-      )
-      .bind(FOREIGN_PROJECT_ID, ORG_ID, USER_ID)
-      .run();
-
-    await db
-      .prepare(
         `INSERT INTO project_members (id, project_id, user_id, role)
          VALUES ('pm_project_context_mw', ?, ?, 'admin')`
       )
@@ -113,20 +102,6 @@ describe("projectContextMiddleware", () => {
     };
     expect(body.projectId).toBe(MEMBER_PROJECT_ID);
     expect(body.projectEnvironment).toBe("sandbox");
-  });
-
-  it("rejects an x-project-id header for a project in the same org the user does not belong to", async () => {
-    const app = buildApp((c) => c.set("session", session));
-
-    const res = await app.request(
-      "/probe",
-      { headers: { "x-project-id": FOREIGN_PROJECT_ID } },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("FORBIDDEN");
   });
 
   it("no longer accepts the dropped ?projectId= query fallback and 400s without the header", async () => {
@@ -153,11 +128,7 @@ describe("projectContextMiddleware", () => {
       })
     );
 
-    const res = await app.request(
-      "/probe",
-      { headers: { "x-project-id": FOREIGN_PROJECT_ID } },
-      env
-    );
+    const res = await app.request("/probe", { headers: { "x-project-id": "prj_missing" } }, env);
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {

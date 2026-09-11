@@ -844,24 +844,18 @@ describe("Clerk webhooks", () => {
     );
 
     const apiKeyHash = "webhook_lifecycle_key_hash";
-    const lifecycleProjectId = "prj_webhook_lifecycle";
-    await getDb(env)
+    const lifecycleProject = await getDb(env)
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?
-         FROM auth_organization_identities aoi
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
+        `SELECT p.id
+         FROM projects p
+         JOIN auth_organization_identities aoi ON aoi.organization_id = p.organization_id
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ? AND p.environment = 'sandbox'`
       )
-      .bind(
-        lifecycleProjectId,
-        "Lifecycle Project",
-        "lifecycle-project",
-        "sandbox",
-        "active",
-        userId,
-        "org_clerk_lifecycle"
-      )
-      .run();
+      .bind("org_clerk_lifecycle")
+      .first<{ id: string }>();
+    if (!lifecycleProject) {
+      throw new Error("Expected the Clerk organization sandbox project to exist");
+    }
     await getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -872,7 +866,7 @@ describe("Clerk webhooks", () => {
       )
       .bind(
         "key_webhook_lifecycle",
-        lifecycleProjectId,
+        lifecycleProject.id,
         userId,
         "Lifecycle Key",
         "sk_test_web",

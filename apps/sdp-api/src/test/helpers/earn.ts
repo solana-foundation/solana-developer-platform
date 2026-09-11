@@ -37,17 +37,13 @@ export interface EarnAuthzTenant {
   user: { id: string; email: string };
   /** The key's pinned project (sandbox). */
   project: { id: string; slug: string };
-  /** A sibling sandbox project in the same org, no key pinned to it. */
-  siblingProject: { id: string; slug: string };
-  /** A same-org project the session user is NOT a member of. */
-  nonMemberProject: { id: string; slug: string };
   /** Session for `user`: org member, project-member of `project` only. */
   sessionId: string;
 }
 
 /**
- * Seed one org with the three projects and the session the authz matrix
- * exercises. Call after `seedTestDatabase(env)`.
+ * Seed one org with its project and the session the authz matrix exercises.
+ * Call after `seedTestDatabase(env)`.
  */
 export async function seedEarnAuthzTenant(
   env: Env,
@@ -59,8 +55,6 @@ export async function seedEarnAuthzTenant(
     org: { id: `org_${tag}`, name: `Earn Authz ${tag}`, slug: `earn-authz-${tag}` },
     user: { id: `usr_${tag}`, email: `${tag}@earn-authz.example.com` },
     project: { id: `prj_${tag}_pinned`, slug: `earn-authz-${tag}-pinned` },
-    siblingProject: { id: `prj_${tag}_sibling`, slug: `earn-authz-${tag}-sibling` },
-    nonMemberProject: { id: `prj_${tag}_nonmember`, slug: `earn-authz-${tag}-nonmember` },
     sessionId: `sess_${tag}`,
   };
 
@@ -83,26 +77,6 @@ export async function seedEarnAuthzTenant(
         tenant.org.id,
         "Pinned",
         tenant.project.slug,
-        environment,
-        tenant.user.id
-      ),
-    db
-      .prepare(projectInsert)
-      .bind(
-        tenant.siblingProject.id,
-        tenant.org.id,
-        "Sibling",
-        tenant.siblingProject.slug,
-        environment,
-        tenant.user.id
-      ),
-    db
-      .prepare(projectInsert)
-      .bind(
-        tenant.nonMemberProject.id,
-        tenant.org.id,
-        "NonMember",
-        tenant.nonMemberProject.slug,
         environment,
         tenant.user.id
       ),

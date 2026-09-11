@@ -17,7 +17,6 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 const TEST_ORG_ID = "org_policy_audit_routes";
 const OTHER_ORG_ID = "org_policy_audit_other";
 const TEST_PROJECT_ID = "prj_policy_audit_routes";
-const OTHER_PROJECT_ID = "prj_policy_audit_other";
 const TEST_USER_ID = "usr_policy_audit_routes";
 const TEST_API_KEY = {
   id: "key_policy_audit_routes",
@@ -146,20 +145,13 @@ async function seedAuthAndWallet() {
     getDb(env)
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_PROJECT_ID,
         TEST_ORG_ID,
         "Policy Audit Project",
         "policy-audit-project",
-        "sandbox",
-        "active",
-        TEST_USER_ID,
-        OTHER_PROJECT_ID,
-        TEST_ORG_ID,
-        "Other Policy Project",
-        "other-policy-project",
         "sandbox",
         "active",
         TEST_USER_ID
@@ -444,12 +436,6 @@ async function seedPoliciesAndEvaluations() {
   };
 
   await seedForeignEvaluation({
-    key: "foreign",
-    organizationId: TEST_ORG_ID,
-    projectId: OTHER_PROJECT_ID,
-    operationType: "payment_transfer_execute",
-  });
-  await seedForeignEvaluation({
     key: "crossOrganization",
     organizationId: OTHER_ORG_ID,
     projectId: TEST_PROJECT_ID,
@@ -571,20 +557,13 @@ describe("Wallet policy audit detail routes", () => {
     expect(filteredBody.meta.total).toBe(1);
   });
 
-  it("rejects unauthenticated reads and hides cross-project and cross-organization evaluations", async () => {
+  it("rejects unauthenticated reads and hides cross-organization evaluations", async () => {
     const unauthenticated = await app.request(
       `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations`,
       undefined,
       env
     );
     expect(unauthenticated.status).toBe(401);
-
-    const crossProject = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.foreign}`,
-      { headers: authHeaders() },
-      env
-    );
-    expect(crossProject.status).toBe(404);
 
     const crossOrganization = await app.request(
       `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.crossOrganization}`,

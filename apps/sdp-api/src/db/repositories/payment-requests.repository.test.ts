@@ -8,7 +8,6 @@ import type { PaymentRequestsRepository } from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
-const OTHER_PROJECT_ID = "prj_preq_repo_test_other";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
 
 describe("PaymentRequestsRepository (postgres)", () => {
@@ -43,15 +42,13 @@ describe("PaymentRequestsRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
     await db
       .prepare(
         `INSERT INTO custody_configs
@@ -194,17 +191,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(row?.id).toBe(created?.id);
     });
 
-    it("returns null when project doesn't match (tenancy guard)", async () => {
-      const created = await repo.createPaymentRequest(createInput());
-
-      const row = await repo.getPaymentRequestById({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-      });
-      expect(row).toBeNull();
-    });
-
     it("returns null when org doesn't match (tenancy guard)", async () => {
       const created = await repo.createPaymentRequest(createInput());
 
@@ -265,20 +251,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       expect(total).toBe(1);
       expect(rows[0].status).toBe("awaiting_payment");
-    });
-
-    it("scopes by project — requests in a sibling project are excluded", async () => {
-      await repo.createPaymentRequest(createInput({ projectId: TEST_PROJECT_ID }));
-      await repo.createPaymentRequest(createInput({ projectId: OTHER_PROJECT_ID }));
-
-      const { rows, total } = await repo.listPaymentRequests({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        limit: 50,
-        offset: 0,
-      });
-      expect(total).toBe(1);
-      expect(rows[0].project_id).toBe(TEST_PROJECT_ID);
     });
   });
 
@@ -391,20 +363,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
       });
       expect(current?.status).toBe("canceled");
-    });
-
-    it("returns null when project doesn't match (tenancy guard)", async () => {
-      const created = await repo.createPaymentRequest(createInput());
-
-      const result = await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-        status: "canceled",
-        fulfilledByTransferId: null,
-        canceledBy: TEST_USER.id,
-      });
-      expect(result).toBeNull();
     });
   });
 

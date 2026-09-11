@@ -92,16 +92,6 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       .run();
   }
 
-  async function seedProject(projectId: string) {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(projectId, TEST_ORG.id, projectId, projectId, TEST_USER.id)
-      .run();
-  }
-
   async function seed(overrides: Partial<CreateWithdrawalInput> = {}) {
     const row = await repo.createWithdrawal(makeInput(overrides));
     if (!row) {
@@ -213,10 +203,8 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
   });
 
   it("countNonTerminalByInstance counts only in-flight rows for the instance", async () => {
-    await seedProject("prj_pcw_a");
-    await seedProject("prj_pcw_b");
-    await seedInstance("inst_A", "prj_pcw_a");
-    await seedInstance("inst_B", "prj_pcw_b");
+    await seedInstance("inst_A");
+    await seedInstance("inst_B");
     const inFlight = await repo.createWithdrawal(makeInput({ instanceId: "inst_A" }));
     const other = await seed({ instanceId: "inst_A" });
     await repo.createWithdrawal(makeInput({ instanceId: "inst_B" }));

@@ -99,9 +99,6 @@ const USER_ID = "usr_rpc_retirement";
  * a project would be refused before reaching the code under test.
  */
 const PROJECT_COMMITTED = "prj_rpc_retirement_committed";
-const PROJECT_UNRECORDABLE = "prj_rpc_retirement_unrecordable";
-const PROJECT_DOOMED = "prj_rpc_retirement_doomed";
-const PROJECT_LEAKED = "prj_rpc_retirement_leaked";
 const PROJECT_DEACTIVATE = "prj_rpc_retirement_deactivate";
 const appEnv = env as unknown as Env;
 
@@ -131,13 +128,17 @@ function submitInput(label: string) {
   };
 }
 
-async function seedProject(projectId: string, slug: string): Promise<void> {
+async function seedProject(
+  projectId: string,
+  slug: string,
+  environment: "sandbox" | "production"
+): Promise<void> {
   await getDb(appEnv)
     .prepare(
       `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'RPC Retirement', ?, 'sandbox', ?)`
+       VALUES (?, ?, 'RPC Retirement', ?, ?, ?)`
     )
-    .bind(projectId, ORG_ID, slug, USER_ID)
+    .bind(projectId, ORG_ID, slug, environment, USER_ID)
     .run();
 }
 
@@ -198,11 +199,8 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
-  await seedProject(PROJECT_COMMITTED, "rpc-retirement-committed");
-  await seedProject(PROJECT_UNRECORDABLE, "rpc-retirement-unrecordable");
-  await seedProject(PROJECT_DOOMED, "rpc-retirement-doomed");
-  await seedProject(PROJECT_LEAKED, "rpc-retirement-leaked");
-  await seedProject(PROJECT_DEACTIVATE, "rpc-retirement-deactivate");
+  await seedProject(PROJECT_COMMITTED, "rpc-retirement-committed", "sandbox");
+  await seedProject(PROJECT_DEACTIVATE, "rpc-retirement-deactivate", "production");
 });
 
 afterAll(async () => {
@@ -362,7 +360,7 @@ describe("BYOK RPC secret retirement", () => {
     retirementQueueControl.failRecordRetirement = true;
 
     await expect(
-      submitRpcConnection(serviceContext(PROJECT_UNRECORDABLE), submitInput("Unrecordable"))
+      submitRpcConnection(serviceContext(), submitInput("Unrecordable"))
     ).rejects.toThrow(/durably reserved/i);
 
     // Fail closed with a clean slate: the obligation is reserved before the
@@ -385,9 +383,9 @@ describe("BYOK RPC secret retirement", () => {
     gcpMock.destroyVersion.mockRejectedValue(new Error("secret manager unavailable"));
     const logError = vi.spyOn(getLogger(), "error");
 
-    await expect(
-      submitRpcConnection(serviceContext(PROJECT_LEAKED), submitInput("Leaked"))
-    ).rejects.toThrow(/durably reserved/i);
+    await expect(submitRpcConnection(serviceContext(), submitInput("Leaked"))).rejects.toThrow(
+      /durably reserved/i
+    );
 
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalledWith(
@@ -455,9 +453,7 @@ describe("BYOK RPC secret retirement", () => {
       .mockRejectedValue(new Error("credential insert failed"));
 
     try {
-      await expect(
-        submitRpcConnection(serviceContext(PROJECT_DOOMED), submitInput("Doomed"))
-      ).rejects.toThrow();
+      await expect(submitRpcConnection(serviceContext(), submitInput("Doomed"))).rejects.toThrow();
     } finally {
       insertCredential.mockRestore();
     }

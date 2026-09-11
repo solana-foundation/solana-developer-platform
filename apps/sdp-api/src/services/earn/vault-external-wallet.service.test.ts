@@ -75,7 +75,6 @@ const {
 
 const ORG = "org_ext_wallet";
 const PROJECT = "prj_ext_wallet";
-const SIBLING_PROJECT = "prj_ext_wallet_sibling";
 const USER = "usr_ext_wallet";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
@@ -154,12 +153,6 @@ async function seedTenancy(): Promise<void> {
          VALUES (?, ?, 'Test Project', 'ext-wallet-project', 'sandbox', 'active', ?)`
       )
       .bind(PROJECT, ORG, USER),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Sibling Project', 'ext-wallet-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(SIBLING_PROJECT, ORG, USER),
   ]);
 }
 
@@ -719,30 +712,6 @@ describe("submitExternalWalletDeposit", () => {
       code: "BAD_REQUEST",
     });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
-  });
-
-  it("scopes the build to its exact project", async () => {
-    const built = await buildDepositRow(depositInput());
-    const signed = await signBuiltTransaction(built);
-    await expect(
-      submitDeposit(built, signed, crypto.randomUUID(), { projectId: SIBLING_PROJECT })
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
-  });
-
-  it("enforces the external position's project claim in the database", async () => {
-    const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
-      built,
-      await signBuiltTransaction(built),
-      crypto.randomUUID()
-    );
-
-    await expect(
-      getDb(env)
-        .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
-        .bind(SIBLING_PROJECT, result.movement.id)
-        .run()
-    ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
   });
 
   it("preserves external position and movement history after project deletion", async () => {

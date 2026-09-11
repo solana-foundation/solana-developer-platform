@@ -159,6 +159,34 @@ describe("reconcileRevokedApiKeyCache", () => {
     expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
   });
 
+  it("tombstones the cached entry of a key whose project was dropped", async () => {
+    const kv = createKVStoreSet(env).apiKeys;
+    const droppedHash = await hashString("sk_test_reconcile_dropped", env.API_KEY_PEPPER);
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES ('key_reconcile_dropped', ?, ?, ?, 'dropped', 'sk_test_rec', ?, 'api_admin', ?, 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, droppedHash, JSON.stringify(["*"]))
+      .run();
+    await seedCachedApiKey(env, droppedHash, activeEntry("key_reconcile_dropped"));
+
+    await getDb(env).batch([
+      getDb(env).prepare("DELETE FROM api_keys WHERE project_id = ?").bind(TEST_PROJECT.id),
+      getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(TEST_PROJECT.id),
+    ]);
+
+    const outcome = await reconcileRevokedApiKeyCache(env);
+    expect(outcome.scanned).toBe(1);
+    expect(outcome.repaired).toBe(1);
+
+    const tombstoned = await kv.get<CachedApiKey>(apiKeyCacheKey(droppedHash), "json");
+    expect(tombstoned?.status).toBe("revoked");
+
+    expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
+  });
+
   it("lands a rotated key's deadline in a cached entry that predates the rotation", async () => {
     // Rotation's handler never fails the request over its cache refresh
     // (the response carries the one-time replacement secret), so this sweep

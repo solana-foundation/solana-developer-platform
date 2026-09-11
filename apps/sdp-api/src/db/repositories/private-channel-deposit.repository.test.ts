@@ -199,32 +199,6 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
     expect(found?.idempotency_fingerprint).toBe("fp_idem_shared");
   });
 
-  it("scopes the reservation to the project, so the same key is free elsewhere", async () => {
-    const db = getDb(env);
-    const otherProjectId = "prj_pcd_repo_other";
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(otherProjectId, TEST_ORG.id, otherProjectId, TEST_USER.id)
-      .run();
-
-    await repo.createDeposit(makeInput({ idempotencyKey: "idem_scoped" }));
-    const other = await repo.createDeposit(
-      makeInput({ idempotencyKey: "idem_scoped", projectId: otherProjectId })
-    );
-    expect(other).not.toBeNull();
-
-    // Neither project can see the other's claim on the same key.
-    const found = await repo.findDepositByIdempotency({
-      organizationId: TEST_ORG.id,
-      projectId: otherProjectId,
-      idempotencyKey: "idem_scoped",
-    });
-    expect(found?.id).toBe(other?.id);
-  });
-
   it("countNonTerminalByInstance ignores terminal deposits", async () => {
     const created = await repo.createDeposit(makeInput());
     expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(1);

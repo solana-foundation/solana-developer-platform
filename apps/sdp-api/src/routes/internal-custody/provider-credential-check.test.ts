@@ -109,16 +109,20 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
   return { app, token };
 }
 
-async function seedProject(projectId: string, slug: string): Promise<void> {
+async function seedProject(
+  projectId: string,
+  slug: string,
+  environment: "sandbox" | "production"
+): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
       .prepare(
         `INSERT INTO projects (
            id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+         ) VALUES (?, ?, ?, ?, ?, 'active', ?)`
       )
-      .bind(projectId, ORGANIZATION_ID, slug, slug, USER_ID),
+      .bind(projectId, ORGANIZATION_ID, slug, slug, environment, USER_ID),
     db
       .prepare(
         `INSERT INTO project_members (id, project_id, user_id, role)
@@ -179,7 +183,7 @@ async function seedActor(): Promise<void> {
       )
       .bind("mem_provider_credential_installation", ORGANIZATION_ID, USER_ID),
   ]);
-  await seedProject(PROJECT_ID, "provider-credential-installation");
+  await seedProject(PROJECT_ID, "provider-credential-installation", "sandbox");
 }
 
 async function seedPendingInstallation(
@@ -1430,7 +1434,7 @@ describe("exact Custody Connection installation routes", () => {
 
   it("allows the same Privy account fingerprint in another Project", async () => {
     const otherProjectId = "prj_provider_credential_installation_other";
-    await seedProject(otherProjectId, "provider-credential-installation-other");
+    await seedProject(otherProjectId, "provider-credential-installation-other", "production");
     await seedActiveFingerprintConnection({
       projectId: otherProjectId,
       credentialId: "pcred_existing_privy_other_project",
@@ -1507,7 +1511,7 @@ describe("exact Custody Connection installation routes", () => {
   it("does not enumerate Connections across Projects or before authentication", async () => {
     const otherProjectId = "prj_provider_credential_installation_hidden";
     const otherConnectionId = "cconn_provider_credential_installation_hidden";
-    await seedProject(otherProjectId, "provider-credential-installation-hidden");
+    await seedProject(otherProjectId, "provider-credential-installation-hidden", "production");
     await seedPendingInstallation({
       projectId: otherProjectId,
       credentialId: "pcred_provider_credential_installation_hidden",

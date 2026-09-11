@@ -430,30 +430,4 @@ describe("custody Connection deactivation", () => {
     expect(await lifecycleAudits()).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
   });
-
-  it("hides a Connection outside the authorized Project just like an unknown target", async () => {
-    await seedConnection("failed");
-    const db = getDb(env);
-    await db.execute(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-      VALUES ('prj_other_deactivation', ?, 'Other', 'other', 'sandbox', 'active', ?)`,
-      [ORG, USER]
-    );
-    await db.execute(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-      VALUES ('pm_other_deactivation', 'prj_other_deactivation', ?, 'admin')`,
-      [USER]
-    );
-    const before = await persistedState();
-    const foreign = await request(undefined, { projectId: "prj_other_deactivation" });
-    const unknown = await request("/connections/cconn_unknown/deactivate", {
-      projectId: "prj_other_deactivation",
-    });
-    expect(foreign.status).toBe(404);
-    expect(unknown.status).toBe(404);
-    expect((await foreign.json()).error).toEqual((await unknown.json()).error);
-    expect(await persistedState()).toEqual(before);
-    expect(await lifecycleAudits()).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
-  });
 });

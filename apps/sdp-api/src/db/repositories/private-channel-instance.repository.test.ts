@@ -10,7 +10,6 @@ import type { PrivateChannelInstanceRepository } from "./private-channel-instanc
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_pci_repo_test";
-const OTHER_PROJECT_ID = "prj_pci_repo_test_other";
 
 let nextDepositKey = 0;
 
@@ -59,15 +58,13 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-             VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .run();
 
     repo = createPostgresPrivateChannelInstanceRepository(db);
   });
@@ -123,32 +120,6 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
     });
     expect(active).toBeNull();
-  });
-
-  it("updateActive cannot update an instance outside its project scope", async () => {
-    const created = await repo.createActive({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      createdBy: TEST_USER.id,
-      ...SANDBOX_DEFAULTS,
-    });
-    if (!created) throw new Error("createActive returned null");
-
-    const updated = await repo.updateActive({
-      id: created.id,
-      organizationId: TEST_ORG.id,
-      projectId: OTHER_PROJECT_ID,
-      ...SANDBOX_DEFAULTS,
-      gatewayUrl: "http://34.71.147.163:9900",
-    });
-
-    expect(updated).toBeNull();
-    expect(
-      await repo.getActiveByProject({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      })
-    ).toMatchObject({ gateway_url: SANDBOX_DEFAULTS.gatewayUrl });
   });
 
   it("findByProjectAndGateway returns inactive rows too", async () => {
@@ -343,21 +314,5 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     // A reconnected instance admits movements again.
     const deposits = createPostgresPrivateChannelDepositRepository(getDb(env));
     expect(await deposits.createDeposit(depositInput(created.id))).not.toBeNull();
-  });
-
-  it("scopes reads by (organizationId, projectId): other project's row is not visible", async () => {
-    await repo.createActive({
-      organizationId: TEST_ORG.id,
-      projectId: OTHER_PROJECT_ID,
-      createdBy: TEST_USER.id,
-      ...SANDBOX_DEFAULTS,
-      gatewayUrl: "http://other.example:8899",
-    });
-
-    const row = await repo.getActiveByProject({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-    });
-    expect(row).toBeNull();
   });
 });

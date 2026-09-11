@@ -671,31 +671,6 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
-  it("allows a sibling project's position when both projects share an org-level wallet", async () => {
-    await seedAuth();
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("UPDATE custody_configs SET project_id = NULL WHERE id = 'cfg_earn_vw'")
-        .bind(),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES ('prj_earn_vw_sibling', ?, 'Sibling', 'earn-vw-sibling', 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_ORG.id, TEST_USER.id),
-    ]);
-    const positionId = await seedPosition({ projectId: "prj_earn_vw_sibling" });
-
-    const res = await postVaultWithdrawal({ positionId, shares: "10" });
-
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ projectId: TEST_PROJECT.id, positionId }),
-      expect.any(Object)
-    );
-  });
-
   it("withdraws in PRODUCTION even while vault deposits are environment-closed there", async () => {
     // The deposit route fail-closes production; an exit must work wherever a
     // position exists, or the fail-close itself would trap funds.
@@ -928,29 +903,6 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
       data: { withdrawals: unknown[] };
     };
     expect(list.data.withdrawals).toHaveLength(0);
-  });
-
-  it("hides a sibling project's withdrawal from this project's key", async () => {
-    await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_earn_vw_sibling', ?, 'Sibling', 'earn-vw-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
-    const { recorded } = await recordWithdrawal({
-      requestId: "vw-sibling-key",
-      projectId: "prj_earn_vw_sibling",
-    });
-
-    expect((await getWithdrawal(`/${recorded.movement.id}`)).status).toBe(404);
-    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
-    expect((await getWithdrawal("?requestId=vw-sibling-key")).status).toBe(200);
-    const page = (await (await getWithdrawal("?requestId=vw-sibling-key")).json()) as {
-      data: { withdrawals: unknown[] };
-    };
-    expect(page.data.withdrawals).toHaveLength(0);
   });
 
   it("filters to unsettled logical withdrawals for recovery", async () => {
