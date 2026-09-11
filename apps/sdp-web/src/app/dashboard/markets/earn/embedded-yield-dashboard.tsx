@@ -499,6 +499,7 @@ function PortfolioByStrategy({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const reduceMotion = useReducedMotion();
   const strategiesByReference = new Map(
     (strategies ?? []).map((strategy) => [
       strategyReferenceKey(strategy.provider, strategy.providerReference),
@@ -507,8 +508,8 @@ function PortfolioByStrategy({
   );
 
   return (
-    <Card className="overflow-hidden rounded-2xl">
-      <CardHeader>
+    <Card className="gap-0 overflow-hidden rounded-2xl py-0">
+      <CardHeader className="py-6">
         <CardTitle>{t("DashboardMarkets.earnProgram.portfolioTitle")}</CardTitle>
         <CardDescription>{t("DashboardMarkets.earnProgram.portfolioDescription")}</CardDescription>
       </CardHeader>
@@ -615,7 +616,9 @@ function PortfolioByStrategy({
                         <m.span
                           animate={{ rotate: isOpen ? 90 : 0 }}
                           className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary"
-                          transition={{ duration: 0.22, ease: "easeOut" }}
+                          transition={
+                            reduceMotion ? { duration: 0 } : { duration: 0.22, ease: "easeOut" }
+                          }
                         >
                           <ChevronRightIcon aria-hidden="true" className="size-4" />
                         </m.span>
@@ -623,28 +626,32 @@ function PortfolioByStrategy({
                     </TableRow>
                     <AnimatePresence initial={false}>
                       {isOpen ? (
-                        <m.tr
-                          animate={{ opacity: 1 }}
-                          className="border-b border-border-subtle"
-                          exit={{ opacity: 0 }}
-                          id={detailsId}
-                          initial={{ opacity: 0 }}
-                          key={`${strategyId}:details`}
-                          transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                        >
+                        <m.tr id={detailsId} key={`${strategyId}:details`}>
                           <td className="p-0 align-top" colSpan={8}>
                             <m.div
-                              animate={{ opacity: 1, scaleY: 1, y: 0 }}
-                              className="origin-top overflow-hidden"
-                              exit={{ opacity: 0, scaleY: 0.98, y: -6 }}
-                              initial={{ opacity: 0, scaleY: 0.98, y: -6 }}
-                              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              className="overflow-hidden will-change-[height,opacity]"
+                              exit={{ height: 0, opacity: 0 }}
+                              initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+                              transition={
+                                reduceMotion
+                                  ? { duration: 0 }
+                                  : {
+                                      height: {
+                                        duration: 0.28,
+                                        ease: [0.22, 1, 0.36, 1],
+                                      },
+                                      opacity: { duration: 0.16, ease: "easeOut" },
+                                    }
+                              }
                             >
-                              <StrategyWalletDetails
-                                cluster={cluster}
-                                strategy={strategy}
-                                strategyDefinition={strategyDefinition}
-                              />
+                              <div className="border-b border-border-subtle">
+                                <StrategyWalletDetails
+                                  cluster={cluster}
+                                  strategy={strategy}
+                                  strategyDefinition={strategyDefinition}
+                                />
+                              </div>
                             </m.div>
                           </td>
                         </m.tr>
