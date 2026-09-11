@@ -3,7 +3,7 @@
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ArrowLeftRight, Coins, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { TokenMark } from "@/components/token-mark";
@@ -22,12 +22,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { readApiErrorMessage } from "@/lib/api-error";
-import {
-  isQuickStartDismissed,
-  quickStartKey,
-  readQuickStart,
-  subscribeQuickStart,
-} from "@/lib/dashboard-quick-start";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -54,6 +48,7 @@ import {
 } from "./payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { tokenActivityHref } from "./tokens/holdings-links";
+import { useHomeQuickStartPending } from "./use-home-quick-start";
 
 interface HomeWorkspaceProps {
   totalBalance: number | null;
@@ -557,16 +552,8 @@ export function HomeWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
-  const { dashboardAccess, flags, dashboardCacheScope, initialQuickStartStep, sdpEnvironment } =
-    useDashboardWorkspace();
-  const progressKey = quickStartKey(dashboardCacheScope);
-  const quickStartFinished = useSyncExternalStore(
-    subscribeQuickStart,
-    () =>
-      isQuickStartDismissed(progressKey) ||
-      readQuickStart(progressKey, initialQuickStartStep) === "done",
-    () => initialQuickStartStep === "done"
-  );
+  const { dashboardAccess, flags } = useDashboardWorkspace();
+  const quickStartPending = useHomeQuickStartPending();
   const custodyEnabled = flags.custody;
   const issuanceEnabled = flags.issuance;
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
@@ -626,12 +613,8 @@ export function HomeWorkspace({
 
   return (
     <div className="w-full space-y-8 py-2">
-      <SectionEntry>
-        {heroState.kind !== "populated" &&
-        sdpEnvironment === "sandbox" &&
-        !quickStartFinished &&
-        initialQuickStartStep === "api-key" &&
-        dashboardAccess.capabilities.canManageApiKeys ? null : (
+      {heroState.kind === "populated" || !quickStartPending ? (
+        <SectionEntry>
           <BalanceHero
             {...balancePresentation}
             totalBalanceError={totalBalanceError}
@@ -646,8 +629,8 @@ export function HomeWorkspace({
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
             canManageCustody={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
           />
-        )}
-      </SectionEntry>
+        </SectionEntry>
+      ) : null}
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">

@@ -5,60 +5,6 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import DashboardLoading from "@/app/dashboard/(home)/loading";
-import {
-  ApiKeyAuthoringSkeleton,
-  ApiKeysListSkeleton,
-} from "@/app/dashboard/api-keys/api-key-page-skeletons";
-import {
-  ApprovalDetailSkeleton,
-  ApprovalInboxSkeleton,
-} from "@/app/dashboard/approvals/approval-page-skeletons";
-import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
-import {
-  IntegrationDetailSkeleton,
-  IntegrationsSkeleton,
-} from "@/app/dashboard/integrations/integrations-skeleton";
-import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
-import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
-import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
-import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
-import {
-  DvpCreateSkeleton,
-  DvpTradeDetailSkeleton,
-  DvpTradesSkeleton,
-  EarnIntegrationGuideSkeleton,
-  EmbeddedYieldPortfolioSkeleton,
-  MarketsLandingSkeleton,
-  TreasurySolutionsSkeleton,
-} from "@/app/dashboard/markets/markets-route-skeletons";
-import {
-  CompactOperationsCardSkeleton,
-  SettingsPageSkeleton,
-} from "@/app/dashboard/operations-card-page-skeletons";
-import { CounterpartyMenuLoading } from "@/app/dashboard/payments/counterparty-menu-loading";
-import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
-import {
-  CounterpartyCreateSkeleton,
-  CounterpartyDetailSkeleton,
-  PaymentsDepositPageSkeleton,
-  PaymentsPayPageSkeleton,
-  PaymentsTransactionsPageSkeleton,
-  RecurringPaymentCreateSkeleton,
-  RecurringPaymentDetailSkeleton,
-  RecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons";
-import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
-import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
-import {
-  WalletConnectionsListSkeleton,
-  WalletDetailSkeleton,
-  WalletPolicyAuditDetailSkeleton,
-  WalletPolicyAuditListSkeleton,
-  WalletPolicySkeleton,
-  WalletSetupSkeleton,
-  WalletsOverviewSkeleton,
-} from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardTopBar,
@@ -66,6 +12,7 @@ import {
   HeaderBackAction,
 } from "@/components/dashboard-header";
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
+import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
   DASHBOARD_SUBNAV_GROUPS,
@@ -78,9 +25,9 @@ import {
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
-import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
@@ -89,128 +36,10 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import {
-  type DashboardLoadingRoute,
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
-
-function ApiKeyNewLoading() {
-  return <ApiKeyAuthoringSkeleton route="api-key-new" />;
-}
-
-function ApiKeyEditLoading() {
-  return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
-}
-
-function AllowlistLoading() {
-  return <CompactOperationsCardSkeleton route="allowlist" />;
-}
-
-interface PageLoadingProps {
-  assetProfilesEnabled?: boolean;
-}
-
-function CounterpartyDirectoryLoading() {
-  return <CounterpartyMenuLoading overview="counterparty-directory" />;
-}
-
-function PaymentRequestsLoading() {
-  return <CounterpartyMenuLoading overview="payment-requests" />;
-}
-
-function resolvePageLoadingComponent(
-  route: DashboardLoadingRoute
-): React.ComponentType<PageLoadingProps> {
-  switch (route) {
-    case "home":
-      return DashboardLoading;
-    case "integrations":
-      return IntegrationsSkeleton;
-    case "integration-detail":
-      return IntegrationDetailSkeleton;
-    case "private-channels-setup":
-      return PrivateChannelsSetupSkeleton;
-    case "token-holdings":
-      return TokenHoldingsLoading;
-    case "wallets-overview":
-      return WalletsOverviewSkeleton;
-    case "wallet-setup":
-      return WalletSetupSkeleton;
-    case "wallet-connections":
-      return WalletConnectionsListSkeleton;
-    case "wallet-detail":
-      return WalletDetailSkeleton;
-    case "wallet-policy":
-      return WalletPolicySkeleton;
-    case "wallet-policy-audit-list":
-      return WalletPolicyAuditListSkeleton;
-    case "wallet-policy-audit-detail":
-      return WalletPolicyAuditDetailSkeleton;
-    case "issuance-overview":
-      return IssuancePageSkeleton;
-    case "issuance-create":
-      return IssuanceCreateSkeleton;
-    case "issuance-detail":
-      return IssuanceDetailSkeleton;
-    case "payments-overview":
-      return PaymentsPageSkeleton;
-    case "markets-landing":
-      return MarketsLandingSkeleton;
-    case "treasury-solutions":
-      return TreasurySolutionsSkeleton;
-    case "embedded-yield-portfolio":
-      return EmbeddedYieldPortfolioSkeleton;
-    case "embedded-yield-configure":
-      return EarnIntegrationGuideSkeleton;
-    case "embedded-yield-integrate":
-      return EarnIntegrationGuideSkeleton;
-    case "dvp-trades":
-      return DvpTradesSkeleton;
-    case "dvp-trade-create":
-      return DvpCreateSkeleton;
-    case "dvp-trade-detail":
-      return DvpTradeDetailSkeleton;
-    case "payments-transactions":
-      return PaymentsTransactionsPageSkeleton;
-    case "payments-pay":
-      return PaymentsPayPageSkeleton;
-    case "payments-deposit":
-      return PaymentsDepositPageSkeleton;
-    case "payment-requests":
-      return PaymentRequestsLoading;
-    case "counterparty-directory":
-      return CounterpartyDirectoryLoading;
-    case "counterparty-create":
-      return CounterpartyCreateSkeleton;
-    case "counterparty-detail":
-      return CounterpartyDetailSkeleton;
-    case "recurring-payments":
-      return RecurringPaymentsPageSkeleton;
-    case "recurring-payment-create":
-      return RecurringPaymentCreateSkeleton;
-    case "recurring-payment-detail":
-      return RecurringPaymentDetailSkeleton;
-    case "api-keys-list":
-      return ApiKeysListSkeleton;
-    case "api-key-new":
-      return ApiKeyNewLoading;
-    case "api-key-edit":
-      return ApiKeyEditLoading;
-    case "policies":
-      return PoliciesOverviewSkeleton;
-    case "approvals-list":
-      return ApprovalInboxSkeleton;
-    case "approval-detail":
-      return ApprovalDetailSkeleton;
-    case "settings":
-      return SettingsPageSkeleton;
-    case "helius-rings":
-      return HeliusRingsSkeleton;
-    case "allowlist":
-      return AllowlistLoading;
-  }
-}
 
 const navItemBase =
   "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
@@ -699,13 +528,8 @@ export function DashboardShell({
   }, [dashboardAccess.capabilities.canReadApprovals, policiesEnabled, selectedProjectId]);
 
   if (!isLoaded) {
-    // This is the only caller with a route in scope, so it hands the indicator the
-    // same skeleton the settled page streams. Without it the cold load paints one
-    // generic shape on every route and the layout jumps when content arrives.
     return (
-      <FullscreenLoadingIndicator contentWidthClass={contentWidthClass}>
-        <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
-      </FullscreenLoadingIndicator>
+      <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />
     );
   }
 
@@ -736,9 +560,7 @@ export function DashboardShell({
 
   if (!orgId) {
     return (
-      <FullscreenLoadingIndicator contentWidthClass={contentWidthClass}>
-        <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
-      </FullscreenLoadingIndicator>
+      <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />
     );
   }
 
