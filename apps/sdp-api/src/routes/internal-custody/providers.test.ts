@@ -103,7 +103,7 @@ async function seedBaseline(): Promise<void> {
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
          VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
       )
-      .bind(TEST_PROJECT.id, TEST_ORG.id, "Setup Status Project", TEST_PROJECT.slug, TEST_USER.id),
+      .bind(TEST_PROJECT.id, TEST_ORG.id, "Setup Status Project", "default-sandbox", TEST_USER.id),
     db
       .prepare(
         `INSERT INTO project_members (id, project_id, user_id, role)

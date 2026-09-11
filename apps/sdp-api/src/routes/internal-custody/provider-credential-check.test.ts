@@ -183,7 +183,7 @@ async function seedActor(): Promise<void> {
       )
       .bind("mem_provider_credential_installation", ORGANIZATION_ID, USER_ID),
   ]);
-  await seedProject(PROJECT_ID, "provider-credential-installation", "sandbox");
+  await seedProject(PROJECT_ID, "default-sandbox", "sandbox");
 }
 
 async function seedPendingInstallation(
@@ -1434,7 +1434,7 @@ describe("exact Custody Connection installation routes", () => {
 
   it("allows the same Privy account fingerprint in another Project", async () => {
     const otherProjectId = "prj_provider_credential_installation_other";
-    await seedProject(otherProjectId, "provider-credential-installation-other", "production");
+    await seedProject(otherProjectId, "default-production", "production");
     await seedActiveFingerprintConnection({
       projectId: otherProjectId,
       credentialId: "pcred_existing_privy_other_project",
@@ -1511,7 +1511,7 @@ describe("exact Custody Connection installation routes", () => {
   it("does not enumerate Connections across Projects or before authentication", async () => {
     const otherProjectId = "prj_provider_credential_installation_hidden";
     const otherConnectionId = "cconn_provider_credential_installation_hidden";
-    await seedProject(otherProjectId, "provider-credential-installation-hidden", "production");
+    await seedProject(otherProjectId, "default-production", "production");
     await seedPendingInstallation({
       projectId: otherProjectId,
       credentialId: "pcred_provider_credential_installation_hidden",

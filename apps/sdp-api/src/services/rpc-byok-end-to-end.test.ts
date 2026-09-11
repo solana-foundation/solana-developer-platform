@@ -260,6 +260,25 @@ afterAll(async () => {
 });
 
 describe("BYOK end to end", () => {
+  it("stores nothing when the provider rejects the key on save", async () => {
+    rejectNextProbe = true;
+    await expect(
+      submitRpcConnection(serviceContext(PROJECT_ID_2), {
+        provider: "helius",
+        scope: "project",
+        credentialLabel: "Never stored",
+        endpointUrl: endpointBase,
+        apiKey: "rejected-key-1111",
+      })
+    ).rejects.toThrow(/rejected this connection/i);
+
+    const stored = await getDb(appEnv)
+      .prepare("SELECT COUNT(*)::int AS count FROM provider_credentials WHERE label = ?")
+      .bind("Never stored")
+      .first<{ count: number }>();
+    expect(stored?.count).toBe(0);
+  });
+
   it("checks the key on save and stores a connection that is already live", async () => {
     // Saving probes (HOO-1228), so the endpoint has to be the stand-in server
     // rather than a vendor host nobody can reach from a test.
@@ -284,27 +303,6 @@ describe("BYOK end to end", () => {
     expect(seenKeys).toEqual(["submitted-key-9999"]);
     // The response must never be able to carry the key back out.
     expect(JSON.stringify(submitted)).not.toContain("submitted-key-9999");
-  });
-
-  it("stores nothing when the provider rejects the key on save", async () => {
-    // The stand-in answers 401 for this one pass, which is what a wrong key
-    // looks like. Nothing may be written on the way out.
-    rejectNextProbe = true;
-    await expect(
-      submitRpcConnection(serviceContext(PROJECT_ID_2), {
-        provider: "helius",
-        scope: "project",
-        credentialLabel: "Never stored",
-        endpointUrl: endpointBase,
-        apiKey: "rejected-key-1111",
-      })
-    ).rejects.toThrow(/rejected this connection/i);
-
-    const stored = await getDb(appEnv)
-      .prepare("SELECT COUNT(*)::int AS count FROM provider_credentials WHERE label = ?")
-      .bind("Never stored")
-      .first<{ count: number }>();
-    expect(stored?.count).toBe(0);
   });
 
   it("refuses a second key for the same provider, because that is a rotation", async () => {

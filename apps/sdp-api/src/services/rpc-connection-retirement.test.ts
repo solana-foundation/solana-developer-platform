@@ -230,6 +230,12 @@ describe("BYOK RPC secret retirement", () => {
     // provisional obligation must have been cancelled by the same commit.
     expect(await retirementRows("projects/sdp-test/secrets/pcred_%")).toEqual([]);
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
+    await getDb(appEnv).execute(`DELETE FROM rpc_connections WHERE project_id = ?`, [
+      PROJECT_COMMITTED,
+    ]);
+    await getDb(appEnv).execute(`DELETE FROM provider_credentials WHERE project_id = ?`, [
+      PROJECT_COMMITTED,
+    ]);
   });
 
   it("withholds a provisional obligation from the sweeper while the create is in flight", async () => {
@@ -360,7 +366,7 @@ describe("BYOK RPC secret retirement", () => {
     retirementQueueControl.failRecordRetirement = true;
 
     await expect(
-      submitRpcConnection(serviceContext(), submitInput("Unrecordable"))
+      submitRpcConnection(serviceContext(PROJECT_COMMITTED), submitInput("Unrecordable"))
     ).rejects.toThrow(/durably reserved/i);
 
     // Fail closed with a clean slate: the obligation is reserved before the
@@ -383,9 +389,9 @@ describe("BYOK RPC secret retirement", () => {
     gcpMock.destroyVersion.mockRejectedValue(new Error("secret manager unavailable"));
     const logError = vi.spyOn(getLogger(), "error");
 
-    await expect(submitRpcConnection(serviceContext(), submitInput("Leaked"))).rejects.toThrow(
-      /durably reserved/i
-    );
+    await expect(
+      submitRpcConnection(serviceContext(PROJECT_COMMITTED), submitInput("Leaked"))
+    ).rejects.toThrow(/durably reserved/i);
 
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalledWith(
@@ -453,7 +459,9 @@ describe("BYOK RPC secret retirement", () => {
       .mockRejectedValue(new Error("credential insert failed"));
 
     try {
-      await expect(submitRpcConnection(serviceContext(), submitInput("Doomed"))).rejects.toThrow();
+      await expect(
+        submitRpcConnection(serviceContext(PROJECT_COMMITTED), submitInput("Doomed"))
+      ).rejects.toThrow();
     } finally {
       insertCredential.mockRestore();
     }

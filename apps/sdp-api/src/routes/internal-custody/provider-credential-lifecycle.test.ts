@@ -84,7 +84,7 @@ async function seedProject(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
        VALUES (?, ?, ?, ?, ?, 'active', ?)`
     )
-    .bind(id, ORGANIZATION_ID, `Lifecycle ${suffix}`, `lifecycle-${suffix}`, environment, USER_ID)
+    .bind(id, ORGANIZATION_ID, `Lifecycle ${suffix}`, suffix, environment, USER_ID)
     .run();
   if (member) {
     await db
@@ -142,8 +142,8 @@ async function seedActor(secondProjectMember = true): Promise<void> {
       )
       .bind("mem_provider_credential_lifecycle", ORGANIZATION_ID, USER_ID),
   ]);
-  await seedProject(PROJECT_A_ID, "a", "sandbox");
-  await seedProject(PROJECT_B_ID, "b", "production", secondProjectMember);
+  await seedProject(PROJECT_A_ID, "default-sandbox", "sandbox");
+  await seedProject(PROJECT_B_ID, "default-production", "production", secondProjectMember);
 }
 
 async function seedActiveSharedCredential(): Promise<void> {

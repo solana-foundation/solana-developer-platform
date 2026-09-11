@@ -136,13 +136,7 @@ async function seedActor(): Promise<void> {
            (id, organization_id, name, slug, environment, status, created_by)
          VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
       )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        "Provider Credential Submit",
-        "provider-credential-submit",
-        USER_ID
-      ),
+      .bind(PROJECT_ID, ORGANIZATION_ID, "Provider Credential Submit", "default-sandbox", USER_ID),
     db
       .prepare(
         `INSERT INTO project_members (id, project_id, user_id, role)

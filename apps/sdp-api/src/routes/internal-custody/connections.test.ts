@@ -92,7 +92,7 @@ async function seedScope(): Promise<void> {
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
          VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
       )
-      .bind(PROJECT.id, ORG.id, "Connections Read", PROJECT.slug, USER.id),
+      .bind(PROJECT.id, ORG.id, "Connections Read", "default-sandbox", USER.id),
     db
       .prepare(
         `INSERT INTO project_members (id, project_id, user_id, role)

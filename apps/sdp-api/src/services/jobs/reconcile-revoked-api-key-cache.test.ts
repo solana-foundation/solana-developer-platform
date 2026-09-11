@@ -110,6 +110,7 @@ describe("reconcileRevokedApiKeyCache", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await clearKVStores(env);
     corruptHash = await hashString(CORRUPT_KEY.raw, env.API_KEY_PEPPER);
     staleHash = await hashString(STALE_KEY.raw, env.API_KEY_PEPPER);
 

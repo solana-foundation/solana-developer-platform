@@ -188,13 +188,14 @@ async function seedProject(input: {
   organizationId: string;
   name: string;
   slug: string;
+  environment: "sandbox" | "production";
 }) {
   await getDb(env)
     .prepare(
       `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+       VALUES (?, ?, ?, ?, ?, 'active', ?)`
     )
-    .bind(input.id, input.organizationId, input.name, input.slug, TEST_USER.id)
+    .bind(input.id, input.organizationId, input.name, input.slug, input.environment, TEST_USER.id)
     .run();
 }
 
@@ -1962,6 +1963,7 @@ describe("Issuance Routes", () => {
             organizationId,
             name: "Other project",
             slug: "other-project",
+            environment: organizationId === TEST_ORG.id ? "production" : "sandbox",
           });
           await getDb(env)
             .prepare(
@@ -2361,12 +2363,14 @@ describe("Issuance Routes", () => {
         organizationId: TEST_ORG.id,
         name: "Other Project",
         slug: "issuance-other-project",
+        environment: "production",
       });
       await seedProject({
         id: "prj_issuance_other_org",
         organizationId: "org_issuance_other",
         name: "Other Org Project",
         slug: "issuance-other-org-project",
+        environment: "sandbox",
       });
       const sameOrgOtherProjectToken = await seedIssuedToken({
         id: "tok_other_project_transactions",
@@ -2897,6 +2901,7 @@ describe("Issuance Routes", () => {
         organizationId: foreignOrgId,
         name: "Foreign issuance project",
         slug: "foreign-issuance-project",
+        environment: "sandbox",
       });
       await getDb(env).batch([
         getDb(env)

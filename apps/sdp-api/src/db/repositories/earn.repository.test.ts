@@ -1179,7 +1179,7 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      const { total } = await listPrograms();
+      const { total } = await listPrograms({ provider: "ground" });
       expect(total).toBe(2);
     });
 
