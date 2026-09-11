@@ -97,8 +97,6 @@ const dvpTradeTermsFields = {
 export const createDvpTradeSchema = z.object({
   partyA: dvpPartySchema,
   partyB: dvpPartySchema,
-  /** Fee/rent signer; omitted means the settlement wallet pays. Not a term of the trade. */
-  payerWalletId: z.string().min(1).nullish(),
   ...dvpTradeTermsFields,
 });
 
