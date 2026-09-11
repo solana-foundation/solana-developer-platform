@@ -14,13 +14,16 @@ import type { DvpTradeStatus } from "@/db/repositories";
 import type { DvpCloseResolution } from "./closing-transaction";
 
 /** One escrow, as read. `exists: false` means the account is not on chain. */
-export interface DvpLegObservation {
-  exists: boolean;
-  /** Raw base units. NOT a UI amount — scaling extensions never touch this. */
-  amount: bigint;
-  /** A frozen escrow bounces incoming transfers. Blocked, not merely unpaid. */
-  frozen: boolean;
-}
+export type DvpLegObservation =
+  | { exists: false; tampered: false }
+  | { exists: false; tampered: true }
+  | {
+      exists: true;
+      /** Raw base units. NOT a UI amount — scaling extensions never touch this. */
+      amount: bigint;
+      /** A frozen escrow bounces incoming transfers. Blocked, not merely unpaid. */
+      frozen: boolean;
+    };
 
 export interface DvpTradeObservation {
   /** Whether the SwapDvp account is still on chain and passed verification. */

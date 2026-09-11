@@ -103,6 +103,9 @@ const dvpTradeLegSchema = z
   .object({
     party: dvpTradePartySchema,
     mint: z.string().openapi({ description: "Mint delivered on this leg." }),
+    name: z.string().nullable().openapi({
+      description: "The mint's human name, or null when it carries no metadata.",
+    }),
     imageUrl: z.string().url().nullable().openapi({
       description:
         "Image of the leg's mint when it is a token this organization issued through SDP; null otherwise.",
@@ -222,6 +225,9 @@ const dvpInboundLegSchema = z
     }),
     symbol: z.string().nullable().openapi({
       description: "The mint's symbol, or null when it carries no metadata.",
+    }),
+    name: z.string().nullable().openapi({
+      description: "The mint's human name, or null when it carries no metadata.",
     }),
     imageUrl: z.string().url().nullable().openapi({
       description:

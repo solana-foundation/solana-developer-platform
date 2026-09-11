@@ -24,10 +24,12 @@ import { readDvpTradeObservation } from "@/services/dvp/read-chain";
 import type { Env } from "@/types/env";
 
 /**
- * Trades per tick. Each one costs a trade-account read plus a two-account batch,
- * so this is the RPC budget for the sweep, not a database concern.
+ * Trades per tick. Each costs one batch containing the trade and both escrows;
+ * vanished trades with unknown closes can additionally scan bounded history.
  */
 const BATCH_SIZE = 64;
+const CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES = 360;
+const MILLISECONDS_PER_MINUTE = 60_000;
 
 /**
  * Reconciles open DvP trades against the chain.
@@ -180,16 +182,44 @@ async function reconcileTrade(
     },
     blockHeight
   );
-  // Two RPC reads per vanished trade, so only while the close is still unknown:
-  // once a close signature is on the row AND the status names the close, the
-  // answer is final. A `closed_unknown` row keeps decoding for its week in the
-  // sweep, because the decode is what lifts it to settled/cancelled/rejected.
-  observation.closeResolution =
-    observation.tradeAccountExists || closeIsKnown(trade)
-      ? null
-      : await resolveDvpClose(rpc, trade.swapDvp, trade.id, trade.createSignature);
+  // A vanished trade with an unknown close can cost up to 10 × 100 signature
+  // reads plus one transaction read per successful entry. The scan is bounded
+  // by the create signature, the created-at floor, and persisted backoff.
+  const now = Date.now();
+  if (
+    !observation.tradeAccountExists &&
+    !closeIsKnown(trade) &&
+    (trade.closeResolutionAfter === null || Date.parse(trade.closeResolutionAfter) <= now)
+  ) {
+    const lookup = await resolveDvpClose(
+      rpc,
+      trade.swapDvp,
+      trade.createSignature,
+      trade.createdAt
+    );
+    if (lookup.kind === "resolved") {
+      observation.closeResolution = lookup;
+    } else if (lookup.kind === "capped") {
+      const attempts = trade.closeResolutionAttempts + 1;
+      const delayMinutes = Math.min(
+        2 ** trade.closeResolutionAttempts,
+        CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES
+      );
+      const after = new Date(now + delayMinutes * MILLISECONDS_PER_MINUTE).toISOString();
+      await repository.deferCloseResolution({
+        id: trade.id,
+        expectedStatus: trade.status,
+        attempts,
+        after,
+      });
+      getLogger().warn(
+        { trade_id: trade.id, attempts, after },
+        "dvp reconcile: deferred capped close resolution"
+      );
+    }
+  }
 
-  const derived = deriveDvpTradeState(observation, trade, Date.now());
+  const derived = deriveDvpTradeState(observation, trade, now);
 
   const updated = await repository.recordObservation({
     id: trade.id,
@@ -226,9 +256,9 @@ async function reconcileTrade(
     getLogger().warn(
       {
         tradeId: trade.id,
-        escrowA: observation.legA.amount.toString(),
+        escrowA: observation.legA.exists ? observation.legA.amount.toString() : null,
         targetA: trade.amountA,
-        escrowB: observation.legB.amount.toString(),
+        escrowB: observation.legB.exists ? observation.legB.amount.toString() : null,
         targetB: trade.amountB,
       },
       "dvp reconcile: escrow holds more than its target; settle refunds the surplus, which can revert the whole settlement on a transfer-hook mint"

@@ -21,6 +21,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import {
   createPostgresDvpLegFundingClaimRepository,
   type DvpLegFundingClaimRepository,
+  toDvpLegFundingClaim,
 } from "./dvp-leg-funding-claim.repository";
 
 const AGENT_ORG = "org_claim_agent";
@@ -352,5 +353,32 @@ describe("DvpLegFundingClaimRepository", () => {
 
     expect(seenByOther).toHaveLength(0);
     expect(seenByOwner).toHaveLength(1);
+  });
+});
+
+// Postgres refuses a value of the wrong type, so a corrupt row is built by
+// hand and pushed through the mapper directly.
+describe("toDvpLegFundingClaim", () => {
+  const row: Record<string, unknown> = {
+    trade_id: TRADE_ID,
+    side: "a",
+    organization_id: PARTY_A_ORG,
+    project_id: "prj_claim",
+    custody_wallet_id: walletId(PARTY_A_ORG),
+    signature: "sig",
+    expiry_height: "1000",
+    funding_tx: null,
+  };
+
+  it("maps a well-typed row", () => {
+    expect(toDvpLegFundingClaim(row)).toMatchObject({ side: "a", expiryHeight: "1000" });
+  });
+
+  it("refuses an expiry height that is not a string", () => {
+    expect(() => toDvpLegFundingClaim({ ...row, expiry_height: 1000 })).toThrow(/expiry_height/);
+  });
+
+  it("refuses a side outside a and b", () => {
+    expect(() => toDvpLegFundingClaim({ ...row, side: "c" })).toThrow(/side/);
   });
 });

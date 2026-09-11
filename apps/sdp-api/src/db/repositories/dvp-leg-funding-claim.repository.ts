@@ -87,7 +87,16 @@ export interface DvpLegFundingClaimRepository {
   deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
 }
 
-function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
+/**
+ * Maps a raw `dvp_leg_funding_claims` row onto the repository shape, asserting
+ * every column's type. Exported so the assertions can be tested with hand-built
+ * rows: Postgres will not store a value of the wrong type, so a corrupt row
+ * cannot be produced through the database itself.
+ *
+ * @param row - One claim row as the driver returns it.
+ * @returns The typed claim.
+ */
+export function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
   const side = assertRepositoryString(row.side, "DvP leg funding claim", "side");
   if (side !== "a" && side !== "b") {
     throw internalError(`DvP leg funding claim side is invalid: ${side}`);

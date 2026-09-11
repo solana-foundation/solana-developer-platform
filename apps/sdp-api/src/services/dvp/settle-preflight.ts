@@ -121,9 +121,14 @@ export async function findMissingSettleAtas(
   const missing = new Set<keyof DvpSettleAtas>();
   for (const [index, key] of keys.entries()) {
     const account = accounts[index];
-    if (!account.exists || account.programAddress !== expected[key].tokenProgram) {
+    if (!account.exists) {
       missing.add(key);
       continue;
+    }
+    if (account.programAddress !== expected[key].tokenProgram) {
+      throw badRequest(
+        `DvP token account ${account.address} is owned by ${account.programAddress}, not the leg's token program ${expected[key].tokenProgram}`
+      );
     }
     let token: ReturnType<ReturnType<typeof getTokenDecoder>["decode"]>;
     try {
@@ -175,14 +180,52 @@ export async function findSettlementFundingShortfall(
   parties: Pick<DvpSettleParties, "mintA" | "mintB" | "tokenProgramA" | "tokenProgramB">,
   accountsToCreate: ReadonlySet<keyof DvpSettleAtas>
 ): Promise<{ balance: bigint; required: bigint; shortfall: bigint }> {
-  const mints = await fetchEncodedAccounts(rpc, [parties.mintA, parties.mintB]);
-  const sizes = mints.map((mint, index) => {
-    const tokenProgram = index === 0 ? parties.tokenProgramA : parties.tokenProgramB;
+  const balance = (await rpc.getBalance(authority, { commitment: "confirmed" }).send()).value;
+  if (accountsToCreate.size === 0) {
+    return {
+      balance,
+      required: FEE_ALLOWANCE_LAMPORTS,
+      shortfall: balance >= FEE_ALLOWANCE_LAMPORTS ? 0n : FEE_ALLOWANCE_LAMPORTS - balance,
+    };
+  }
+
+  const needsMintA = [...accountsToCreate].some(
+    (key) => key === "userBDestinationAtaA" || key === "userAAtaA"
+  );
+  const needsMintB = [...accountsToCreate].some(
+    (key) => key === "userADestinationAtaB" || key === "userBAtaB"
+  );
+  const requestedMints: Array<{
+    side: "a" | "b";
+    mint: Address;
+    tokenProgram: Address;
+  }> = [];
+  if (needsMintA) {
+    requestedMints.push({
+      side: "a",
+      mint: parties.mintA,
+      tokenProgram: parties.tokenProgramA,
+    });
+  }
+  if (needsMintB) {
+    requestedMints.push({
+      side: "b",
+      mint: parties.mintB,
+      tokenProgram: parties.tokenProgramB,
+    });
+  }
+  const mints = await fetchEncodedAccounts(
+    rpc,
+    requestedMints.map((requested) => requested.mint)
+  );
+  const sizedMints = mints.map((mint, index) => {
+    const requested = requestedMints[index];
+    const tokenProgram = requested.tokenProgram;
     if (!mint.exists || mint.programAddress !== tokenProgram) {
       throw badRequest(`DvP mint ${mint.address} cannot be read from its token program`);
     }
     if (tokenProgram !== TOKEN_2022_PROGRAM_ADDRESS) {
-      return 165;
+      return { side: requested.side, size: 165 };
     }
     let decoded: ReturnType<ReturnType<typeof getMintDecoder>["decode"]>;
     try {
@@ -199,19 +242,25 @@ export async function findSettlementFundingShortfall(
         accountExtensions.push(extension("PausableAccount", {}));
       }
     }
-    return getTokenSize(accountExtensions);
+    return { side: requested.side, size: getTokenSize(accountExtensions) };
   });
-  const rent = await Promise.all(
-    [...accountsToCreate].map((key) =>
-      getMinimumBalanceForRentExemption(
-        rpc,
-        key === "userADestinationAtaB" || key === "userBAtaB" ? sizes[1] : sizes[0]
-      )
-    )
+  const accountSizes = sizedMints.flatMap(({ side, size }) => {
+    const count = [...accountsToCreate].filter((key) =>
+      side === "a"
+        ? key === "userBDestinationAtaA" || key === "userAAtaA"
+        : key === "userADestinationAtaB" || key === "userBAtaB"
+    ).length;
+    return Array.from({ length: count }, () => size);
+  });
+  const distinctSizes = [...new Set(accountSizes)];
+  const rentBySize = await Promise.all(
+    distinctSizes.map((size) => getMinimumBalanceForRentExemption(rpc, size))
   );
-  const required = rent.reduce((sum, amount) => sum + amount, FEE_ALLOWANCE_LAMPORTS);
-  // A missing account reads as 0n, which is exactly the case this check exists
-  // for: a freshly provisioned authority holds nothing.
-  const balance = (await rpc.getBalance(authority, { commitment: "confirmed" }).send()).value;
+  const rent = rentBySize.reduce(
+    (total, amount, index) =>
+      total + amount * BigInt(accountSizes.filter((size) => size === distinctSizes[index]).length),
+    0n
+  );
+  const required = FEE_ALLOWANCE_LAMPORTS + rent;
   return { balance, required, shortfall: balance >= required ? 0n : required - balance };
 }

@@ -63,10 +63,15 @@ export async function observeDvpTradeNow(
       },
       blockHeight
     );
-    observation.closeResolution =
-      observation.tradeAccountExists || closeIsKnown(trade)
-        ? null
-        : await resolveDvpClose(rpc, trade.swapDvp, trade.id, trade.createSignature);
+    if (!observation.tradeAccountExists && !closeIsKnown(trade)) {
+      const lookup = await resolveDvpClose(
+        rpc,
+        trade.swapDvp,
+        trade.createSignature,
+        trade.createdAt
+      );
+      observation.closeResolution = lookup.kind === "resolved" ? lookup : null;
+    }
 
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
@@ -135,10 +140,15 @@ export async function observeDvpTradeWithoutRecording(
       },
       blockHeight
     );
-    observation.closeResolution =
-      observation.tradeAccountExists || closeIsKnown(trade)
-        ? null
-        : await resolveDvpClose(rpc, trade.swapDvp, trade.id, trade.createSignature);
+    if (!observation.tradeAccountExists && !closeIsKnown(trade)) {
+      const lookup = await resolveDvpClose(
+        rpc,
+        trade.swapDvp,
+        trade.createSignature,
+        trade.createdAt
+      );
+      observation.closeResolution = lookup.kind === "resolved" ? lookup : null;
+    }
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
     return {

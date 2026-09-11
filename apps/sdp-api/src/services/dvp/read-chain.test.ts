@@ -10,7 +10,7 @@
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import { AccountState, getTokenEncoder } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -179,13 +179,13 @@ describe("readDvpTradeObservation", () => {
   it("refuses to read an escrow owned by another program as a balance", async () => {
     fetchEncodedAccounts.mockResolvedValue([
       tradeAccount(),
-      tokenAccount(ESCROW_A, { amount: 9999n }, "11111111111111111111111111111111" as Address),
+      tokenAccount(ESCROW_A, { amount: 9999n }, address("11111111111111111111111111111111")),
       missing(ESCROW_B),
     ]);
 
     const observation = await readDvpTradeObservation(rpc, SWAP, legs, 500n);
 
-    expect(observation.legA).toEqual({ exists: false, amount: 0n, frozen: false });
+    expect(observation.legA).toEqual({ exists: false, tampered: true });
   });
 
   it("refuses an escrow token account for the wrong mint", async () => {
@@ -197,7 +197,7 @@ describe("readDvpTradeObservation", () => {
 
     const observation = await readDvpTradeObservation(rpc, SWAP, legs, 500n);
 
-    expect(observation.legA).toEqual({ exists: false, amount: 0n, frozen: false });
+    expect(observation.legA).toEqual({ exists: false, tampered: true });
   });
 
   it("refuses an escrow token account owned by another address", async () => {
@@ -209,7 +209,7 @@ describe("readDvpTradeObservation", () => {
 
     const observation = await readDvpTradeObservation(rpc, SWAP, legs, 500n);
 
-    expect(observation.legA).toEqual({ exists: false, amount: 0n, frozen: false });
+    expect(observation.legA).toEqual({ exists: false, tampered: true });
   });
 });
 
@@ -222,7 +222,7 @@ describe("readEscrowState", () => {
     fetchEncodedAccounts.mockResolvedValue([tokenAccount(ESCROW_A, { amount: 400n })]);
 
     await expect(
-      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP)
+      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP, "dvp_test")
     ).resolves.toEqual({
       amount: 400n,
       frozen: false,
@@ -233,7 +233,17 @@ describe("readEscrowState", () => {
     fetchEncodedAccounts.mockResolvedValue([missing(ESCROW_A)]);
 
     await expect(
-      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP)
+      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP, "dvp_test")
     ).resolves.toBeNull();
+  });
+
+  it("throws a conflict for a tampered escrow", async () => {
+    fetchEncodedAccounts.mockResolvedValue([
+      tokenAccount(ESCROW_A, { amount: 400n }, address("11111111111111111111111111111111")),
+    ]);
+
+    await expect(
+      readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP, "dvp_test")
+    ).rejects.toThrow(/owner\/mint\/program mismatch/);
   });
 });

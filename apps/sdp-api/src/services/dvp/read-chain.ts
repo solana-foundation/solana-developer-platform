@@ -13,6 +13,7 @@ import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
+import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { DvpLegObservation, DvpTradeObservation } from "./observe";
 
@@ -31,7 +32,8 @@ export interface DvpLegAddress {
   mint: Address;
 }
 
-const MISSING: DvpLegObservation = { exists: false, amount: 0n, frozen: false };
+const MISSING: DvpLegObservation = { exists: false, tampered: false };
+const TAMPERED: DvpLegObservation = { exists: false, tampered: true };
 
 /**
  * Decodes one escrow account, or reports it missing.
@@ -52,16 +54,16 @@ function readLeg(
   if (account.programAddress !== leg.tokenProgram) {
     getLogger().warn(
       { escrow: account.address, owner: account.programAddress, expected: leg.tokenProgram },
-      "dvp reconcile: escrow address is not owned by its token program"
+      "dvp read-chain: escrow address is not owned by its token program"
     );
-    return MISSING;
+    return TAMPERED;
   }
   if (account.data.length < TOKEN_ACCOUNT_MIN_SIZE) {
     getLogger().warn(
       { escrow: account.address, size: account.data.length },
-      "dvp reconcile: escrow account is too small to be a token account"
+      "dvp read-chain: escrow account is too small to be a token account"
     );
-    return MISSING;
+    return TAMPERED;
   }
 
   const token = getTokenDecoder().decode(account.data);
@@ -74,9 +76,9 @@ function readLeg(
         owner: token.owner,
         expectedOwner: swapDvp,
       },
-      "dvp reconcile: escrow token account does not match its trade leg"
+      "dvp read-chain: escrow token account does not match its trade leg"
     );
-    return MISSING;
+    return TAMPERED;
   }
   return {
     exists: true,
@@ -94,14 +96,26 @@ function readLeg(
  * reconciler's last sweep: that runs once a minute, so two funding requests
  * seconds apart would both believe the escrow was empty and between them
  * over-fund it.
+ *
+ * @param rpc - Solana RPC for the trade's cluster.
+ * @param leg - Expected escrow address, mint, and token program.
+ * @param swapDvp - Trade account that must own the escrow token account.
+ * @param tradeId - Stored trade id used in a tampering conflict.
+ * @returns The live balance, or null only when the account is genuinely absent.
  */
 export async function readEscrowState(
   rpc: SolanaRpc,
   leg: DvpLegAddress,
-  swapDvp: Address
+  swapDvp: Address,
+  tradeId: string
 ): Promise<{ amount: bigint; frozen: boolean } | null> {
   const [account] = await fetchEncodedAccounts(rpc, [leg.escrow]);
   const observed = readLeg(account, leg, swapDvp);
+  if (!observed.exists && observed.tampered) {
+    throw conflict(
+      `DvP trade ${tradeId}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+    );
+  }
   return observed.exists ? { amount: observed.amount, frozen: observed.frozen } : null;
 }
 

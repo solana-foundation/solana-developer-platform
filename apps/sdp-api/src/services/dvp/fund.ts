@@ -8,21 +8,24 @@ import {
   verifySwapDvpAccount,
 } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   type Address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
   getSignatureFromTransaction,
   getTransactionEncoder,
-  isSolanaError,
   pipe,
   type Signature,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
-import { findAssociatedTokenPda, getTransferCheckedInstruction } from "@solana-program/token-2022";
+import {
+  fetchMaybeToken,
+  findAssociatedTokenPda,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
@@ -33,6 +36,7 @@ import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-o
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import { readMintDecimals } from "./mints";
+import { preflightFailure } from "./preflight-failure";
 import { readDvpAccounts, readEscrowState } from "./read-chain";
 
 /** Statuses from which a leg can still be funded. */
@@ -79,7 +83,7 @@ export async function readDvpLegShortfall(
   side: DvpTradeSide
 ): Promise<bigint> {
   const leg = legOfSide(trade, side);
-  const state = await readEscrowState(solanaRpc.createRpc(env), leg, trade.swapDvp);
+  const state = await readEscrowState(solanaRpc.createRpc(env), leg, trade.swapDvp, trade.id);
   if (state === null) {
     throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
   }
@@ -251,6 +255,11 @@ export async function executeDvpFunding(
 
   const legObservation = side === "a" ? snapshot.legA : snapshot.legB;
   if (!legObservation.exists) {
+    if (legObservation.tampered) {
+      throw conflict(
+        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+      );
+    }
     throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
   }
   const escrowState = { amount: legObservation.amount, frozen: legObservation.frozen };
@@ -304,6 +313,20 @@ export async function executeDvpFunding(
     throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`);
   }
 
+  const sourceAccount = await fetchMaybeToken(rpc, source);
+  if (!sourceAccount.exists) {
+    throw badRequest(
+      `DvP trade ${trade.id}: wallet ${signer.address} holds no ${mint} token account, so it cannot fund this leg; nothing was sent`
+    );
+  }
+  if (sourceAccount.data.amount < outstanding) {
+    const sourceAmount = formatDecimalAmount(sourceAccount.data.amount, decimals);
+    const outstandingAmount = formatDecimalAmount(outstanding, decimals);
+    throw badRequest(
+      `DvP trade ${trade.id}: wallet ${signer.address} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`
+    );
+  }
+
   const instruction = getTransferCheckedInstruction(
     { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
     { programAddress: tokenProgram }
@@ -339,7 +362,7 @@ export async function executeDvpFunding(
   // deposit capped at the target, which is a program change, not an API one.
   // Aborting is the safe half of the trade-off: a refused top-up is retryable,
   // an over-funded escrow depends on the surplus-refund path working.
-  const recheck = await readEscrowState(rpc, plan.leg, trade.swapDvp);
+  const recheck = await readEscrowState(rpc, plan.leg, trade.swapDvp, trade.id);
   if (recheck === null) {
     throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
   }
@@ -382,10 +405,10 @@ export async function executeDvpFunding(
     // released and the leg funded again. Any other failure is ambiguous and
     // KEEPS the claim: releasing it would invite a second transfer on top of
     // one that may yet land.
-    if (
-      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
-    ) {
+    const mapped = preflightFailure(error, `DvP trade ${trade.id}: funding side ${side}`);
+    if (mapped !== null) {
       await plan.release(signature);
+      throw mapped;
     }
     throw error;
   }

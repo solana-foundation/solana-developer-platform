@@ -33,6 +33,8 @@ interface DvpInboundLegResponse {
   amount: string;
   decimals: number | null;
   symbol: string | null;
+  /** The mint's human name, or null when it carries no metadata. */
+  name: string | null;
   /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
   imageUrl: string | null;
   /** The address to pay. The whole of this party's integration. */
@@ -113,6 +115,7 @@ export function toDvpInboundResponse(
         amount: trade.amountA,
         decimals: trade.decimalsA,
         symbol: trade.symbolA,
+        name: trade.nameA,
         imageUrl: mintAImage === undefined ? null : mintAImage,
         escrow: trade.escrowA,
         settlementDestination: trade.userASettlementDestination,
@@ -127,6 +130,7 @@ export function toDvpInboundResponse(
         amount: trade.amountB,
         decimals: trade.decimalsB,
         symbol: trade.symbolB,
+        name: trade.nameB,
         imageUrl: mintBImage === undefined ? null : mintBImage,
         escrow: trade.escrowB,
         settlementDestination: trade.userBSettlementDestination,

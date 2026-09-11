@@ -71,15 +71,15 @@ dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"),
 
 // Funding ONE side — creator and party funding are the same operation: the
 // right to fund side X is holding a custody wallet whose public key equals
-// that side's party address. The gate sits after `validateBody` (like every
-// body-validated policy-gated route), so a malformed body is a 400 from the
-// schema before any custody or RPC access.
+// that side's party address. Validation precedes policy, and quota follows it:
+// malformed bodies, approval-pending 202s, and policy refusals must not consume
+// the execution quota reserved for an approved attempt.
 dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(fundDvpTradeSchema),
-  meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: (c) => extractDvpFundPolicyCandidate(c) }),
+  meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   fundTrade
 );
 // Settle and cancel are the only two actions the settlement authority can take,
@@ -91,15 +91,15 @@ dvp.post(
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),
-  meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle") }),
+  meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
   requirePermissions("payments:write", "wallets:read"),
-  meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "cancel") }),
+  meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );
 

@@ -9,10 +9,15 @@
  */
 
 import { getSettleDvpInstruction } from "@sdp/dvp";
-import { address } from "@solana/kit";
+import {
+  address,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+} from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import type { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -22,12 +27,14 @@ const getMinimumBalanceForRentExemption = vi.hoisted(() => vi.fn());
 const getBalanceValue = vi.hoisted(() => vi.fn());
 const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
+const readDvpAccounts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   beginApprovedWalletOperationEffect,
 }));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
+vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({
     getBalance: () => ({
@@ -97,6 +104,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     decimalsB: 6,
     symbolA: "ATD",
     symbolB: "USDC",
+    nameA: "Acme Treasury Debt",
+    nameB: "USD Coin",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",
@@ -115,6 +124,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
+    closeResolutionAttempts: 0,
+    closeResolutionAfter: null,
     escrowAAmount: "1000",
     escrowBAmount: "2000",
     escrowAPeakAmount: "1000",
@@ -129,12 +140,34 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 
 const context = { env } as never;
 
+function preflightError(): SolanaError {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: ["Program log: Error: IncorrectProgramId"],
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+  });
+}
+
 describe("closeDvpTrade", () => {
   /** The fee payer, which is what the funding pre-flight actually reads. */
   let feePayer = "";
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    readDvpAccounts.mockResolvedValue({
+      trade: { exists: true, address: trade().swapDvp },
+      legA: { exists: true, amount: 1000n, frozen: false },
+      legB: { exists: true, amount: 2000n, frozen: false },
+    });
     const signer = await generateKeyPairSigner();
     feePayer = signer.address;
     createOrgSignerForCustodyWallet.mockResolvedValue(signer);
@@ -166,6 +199,23 @@ describe("closeDvpTrade", () => {
     await closeDvpTrade(context, trade(), "settle");
 
     expect(order).toEqual(["fence", "send"]);
+  });
+
+  it("maps a preflight rejection to a transaction failure", async () => {
+    sendTransaction.mockRejectedValue(preflightError());
+
+    await expect(closeDvpTrade(context, trade(), "settle")).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+      statusCode: 400,
+      message: expect.stringContaining("IncorrectProgramId"),
+    } satisfies Partial<AppError>);
+  });
+
+  it("rethrows an ambiguous send error unchanged", async () => {
+    const error = new Error("socket hang up");
+    sendTransaction.mockRejectedValue(error);
+
+    await expect(closeDvpTrade(context, trade(), "settle")).rejects.toBe(error);
   });
 
   it("refuses to settle a trade that is already closed", async () => {

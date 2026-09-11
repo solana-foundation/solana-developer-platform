@@ -69,6 +69,7 @@ interface LegInput {
   observedAmount: string | null;
   decimals: number | null;
   symbol: string | null;
+  name: string | null;
   imageUrl: string | null;
   frozen: boolean | null;
   outcome: ReturnType<typeof deriveDvpLegOutcome>;
@@ -198,6 +199,8 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     decimals: leg.decimals,
     /** The mint's symbol, or null when it carries no metadata. Never invented. */
     symbol: leg.symbol,
+    /** The mint's human name, or null when it carries no metadata. Never invented. */
+    name: leg.name,
     /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
     imageUrl: leg.imageUrl,
     /** Pay this address to fund the leg. */
@@ -247,6 +250,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           observedAmount: row.escrowAAmount,
           decimals: row.decimalsA,
           symbol: row.symbolA,
+          name: row.nameA,
           imageUrl: mintAImage === undefined ? null : mintAImage,
           frozen: row.escrowAFrozen,
           outcome: deriveDvpLegOutcome(row, "a"),
@@ -269,6 +273,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           observedAmount: row.escrowBAmount,
           decimals: row.decimalsB,
           symbol: row.symbolB,
+          name: row.nameB,
           imageUrl: mintBImage === undefined ? null : mintBImage,
           frozen: row.escrowBFrozen,
           outcome: deriveDvpLegOutcome(row, "b"),

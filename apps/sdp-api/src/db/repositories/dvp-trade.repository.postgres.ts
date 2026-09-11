@@ -3,7 +3,7 @@ import { type Address, address, type Signature, signature } from "@solana/kit";
 import type { AppDb } from "@/db";
 import type { DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
-import { assertRepositoryString } from "./assertions";
+import { assertRepositoryNullableString, assertRepositoryString } from "./assertions";
 import type {
   DvpTradeInsert,
   DvpTradeListFilters,
@@ -26,6 +26,13 @@ function assertString(value: unknown, field: string): string {
   return assertRepositoryString(value, "DvP trade", field);
 }
 
+function assertInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw internalError(`DvP trade ${field} is invalid`);
+  }
+  return value;
+}
+
 /**
  * Validates a status read from the open-text database column.
  *
@@ -46,7 +53,16 @@ function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
 }
 
-function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
+/**
+ * Maps a raw `dvp_trades` row onto the repository shape, asserting every
+ * column's type. Exported so the assertions can be tested with hand-built rows:
+ * Postgres will not store a value of the wrong type, so a corrupt row cannot be
+ * produced through the database itself.
+ *
+ * @param row - One `dvp_trades` row as the driver returns it.
+ * @returns The typed trade row.
+ */
+export function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
   return {
     id: assertString(row.id, "id"),
     organizationId: assertString(row.organization_id, "organization_id"),
@@ -65,8 +81,19 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
     decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
     closeSignature: typeof row.close_signature === "string" ? signature(row.close_signature) : null,
+    closeResolutionAttempts: assertInteger(
+      row.close_resolution_attempts,
+      "close_resolution_attempts"
+    ),
+    closeResolutionAfter: assertRepositoryNullableString(
+      row.close_resolution_after,
+      "DvP trade",
+      "close_resolution_after"
+    ),
     symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
     symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
+    nameA: typeof row.name_a === "string" ? row.name_a : null,
+    nameB: typeof row.name_b === "string" ? row.name_b : null,
     tokenProgramB: address(assertString(row.token_program_b, "token_program_b")),
 
     amountA: assertString(row.amount_a, "amount_a"),
@@ -119,13 +146,14 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
 const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
          token_program_a, token_program_b,
-         decimals_a, decimals_b, symbol_a, symbol_b,
+         decimals_a, decimals_b, symbol_a, symbol_b, name_a, name_b,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
          status, observed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
+         close_resolution_attempts, close_resolution_after,
          escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
          escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
@@ -170,14 +198,14 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               id, organization_id, project_id, swap_dvp,
               settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
               token_program_a, token_program_b,
-              decimals_a, decimals_b, symbol_a, symbol_b,
+              decimals_a, decimals_b, symbol_a, symbol_b, name_a, name_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
               idempotency_key, idempotency_fingerprint,
               create_signature, create_last_valid_block_height
             ) VALUES (
-              ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
               ?, ?, ?, ?,
@@ -206,6 +234,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         row.decimalsB,
         row.symbolA,
         row.symbolB,
+        row.nameA,
+        row.nameB,
         row.amountA,
         row.amountB,
         row.expiryTimestamp,
@@ -330,6 +360,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   escrow_a_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
                   escrow_b_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
                   close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
+                  close_resolution_attempts = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN 0 ELSE close_resolution_attempts END,
+                  close_resolution_after = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN NULL ELSE close_resolution_after END,
                   closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN sdp_iso_now() ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
@@ -349,6 +381,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.escrowBAmount,
           input.escrowBAmount,
           input.closeSignature,
+          input.closeSignature,
+          input.status,
+          input.closeSignature,
+          input.status,
           input.status,
           input.observedAt,
           input.id,
@@ -356,6 +392,21 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         )
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
+    },
+
+    async deferCloseResolution(input) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET close_resolution_attempts = ?,
+                  close_resolution_after = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND status = ?
+            RETURNING id`
+        )
+        .bind(input.attempts, input.after, input.id, input.expectedStatus)
+        .first<Record<string, unknown>>();
+      return row !== null && row !== undefined;
     },
 
     async getById(scope: DvpTradeScope, id: string) {

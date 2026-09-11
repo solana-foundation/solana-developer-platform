@@ -25,10 +25,12 @@ import {
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
-import { badRequest } from "@/lib/errors";
+import { badRequest, conflict } from "@/lib/errors";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+import { preflightFailure } from "./preflight-failure";
+import { readDvpAccounts } from "./read-chain";
 import {
   buildCancelInstruction,
   buildMissingAtaInstructions,
@@ -120,6 +122,18 @@ export async function closeDvpTrade(
   });
 
   const rpc = solanaRpc.createRpc(env);
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
+    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+  });
+  if (
+    (!snapshot.legA.exists && snapshot.legA.tampered) ||
+    (!snapshot.legB.exists && snapshot.legB.tampered)
+  ) {
+    throw conflict(
+      `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+    );
+  }
   const missing = await resolveMissingAtas(rpc, atas, trade, action);
 
   // Before a signature is spent. The settlement authority pays the fee and the
@@ -156,7 +170,16 @@ export async function closeDvpTrade(
   // which is exactly what this fence records.
   await beginApprovedWalletOperationEffect(c);
 
-  await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+  try {
+    await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+  } catch (error) {
+    const what = action === "settle" ? "settlement" : "cancellation";
+    const mapped = preflightFailure(error, `DvP trade ${trade.id}: ${what}`);
+    if (mapped !== null) {
+      throw mapped;
+    }
+    throw error;
+  }
 
   return {
     signature,

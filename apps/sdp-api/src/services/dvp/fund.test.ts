@@ -12,10 +12,17 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
-import { address, none, some } from "@solana/kit";
+import {
+  address,
+  none,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+  some,
+} from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import type { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -29,6 +36,7 @@ const readMintDecimals = vi.hoisted(() => vi.fn());
 const claimFunding = vi.hoisted(() => vi.fn());
 const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
+const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/policy/approved-operation-replay", () => ({
@@ -49,6 +57,10 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   }),
 }));
 vi.mock("./mints", () => ({ readMintDecimals }));
+vi.mock("@solana-program/token-2022", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
+  fetchMaybeToken,
+}));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -80,6 +92,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     decimalsB: 6,
     symbolA: "ATD",
     symbolB: "USDC",
+    nameA: "Acme Treasury Debt",
+    nameB: "USD Coin",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1900000000",
@@ -98,6 +112,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
+    closeResolutionAttempts: 0,
+    closeResolutionAfter: null,
     escrowAAmount: null,
     escrowBAmount: null,
     escrowAPeakAmount: null,
@@ -130,7 +146,7 @@ describe("fundDvpTradeLeg", () => {
       const state = await readEscrowState();
       const leg =
         state === null
-          ? { exists: false, amount: 0n, frozen: false }
+          ? { exists: false, tampered: false }
           : { exists: true, amount: state.amount, frozen: state.frozen };
       return { trade: { address: trade().swapDvp, exists: true }, legA: leg, legB: leg };
     });
@@ -152,6 +168,7 @@ describe("fundDvpTradeLeg", () => {
       },
     }));
     readMintDecimals.mockResolvedValue(6);
+    fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockResolvedValue("sig");
     claimFunding.mockResolvedValue(true);
@@ -258,6 +275,22 @@ describe("fundDvpTradeLeg", () => {
       /escrow for this leg is missing; nothing was sent/
     );
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns a conflict before claiming a tampered escrow", async () => {
+    readDvpAccounts.mockResolvedValue({
+      trade: { address: trade().swapDvp, exists: true },
+      legA: { exists: false, tampered: true },
+      legB: { exists: true, amount: 0n, frozen: false },
+    });
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining(
+        "the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it"
+      ),
+    });
+    expect(claimFunding).not.toHaveBeenCalled();
   });
 
   it("refuses a trade that is no longer verifiable on chain", async () => {
@@ -392,6 +425,64 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(/could not be read/);
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses before claiming when the funding wallet has no source token account", async () => {
+    const signer = await generateKeyPairSigner();
+    createOrgSignerForCustodyWallet.mockResolvedValue(signer);
+    fetchMaybeToken.mockResolvedValue({ address: signer.address, exists: false });
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: expect.stringContaining(signer.address),
+    } satisfies Partial<AppError>);
+
+    expect(claimFunding).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses before claiming when the source balance is below the shortfall", async () => {
+    fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 250n } });
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: expect.stringMatching(/holds 0\.00025 of the 0\.001 /),
+    } satisfies Partial<AppError>);
+
+    expect(claimFunding).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("maps a preflight rejection and releases the funding claim", async () => {
+    sendTransaction.mockRejectedValue(
+      new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+        accounts: null,
+        fee: null,
+        loadedAccountsDataSize: null,
+        loadedAddresses: null,
+        logs: [
+          "Program log: Instruction: TransferChecked",
+          "Program log: Error: IncorrectProgramId",
+          `Program ${T22} failed: incorrect program id for instruction`,
+        ],
+        postBalances: null,
+        postTokenBalances: null,
+        preBalances: null,
+        preTokenBalances: null,
+        replacementBlockhash: null,
+        returnData: null,
+        unitsConsumed: null,
+      })
+    );
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+      statusCode: 400,
+      message: expect.stringContaining("IncorrectProgramId"),
+    } satisfies Partial<AppError>);
+    expect(releaseFunding).toHaveBeenCalledTimes(1);
   });
 
   // The escrow ATA takes a transfer from ANYONE, and resolving a signer at the

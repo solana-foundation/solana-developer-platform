@@ -11,17 +11,23 @@ import {
 } from "@sdp/rpc/solana";
 import { type Address, getBase58Encoder, type Signature } from "@solana/kit";
 import { internalError } from "@/lib/errors";
-import { getLogger } from "@/runtime/logger";
 
 /** Position of `swap_dvp` in every SettleDvp, CancelDvp and RejectDvp account list. */
 const SWAP_DVP_ACCOUNT_INDEX = 1;
 const HISTORY_PAGE_LIMIT = 100;
 const HISTORY_PAGE_CAP = 10;
+/** Maximum tolerated difference between SDP and validator clocks around create. */
+export const CREATE_TIME_SKEW_SECONDS = 300;
 
 export interface DvpCloseResolution {
   status: "settled" | "cancelled" | "rejected";
   signature: Signature;
 }
+
+export type DvpCloseLookup =
+  | ({ kind: "resolved" } & DvpCloseResolution)
+  | { kind: "absent" }
+  | { kind: "capped" };
 
 /**
  * Decodes a recognized close instruction that is bound to this trade.
@@ -71,25 +77,34 @@ function readCloseStatus(
  *
  * @param rpc - Solana RPC client.
  * @param swapDvp - The vanished trade account address.
- * @param tradeId - Stored trade id, used when capped history cannot be resolved.
  * @param createSignature - Signature that bounds this trade's relevant history.
- * @returns The resolved close, or null when recent history contains none.
+ * SDP inserts the row before broadcasting create, and the PDA is only derivable
+ * from the terms SDP publishes. Therefore no transaction concerning this trade
+ * can precede `createdAt` by more than validator/API clock skew.
+ *
+ * @param createdAt - ISO creation time of the stored trade row.
+ * @returns The resolved close, absence within the bounded window, or a page cap.
  */
 export async function resolveDvpClose(
   rpc: SolanaRpc,
   swapDvp: Address,
-  tradeId: string,
-  createSignature: Signature | null
-): Promise<DvpCloseResolution | null> {
+  createSignature: Signature | null,
+  createdAt: string
+): Promise<DvpCloseLookup> {
+  const createdAtFloor = Math.floor(Date.parse(createdAt) / 1000) - CREATE_TIME_SKEW_SECONDS;
   let before: Signature | undefined;
   for (let page = 0; page < HISTORY_PAGE_CAP; page += 1) {
     const history = await getSignaturesForAddress(rpc, swapDvp, {
       limit: HISTORY_PAGE_LIMIT,
       ...(before === undefined ? {} : { before }),
+      ...(createSignature === null ? {} : { until: createSignature }),
     });
     for (const entry of history) {
       if (entry.signature === createSignature) {
-        return null;
+        return { kind: "absent" };
+      }
+      if (entry.blockTime !== null && Number(entry.blockTime) < createdAtFloor) {
+        return { kind: "absent" };
       }
       if (entry.err !== null) {
         continue;
@@ -101,18 +116,14 @@ export async function resolveDvpClose(
       for (const instruction of transaction.instructions) {
         const status = readCloseStatus(instruction, swapDvp);
         if (status !== null) {
-          return { status, signature: entry.signature };
+          return { kind: "resolved", status, signature: entry.signature };
         }
       }
     }
     if (history.length < HISTORY_PAGE_LIMIT) {
-      return null;
+      return { kind: "absent" };
     }
     before = history[history.length - 1].signature;
   }
-  getLogger().warn(
-    { trade_id: tradeId, swap_dvp: swapDvp, pages: HISTORY_PAGE_CAP },
-    "dvp close resolution reached the signature history page cap"
-  );
-  return null;
+  return { kind: "capped" };
 }

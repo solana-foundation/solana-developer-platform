@@ -1,6 +1,14 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { address, createSolanaRpc, lamports } from "@solana/kit";
-import { extension, getTokenSize, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { address, createSolanaRpc, lamports, none, some } from "@solana/kit";
+import {
+  AccountState,
+  type ExtensionArgs,
+  extension,
+  getMintEncoder,
+  getTokenEncoder,
+  getTokenSize,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchEncodedAccounts = vi.hoisted(() => vi.fn());
@@ -11,26 +19,6 @@ vi.mock("@solana/kit", async (importOriginal) => ({
   fetchEncodedAccounts,
 }));
 vi.mock("@sdp/rpc/solana", () => ({ getMinimumBalanceForRentExemption }));
-vi.mock("@solana-program/token-2022", async (importOriginal) => ({
-  ...(await importOriginal()),
-  getTokenDecoder: () => ({
-    decode: (data: Uint8Array) => {
-      if (data.length === 0) {
-        throw new Error("invalid token bytes");
-      }
-      return { owner: data[0] === 1 ? USER_A : OTHER };
-    },
-  }),
-  getMintDecoder: () => ({
-    decode: (data: Uint8Array) => ({
-      extensions:
-        data[0] === 1
-          ? { __option: "Some", value: [{ __kind: "TransferHook" }] }
-          : { __option: "None" },
-    }),
-  }),
-}));
-
 const { findMissingSettleAtas, findSettlementFundingShortfall } = await import(
   "./settle-preflight"
 );
@@ -60,16 +48,45 @@ const atas = {
   userBAtaB: ATA_B,
 };
 
+function token(owner: ReturnType<typeof address> = USER_A): Uint8Array {
+  return new Uint8Array(
+    getTokenEncoder().encode({
+      mint: MINT_A,
+      owner,
+      amount: 0n,
+      delegate: null,
+      state: AccountState.Initialized,
+      isNative: null,
+      delegatedAmount: 0n,
+      closeAuthority: null,
+      extensions: null,
+    })
+  );
+}
+
+function mint(extensions: ExtensionArgs[]): Uint8Array {
+  return new Uint8Array(
+    getMintEncoder().encode({
+      mintAuthority: some(USER_A),
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthority: none(),
+      extensions: extensions.length === 0 ? none() : some(extensions),
+    })
+  );
+}
+
 describe("settle preflight", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("treats a dusted system-owned ATA address as missing", async () => {
+  it("rejects an ATA address owned by the wrong program", async () => {
     fetchEncodedAccounts.mockResolvedValue([
       { exists: true, address: ATA_A, programAddress: OTHER, data: new Uint8Array() },
     ]);
 
-    await expect(findMissingSettleAtas(RPC, atas, parties, ["userAAtaA"])).resolves.toEqual(
-      new Set(["userAAtaA"])
+    await expect(findMissingSettleAtas(RPC, atas, parties, ["userAAtaA"])).rejects.toThrow(
+      new RegExp(`${ATA_A}.*owned by ${OTHER}.*${TOKEN_2022_PROGRAM_ADDRESS}`)
     );
   });
 
@@ -79,7 +96,7 @@ describe("settle preflight", () => {
         exists: true,
         address: ATA_A,
         programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-        data: new Uint8Array([2]),
+        data: token(OTHER),
       },
     ]);
 
@@ -94,7 +111,7 @@ describe("settle preflight", () => {
         exists: true,
         address: ATA_B,
         programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-        data: new Uint8Array([2]),
+        data: token(OTHER),
       },
     ]);
 
@@ -124,13 +141,16 @@ describe("settle preflight", () => {
         exists: true,
         address: MINT_A,
         programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-        data: new Uint8Array([1]),
+        data: mint([
+          extension("TransferHook", { authority: USER_A, programId: OTHER }),
+          extension("PausableConfig", { authority: some(USER_A), paused: false }),
+        ]),
       },
       {
         exists: true,
         address: MINT_B,
         programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-        data: new Uint8Array([0]),
+        data: mint([]),
       },
     ]);
     getMinimumBalanceForRentExemption.mockImplementation(async (_rpc: unknown, size: number) =>
@@ -150,6 +170,35 @@ describe("settle preflight", () => {
     );
 
     expect(getTokenSize([extension("ImmutableOwner", {})])).toBe(170);
-    expect(result.required).toBe(50_345n);
+    expect(result.required).toBeGreaterThan(50_345n);
+    expect(getMinimumBalanceForRentExemption).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses only the fee balance when no accounts need creation", async () => {
+    const rpcWithBalance = {
+      getBalance: () => ({ send: async () => ({ value: lamports(100_000n) }) }),
+    } as unknown as SolanaRpc;
+    await expect(
+      findSettlementFundingShortfall(rpcWithBalance, USER_A, parties, new Set())
+    ).resolves.toEqual({ balance: 100_000n, required: 50_000n, shortfall: 0n });
+    expect(fetchEncodedAccounts).not.toHaveBeenCalled();
+    expect(getMinimumBalanceForRentExemption).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates rent lookups for accounts with the same size", async () => {
+    fetchEncodedAccounts.mockResolvedValue([
+      { exists: true, address: MINT_A, programAddress: TOKEN_2022_PROGRAM_ADDRESS, data: mint([]) },
+    ]);
+    getMinimumBalanceForRentExemption.mockResolvedValue(1n);
+    const rpcWithBalance = {
+      getBalance: () => ({ send: async () => ({ value: lamports(100_000n) }) }),
+    } as unknown as SolanaRpc;
+    await findSettlementFundingShortfall(
+      rpcWithBalance,
+      USER_A,
+      parties,
+      new Set(["userBDestinationAtaA", "userAAtaA"])
+    );
+    expect(getMinimumBalanceForRentExemption).toHaveBeenCalledTimes(1);
   });
 });
