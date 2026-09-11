@@ -122,4 +122,15 @@ describe("loadCachedApiKeyFromDb wallet binding permissions", () => {
       { walletId: "wal_corrupt", custodyWalletId: "cwlt_wal_corrupt", permissions: [] },
     ]);
   });
+
+  it("returns null when the API key's project is archived", async () => {
+    await getDb(env)
+      .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+      .bind(TEST_PROJECT.id)
+      .run();
+
+    const cached = await loadCachedApiKeyFromDb(getDb(env), keyHash);
+
+    expect(cached).toBeNull();
+  });
 });

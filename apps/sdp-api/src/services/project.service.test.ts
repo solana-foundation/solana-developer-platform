@@ -2,7 +2,7 @@
  * Project Service Unit Tests
  */
 
-import type { ProjectSettings } from "@sdp/types";
+import type { ProjectEnvironment, ProjectSettings } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { ProjectService } from "@/services/project.service";
@@ -18,6 +18,7 @@ async function seedProject(
   id: string,
   name: string,
   slug: string,
+  environment: ProjectEnvironment,
   settings: ProjectSettings | null
 ): Promise<void> {
   const db = getDb(env);
@@ -25,13 +26,14 @@ async function seedProject(
     db
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', ?, 'active', ?)`
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`
       )
       .bind(
         id,
         TEST_ORG.id,
         name,
         slug,
+        environment,
         settings === null ? null : JSON.stringify(settings),
         TEST_USER.id
       ),
@@ -88,7 +90,7 @@ describe("ProjectService", () => {
 
   describe("getProject", () => {
     it("returns project by ID", async () => {
-      await seedProject("prj_get_test", "Get Test", "get-test", null);
+      await seedProject("prj_get_test", "Get Test", "get-test", "sandbox", null);
 
       const project = await projectService.getProject("prj_get_test");
 
@@ -106,7 +108,7 @@ describe("ProjectService", () => {
 
   describe("getProjectBySlug", () => {
     it("returns project by slug within organization", async () => {
-      await seedProject("prj_slug_test", "Slug Test", "slug-test", null);
+      await seedProject("prj_slug_test", "Slug Test", "slug-test", "sandbox", null);
 
       const project = await projectService.getProjectBySlug(TEST_ORG.id, "slug-test");
 
@@ -117,8 +119,8 @@ describe("ProjectService", () => {
 
   describe("listProjects", () => {
     it("lists all active projects for organization", async () => {
-      await seedProject("prj_list_1", "Project 1", "project-1", null);
-      await seedProject("prj_list_2", "Project 2", "project-2", null);
+      await seedProject("prj_list_1", "Project 1", "project-1", "sandbox", null);
+      await seedProject("prj_list_2", "Project 2", "project-2", "production", null);
 
       const projects = await projectService.listProjects(TEST_ORG.id);
 
@@ -126,8 +128,11 @@ describe("ProjectService", () => {
     });
 
     it("excludes archived projects by default", async () => {
-      await seedProject("prj_archive_default", "To Archive", "to-archive-default", null);
-      await projectService.archiveProject("prj_archive_default");
+      await seedProject("prj_archive_default", "To Archive", "to-archive-default", "sandbox", null);
+      await db
+        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+        .bind("prj_archive_default")
+        .run();
 
       const projects = await projectService.listProjects(TEST_ORG.id);
 
@@ -135,8 +140,11 @@ describe("ProjectService", () => {
     });
 
     it("includes archived projects when requested", async () => {
-      await seedProject("prj_archived_one", "Archived One", "archived-one", null);
-      await projectService.archiveProject("prj_archived_one");
+      await seedProject("prj_archived_one", "Archived One", "archived-one", "sandbox", null);
+      await db
+        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+        .bind("prj_archived_one")
+        .run();
 
       const projects = await projectService.listProjects(TEST_ORG.id, {
         includeArchived: true,
@@ -148,7 +156,7 @@ describe("ProjectService", () => {
 
   describe("updateProject", () => {
     it("updates project name", async () => {
-      await seedProject("prj_update_name", "Original Name", "original-name", null);
+      await seedProject("prj_update_name", "Original Name", "original-name", "sandbox", null);
 
       const updated = await projectService.updateProject("prj_update_name", {
         name: "New Name",
@@ -158,7 +166,13 @@ describe("ProjectService", () => {
     });
 
     it("updates project settings", async () => {
-      await seedProject("prj_update_settings", "Settings Update", "settings-update", null);
+      await seedProject(
+        "prj_update_settings",
+        "Settings Update",
+        "settings-update",
+        "sandbox",
+        null
+      );
 
       const updated = await projectService.updateProject("prj_update_settings", {
         settings: { webhookUrl: "https://new.example.com/webhook" },
@@ -168,7 +182,13 @@ describe("ProjectService", () => {
     });
 
     it("defaults rpc provider to round robin when settings are omitted", async () => {
-      await seedProject("prj_default_rpc", "Default RPC Provider", "default-rpc-provider", null);
+      await seedProject(
+        "prj_default_rpc",
+        "Default RPC Provider",
+        "default-rpc-provider",
+        "sandbox",
+        null
+      );
 
       const updated = await projectService.updateProject("prj_default_rpc", {
         name: "Default RPC Provider Renamed",
@@ -178,9 +198,13 @@ describe("ProjectService", () => {
     });
 
     it("preserves existing rpc provider when settings update omits it", async () => {
-      await seedProject("prj_preserve_rpc", "Preserve RPC Provider", "preserve-rpc-provider", {
-        rpcProvider: "triton",
-      });
+      await seedProject(
+        "prj_preserve_rpc",
+        "Preserve RPC Provider",
+        "preserve-rpc-provider",
+        "sandbox",
+        { rpcProvider: "triton" }
+      );
 
       const updated = await projectService.updateProject("prj_preserve_rpc", {
         settings: { webhookUrl: "https://updated.example.com/webhook" },
@@ -190,7 +214,7 @@ describe("ProjectService", () => {
     });
 
     it("switches provider to default and clears custom endpoint", async () => {
-      await seedProject("prj_switch_rpc", "Switch RPC Provider", "switch-rpc-provider", {
+      await seedProject("prj_switch_rpc", "Switch RPC Provider", "switch-rpc-provider", "sandbox", {
         rpcProvider: "custom",
         rpcEndpoint: "https://rpc.custom.example.com",
       });
@@ -210,14 +234,19 @@ describe("ProjectService", () => {
     });
   });
 
-  describe("archiveProject", () => {
-    it("sets project status to archived", async () => {
-      await seedProject("prj_to_archive", "To Archive", "to-archive", null);
+  describe("active project environment invariant", () => {
+    it("rejects a second active project for the same organization and environment", async () => {
+      await seedProject("prj_active_sandbox", "Active Sandbox", "active-sandbox", "sandbox", null);
 
-      await projectService.archiveProject("prj_to_archive");
-
-      const archived = await projectService.getProject("prj_to_archive");
-      expect(archived?.status).toBe("archived");
+      await expect(
+        seedProject(
+          "prj_duplicate_sandbox",
+          "Duplicate Sandbox",
+          "duplicate-sandbox",
+          "sandbox",
+          null
+        )
+      ).rejects.toMatchObject({ code: "23505" });
     });
   });
 
@@ -225,7 +254,7 @@ describe("ProjectService", () => {
     const projectId = "prj_member_test";
 
     beforeEach(async () => {
-      await seedProject(projectId, "Member Test Project", "member-test-project", null);
+      await seedProject(projectId, "Member Test Project", "member-test-project", "sandbox", null);
     });
 
     describe("addMember", () => {

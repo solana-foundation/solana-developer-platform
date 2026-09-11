@@ -70,7 +70,8 @@ export async function loadCachedApiKeyFromDb(
        FROM api_keys ak
        JOIN projects p ON p.id = ak.project_id
        JOIN organizations o ON o.id = ak.organization_id
-       WHERE ak.key_hash = ?`
+       WHERE ak.key_hash = ?
+         AND p.status = 'active'`
     )
     .bind(keyHash)
     .first<{
