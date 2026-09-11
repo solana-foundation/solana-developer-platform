@@ -26,10 +26,6 @@
         "min": null,
         "max": null
       },
-      "ANG": {
-        "min": null,
-        "max": null
-      },
       "AOA": {
         "min": null,
         "max": null
@@ -55,10 +51,6 @@
         "max": null
       },
       "BDT": {
-        "min": null,
-        "max": null
-      },
-      "BGN": {
         "min": null,
         "max": null
       },
@@ -127,10 +119,6 @@
         "max": null
       },
       "CRC": {
-        "min": null,
-        "max": null
-      },
-      "CUC": {
         "min": null,
         "max": null
       },
@@ -223,10 +211,6 @@
         "max": null
       },
       "HNL": {
-        "min": null,
-        "max": null
-      },
-      "HRK": {
         "min": null,
         "max": null
       },
@@ -498,10 +482,6 @@
         "min": null,
         "max": null
       },
-      "SLL": {
-        "min": null,
-        "max": null
-      },
       "SOS": {
         "min": null,
         "max": null
@@ -515,10 +495,6 @@
         "max": null
       },
       "STN": {
-        "min": null,
-        "max": null
-      },
-      "SVC": {
         "min": null,
         "max": null
       },

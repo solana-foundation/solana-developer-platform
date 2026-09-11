@@ -42,10 +42,6 @@
         "min": null,
         "max": null
       },
-      "BGN": {
-        "min": null,
-        "max": null
-      },
       "BHD": {
         "min": null,
         "max": null
@@ -147,10 +143,6 @@
         "max": null
       },
       "HKD": {
-        "min": null,
-        "max": null
-      },
-      "HRK": {
         "min": null,
         "max": null
       },
@@ -335,10 +327,6 @@
         "max": null
       },
       "SGD": {
-        "min": null,
-        "max": null
-      },
-      "SLL": {
         "min": null,
         "max": null
       },
