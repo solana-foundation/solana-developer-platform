@@ -53,7 +53,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       201: { description: "Trade created", content: jsonContent(dvpTradeResponse) },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 422, 500]),
     },
   });
 
@@ -111,7 +111,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -149,7 +149,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
       request: { headers: projectScopeHeaders, params: tradeIdPathParams },
       responses: {
         200: { description: "Trade closed", content: jsonContent(dvpCloseResponse) },
-        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 422, 500]),
       },
     });
   }

@@ -291,6 +291,24 @@ describe("OpenAPI spec", () => {
     }
   });
 
+  it("documents the 422 SIGNING_REJECTED response on sponsored submit operations", () => {
+    const doc = createOpenApiDocument();
+    const sponsored = [
+      ["/v1/earn/external-wallet/deposits", "post"],
+      ["/v1/earn/external-wallet/withdrawals", "post"],
+      ["/v1/payments/transfers", "post"],
+      ["/v1/issuance/tokens/{tokenId}/mint", "post"],
+      ["/v1/dvp/trades/{tradeId}/settle", "post"],
+    ] as const;
+    for (const [path, method] of sponsored) {
+      expect(doc.paths?.[path]?.[method]?.responses, path).toHaveProperty("422");
+    }
+    const codes = (doc.components?.schemas?.ApiErrorCode ?? doc.components?.schemas?.ErrorCode) as
+      | { enum?: string[] }
+      | undefined;
+    if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
+  });
+
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
     const doc = createOpenApiDocument();
     const createWallet = getWalletResponseSchema(
