@@ -1,10 +1,11 @@
 "use client";
 
+import type { ComponentType } from "react";
 import DashboardLoading from "@/app/dashboard/(home)/loading";
-import {
-  ApiKeyAuthoringSkeleton,
-  ApiKeysListSkeleton,
-} from "@/app/dashboard/api-keys/api-key-page-skeletons";
+import AllowlistLoading from "@/app/dashboard/allowlist/loading";
+import ApiKeyEditLoading from "@/app/dashboard/api-keys/[keyId]/edit/loading";
+import { ApiKeysListSkeleton } from "@/app/dashboard/api-keys/api-key-page-skeletons";
+import ApiKeyNewLoading from "@/app/dashboard/api-keys/new/loading";
 import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
@@ -27,11 +28,8 @@ import {
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
-import {
-  CompactOperationsCardSkeleton,
-  SettingsPageSkeleton,
-} from "@/app/dashboard/operations-card-page-skeletons";
-import { CounterpartyMenuLoading } from "@/app/dashboard/payments/counterparty-menu-loading";
+import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
+import CounterpartyDirectoryLoading from "@/app/dashboard/payments/counterparty/loading";
 import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
 import {
   CounterpartyCreateSkeleton,
@@ -43,6 +41,7 @@ import {
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
 } from "@/app/dashboard/payments/payments-route-skeletons";
+import PaymentRequestsLoading from "@/app/dashboard/payments/requests/loading";
 import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
 import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
 import {
@@ -56,33 +55,13 @@ import {
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
-function ApiKeyNewLoading() {
-  return <ApiKeyAuthoringSkeleton route="api-key-new" />;
-}
-
-function ApiKeyEditLoading() {
-  return <ApiKeyAuthoringSkeleton route="api-key-edit" />;
-}
-
-function AllowlistLoading() {
-  return <CompactOperationsCardSkeleton route="allowlist" />;
-}
-
 interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
-function CounterpartyDirectoryLoading() {
-  return <CounterpartyMenuLoading overview="counterparty-directory" />;
-}
-
-function PaymentRequestsLoading() {
-  return <CounterpartyMenuLoading overview="payment-requests" />;
-}
-
 export function resolvePageLoadingComponent(
   route: DashboardLoadingRoute
-): React.ComponentType<PageLoadingProps> {
+): ComponentType<PageLoadingProps> {
   switch (route) {
     case "home":
       return DashboardLoading;
