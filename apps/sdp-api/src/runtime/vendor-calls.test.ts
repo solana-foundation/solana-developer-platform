@@ -12,6 +12,51 @@ function failureEvents() {
   return logEvent.mock.calls.filter(([, payload]) => payload.event === "sdp_api_vendor_call");
 }
 
+describe("logVendorCallFailure", () => {
+  it("logs the error's name and code only, never a provider body or its details", async () => {
+    // EARN-025: a provider error routinely echoes the request, the owner and
+    // whatever the provider felt like saying. The failure event is the one log
+    // line every vendor call shares, so it carries facts about the FAILURE, not
+    // the payload that failed.
+    const failure = Object.assign(new Error("kamino request failed with status 400"), {
+      name: "SdpEarnError",
+      code: "BAD_REQUEST",
+      details: {
+        provider: "kamino",
+        providerStatus: 400,
+        providerBody: '{"owner":"7Yq3nRbFkMd2pXcLwT9vZs4HaJ1uE6gQoB8iVtNrK5mD","reason":"nope"}',
+        ownerAddress: "7Yq3nRbFkMd2pXcLwT9vZs4HaJ1uE6gQoB8iVtNrK5mD",
+      },
+    });
+
+    await expect(
+      withVendorCall("kamino", "quoteVaultDeposit", () => Promise.reject(failure))
+    ).rejects.toBe(failure);
+
+    const emitted = failureEvents();
+    expect(emitted).toHaveLength(1);
+    const payload = emitted[0][1];
+    expect(payload).toMatchObject({
+      vendor: "kamino",
+      operation: "quoteVaultDeposit",
+      outcome: "failed",
+      error_name: "SdpEarnError",
+      error_code: "BAD_REQUEST",
+    });
+    expect(Object.keys(payload).sort()).toEqual([
+      "duration_ms",
+      "error_code",
+      "error_name",
+      "event",
+      "operation",
+      "outcome",
+      "vendor",
+    ]);
+    expect(JSON.stringify(payload)).not.toContain("7Yq3nRbFkMd2pXcLwT9vZs4HaJ1uE6gQoB8iVtNrK5mD");
+    expect(JSON.stringify(payload)).not.toContain("nope");
+  });
+});
+
 describe("instrumentVendorPort", () => {
   it("returns sync results unchanged and emits nothing", () => {
     const port = instrumentVendorPort("kora", { double: (n: number) => n * 2 });
