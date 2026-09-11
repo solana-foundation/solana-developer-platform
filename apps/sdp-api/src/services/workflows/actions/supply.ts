@@ -21,6 +21,7 @@ import {
 import {
   preflightDestinationAllowed,
   preflightMintAmount,
+  preflightTokenOperation,
   preflightWalletPolicy,
 } from "./preflight";
 import { recordWorkflowTransaction } from "./record-transaction";
@@ -117,8 +118,13 @@ export async function runMint(
   }
 
   // Everything the HTTP mint route checks, checked here too and BEFORE the chain call:
-  // mintability + max supply, the token's control list, and the wallet policy. Running
-  // the supply check after the mint is what allowed a rule to mint past `maxSupply`.
+  // operational status, mintability + max supply, the token's control list, and the
+  // wallet policy. Running the supply check after the mint is what allowed a rule to
+  // mint past `maxSupply`.
+  const status = preflightTokenOperation(prep.ctx, "mint");
+  if (!status.ok) {
+    return status.result;
+  }
   const supplyCheck = preflightMintAmount(prep.ctx, amount.amountStr);
   if (!supplyCheck.ok) {
     return supplyCheck.result;
@@ -222,6 +228,11 @@ export async function runBurn(
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
   }
 
+  const status = preflightTokenOperation(prep.ctx, "burn");
+  if (!status.ok) {
+    return status.result;
+  }
+
   // The signing wallet's operation policy (amount/velocity limits, custody approval)
   // binds every custody-signed op, checked BEFORE the chain call — a rule must not be
   // a way to destroy supply past limits the org configured for the key.
@@ -278,6 +289,11 @@ export async function runForceBurn(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  const status = preflightTokenOperation(prep.ctx, "force_burn");
+  if (!status.ok) {
+    return status.result;
   }
 
   // Wallet policy for the permanent-delegate key, BEFORE the chain call (see runBurn).
@@ -339,6 +355,11 @@ export async function runSeize(
   const amount = parseAmount(action, decimals);
   if (!amount) {
     return permanentFail("MISSING_OR_INVALID_PARAM:amount");
+  }
+
+  const status = preflightTokenOperation(prep.ctx, "seize");
+  if (!status.ok) {
+    return status.result;
   }
 
   // The HTTP seize route checks the destination against the token's control list before

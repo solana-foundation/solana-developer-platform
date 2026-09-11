@@ -32,6 +32,8 @@ const mirrorUnfreezeWrite = vi.hoisted(() => vi.fn());
 const applySettledTokenStatus = vi.hoisted(() => vi.fn());
 const reconcileObservedTokenPauseState = vi.hoisted(() => vi.fn());
 const recordWorkflowTransaction = vi.hoisted(() => vi.fn());
+// What the token row says about freeze support; the flag the API handler enforces.
+const tokenRow = vi.hoisted(() => ({ isFreezable: true }));
 
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
@@ -65,6 +67,7 @@ vi.mock("./onchain", async (importOriginal) => {
     prepareOnchain: async () => ({
       ok: true,
       ctx: {
+        token: tokenRow,
         mintAddress: TOKEN_ACCOUNT,
         signer: { address: WALLET },
         mosaic: { freezeAccount, thawAccount, pauseToken, unpauseToken },
@@ -113,6 +116,7 @@ function chainSays(state: "frozen" | "thawed") {
 describe("freeze/unfreeze converge on chain state, not the DB mirror", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    tokenRow.isFreezable = true;
     freezeAccount.mockResolvedValue({ signature: "sig_freeze", slot: 1 });
     thawAccount.mockResolvedValue({ signature: "sig_thaw", slot: 2 });
     mirrorFreezeWrite.mockResolvedValue(undefined);
@@ -144,6 +148,23 @@ describe("freeze/unfreeze converge on chain state, not the DB mirror", () => {
     expect(freezeAccount).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("succeeded");
     expect(result.result).not.toMatchObject({ alreadyFrozen: true });
+  });
+
+  // The API's freeze handler refuses a token declared not-freezable; a rule-driven
+  // freeze is the same operation with a different trigger and must honor the same flag.
+  it("refuses to freeze when the token does not support freeze operations", async () => {
+    tokenRow.isFreezable = false;
+    isAccountFrozen.mockResolvedValue(false);
+    chainSays("thawed");
+
+    const result = await runFreeze(env, executionFixture(), action);
+
+    expect(freezeAccount).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "failed",
+      retryable: false,
+      error: "TOKEN_NOT_FREEZABLE",
+    });
   });
 
   // Idempotency still holds where it should — this is what the pre-check exists for, so
