@@ -1092,6 +1092,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
           disabled={submitting || !selectedWallet || decimals === undefined}
           id="earn-vault-deposit-amount"
           inputMode="decimal"
+          leadingAddon={<span aria-hidden="true">$</span>}
           maxLength={MAX_AMOUNT_LENGTH}
           onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountChange(event.target.value)}
           placeholder="0.00"

@@ -324,6 +324,7 @@ describe("EarnVaultDepositModal", () => {
     ).toBe(true);
     expect(screen.queryByText("Pay with")).toBeNull();
     expect((screen.getByLabelText("Amount") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText("$")).toBeTruthy();
     expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
   });
 

@@ -610,6 +610,7 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
           disabled={submitting}
           id="earn-vault-withdraw-amount"
           inputMode="decimal"
+          leadingAddon={<span aria-hidden="true">$</span>}
           maxDecimals={VAULT_WITHDRAWAL_AMOUNT_DECIMALS}
           onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountChange(event.target.value)}
           placeholder="0.00"

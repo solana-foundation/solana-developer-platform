@@ -94,6 +94,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(
       Array.from(progress.querySelectorAll("li"), (item) => item.textContent?.replace(/^\d/, ""))
     ).toEqual(["Details", "Review", "Processing", "Complete"]);
+    expect(screen.getByText("$")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Max" }));
 
