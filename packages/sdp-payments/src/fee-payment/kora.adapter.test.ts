@@ -134,7 +134,7 @@ describe("KoraAdapter error classification", () => {
     );
     await assert.rejects(
       adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) => error instanceof FeePaymentError && error.code === "SIGNING_FAILED"
+      (error: unknown) => error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED"
     );
   });
 
@@ -147,7 +147,7 @@ describe("KoraAdapter error classification", () => {
       adapter.signAndSend(new Uint8Array(64)),
       (error: unknown) =>
         error instanceof FeePaymentError &&
-        error.code === "SIGNING_FAILED" &&
+        error.code === "PROVIDER_REJECTED" &&
         error.message.includes("Mutable transfer-hook authority")
     );
   });

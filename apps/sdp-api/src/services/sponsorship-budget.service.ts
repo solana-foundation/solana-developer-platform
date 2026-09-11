@@ -203,9 +203,16 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       signed = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
-      // Once custody has been asked to sign, no error proves that a usable
-      // signature was not produced before the response was lost. Retain the
-      // full reservation and block an unsafe replay.
+      if (isStructuredProviderRejection(error)) {
+        // Kora answered with a policy verdict, so nothing was signed and the
+        // same bytes will be refused again. Release so a corrected retry is
+        // not blocked by a charged_unknown row.
+        await this.releaseDeterministic(reservation, error);
+        throw error;
+      }
+      // Otherwise, once custody has been asked to sign, no error proves that a
+      // usable signature was not produced before the response was lost.
+      // Retain the full reservation and block an unsafe replay.
       await this.markAmbiguous(reservation, error);
       throw error;
     }
@@ -929,10 +936,22 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 function isDeterministicProviderRejection(error: unknown): boolean {
   return (
     error instanceof FeePaymentError &&
-    ["SIGNING_FAILED", "TRANSACTION_TOO_LARGE", "INSUFFICIENT_BALANCE", "RATE_LIMITED"].includes(
-      error.code
-    )
+    [
+      "PROVIDER_REJECTED",
+      "SIGNING_FAILED",
+      "TRANSACTION_TOO_LARGE",
+      "INSUFFICIENT_BALANCE",
+      "RATE_LIMITED",
+    ].includes(error.code)
   );
+}
+
+// Narrower than the pre-send set above: only a structured provider verdict
+// proves that a sign-only request produced no signature. SIGNING_FAILED and
+// the balance/limit codes can also come from a custody exception after
+// signing, so they stay ambiguous on the sign-only path.
+function isStructuredProviderRejection(error: unknown): boolean {
+  return error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED";
 }
 
 function reservationHasResponse(
