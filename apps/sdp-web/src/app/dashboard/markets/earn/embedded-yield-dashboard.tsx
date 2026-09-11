@@ -34,12 +34,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary } from "./earn-program-data";
+import { MarketsSandboxEmbeddedYield } from "./markets-sandbox-embedded-yield";
 
 function PortfolioInfoTip({ label }: { label: string }) {
   return (
@@ -346,7 +348,7 @@ function PortfolioByStrategy({
   );
 }
 
-export function EmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
+export function LiveEmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
@@ -459,5 +461,14 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
         }}
       />
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function EmbeddedYieldDashboard({ configureHref }: { configureHref: string }) {
+  const { sdpEnvironment } = useDashboardWorkspace();
+  return sdpEnvironment === "sandbox" ? (
+    <MarketsSandboxEmbeddedYield configureHref={configureHref} />
+  ) : (
+    <LiveEmbeddedYieldDashboard configureHref={configureHref} />
   );
 }

@@ -7,12 +7,15 @@
  * stays out of the code that decides whether it can be sent at all.
  */
 
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useMarketsSandbox } from "../../markets-sandbox-store";
+import type { DvpPartyRef as DvpDisplayPartyRef, DvpTrade, DvpTradeLeg } from "../dvp-trade";
 import type { DvpPartyRef, DvpPartyWire } from "./use-dvp-parties";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
@@ -118,6 +121,8 @@ export interface DvpCreateSubmit {
 export function useDvpCreateSubmit(): DvpCreateSubmit {
   const router = useRouter();
   const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const { saveDvpTrade } = useMarketsSandbox(workspace?.selectedProjectId ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,6 +130,16 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
     setSubmitting(true);
     setError(null);
     try {
+      if (workspace?.sdpEnvironment === "sandbox") {
+        const trade = buildSandboxTrade(request, {
+          walletName: t("DashboardMarkets.sandbox.dvpWalletName"),
+          counterpartyLabel: t("DashboardMarkets.sandbox.dvpCounterpartyName"),
+        });
+        saveDvpTrade(trade);
+        toast.success(t("DashboardMarkets.dvp.toastCreated"), { position: "bottom-right" });
+        router.push(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${trade.id}`);
+        return;
+      }
       // One logical request: a double submit, or a retry after a dropped
       // connection, must not create a second trade at a second address.
       const idempotencyKey = createIdempotencyKey(request);
@@ -193,4 +208,109 @@ export function useDvpCreateSubmit(): DvpCreateSubmit {
   }
 
   return { error, submit, submitting };
+}
+
+interface SandboxDvpLabels {
+  walletName: string;
+  counterpartyLabel: string;
+}
+
+function sandboxParty(party: DvpPartyWire, labels: SandboxDvpLabels): DvpDisplayPartyRef {
+  if ("walletId" in party.ref) {
+    return {
+      address: party.address,
+      counterparty: null,
+      wallet: { id: party.ref.walletId, name: labels.walletName },
+    };
+  }
+  if ("counterpartyAccountId" in party.ref) {
+    return {
+      address: party.address,
+      counterparty: { id: party.ref.counterpartyAccountId, label: labels.counterpartyLabel },
+      wallet: null,
+    };
+  }
+  return { address: party.address, counterparty: null, wallet: null };
+}
+
+function sandboxLeg(
+  input: {
+    amount: string;
+    mint: string;
+    party: DvpPartyWire;
+    tokenProgram: string | null;
+    escrow: string;
+    settlementDestination: string;
+  },
+  labels: SandboxDvpLabels
+): DvpTradeLeg {
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(input.mint);
+  return {
+    party: sandboxParty(input.party, labels),
+    mint: input.mint,
+    tokenProgram: input.tokenProgram ?? TOKEN_2022,
+    decimals: token?.decimals ?? null,
+    symbol: token?.symbol ?? null,
+    imageUrl: null,
+    amount: input.amount,
+    escrow: input.escrow,
+    settlementDestination: input.settlementDestination || input.party.address,
+    funding: null,
+    fundingSignature: null,
+    outcome: "awaiting",
+  };
+}
+
+function buildSandboxTrade(request: DvpCreateRequest, labels: SandboxDvpLabels): DvpTrade {
+  const now = new Date().toISOString();
+  const id = `dvp_local_${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
+  const custodiedSides = [request.parties.a, request.parties.b].filter(
+    (party) => "walletId" in party.ref
+  ).length;
+  return {
+    id,
+    status: "created",
+    kind: custodiedSides === 2 ? "bilateral" : custodiedSides === 1 ? "principal" : "agent",
+    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
+    settlementAuthority: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
+    legs: {
+      a: sandboxLeg(
+        {
+          amount: request.amountA,
+          mint: request.mintA,
+          party: request.parties.a,
+          tokenProgram: request.tokenProgramA,
+          escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+          settlementDestination: request.userASettlementDestination,
+        },
+        labels
+      ),
+      b: sandboxLeg(
+        {
+          amount: request.amountB,
+          mint: request.mintB,
+          party: request.parties.b,
+          tokenProgram: request.tokenProgramB,
+          escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+          settlementDestination: request.userBSettlementDestination,
+        },
+        labels
+      ),
+    },
+    nonce: String(Date.now()),
+    expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
+    earliestSettlementTimestamp: null,
+    refString: request.refString || null,
+    createSignature: null,
+    closeSignature: null,
+    settlementReadiness: {
+      address: "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY",
+      balance: "1000000000000",
+      required: "0",
+      funded: true,
+    },
+    observedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
 }

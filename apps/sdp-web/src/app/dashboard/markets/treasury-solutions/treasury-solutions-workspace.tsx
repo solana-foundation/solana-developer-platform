@@ -92,6 +92,7 @@ import {
   EarnVaultWithdrawModal,
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
+import { MarketsSandboxTreasury } from "./markets-sandbox-treasury";
 import {
   availableTreasuryCashForWallet,
   estimatedTreasuryApy,
@@ -1136,7 +1137,7 @@ function EarnWithdrawalLedgerRecovery({
   return null;
 }
 
-export function TreasurySolutionsWorkspace({
+export function LiveTreasurySolutionsWorkspace({
   providerAccess,
 }: {
   providerAccess: EarnProviderAccess | null;
@@ -1540,5 +1541,18 @@ export function TreasurySolutionsWorkspace({
         />
       ))}
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function TreasurySolutionsWorkspace({
+  providerAccess,
+}: {
+  providerAccess: EarnProviderAccess | null;
+}) {
+  const { sdpEnvironment } = useDashboardWorkspace();
+  return sdpEnvironment === "sandbox" ? (
+    <MarketsSandboxTreasury />
+  ) : (
+    <LiveTreasurySolutionsWorkspace providerAccess={providerAccess} />
   );
 }

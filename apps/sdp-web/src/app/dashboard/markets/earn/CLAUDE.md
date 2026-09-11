@@ -1,8 +1,15 @@
 # dashboard/markets/earn — agent notes
 
-The Earn dashboard module. **All live data** — there is no mock seam; do not
-reintroduce fixture modules. Data flows: BFF proxies
-(`src/app/api/dashboard/markets/earn/*` → `/v1/earn/*`) → SWR hooks → UI.
+The Earn dashboard module. Production projects use **all live data** through BFF
+proxies (`src/app/api/dashboard/markets/earn/*` → `/v1/earn/*`) → SWR hooks → UI.
+Selected sandbox projects are the deliberate exception: Markets becomes a
+project-scoped, browser-only product demo backed by versioned LocalStorage. The
+sandbox reads the real `mainnet-beta` strategy catalogue and live APYs so its
+shelf mirrors production, but its balances, positions, deposits, withdrawals,
+swaps, and DVP lifecycle never touch a Solana RPC or value-moving API. Its
+self-fund action grants SOL, USDC, USDG, USDT, and PYUSD, and stablecoin
+conversions settle exactly 1:1 with no slippage. Keep this seam explicit and do
+not route sandbox mutations through devnet.
 
 This module was rebuilt on live provider and organization capability. The
 Markets prototype it replaced (the deposit wizard, `earn-workspace`, the
@@ -67,9 +74,11 @@ program create still sends the body `requestId` form.
 ## Routes
 
 - `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
-  customer portfolio and entry point for configuration. Its strategy drawer
-  renders the positions already hydrated by the project summary; it must not
-  fan out one metered request per customer wallet.
+  customer portfolio and entry point for configuration in production. Sandbox
+  projects render the same project-scoped LocalStorage positions used by
+  Treasury. The live strategy drawer renders the positions already hydrated by
+  the project summary; it must not fan out one metered request per customer
+  wallet.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
@@ -96,9 +105,11 @@ program create still sends the body `requestId` form.
   public `/embedded-yield/integrate/:token` handoff page and its
   `/v1/earn/button-configurations/*` API — was removed; migration 0074 dropped
   its table. Do not reintroduce persisted presentation state here.)
-- Both routes are `dynamic = "force-dynamic"` and resolve
-  `loadEarnProviderAccess()` server-side per request. Provider access is
-  organization-scoped; caching it would hand one org's entitlement to another.
+- Both routes are `dynamic = "force-dynamic"`. Production projects resolve
+  `loadEarnProviderAccess()` server-side per request. Sandbox projects skip that
+  devnet capability read and use their local demo capability instead. Provider
+  access is organization-scoped; caching it would hand one org's entitlement to
+  another.
 - No layout of its own: `../layout.tsx` gates the whole Markets segment on
   both `markets()` and `earn()` (`notFound()`), enforced once there so no child
   layout suspends on a flag read (which would paint the parent's loading

@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import { isSelectedProjectSandbox } from "@/lib/server-sdp-environment";
+import { DvpSandboxTradeDetailClient } from "../dvp-sandbox-trade-detail-client";
 import { DvpTradeDetailClient } from "../dvp-trade-detail-client";
 import { DvpTradeLoadError } from "../dvp-trade-load-error";
 import { fetchDvpTrade, isNotFound } from "../dvp-trades.data";
@@ -12,6 +14,9 @@ export default async function DvpTradeDetailPage({
   params: Promise<{ tradeId: string }>;
 }) {
   const { tradeId } = await params;
+  if (await isSelectedProjectSandbox()) {
+    return <DvpSandboxTradeDetailClient tradeId={tradeId} />;
+  }
   return withDashboardPageTrace("dashboard.dvp.trade.page", async ({ apiClient }) => {
     const result = await fetchDvpTrade(apiClient.request, tradeId);
     const { trade, error } = result;

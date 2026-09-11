@@ -16,8 +16,10 @@ import type { DvpTradeSide } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useMarketsSandbox } from "../markets-sandbox-store";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund";
 
@@ -55,6 +57,8 @@ const HELD_MESSAGE: Record<DvpTradeActionName, MessageKey> = {
 export function useDvpTradeActions(tradeId: string): DvpTradeActions {
   const router = useRouter();
   const t = useTranslations();
+  const workspace = useOptionalDashboardWorkspace();
+  const { actOnDvpTrade } = useMarketsSandbox(workspace?.selectedProjectId ?? null);
   const [pending, setPending] = useState<DvpTradeActionName | null>(null);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +68,11 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
     setError(null);
     setAwaitingApproval(false);
     try {
+      if (workspace?.sdpEnvironment === "sandbox") {
+        actOnDvpTrade(tradeId, action, options?.side);
+        toast.success(t(DONE_MESSAGE[action]), { position: "bottom-right" });
+        return;
+      }
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
         {

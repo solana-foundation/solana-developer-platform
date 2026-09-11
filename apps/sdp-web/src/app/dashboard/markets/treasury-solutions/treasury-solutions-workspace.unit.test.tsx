@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
+import { LiveTreasurySolutionsWorkspace as TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
 
 // jsdom implements no matchMedia, and the design-system SegmentedControl (the
 // PRO-1742 cluster toggle) reads it through motion's useReducedMotion.
