@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
-import { TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
@@ -20,6 +19,7 @@ import {
   TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { seedRateLimit } from "@/test/mocks/kv";

@@ -701,21 +701,6 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     await seedAuth();
     await getDb(env)
       .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn VW Prod Key', ?, ?, 'api_admin', '["*"]', 'active')`
-      )
-      .bind(
-        PROD_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_USER.id,
-        PROD_API_KEY.prefix,
-        prodKeyHash
-      )
-      .run();
-    await getDb(env)
-      .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
          VALUES ('cfg_earn_vw_prod', ?, ?, 'privy', 'encrypted', 'active')`
       )

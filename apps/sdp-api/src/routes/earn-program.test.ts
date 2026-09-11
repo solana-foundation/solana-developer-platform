@@ -1311,19 +1311,16 @@ describe("Earn program — session callers and environment isolation", () => {
 });
 
 describe("Earn program — live reads", () => {
-  it.each([
-    ["program", "GET", ""],
-    ["deposits", "GET", "/deposits"],
-    ["withdrawal preview", "POST", "/withdrawal-preview"],
-  ])("404s another project's program on %s", async (_name, method, suffix) => {
+  it.each<[string, string, string, Record<string, unknown> | undefined]>([
+    ["program", "GET", "", undefined],
+    ["deposits", "GET", "/deposits", undefined],
+    ["withdrawal preview", "POST", "/withdrawal-preview", { amountUsd: "25.50", token: "usdc" }],
+  ])("404s another project's program on %s", async (_name, method, suffix, body) => {
     await seedAuth();
     const program = await seedProgramWallet();
-    const response = await requestEarn(
-      method,
-      programPath(program.id, suffix),
-      { amountUsd: "25.50", token: "usdc" },
-      { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` }
-    );
+    const response = await requestEarn(method, programPath(program.id, suffix), body, {
+      Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}`,
+    });
     expect(response.status).toBe(404);
   });
 
