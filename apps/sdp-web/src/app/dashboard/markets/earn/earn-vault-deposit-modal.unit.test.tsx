@@ -807,8 +807,12 @@ describe("EarnVaultDepositModal", () => {
       expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
       if (status === "confirmed") {
         const confirmation = document.querySelector('[data-earn-outcome="success"]');
+        const terminalStep = document.querySelector('[data-earn-step-terminal-active="true"]');
         expect(confirmation).toBeTruthy();
         expect(confirmation?.className).toContain("mx-auto");
+        expect(terminalStep?.className).toContain("bg-white");
+        expect(terminalStep?.className).toContain("text-black");
+        expect(terminalStep?.querySelector('[data-earn-step-check="true"]')).toBeNull();
       }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(
