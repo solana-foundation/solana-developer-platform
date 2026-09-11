@@ -4,7 +4,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import app from "@/index";
 import * as solanaServices from "@/services/solana";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -27,7 +30,6 @@ vi.mock("@/services/private-channels/auth/gateway-auth", async (importOriginal) 
 
 const ORGANIZATION_ID = "org_pc_transfers";
 const PROJECT_ID = "prj_pc_transfers";
-const OTHER_PROJECT_ID = "prj_pc_transfers_other";
 const SESSION_ID = "ses_pc_transfers";
 const ACTOR_USER_ID = "usr_pc_transfer_actor";
 const RECIPIENT_USER_ID = "usr_pc_transfer_recipient";
@@ -170,28 +172,22 @@ async function seedRouteState(): Promise<void> {
         ORGANIZATION_ID,
         new Date(Date.now() + 60_000).toISOString()
       ),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES
-           (?, ?, 'Transfer Project', 'pc-transfer-project', 'sandbox', 'active', ?),
-           (?, ?, 'Other Project', 'pc-transfer-other', 'sandbox', 'active', ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        ACTOR_USER_ID,
-        OTHER_PROJECT_ID,
-        ORGANIZATION_ID,
-        ACTOR_USER_ID
-      ),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_pc_transfers', ?, ?, 'admin')`
-      )
-      .bind(PROJECT_ID, ACTOR_USER_ID),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: ACTOR_USER_ID,
+    members: [ACTOR_USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await seedProjectApiKey(db, env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: ORGANIZATION_ID,
+    projectId: `${PROJECT_ID}_production`,
+    createdBy: ACTOR_USER_ID,
+    role: "api_admin",
+    permissions: ["payments:read"],
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys
@@ -766,15 +762,9 @@ describe("Private Channels — transfer access and routes", () => {
     );
   });
 
-  it("keeps transfer reads project scoped and supports an optional channel filter", async () => {
+  it("supports transfer reads and an optional channel filter", async () => {
     await seedTransfer({ id: "pct-visible-a" });
     await seedTransfer({ id: "pct-visible-b", channelId: OTHER_CHANNEL_ID });
-    await seedTransfer({
-      id: "pct-other-project",
-      projectId: OTHER_PROJECT_ID,
-      instanceId: "pci-other",
-      channelId: "pch-other",
-    });
 
     const list = await app.request(
       "/v1/private-channels/transfers",
@@ -809,12 +799,17 @@ describe("Private Channels — transfer access and routes", () => {
       env
     );
     expect(getVisible.status).toBe(200);
+  });
 
-    const getOtherProject = await app.request(
-      "/v1/private-channels/transfers/pct-other-project",
-      { headers: sessionHeaders() },
+  it("returns 404 for another project's transfer", async () => {
+    await seedTransfer({ id: "pct-sandbox-owned" });
+    const response = await app.request(
+      "/v1/private-channels/transfers/pct-sandbox-owned",
+      {
+        headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
+      },
       env
     );
-    expect(getOtherProject.status).toBe(404);
+    expect(response.status).toBe(404);
   });
 });

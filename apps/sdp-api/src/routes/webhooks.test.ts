@@ -13,6 +13,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -238,12 +239,14 @@ describe("Clerk webhooks", () => {
           "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'webhook-cache@example.com', 1, 'active')"
         )
         .bind(userId),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, orgId, projectId, userId),
+    ]);
+    await seedDefaultProjects(db, {
+      organizationId: orgId,
+      createdBy: userId,
+      members: [],
+      ids: { sandbox: projectId, production: `${projectId}_production` },
+    });
+    await db.batch([
       db
         .prepare(
           `INSERT INTO api_keys
@@ -844,24 +847,18 @@ describe("Clerk webhooks", () => {
     );
 
     const apiKeyHash = "webhook_lifecycle_key_hash";
-    const lifecycleProjectId = "prj_webhook_lifecycle";
-    await getDb(env)
+    const lifecycleProject = await getDb(env)
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?
-         FROM auth_organization_identities aoi
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
+        `SELECT p.id
+         FROM projects p
+         JOIN auth_organization_identities aoi ON aoi.organization_id = p.organization_id
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ? AND p.environment = 'sandbox'`
       )
-      .bind(
-        lifecycleProjectId,
-        "Lifecycle Project",
-        "lifecycle-project",
-        "sandbox",
-        "active",
-        userId,
-        "org_clerk_lifecycle"
-      )
-      .run();
+      .bind("org_clerk_lifecycle")
+      .first<{ id: string }>();
+    if (!lifecycleProject) {
+      throw new Error("Expected the Clerk organization sandbox project to exist");
+    }
     await getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -872,7 +869,7 @@ describe("Clerk webhooks", () => {
       )
       .bind(
         "key_webhook_lifecycle",
-        lifecycleProjectId,
+        lifecycleProject.id,
         userId,
         "Lifecycle Key",
         "sk_test_web",
@@ -954,13 +951,12 @@ describe("BVNK ramp webhook", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "webhook-user@example.com", 1, "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(PROJECT_ID, ORG_ID, "Test", "bvnk-webhook-proj", "sandbox", "active", USER_ID)
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (
@@ -2065,13 +2061,12 @@ describe("Lightspark ramp webhook", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "lightspark-webhook-user@example.com", 1, "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(PROJECT_ID, ORG_ID, "Test", "lightspark-webhook-proj", "sandbox", "active", USER_ID)
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (
@@ -2419,13 +2414,12 @@ describe("MoonPay ramp webhook", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "moonpay-webhook-user@example.com", 1, "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(PROJECT_ID, ORG_ID, "Test", "moonpay-webhook-proj", "sandbox", "active", USER_ID)
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (

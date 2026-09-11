@@ -39,6 +39,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -280,34 +281,14 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        "production",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -954,74 +935,6 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       .bind(TEST_ORG.id, TEST_PROJECT.id, key)
       .first<{ count: number | string }>();
     expect(Number(count?.count ?? 0)).toBe(1);
-  });
-
-  it("refuses a key first used by a sibling project instead of replaying its deposit", async () => {
-    // Reachable only because an ORGANIZATION-level custody config is handed to
-    // every project in the org, so both projects resolve the same
-    // `custody_wallets` row and the rest of the request matches. The API's
-    // replay lookup is keyed on (organization_id, request_id) and the server
-    // fingerprint omits the project, so without an explicit project check this
-    // returned the SIBLING project's movement — answering the wrong deposit and
-    // exposing its amount and signature.
-    await seedAuth();
-    const strategy = await seedStrategy();
-    const siblingProject = "prj_test_earn_vault_sibling";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Sibling', 'test-earn-vault-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(siblingProject, TEST_ORG.id, TEST_USER.id)
-      .run();
-    // project_id NULL == organization-level, visible to every project.
-    await seedWallet({
-      configId: "cfg_earn_vault_org_level",
-      custodyWalletId: "cwlt_earn_vault_org_level",
-      providerWalletId: "privy_earn_vault_org_level",
-      projectId: null,
-    });
-
-    const key = "key-first-used-by-the-sibling-project";
-    await createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
-      organizationId: TEST_ORG.id,
-      projectId: siblingProject,
-      environment: "sandbox",
-      provider: strategy.provider,
-      vaultAddress: strategy.provider_reference,
-      custodyWalletId: "cwlt_earn_vault_org_level",
-      sourceAddress: "OrgLevelWalletPublicKey1111111111111111111",
-      tokenMint: USDC_MINT,
-      shareMint: SHARE_MINT,
-      label: strategy.name,
-      requestedAmount: "10",
-      signature: `sig_${crypto.randomUUID()}`,
-      signedTransaction: "AQ==",
-      lastValidBlockHeight: "12345",
-      requestId: key,
-      idempotencyFingerprint: buildEarnVaultDepositFingerprint({
-        environment: "sandbox",
-        provider: strategy.provider,
-        providerReference: strategy.provider_reference,
-        custodyWalletId: "cwlt_earn_vault_org_level",
-        amount: "10",
-        minSharesOut: null,
-      }),
-      createdBy: TEST_USER.id,
-    });
-
-    const response = await postVaultDeposit(
-      {
-        strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_org_level",
-        amount: "10",
-      },
-      key
-    );
-
-    // 409, not a 200 replay of the sibling's movement.
-    expect(response.status).toBe(409);
-    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 
   it("rejects a provider wallet id even when scoped configurations reuse it", async () => {

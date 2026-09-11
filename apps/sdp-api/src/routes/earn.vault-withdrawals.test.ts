@@ -16,7 +16,9 @@ import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -115,18 +117,28 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(TEST_USER.id, TEST_USER.email),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Prod Project', ?, 'production', 'active', ?)`
-      )
-      .bind(TEST_PRODUCTION_PROJECT.id, TEST_ORG.id, TEST_PRODUCTION_PROJECT.slug, TEST_USER.id),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PROD_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    createdBy: TEST_USER.id,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: PROD_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -550,12 +562,17 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_vw_other", "Other Org", "earn-vw-other"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES ('prj_earn_vw_other', 'org_earn_vw_other', 'Other', 'earn-vw-other-prj', 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_USER.id),
+    ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: "org_earn_vw_other",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_vw_other",
+        production: "prj_earn_vw_other_production",
+      },
+    });
+    await getDb(env).batch([
       getDb(env)
         .prepare(
           `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
@@ -671,31 +688,6 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
-  it("allows a sibling project's position when both projects share an org-level wallet", async () => {
-    await seedAuth();
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("UPDATE custody_configs SET project_id = NULL WHERE id = 'cfg_earn_vw'")
-        .bind(),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES ('prj_earn_vw_sibling', ?, 'Sibling', 'earn-vw-sibling', 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_ORG.id, TEST_USER.id),
-    ]);
-    const positionId = await seedPosition({ projectId: "prj_earn_vw_sibling" });
-
-    const res = await postVaultWithdrawal({ positionId, shares: "10" });
-
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ projectId: TEST_PROJECT.id, positionId }),
-      expect.any(Object)
-    );
-  });
-
   it("withdraws in PRODUCTION even while vault deposits are environment-closed there", async () => {
     // The deposit route fail-closes production; an exit must work wherever a
     // position exists, or the fail-close itself would trap funds.
@@ -707,21 +699,6 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
       environment: "production",
     });
     await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn VW Prod Key', ?, ?, 'api_admin', '["*"]', 'active')`
-      )
-      .bind(
-        PROD_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_USER.id,
-        PROD_API_KEY.prefix,
-        prodKeyHash
-      )
-      .run();
     await getDb(env)
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
@@ -841,6 +818,12 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
 });
 
 describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
+  it("404s another project's withdrawal", async () => {
+    await seedAuth();
+    const { recorded } = await recordWithdrawal({ requestId: "vw-project-scope" });
+    expect((await getWithdrawal(`/${recorded.movement.id}`, PROD_API_KEY.raw)).status).toBe(404);
+  });
+
   async function recordWithdrawal(params: {
     requestId: string;
     projectId?: string;
@@ -928,29 +911,6 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
       data: { withdrawals: unknown[] };
     };
     expect(list.data.withdrawals).toHaveLength(0);
-  });
-
-  it("hides a sibling project's withdrawal from this project's key", async () => {
-    await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_earn_vw_sibling', ?, 'Sibling', 'earn-vw-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
-    const { recorded } = await recordWithdrawal({
-      requestId: "vw-sibling-key",
-      projectId: "prj_earn_vw_sibling",
-    });
-
-    expect((await getWithdrawal(`/${recorded.movement.id}`)).status).toBe(404);
-    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
-    expect((await getWithdrawal("?requestId=vw-sibling-key")).status).toBe(200);
-    const page = (await (await getWithdrawal("?requestId=vw-sibling-key")).json()) as {
-      data: { withdrawals: unknown[] };
-    };
-    expect(page.data.withdrawals).toHaveLength(0);
   });
 
   it("filters to unsettled logical withdrawals for recovery", async () => {

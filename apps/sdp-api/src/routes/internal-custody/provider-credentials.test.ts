@@ -12,6 +12,7 @@ import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -130,26 +131,13 @@ async function seedActor(): Promise<void> {
          VALUES (?, ?, ?, 'admin', 'active')`
       )
       .bind("mem_provider_credential_submit", ORGANIZATION_ID, USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        "Provider Credential Submit",
-        "provider-credential-submit",
-        USER_ID
-      ),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_provider_credential_submit", PROJECT_ID, USER_ID),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 async function submit(
@@ -1356,46 +1344,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
-  it("does not expose a Connection from another Project during exact replacement", async () => {
-    const otherProjectId = "prj_provider_credential_submit_exact_other";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other exact project', 'other-exact-project', 'sandbox', 'active', ?)`
-        )
-        .bind(otherProjectId, ORGANIZATION_ID, USER_ID),
-      getDb(env)
-        .prepare(
-          `INSERT INTO project_members (id, project_id, user_id, role)
-           VALUES ('pm_provider_credential_submit_exact_other', ?, ?, 'admin')`
-        )
-        .bind(otherProjectId, USER_ID),
-    ]);
-    const { app, token } = buildApp();
-    const other = await submit(app, token, {
-      key: "exact-other-project-initial",
-      projectId: otherProjectId,
-    });
-    const otherBody = (await other.json()) as {
-      data: { providerCredential: { id: string }; connectionId: string };
-    };
-    await markInitialValidationFailed(getDb(env), {
-      credentialId: otherBody.data.providerCredential.id,
-      connectionId: otherBody.data.connectionId,
-    });
-
-    const response = await replace(app, token, otherBody.data.connectionId, {
-      key: "exact-other-project-replacement",
-    });
-    expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({
-      error: { code: "NOT_FOUND", message: "Custody Connection not found" },
-    });
-    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
-  });
-
   it.each([
     {
       label: "a pending connection",
@@ -2235,114 +2183,5 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(gcp.writes).toHaveLength(1);
     expect(gcp.destroys).toEqual([]);
     expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
-  });
-
-  it("rejects a cross-project idempotency race before the losing GCP secret is written", async () => {
-    const otherProjectId = "prj_provider_credential_submit_other";
-    const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-        )
-        .bind(
-          otherProjectId,
-          ORGANIZATION_ID,
-          "Other Provider Credential Project",
-          "other-provider-credential-project",
-          USER_ID
-        ),
-      db
-        .prepare(
-          `INSERT INTO project_members (id, project_id, user_id, role)
-           VALUES (?, ?, ?, 'admin')`
-        )
-        .bind("pm_provider_credential_submit_other", otherProjectId, USER_ID),
-    ]);
-
-    const gcp = mockSubmissionGcp();
-    const { app, token } = buildApp();
-
-    const responses = await Promise.all([
-      submit(app, token, { key: "concurrent-mismatched-key" }),
-      submit(app, token, {
-        key: "concurrent-mismatched-key",
-        projectId: otherProjectId,
-      }),
-    ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
-    expect(gcp.writes).toHaveLength(1);
-
-    const successResponse = responses.find((response) => response.status === 201);
-    const successBody = (await successResponse?.json()) as
-      | {
-          data: {
-            providerCredential: { id: string; projectId: string };
-          };
-        }
-      | undefined;
-    const winnerId = successBody?.data.providerCredential.id;
-    expect(winnerId).toMatch(/^pcred_/);
-    const winnerProjectId = successBody?.data.providerCredential.projectId;
-    expect([PROJECT_ID, otherProjectId]).toContain(winnerProjectId);
-
-    if (!winnerId || !winnerProjectId) {
-      throw new Error("Concurrent submission did not produce a winning credential");
-    }
-    const winnerVersionRef = `projects/1234567890/secrets/sdp-provider-credentials-${winnerId}/versions/1`;
-    expect(gcp.writes).toEqual([winnerVersionRef]);
-    expect((await getConnectionForCredential(winnerId)).project_id).toBe(winnerProjectId);
-
-    expect(gcp.destroys).toEqual([]);
-
-    const audits = await getDb(env)
-      .prepare(
-        `SELECT action, resource_id
-         FROM audit_logs
-         WHERE resource_type = 'provider_credential'
-         ORDER BY action`
-      )
-      .all<{ action: string; resource_id: string | null }>();
-    expect(audits.results.filter((audit) => audit.action === "submit")).toEqual([
-      { action: "submit", resource_id: winnerId },
-    ]);
-    const failedAudits = audits.results.filter((audit) => audit.action === "submit_failed");
-    expect(failedAudits).toHaveLength(1);
-    expect(failedAudits[0]?.resource_id).not.toBe(winnerId);
-    expect(await getDomainCounts()).toEqual({
-      credentials: 1,
-      connections: 1,
-      wallets: 0,
-    });
-
-    const persisted = await getDb(env)
-      .prepare(
-        `SELECT pc.id AS credential_id,
-                pc.project_id AS credential_project_id,
-                pc.secret_version_ref,
-                c.project_id AS connection_project_id,
-                c.provider_credential_id AS connection_credential_id
-         FROM provider_credentials pc
-         JOIN custody_connections c ON c.provider_credential_id = pc.id`
-      )
-      .first<{
-        credential_id: string;
-        credential_project_id: string;
-        secret_version_ref: string;
-        connection_project_id: string;
-        connection_credential_id: string;
-      }>();
-    expect(persisted).toEqual({
-      credential_id: winnerId,
-      credential_project_id: winnerProjectId,
-      secret_version_ref: winnerVersionRef.replace(
-        "projects/1234567890/",
-        "projects/sdp-submission-test/"
-      ),
-      connection_project_id: winnerProjectId,
-      connection_credential_id: winnerId,
-    });
   });
 });

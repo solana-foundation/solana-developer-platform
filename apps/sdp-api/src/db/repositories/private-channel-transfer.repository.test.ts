@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   type CreatePrivateChannelTransferInput,
@@ -11,12 +12,9 @@ import {
 import { createPostgresPrivateChannelTransferRepository } from "./private-channel-transfer.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_pct_repo_test";
-const OTHER_PROJECT_ID = "prj_pct_repo_other";
 const TEST_INSTANCE_ID = "pci_pct_repo_test";
-const OTHER_INSTANCE_ID = "pci_pct_repo_other";
 const CHANNEL_A_ID = "pch_pct_repo_a";
 const CHANNEL_B_ID = "pch_pct_repo_b";
-const OTHER_CHANNEL_ID = "pch_pct_repo_other";
 const SENDER_PC_USER_ID = "pcu_pct_repo_sender";
 const RECIPIENT_PC_USER_ID = "pcu_pct_repo_recipient";
 const NON_MEMBER_PC_USER_ID = "pcu_pct_repo_non_member";
@@ -104,16 +102,12 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
         .run();
     }
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (
-             id, organization_id, name, slug, environment, status, created_by
-           ) VALUES (?, ?, 'Transfer Repo Test', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     await db
       .prepare(
@@ -140,21 +134,10 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
         `INSERT INTO private_channel_instances (
            id, organization_id, project_id, gateway_url,
            escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
-         ) VALUES
-           (?, ?, ?, 'https://gateway.example',
-            'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE),
-           (?, ?, ?, 'https://other-gateway.example',
-            'other_escrow_program', 'other_withdraw_program', 'other_escrow_instance',
-            'https://other-auth.example', TRUE)`
+         ) VALUES (?, ?, ?, 'https://gateway.example',
+            'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
       )
-      .bind(
-        TEST_INSTANCE_ID,
-        TEST_ORG.id,
-        TEST_PROJECT_ID,
-        OTHER_INSTANCE_ID,
-        TEST_ORG.id,
-        OTHER_PROJECT_ID
-      )
+      .bind(TEST_INSTANCE_ID, TEST_ORG.id, TEST_PROJECT_ID)
       .run();
 
     await db
@@ -163,8 +146,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
            id, organization_id, project_id, instance_id, name, status
          ) VALUES
            (?, ?, ?, ?, 'Channel A', 'active'),
-           (?, ?, ?, ?, 'Channel B', 'active'),
-           (?, ?, ?, ?, 'Other Channel', 'active')`
+           (?, ?, ?, ?, 'Channel B', 'active')`
       )
       .bind(
         CHANNEL_A_ID,
@@ -174,11 +156,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
         CHANNEL_B_ID,
         TEST_ORG.id,
         TEST_PROJECT_ID,
-        TEST_INSTANCE_ID,
-        OTHER_CHANNEL_ID,
-        TEST_ORG.id,
-        OTHER_PROJECT_ID,
-        OTHER_INSTANCE_ID
+        TEST_INSTANCE_ID
       )
       .run();
 
@@ -360,15 +338,10 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     });
   });
 
-  it("scopes reads to the project and optionally filters project history by channel", async () => {
+  it("reads project history and optionally filters it by channel", async () => {
     const channelA = await seedTransfer();
     const channelB = await seedTransfer({
       channelId: CHANNEL_B_ID,
-    });
-    const otherProject = await seedTransfer({
-      projectId: OTHER_PROJECT_ID,
-      instanceId: OTHER_INSTANCE_ID,
-      channelId: OTHER_CHANNEL_ID,
     });
 
     expect(
@@ -377,20 +350,11 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
         id: channelA.id,
       })
     ).toMatchObject({ id: channelA.id });
-    expect(
-      await repo.getTransferById({
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-        id: channelA.id,
-      })
-    ).toBeNull();
-
     const projectRows = await repo.listTransfersByProject(SCOPE);
     expect(new Set(projectRows.map((row) => row.id))).toEqual(new Set([channelA.id, channelB.id]));
     expect(await repo.listTransfersByProject({ ...SCOPE, channelId: CHANNEL_A_ID })).toEqual([
       expect.objectContaining({ id: channelA.id }),
     ]);
-    expect(projectRows.map((row) => row.id)).not.toContain(otherProject.id);
   });
 
   it("stores failed transfer errors as terminal history", async () => {
@@ -492,9 +456,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
       initiatingPrivateChannelUserId: SENDER_PC_USER_ID,
     };
 
-    expect(await repo.listEligibleRecipients({ ...input, instanceId: OTHER_INSTANCE_ID })).toEqual(
-      []
-    );
+    expect(await repo.listEligibleRecipients({ ...input, instanceId: "pci_missing" })).toEqual([]);
 
     const db = getDb(env);
     await db

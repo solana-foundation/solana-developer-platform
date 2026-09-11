@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const provisionApiKeyWallet = vi.hoisted(() => vi.fn());
@@ -67,13 +68,12 @@ describe("getOrCreateDvpSettlementWallet", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)

@@ -58,6 +58,7 @@ import { getDb } from "@/db";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import { reconcileRevokedApiKeyCache } from "./reconcile-revoked-api-key-cache";
@@ -110,6 +111,7 @@ describe("reconcileRevokedApiKeyCache", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await clearKVStores(env);
     corruptHash = await hashString(CORRUPT_KEY.raw, env.API_KEY_PEPPER);
     staleHash = await hashString(STALE_KEY.raw, env.API_KEY_PEPPER);
 
@@ -120,13 +122,13 @@ describe("reconcileRevokedApiKeyCache", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id),
     ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    });
 
     await seedRevokedKeyRow(CORRUPT_KEY.id, corruptHash);
     await seedRevokedKeyRow(STALE_KEY.id, staleHash);
@@ -156,6 +158,34 @@ describe("reconcileRevokedApiKeyCache", () => {
     expect(repairedStale?.status).toBe("revoked");
 
     // And a second sweep has nothing left to do.
+    expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
+  });
+
+  it("tombstones the cached entry of a key whose project was dropped", async () => {
+    const kv = createKVStoreSet(env).apiKeys;
+    const droppedHash = await hashString("sk_test_reconcile_dropped", env.API_KEY_PEPPER);
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES ('key_reconcile_dropped', ?, ?, ?, 'dropped', 'sk_test_rec', ?, 'api_admin', ?, 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, droppedHash, JSON.stringify(["*"]))
+      .run();
+    await seedCachedApiKey(env, droppedHash, activeEntry("key_reconcile_dropped"));
+
+    await getDb(env).batch([
+      getDb(env).prepare("DELETE FROM api_keys WHERE project_id = ?").bind(TEST_PROJECT.id),
+      getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(TEST_PROJECT.id),
+    ]);
+
+    const outcome = await reconcileRevokedApiKeyCache(env);
+    expect(outcome.scanned).toBe(1);
+    expect(outcome.repaired).toBe(1);
+
+    const tombstoned = await kv.get<CachedApiKey>(apiKeyCacheKey(droppedHash), "json");
+    expect(tombstoned?.status).toBe("revoked");
+
     expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
   });
 

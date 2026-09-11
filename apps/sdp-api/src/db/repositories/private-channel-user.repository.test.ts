@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPrivateChannelRepository } from "./private-channel.repository.postgres";
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
@@ -12,7 +13,6 @@ import { createPostgresPrivateChannelVerifiedWalletRepository } from "./private-
 
 const TEST_PROJECT_ID = "prj_pcu_repo_test";
 const PCU_ID = "pcu_pcu_repo_test";
-const PROJECT_MEMBER_ID = "pm_pcu_repo_test";
 const PUBKEY_A = "So11111111111111111111111111111111111111112";
 const PUBKEY_B = "So11111111111111111111111111111111111111113";
 
@@ -53,20 +53,12 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-           VALUES (?, ?, ?, 'developer')`
-      )
-      .bind(PROJECT_MEMBER_ID, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [TEST_USER.id],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO private_channel_users (id, organization_id, project_id, user_id)
@@ -179,8 +171,8 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
   it("surfaces the caller's project_members role", async () => {
     const db = getDb(env);
     await db
-      .prepare("UPDATE project_members SET role = 'admin' WHERE id = ?")
-      .bind(PROJECT_MEMBER_ID)
+      .prepare("UPDATE project_members SET role = 'admin' WHERE project_id = ? AND user_id = ?")
+      .bind(TEST_PROJECT_ID, TEST_USER.id)
       .run();
 
     const [listed] = await repo.listByProject(scope);
@@ -191,7 +183,10 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
 
   it("keeps the PCU visible with null role when project_members is removed", async () => {
     const db = getDb(env);
-    await db.prepare("DELETE FROM project_members WHERE id = ?").bind(PROJECT_MEMBER_ID).run();
+    await db
+      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+      .bind(TEST_PROJECT_ID, TEST_USER.id)
+      .run();
 
     const [listed] = await repo.listByProject(scope);
     expect(listed.project_role).toBeNull();

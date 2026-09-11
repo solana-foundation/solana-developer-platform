@@ -16,6 +16,7 @@ import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-conne
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -75,20 +76,14 @@ async function seedAuth(): Promise<void> {
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Rings Route Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys

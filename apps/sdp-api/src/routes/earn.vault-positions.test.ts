@@ -7,7 +7,9 @@ import {
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -35,18 +37,19 @@ vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
 const ORG = "org_vault_positions";
 const USER = "usr_vault_positions";
 const PROJECT_A = "prj_vault_positions_a";
-const PROJECT_B = "prj_vault_positions_b";
 const CONFIG_A = "cfg_vault_positions_a";
-const CONFIG_B = "cfg_vault_positions_b";
 const WALLET_A = "cwlt_vault_positions_a";
-const WALLET_B = "cwlt_vault_positions_b";
 const PROVIDER_WALLET_A = "privy_vault_positions_a";
-const PROVIDER_WALLET_B = "privy_vault_positions_b";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const PUBLIC_KEY_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const API_KEY = { id: "key_vault_positions", raw: "sk_test_vault_positions" };
+const PRODUCTION_API_KEY = {
+  id: "key_vault_positions_production",
+  raw: "sk_live_vault_positions",
+  prefix: "sk_live_vau",
+};
 
 function cachedKey(): CachedApiKey {
   return {
@@ -74,15 +77,28 @@ async function seedScope(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "vault-positions@example.com"),
-    ...[PROJECT_A, PROJECT_B].map((projectId, index) =>
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, ORG, `Project ${index}`, `vault-positions-${index}`, USER)
-    ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT_A, production: `${PROJECT_A}_production` },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PRODUCTION_API_KEY,
+    organizationId: ORG,
+    projectId: `${PROJECT_A}_production`,
+    createdBy: USER,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: PRODUCTION_API_KEY.id,
+    projectId: `${PROJECT_A}_production`,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -90,25 +106,24 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
       )
       .bind(API_KEY.id, ORG, PROJECT_A, USER, "Vault key", "sk_test_vau", keyHash),
-    ...[
-      [CONFIG_A, PROJECT_A, WALLET_A, PROVIDER_WALLET_A, PUBLIC_KEY_A],
-      [CONFIG_B, PROJECT_B, WALLET_B, PROVIDER_WALLET_B, PUBLIC_KEY_B],
-    ].flatMap(([configId, projectId, walletId, providerWalletId, publicKey]) => [
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
+    ...[[CONFIG_A, PROJECT_A, WALLET_A, PROVIDER_WALLET_A, PUBLIC_KEY_A]].flatMap(
+      ([configId, projectId, walletId, providerWalletId, publicKey]) => [
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_configs
              (id, organization_id, project_id, provider, config_encrypted, status)
            VALUES (?, ?, ?, 'privy', 'encrypted', 'active')`
-        )
-        .bind(configId, ORG, projectId),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
+          )
+          .bind(configId, ORG, projectId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets
              (id, custody_config_id, wallet_id, public_key, status)
            VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(walletId, configId, providerWalletId, publicKey),
-    ]),
+          )
+          .bind(walletId, configId, providerWalletId, publicKey),
+      ]
+    ),
   ]);
 }
 
@@ -166,6 +181,10 @@ function getDeposit(movementId: string) {
   );
 }
 
+function requestAsProduction(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${PRODUCTION_API_KEY.raw}` } }, env);
+}
+
 function encodeCursorPayload(createdAt: string, id: string): string {
   return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -193,30 +212,22 @@ beforeEach(async () => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
-  it("never exposes a sibling project's wallet position to an unbound project key", async () => {
-    const own = await createPosition({});
-    await createPosition({
-      projectId: PROJECT_B,
-      walletId: WALLET_B,
-      providerReference: "vault_sibling",
-    });
+  it.each([
+    ["position list", "/v1/earn/vault-positions", 200],
+    ["deposit list", "/v1/earn/vault-deposits", 200],
+    ["deposit request-id lookup", "/v1/earn/vault-deposits?requestId=project-scope", 200],
+  ])("hides another project's resource from the %s", async (_name, path, status) => {
+    await createPosition({ requestId: "project-scope" });
+    const response = await requestAsProduction(path);
+    expect(response.status).toBe(status);
+    expect(JSON.stringify(await response.json())).not.toContain(PROJECT_A);
+  });
 
-    const response = await getPositions();
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: { positions: Array<{ id: string; custodyWalletId: string; label: string }> };
-    };
-
-    expect(body.data.positions).toEqual([
-      expect.objectContaining({
-        id: own.position.id,
-        custodyWalletId: WALLET_A,
-        label: own.position.label,
-        // Sponsorship is unset in this harness: the exit reads wallet-pays.
-        feeSponsored: false,
-      }),
-    ]);
-    expect(readVaultPositions).toHaveBeenCalledTimes(1);
+  it("404s another project's deposit", async () => {
+    const created = await createPosition({});
+    expect(
+      (await requestAsProduction(`/v1/earn/vault-deposits/${created.movement.id}`)).status
+    ).toBe(404);
   });
 
   /**
@@ -577,19 +588,6 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
     );
   });
 
-  it("hides a sibling project's wallet deposit from an unbound project key", async () => {
-    const sibling = await createPosition({
-      projectId: PROJECT_B,
-      walletId: WALLET_B,
-      providerReference: "vault_read_sibling",
-    });
-
-    // 404, not 403: a caller who may not see the movement must not learn that
-    // it exists.
-    expect((await getDeposit(sibling.movement.id)).status).toBe(404);
-    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
-  });
-
   it("refuses a withdrawal from the deposit path", async () => {
     const created = await createPosition({ providerReference: "vault_read_direction" });
     await getDb(env)
@@ -683,21 +681,6 @@ describe("GET /v1/earn/vault-deposits", () => {
     expect(body.data.nextCursor).toBeNull();
   });
 
-  it("never lists a sibling project's wallet deposit", async () => {
-    const own = await createPosition({ providerReference: "vault_list_own" });
-    await createPosition({
-      projectId: PROJECT_B,
-      walletId: WALLET_B,
-      providerReference: "vault_list_sibling",
-    });
-
-    const body = (await (await listDeposits()).json()) as {
-      data: { deposits: Array<{ movementId: string }> };
-    };
-
-    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([own.movement.id]);
-  });
-
   it("omits a withdrawal, which is not a deposit", async () => {
     const deposit = await createPosition({ providerReference: "vault_list_deposit" });
     const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
@@ -768,25 +751,6 @@ describe("GET /v1/earn/vault-deposits", () => {
     expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([created.movement.id]);
   });
 
-  it("answers empty for a key that resolves outside the caller's scope", async () => {
-    // A key is caller-chosen and may be one character, so it must never work as
-    // a capability — the sibling-project scoping applies to it exactly as it
-    // does to the movement id.
-    const requestId = "1";
-    await createPosition({
-      projectId: PROJECT_B,
-      walletId: WALLET_B,
-      providerReference: "vault_by_key_sibling",
-      requestId,
-    });
-
-    const body = (await (
-      await listDeposits(`?requestId=${encodeURIComponent(requestId)}`)
-    ).json()) as { data: { deposits: unknown[] } };
-
-    expect(body.data.deposits).toEqual([]);
-  });
-
   it("returns only in-flight movements when asked, so recovery cannot be paged out", async () => {
     const inFlight = await createPosition({ providerReference: "vault_settled_pending" });
     const settled = await createPosition({ providerReference: "vault_settled_confirmed" });
@@ -816,8 +780,7 @@ describe("GET /v1/earn/vault-deposits", () => {
 
   it("hides a movement whose project was deleted", async () => {
     // `project_id` is nullable only through ON DELETE SET NULL, so a null means
-    // the owning project is gone — not that the row is readable by every
-    // sibling project that happens to share an organization-level wallet.
+    // the owning project is gone, not that the row is unscoped.
     const orphaned = await createPosition({ providerReference: "vault_orphaned" });
     await getDb(env)
       .prepare("UPDATE earn_movements SET project_id = NULL WHERE id = ?")

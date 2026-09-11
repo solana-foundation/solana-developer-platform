@@ -746,26 +746,8 @@ describe("Payments routes — recurring", () => {
     await expectTokenRejected("SOL");
     await expectTokenRejected(TEST_SOLANA_ADDRESSES.wallet1);
 
-    const otherProject = { id: "prj_other_token_gate", slug: "other-token-gate-project" };
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        otherProject.id,
-        TEST_ORG.id,
-        "Other Token Gate Project",
-        otherProject.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      )
-      .run();
-
     const issuedMint = (await generateKeyPairSigner()).address;
     const pausedMint = (await generateKeyPairSigner()).address;
-    const otherProjectMint = (await generateKeyPairSigner()).address;
     await seedIssuedTokenMint({
       projectId: TEST_PROJECT.id,
       mintAddress: issuedMint,
@@ -776,14 +758,7 @@ describe("Payments routes — recurring", () => {
       mintAddress: pausedMint,
       status: "paused",
     });
-    await seedIssuedTokenMint({
-      projectId: otherProject.id,
-      mintAddress: otherProjectMint,
-      status: "active",
-    });
-
     await expectTokenRejected(pausedMint);
-    await expectTokenRejected(otherProjectMint);
 
     const issuedRes = await createRecurring(issuedMint);
     expect(issuedRes.status).toBe(201);

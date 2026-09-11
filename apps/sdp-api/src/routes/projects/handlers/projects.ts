@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
-import { noContent, success } from "@/lib/response";
+import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
@@ -88,29 +88,4 @@ export const updateProject = async (c: ValidatedBodyContext<typeof updateProject
 
   const response: ProjectResponse = { project };
   return success(c, response);
-};
-
-export const archiveProject = async (c: AppContext) => {
-  const { projectId } = c.req.param();
-  const auth = getAuth(c);
-
-  const projectService = new ProjectService(getDb(c.env));
-
-  // Verify ownership
-  const existing = await projectService.getProject(projectId);
-  if (!existing || existing.organizationId !== auth.organizationId) {
-    throw notFound("Project");
-  }
-
-  await projectService.archiveProject(projectId);
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "delete",
-    resourceType: "project",
-    resourceId: projectId,
-  });
-
-  return noContent(c);
 };

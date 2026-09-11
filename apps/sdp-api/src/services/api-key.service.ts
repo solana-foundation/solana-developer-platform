@@ -16,7 +16,7 @@ import type {
 import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { ApiKeyWalletPolicyBindingRow } from "@/db/repositories";
-import { AppError, badRequest, internalError } from "@/lib/errors";
+import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
@@ -275,12 +275,15 @@ export class ApiKeyService {
     assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
 
     const project = await this.db
-      .prepare(`SELECT environment FROM projects WHERE id = ? AND organization_id = ?`)
+      .prepare(
+        `SELECT environment FROM projects
+         WHERE id = ? AND organization_id = ? AND status = 'active'`
+      )
       .bind(input.projectId, input.organizationId)
       .first<{ environment: ApiKeyEnvironment }>();
 
     if (!project) {
-      throw new AppError("NOT_FOUND", "Project not found");
+      throw notFound("Project");
     }
 
     const keyId = `key_${crypto.randomUUID()}`;
@@ -430,7 +433,8 @@ export class ApiKeyService {
                 p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
-         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ? AND ak.status = 'active'`
+         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?
+           AND ak.status = 'active' AND p.status = 'active'`
       )
       .bind(keyId, organizationId, projectId)
       .first<{

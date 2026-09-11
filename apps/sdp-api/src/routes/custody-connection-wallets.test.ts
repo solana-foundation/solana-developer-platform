@@ -10,6 +10,7 @@ import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-cre
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -64,13 +65,14 @@ async function seedFixture(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER_ID, "connection-wallets@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, 'Connection wallets', 'connection-wallets', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, USER_ID),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys (

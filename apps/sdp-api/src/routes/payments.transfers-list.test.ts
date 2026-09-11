@@ -3,7 +3,9 @@ import type { Address, Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -24,6 +26,17 @@ import { seedRateLimit } from "@/test/mocks/kv";
 
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
+
+  beforeEach(async () => {
+    await seedProjectApiKey(getDb(env), env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT.id}_production`,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["payments:read"],
+    });
+  });
 
   async function seedTransfer(params: {
     id: string;
@@ -1383,60 +1396,15 @@ describe("Payments routes — list transfers", () => {
       expect(body.error.code).toBe("FORBIDDEN");
     });
 
-    it("returns 404 when the transfer belongs to a different project in the same org", async () => {
-      const otherProjectId = "prj_payments_cross_project";
-      const now = new Date().toISOString();
-
-      await getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          otherProjectId,
-          TEST_ORG.id,
-          "Other Payments Project",
-          "other-payments-project",
-          "sandbox",
-          "active",
-          TEST_USER.id
-        )
-        .run();
-
-      await getDb(env)
-        .prepare(
-          `INSERT INTO payment_transfers
-             (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "xfr_cross_project_iso",
-          TEST_ORG.id,
-          otherProjectId,
-          TEST_WALLET_ID,
-          TEST_SOLANA_ADDRESSES.wallet1,
-          TEST_SOLANA_ADDRESSES.wallet2,
-          "SOL",
-          "1",
-          null,
-          "transfer",
-          "outbound",
-          "confirmed",
-          null,
-          now,
-          now
-        )
-        .run();
-
+    it("returns 404 for another project's transfer", async () => {
+      await seedTransfer({ id: "xfr_sandbox_owned", status: "confirmed" });
       const res = await app.request(
-        "/v1/payments/transfers/xfr_cross_project_iso",
+        "/v1/payments/transfers/xfr_sandbox_owned",
         {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
         },
         env
       );
-
       expect(res.status).toBe(404);
     });
   });

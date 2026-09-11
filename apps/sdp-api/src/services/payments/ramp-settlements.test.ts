@@ -2,6 +2,7 @@ import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { applyRampSettlementEvent } from "./ramp-settlements";
 
@@ -105,21 +106,13 @@ describe("applyRampSettlementEvent", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(USER_ID, "ramp-settlement@example.com", 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          PROJECT_ID,
-          ORG_ID,
-          "Ramp Settlement Project",
-          "ramp-settlement-project",
-          "sandbox",
-          "active",
-          USER_ID
-        ),
     ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
   });
 
   it("persists the provider signature for an on-ramp deposit", async () => {

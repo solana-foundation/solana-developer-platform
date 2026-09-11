@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { VaultWithdrawalInput } from "./vault-withdraw.service";
 
@@ -93,12 +94,14 @@ async function seedPosition(): Promise<void> {
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER, "vault-withdraw@example.com", 1, "active"),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, "Vault Withdraw Project", "vault-withdraw-project", USER),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)

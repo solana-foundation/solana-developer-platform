@@ -2,6 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   CreateDepositInput,
@@ -47,6 +52,7 @@ function makeInput(overrides: Partial<CreateDepositInput> = {}): CreateDepositIn
 
 describe("PrivateChannelDepositRepository (postgres)", () => {
   let repo: PrivateChannelDepositRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -73,13 +79,12 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO private_channel_instances (
@@ -199,32 +204,6 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
     expect(found?.idempotency_fingerprint).toBe("fp_idem_shared");
   });
 
-  it("scopes the reservation to the project, so the same key is free elsewhere", async () => {
-    const db = getDb(env);
-    const otherProjectId = "prj_pcd_repo_other";
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(otherProjectId, TEST_ORG.id, otherProjectId, TEST_USER.id)
-      .run();
-
-    await repo.createDeposit(makeInput({ idempotencyKey: "idem_scoped" }));
-    const other = await repo.createDeposit(
-      makeInput({ idempotencyKey: "idem_scoped", projectId: otherProjectId })
-    );
-    expect(other).not.toBeNull();
-
-    // Neither project can see the other's claim on the same key.
-    const found = await repo.findDepositByIdempotency({
-      organizationId: TEST_ORG.id,
-      projectId: otherProjectId,
-      idempotencyKey: "idem_scoped",
-    });
-    expect(found?.id).toBe(other?.id);
-  });
-
   it("countNonTerminalByInstance ignores terminal deposits", async () => {
     const created = await repo.createDeposit(makeInput());
     expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(1);
@@ -235,5 +214,35 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       expectedStatus: "pending",
     });
     expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(0);
+  });
+
+  it("scopes idempotency reservations to the project", async () => {
+    await repo.createDeposit(makeInput({ idempotencyKey: "idem_scoped" }));
+    const read = (projectId: string) =>
+      repo.findDepositByIdempotency({
+        organizationId: TEST_ORG.id,
+        projectId,
+        idempotencyKey: "idem_scoped",
+      });
+    await expectProjectScoped(
+      read,
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_instances (id, organization_id, project_id, gateway_url, escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active) VALUES ('inst_pcd_production', ?, ?, 'https://production.example', 'escrow_program', 'withdraw_program', 'escrow_instance_production', 'https://auth.example', TRUE)`
+      )
+      .bind(TEST_ORG.id, projects.production.id)
+      .run();
+    await expect(
+      repo.createDeposit(
+        makeInput({
+          projectId: projects.production.id,
+          instanceId: "inst_pcd_production",
+          idempotencyKey: "idem_scoped",
+        })
+      )
+    ).resolves.not.toBeNull();
   });
 });

@@ -16,6 +16,7 @@ import {
 import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_runtime_targets";
@@ -1185,14 +1186,13 @@ async function seedScope(): Promise<void> {
          VALUES (?, 'runtime-targets@example.com', 1, 'active')`
       )
       .bind(USER_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, 'Runtime targets', 'runtime-targets', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, USER_ID),
   ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 async function seedConfig(params: {

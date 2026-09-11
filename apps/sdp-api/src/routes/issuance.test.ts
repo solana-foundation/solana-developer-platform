@@ -31,16 +31,20 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
   TEST_ALLOWLIST_TOKEN,
+  TEST_PRODUCTION_PROJECT,
   TEST_PROJECT,
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -188,14 +192,18 @@ async function seedProject(input: {
   organizationId: string;
   name: string;
   slug: string;
+  environment: "sandbox" | "production";
 }) {
-  await getDb(env)
-    .prepare(
-      `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-    )
-    .bind(input.id, input.organizationId, input.name, input.slug, TEST_USER.id)
-    .run();
+  const otherId = `${input.id}_${input.environment === "sandbox" ? "production" : "sandbox"}`;
+  await seedDefaultProjects(getDb(env), {
+    organizationId: input.organizationId,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids:
+      input.environment === "sandbox"
+        ? { sandbox: input.id, production: otherId }
+        : { sandbox: otherId, production: input.id },
+  });
 }
 
 function toTestIdPart(value: string): string {
@@ -356,22 +364,20 @@ describe("Issuance Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    // Seed project
-    await db
-      .prepare(
-        `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_PROJECT.organizationId,
-        TEST_PROJECT.name,
-        TEST_PROJECT.slug,
-        TEST_PROJECT.environment,
-        TEST_PROJECT.status,
-        TEST_PROJECT.createdBy
-      )
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+    });
+    await seedProjectApiKey(db, env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT.id,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
+    });
 
     // Seed project-scoped API key
     await db
@@ -1954,15 +1960,21 @@ describe("Issuance Routes", () => {
         const request = await prepareAction(operation);
         await seedOrganization({ id: "org_other_selector", name: "Other", slug: "other-selector" });
         for (const organizationId of [TEST_ORG.id, "org_other_selector"]) {
-          const projectId = `prj_other_${organizationId}`;
+          const projectId =
+            organizationId === TEST_ORG.id
+              ? TEST_PRODUCTION_PROJECT.id
+              : `prj_other_${organizationId}`;
           const configId = `cfg_other_${organizationId}`;
           const custodyWalletId = `cwlt_other_${organizationId}`;
-          await seedProject({
-            id: projectId,
-            organizationId,
-            name: "Other project",
-            slug: "other-project",
-          });
+          if (organizationId !== TEST_ORG.id) {
+            await seedProject({
+              id: projectId,
+              organizationId,
+              name: "Other project",
+              slug: "other-project",
+              environment: "sandbox",
+            });
+          }
           await getDb(env)
             .prepare(
               `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
@@ -2357,20 +2369,15 @@ describe("Issuance Routes", () => {
         slug: "issuance-other-org",
       });
       await seedProject({
-        id: "prj_issuance_other_project",
-        organizationId: TEST_ORG.id,
-        name: "Other Project",
-        slug: "issuance-other-project",
-      });
-      await seedProject({
         id: "prj_issuance_other_org",
         organizationId: "org_issuance_other",
         name: "Other Org Project",
         slug: "issuance-other-org-project",
+        environment: "sandbox",
       });
       const sameOrgOtherProjectToken = await seedIssuedToken({
         id: "tok_other_project_transactions",
-        projectId: "prj_issuance_other_project",
+        projectId: TEST_PRODUCTION_PROJECT.id,
         mintAddress: null,
       });
       const otherOrgToken = await seedIssuedToken({
@@ -2897,6 +2904,7 @@ describe("Issuance Routes", () => {
         organizationId: foreignOrgId,
         name: "Foreign issuance project",
         slug: "foreign-issuance-project",
+        environment: "sandbox",
       });
       await getDb(env).batch([
         getDb(env)
@@ -3555,30 +3563,15 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 404 when the token belongs to a different project in the same org", async () => {
-      const otherProjectId = "prj_cross_project_isolation";
-      await seedProject({
-        id: otherProjectId,
-        organizationId: TEST_ORG.id,
-        name: "Other Project",
-        slug: "cross-project-isolation",
-      });
-      const otherProjectToken = await seedIssuedToken({
-        id: "tok_other_project_iso",
-        projectId: otherProjectId,
-      });
-      const mintRead = vi.spyOn(Token2022, "fetchMaybeMint");
-
+    it("returns 404 when the token belongs to the sandbox project", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${otherProjectToken.id}?includeMetadataAuthority=true`,
+        `/v1/issuance/tokens/${tokenId}`,
         {
-          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
         },
         env
       );
-
       expect(res.status).toBe(404);
-      expect(mintRead).not.toHaveBeenCalled();
     });
   });
 
@@ -3633,42 +3626,6 @@ describe("Issuance Routes", () => {
         signing_wallet_id: wallet.walletId,
         signing_custody_wallet_id: wallet.custodyWalletId,
       });
-    });
-
-    it("does not persist an exact signing wallet outside the project", async () => {
-      const wallet = await seedIssuanceActivityWallet("wallet_other_project");
-      await getDb(env)
-        .prepare(
-          "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES ('prj_foreign_draft', ?, 'Other project', 'foreign-draft', 'sandbox', 'active', ?)"
-        )
-        .bind(TEST_ORG.id, TEST_USER.id)
-        .run();
-      await getDb(env)
-        .prepare(
-          "UPDATE custody_configs SET project_id = ? WHERE id = 'cust_cfg_issuance_activity'"
-        )
-        .bind("prj_foreign_draft")
-        .run();
-      const response = await app.request(
-        `/v1/issuance/tokens/${tokenId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ signingCustodyWalletId: wallet.custodyWalletId }),
-        },
-        env
-      );
-      expect(response.status).toBe(404);
-      const row = await getDb(env)
-        .prepare(
-          "SELECT signing_wallet_id, signing_custody_wallet_id FROM issued_tokens WHERE id = ?"
-        )
-        .bind(tokenId)
-        .first();
-      expect(row).toEqual({ signing_wallet_id: null, signing_custody_wallet_id: null });
     });
 
     it("rejects a selector-only patch after deploy without changing deployment attribution", async () => {

@@ -3,17 +3,22 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentTransferBatchesRepository } from "./payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_transfer_batches_repo_test";
-const OTHER_PROJECT_ID = "prj_transfer_batches_repo_test_other";
 const TEST_WALLET_ID = "wallet_transfer_batches_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_transfer_batches_repo_test";
 
 describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   let repo: PaymentTransferBatchesRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env);
@@ -40,15 +45,12 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs
@@ -105,26 +107,6 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     });
   });
 
-  it("scopes idempotency keys to the project", async () => {
-    const { batch: first } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "shared-batch-key" },
-      recipients: [],
-    });
-    const { batch: second } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: OTHER_PROJECT_ID, idempotencyKey: "shared-batch-key" },
-      recipients: [],
-    });
-
-    expect(first.id).not.toBe(second.id);
-    expect(
-      await repo.findTransferBatchByIdempotency({
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-        idempotencyKey: "shared-batch-key",
-      })
-    ).toMatchObject({ id: second.id });
-  });
-
   it("rejects a second batch with the same organization, project, and idempotency key", async () => {
     await repo.createTransferBatchWithRecipients({
       batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "duplicate-batch-key" },
@@ -137,6 +119,34 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         recipients: [],
       })
     ).rejects.toSatisfy((error: unknown) => isPostgresUniqueViolation(error));
+  });
+
+  it("scopes idempotency keys to the project", async () => {
+    await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: projects.sandbox.id, idempotencyKey: "shared-batch-key" },
+      recipients: [],
+    });
+    const read = (projectId: string) =>
+      repo.findTransferBatchByIdempotency({
+        organizationId: TEST_ORG.id,
+        projectId,
+        idempotencyKey: "shared-batch-key",
+      });
+    await expectProjectScoped(
+      read,
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
+    await expect(
+      repo.createTransferBatchWithRecipients({
+        batch: {
+          ...baseInput,
+          projectId: projects.production.id,
+          idempotencyKey: "shared-batch-key",
+        },
+        recipients: [],
+      })
+    ).resolves.toBeDefined();
   });
 
   it("rolls back the batch row when a recipient insert fails", async () => {

@@ -6,12 +6,12 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_policy_inventory";
 const TEST_PROJECT_ID = "prj_policy_inventory";
-const OTHER_PROJECT_ID = "prj_policy_inventory_other";
 const OTHER_ORG_ID = "org_policy_inventory_other";
 const TEST_USER_ID = "usr_policy_inventory";
 const OTHER_USER_ID = "usr_policy_inventory_other";
@@ -62,48 +62,23 @@ async function seedPolicyInventory(): Promise<string> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(OTHER_USER_ID, "other-policy-inventory@example.com", 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT_ID,
-        TEST_ORG_ID,
-        "Policy Inventory Project",
-        "policy-inventory-project",
-        "sandbox",
-        "active",
-        TEST_USER_ID
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        OTHER_PROJECT_ID,
-        TEST_ORG_ID,
-        "Other Policy Project",
-        "other-policy-project",
-        "sandbox",
-        "active",
-        TEST_USER_ID
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "prj_policy_inventory_foreign",
-        OTHER_ORG_ID,
-        "Foreign Policy Project",
-        "foreign-policy-project",
-        "sandbox",
-        "active",
-        OTHER_USER_ID
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG_ID,
+    createdBy: TEST_USER_ID,
+    members: [],
+    ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+  });
+  await seedDefaultProjects(getDb(env), {
+    organizationId: OTHER_ORG_ID,
+    createdBy: OTHER_USER_ID,
+    members: [],
+    ids: {
+      sandbox: "prj_policy_inventory_foreign",
+      production: "prj_policy_inventory_foreign_production",
+    },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -162,27 +137,9 @@ async function seedPolicyInventory(): Promise<string> {
       ),
     getDb(env)
       .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "key_policy_inventory_other_project",
-        TEST_ORG_ID,
-        OTHER_PROJECT_ID,
-        TEST_USER_ID,
-        "Other Project Key",
-        "sk_test_other",
-        "hash_policy_inventory_other_project",
-        "api_developer",
-        JSON.stringify(["payments:read"]),
-        "active"
-      ),
-    getDb(env)
-      .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         "cfg_policy_inventory",
@@ -199,13 +156,6 @@ async function seedPolicyInventory(): Promise<string> {
         "encrypted-null",
         "sdp-custody-encryption-v1",
         "active",
-        "cfg_policy_inventory_other_project",
-        TEST_ORG_ID,
-        OTHER_PROJECT_ID,
-        "local",
-        "encrypted-other",
-        "sdp-custody-encryption-v1",
-        "active",
         "cfg_policy_inventory_foreign",
         OTHER_ORG_ID,
         "prj_policy_inventory_foreign",
@@ -219,7 +169,6 @@ async function seedPolicyInventory(): Promise<string> {
         `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status, created_at, updated_at)
          VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?),
@@ -273,15 +222,6 @@ async function seedPolicyInventory(): Promise<string> {
         "active",
         "2026-07-08T00:00:00.000Z",
         "2026-07-08T00:00:00.000Z",
-        "cw_policy_inventory_other_project",
-        "cfg_policy_inventory_other_project",
-        "wallet_policy_inventory_other_project",
-        "address_policy_inventory_other_project",
-        "Other Project Wallet",
-        "transfer",
-        "active",
-        "2026-07-09T00:00:00.000Z",
-        "2026-07-09T00:00:00.000Z",
         "cw_policy_inventory_foreign",
         "cfg_policy_inventory_foreign",
         "wallet_policy_inventory_foreign",
@@ -653,9 +593,7 @@ describe("GET /v1/policies", () => {
     const body = (await response.json()) as { data: PolicyControlInventoryResponse };
     const targetIds = body.data.controls.map((control) => control.targetId);
     expect(targetIds).not.toContain("cw_policy_inventory_null");
-    expect(targetIds).not.toContain("cw_policy_inventory_other_project");
     expect(targetIds).not.toContain("cw_policy_inventory_foreign");
-    expect(targetIds).not.toContain("key_policy_inventory_other_project");
 
     const nullScoped = await createPostgresPolicyRepository(
       getDb(env),

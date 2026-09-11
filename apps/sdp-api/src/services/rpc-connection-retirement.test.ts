@@ -21,6 +21,7 @@ import { clearQueuedSecretVersion, queuePendingSecretVersion } from "@/services/
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -99,9 +100,6 @@ const USER_ID = "usr_rpc_retirement";
  * a project would be refused before reaching the code under test.
  */
 const PROJECT_COMMITTED = "prj_rpc_retirement_committed";
-const PROJECT_UNRECORDABLE = "prj_rpc_retirement_unrecordable";
-const PROJECT_DOOMED = "prj_rpc_retirement_doomed";
-const PROJECT_LEAKED = "prj_rpc_retirement_leaked";
 const PROJECT_DEACTIVATE = "prj_rpc_retirement_deactivate";
 const appEnv = env as unknown as Env;
 
@@ -129,16 +127,6 @@ function submitInput(label: string) {
     endpointUrl: "https://devnet.helius-rpc.com",
     apiKey: "tenant-key-retirement",
   };
-}
-
-async function seedProject(projectId: string, slug: string): Promise<void> {
-  await getDb(appEnv)
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'RPC Retirement', ?, 'sandbox', ?)`
-    )
-    .bind(projectId, ORG_ID, slug, USER_ID)
-    .run();
 }
 
 async function retirementRows(refLike: string): Promise<Array<{ secret_version_ref: string }>> {
@@ -198,11 +186,12 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
-  await seedProject(PROJECT_COMMITTED, "rpc-retirement-committed");
-  await seedProject(PROJECT_UNRECORDABLE, "rpc-retirement-unrecordable");
-  await seedProject(PROJECT_DOOMED, "rpc-retirement-doomed");
-  await seedProject(PROJECT_LEAKED, "rpc-retirement-leaked");
-  await seedProject(PROJECT_DEACTIVATE, "rpc-retirement-deactivate");
+  await seedDefaultProjects(db, {
+    organizationId: ORG_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_COMMITTED, production: PROJECT_DEACTIVATE },
+  });
 });
 
 afterAll(async () => {
@@ -232,6 +221,12 @@ describe("BYOK RPC secret retirement", () => {
     // provisional obligation must have been cancelled by the same commit.
     expect(await retirementRows("projects/sdp-test/secrets/pcred_%")).toEqual([]);
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
+    await getDb(appEnv).execute(`DELETE FROM rpc_connections WHERE project_id = ?`, [
+      PROJECT_COMMITTED,
+    ]);
+    await getDb(appEnv).execute(`DELETE FROM provider_credentials WHERE project_id = ?`, [
+      PROJECT_COMMITTED,
+    ]);
   });
 
   it("withholds a provisional obligation from the sweeper while the create is in flight", async () => {
@@ -362,7 +357,7 @@ describe("BYOK RPC secret retirement", () => {
     retirementQueueControl.failRecordRetirement = true;
 
     await expect(
-      submitRpcConnection(serviceContext(PROJECT_UNRECORDABLE), submitInput("Unrecordable"))
+      submitRpcConnection(serviceContext(PROJECT_COMMITTED), submitInput("Unrecordable"))
     ).rejects.toThrow(/durably reserved/i);
 
     // Fail closed with a clean slate: the obligation is reserved before the
@@ -386,7 +381,7 @@ describe("BYOK RPC secret retirement", () => {
     const logError = vi.spyOn(getLogger(), "error");
 
     await expect(
-      submitRpcConnection(serviceContext(PROJECT_LEAKED), submitInput("Leaked"))
+      submitRpcConnection(serviceContext(PROJECT_COMMITTED), submitInput("Leaked"))
     ).rejects.toThrow(/durably reserved/i);
 
     expect(gcpMock.destroyVersion).not.toHaveBeenCalled();
@@ -456,7 +451,7 @@ describe("BYOK RPC secret retirement", () => {
 
     try {
       await expect(
-        submitRpcConnection(serviceContext(PROJECT_DOOMED), submitInput("Doomed"))
+        submitRpcConnection(serviceContext(PROJECT_COMMITTED), submitInput("Doomed"))
       ).rejects.toThrow();
     } finally {
       insertCredential.mockRestore();

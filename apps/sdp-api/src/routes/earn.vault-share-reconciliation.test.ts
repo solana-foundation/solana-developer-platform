@@ -7,6 +7,7 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -46,19 +47,14 @@ vi.mock("@/services/earn/vault-deadline", async (importOriginal) => {
 const ORG = "org_share_reconciliation";
 const USER = "usr_share_reconciliation";
 const PROJECT_A = "prj_share_reconciliation_a";
-const PROJECT_B = "prj_share_reconciliation_b";
 const CONFIG_A = "cfg_share_reconciliation_a";
 const CONFIG_A2 = "cfg_share_reconciliation_a2";
-const CONFIG_B = "cfg_share_reconciliation_b";
 const WALLET_A = "cwlt_share_reconciliation_a";
 const WALLET_A2 = "cwlt_share_reconciliation_a2";
-const WALLET_B = "cwlt_share_reconciliation_b";
 const PROVIDER_WALLET_A = "privy_share_reconciliation_a";
 const PROVIDER_WALLET_A2 = "privy_share_reconciliation_a2";
-const PROVIDER_WALLET_B = "privy_share_reconciliation_b";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const PUBLIC_KEY_A2 = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So";
-const PUBLIC_KEY_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT_CATALOGUED = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const SHARE_MINT_RECORDED = "So11111111111111111111111111111111111111112";
@@ -92,15 +88,14 @@ async function seedScope(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "share-reconciliation@example.com"),
-    ...[PROJECT_A, PROJECT_B].map((projectId, index) =>
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, ORG, `Project ${index}`, `share-reconciliation-${index}`, USER)
-    ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT_A, production: `${PROJECT_A}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -108,25 +103,24 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
       )
       .bind(API_KEY.id, ORG, PROJECT_A, USER, "Reconciliation key", "sk_test_sha", keyHash),
-    ...[
-      [CONFIG_A, PROJECT_A, WALLET_A, PROVIDER_WALLET_A, PUBLIC_KEY_A],
-      [CONFIG_B, PROJECT_B, WALLET_B, PROVIDER_WALLET_B, PUBLIC_KEY_B],
-    ].flatMap(([configId, projectId, walletId, providerWalletId, publicKey]) => [
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
+    ...[[CONFIG_A, PROJECT_A, WALLET_A, PROVIDER_WALLET_A, PUBLIC_KEY_A]].flatMap(
+      ([configId, projectId, walletId, providerWalletId, publicKey]) => [
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_configs
              (id, organization_id, project_id, provider, config_encrypted, status)
            VALUES (?, ?, ?, 'privy', 'encrypted', 'active')`
-        )
-        .bind(configId, ORG, projectId),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
+          )
+          .bind(configId, ORG, projectId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets
              (id, custody_config_id, wallet_id, public_key, status)
            VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(walletId, configId, providerWalletId, publicKey),
-    ]),
+          )
+          .bind(walletId, configId, providerWalletId, publicKey),
+      ]
+    ),
   ]);
 }
 

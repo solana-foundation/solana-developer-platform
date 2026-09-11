@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_config_scope_integrity";
@@ -23,14 +24,13 @@ async function seedScope(): Promise<void> {
          VALUES (?, 'custody-config-scope-integrity@example.com', 1, 'active')`
       )
       .bind(USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Custody config scope integrity', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, "custody-config-scope-integrity", USER_ID),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 async function insertConfig(

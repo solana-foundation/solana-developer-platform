@@ -577,15 +577,6 @@
           }
         },
         {
-          "name": "Archive project",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}",
-            "description": "Archives a project and prevents future writes."
-          }
-        },
-        {
           "name": "List project members",
           "request": {
             "method": "GET",

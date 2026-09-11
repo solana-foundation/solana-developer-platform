@@ -8,9 +8,21 @@ import { TEST_ORG, TEST_USER } from "./organizations";
 export const TEST_PROJECT = {
   id: "prj_test123456789",
   organizationId: TEST_ORG.id,
-  name: "Test Project",
-  slug: "test-project",
+  name: "Default Sandbox Project",
+  slug: "default-sandbox",
   environment: "sandbox" as const,
+  status: "active" as const,
+  createdBy: TEST_USER.id,
+  createdAt: "2024-01-01T00:00:00.000Z",
+  updatedAt: "2024-01-01T00:00:00.000Z",
+};
+
+export const TEST_PRODUCTION_PROJECT = {
+  id: "prj_test123456789_production",
+  organizationId: TEST_ORG.id,
+  name: "Default Production Project",
+  slug: "default-production",
+  environment: "production" as const,
   status: "active" as const,
   createdBy: TEST_USER.id,
   createdAt: "2024-01-01T00:00:00.000Z",

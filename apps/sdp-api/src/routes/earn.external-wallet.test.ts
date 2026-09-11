@@ -11,6 +11,7 @@ import { generateEarnPositionId } from "@/db/repositories/earn-movements.reposit
 import app from "@/index";
 import { badRequest } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -121,18 +122,14 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(TEST_USER.id, TEST_USER.email),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Prod Project', ?, 'production', 'active', ?)`
-      )
-      .bind(TEST_PRODUCTION_PROJECT.id, TEST_ORG.id, TEST_PRODUCTION_PROJECT.slug, TEST_USER.id),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -896,6 +893,16 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 });
 
 describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
+  it.each([
+    ["withdrawal preview", "withdrawal-previews"],
+    ["withdrawal transaction", "withdrawal-transactions"],
+  ])("404s another project's position for %s", async (_name, path) => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+    const response = await post(path, { positionId, shares: "10" }, { apiKey: PROD_API_KEY.raw });
+    expect(response.status).toBe(404);
+  });
+
   it("quotes an external-wallet exit so callers can derive minAmountOut", async () => {
     await seedAuth();
     const positionId = await seedExternalWalletPosition();
@@ -917,23 +924,6 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     });
   });
 
-  it("keeps the external-wallet exit quote inside the exact project", async () => {
-    await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_earn_ext_quote_sibling', ?, 'Sibling', 'earn-ext-quote-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
-    const positionId = await seedExternalWalletPosition({
-      projectId: "prj_earn_ext_quote_sibling",
-    });
-
-    expect((await post("withdrawal-previews", { positionId, shares: "10" })).status).toBe(404);
-    expect(quoteVaultWithdrawal).not.toHaveBeenCalled();
-  });
-
   it("404s an unknown position", async () => {
     await seedAuth();
     const res = await post("withdrawal-transactions", {
@@ -953,20 +943,6 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     });
     expect(res.status).toBe(404);
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
-  });
-
-  it("404s a sibling project's position: the wallet is project-scoped", async () => {
-    await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_earn_ext_sibling', ?, 'Sibling', 'earn-ext-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_USER.id)
-      .run();
-    const positionId = await seedExternalWalletPosition({ projectId: "prj_earn_ext_sibling" });
-    const res = await post("withdrawal-transactions", { positionId, shares: "10" });
-    expect(res.status).toBe(404);
   });
 
   it("builds the exit from the recorded position facts", async () => {

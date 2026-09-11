@@ -7,10 +7,16 @@ import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import {
+  TEST_API_KEY,
+  TEST_CACHED_API_KEY,
+  TEST_PRODUCTION_API_KEY,
+} from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
@@ -77,21 +83,20 @@ describe("Counterparties Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', 'test-project', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
-      .run();
-
-    await db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_test_counterparty', ?, ?, 'admin')`
-      )
-      .bind(TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [TEST_USER.id],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await seedProjectApiKey(db, env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT_ID}_production`,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
+    });
 
     await db
       .prepare(
@@ -388,32 +393,12 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 404 when the counterparty belongs to a different project in the same org", async () => {
-      const db = getDb(env);
-      const otherProjectId = "prj_counterparties_cross_project";
-      const otherCounterpartyId = "cpty_cross_project_iso";
-
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other Project', 'other-project', 'sandbox', 'active', ?)`
-        )
-        .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
-        .run();
-
-      await db
-        .prepare(
-          `INSERT INTO counterparties (
-             id, organization_id, project_id, external_id, entity_type,
-             display_name, provider_data, status, created_by
-           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', '{}', 'active', ?)`
-        )
-        .bind(otherCounterpartyId, TEST_ORG.id, otherProjectId, "ext_cross_project", TEST_USER.id)
-        .run();
-
+    it("returns 404 for another project's counterparty", async () => {
+      const created = await createCounterparty({ externalId: "cross_project" });
+      const counterparty = (await created.json()).data.counterparty;
       const res = await app.request(
-        `/v1/counterparties/${otherCounterpartyId}`,
-        { headers: { Authorization: authHeader } },
+        `/v1/counterparties/${counterparty.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
         env
       );
       expect(res.status).toBe(404);

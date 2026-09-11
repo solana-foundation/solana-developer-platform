@@ -93,27 +93,6 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "delete",
-    path: "/v1/projects/{projectId}",
-    tags: ["Projects"],
-    summary: "Archive project",
-    operationId: "archiveProject",
-    description: "Archives a project and prevents future writes.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-      }),
-    },
-    responses: {
-      204: {
-        description: "Project archived",
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "get",
     path: "/v1/projects/{projectId}/members",
     tags: ["Projects"],

@@ -22,6 +22,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
 import { getDb } from "@/db/client";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
@@ -37,17 +38,13 @@ export interface EarnAuthzTenant {
   user: { id: string; email: string };
   /** The key's pinned project (sandbox). */
   project: { id: string; slug: string };
-  /** A sibling sandbox project in the same org, no key pinned to it. */
-  siblingProject: { id: string; slug: string };
-  /** A same-org project the session user is NOT a member of. */
-  nonMemberProject: { id: string; slug: string };
   /** Session for `user`: org member, project-member of `project` only. */
   sessionId: string;
 }
 
 /**
- * Seed one org with the three projects and the session the authz matrix
- * exercises. Call after `seedTestDatabase(env)`.
+ * Seed one org with its project and the session the authz matrix exercises.
+ * Call after `seedTestDatabase(env)`.
  */
 export async function seedEarnAuthzTenant(
   env: Env,
@@ -58,15 +55,14 @@ export async function seedEarnAuthzTenant(
   const tenant: EarnAuthzTenant = {
     org: { id: `org_${tag}`, name: `Earn Authz ${tag}`, slug: `earn-authz-${tag}` },
     user: { id: `usr_${tag}`, email: `${tag}@earn-authz.example.com` },
-    project: { id: `prj_${tag}_pinned`, slug: `earn-authz-${tag}-pinned` },
-    siblingProject: { id: `prj_${tag}_sibling`, slug: `earn-authz-${tag}-sibling` },
-    nonMemberProject: { id: `prj_${tag}_nonmember`, slug: `earn-authz-${tag}-nonmember` },
+    project: {
+      id: `prj_${tag}_pinned`,
+      slug: environment === "sandbox" ? "default-sandbox" : "default-production",
+    },
     sessionId: `sess_${tag}`,
   };
 
   const db = getDb(env);
-  const projectInsert = `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-     VALUES (?, ?, ?, ?, ?, 'active', ?)`;
   await db.batch([
     db
       .prepare(
@@ -77,36 +73,6 @@ export async function seedEarnAuthzTenant(
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(tenant.user.id, tenant.user.email),
     db
-      .prepare(projectInsert)
-      .bind(
-        tenant.project.id,
-        tenant.org.id,
-        "Pinned",
-        tenant.project.slug,
-        environment,
-        tenant.user.id
-      ),
-    db
-      .prepare(projectInsert)
-      .bind(
-        tenant.siblingProject.id,
-        tenant.org.id,
-        "Sibling",
-        tenant.siblingProject.slug,
-        environment,
-        tenant.user.id
-      ),
-    db
-      .prepare(projectInsert)
-      .bind(
-        tenant.nonMemberProject.id,
-        tenant.org.id,
-        "NonMember",
-        tenant.nonMemberProject.slug,
-        environment,
-        tenant.user.id
-      ),
-    db
       .prepare(
         `INSERT INTO organization_members (id, organization_id, user_id, role, status)
          VALUES (?, ?, ?, 'admin', 'active')`
@@ -114,16 +80,20 @@ export async function seedEarnAuthzTenant(
       .bind(`om_${tag}`, tenant.org.id, tenant.user.id),
     db
       .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind(`pm_${tag}_pinned`, tenant.project.id, tenant.user.id),
-    db
-      .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
          VALUES (?, ?, ?, 'session', '2099-01-01T00:00:00.000Z')`
       )
       .bind(tenant.sessionId, tenant.user.id, tenant.org.id),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: tenant.org.id,
+    createdBy: tenant.user.id,
+    members: [tenant.user.id],
+    ids:
+      environment === "sandbox"
+        ? { sandbox: tenant.project.id, production: `prj_${tag}_production` }
+        : { sandbox: `prj_${tag}_sandbox`, production: tenant.project.id },
+  });
 
   return tenant;
 }

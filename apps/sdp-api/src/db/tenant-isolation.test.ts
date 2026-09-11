@@ -23,6 +23,7 @@ import {
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORG_A = "org_tenant_isolation_a";
@@ -54,18 +55,20 @@ async function seedTwoTenants(): Promise<void> {
          VALUES (?, 'tenant-isolation@example.com', 1, 'active')`
       )
       .bind(USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Tenant isolation A', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_A, ORG_A, "tenant-isolation-a", USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Tenant isolation B', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_B, ORG_B, "tenant-isolation-b", USER_ID),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG_A,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_A, production: `${PROJECT_A}_production` },
+  });
+  await seedDefaultProjects(db, {
+    organizationId: ORG_B,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_B, production: `${PROJECT_B}_production` },
+  });
+  await db.batch([
     db
       .prepare(
         // provider_data is explicit: 0036 dropped its NOT NULL/DEFAULT, and the
