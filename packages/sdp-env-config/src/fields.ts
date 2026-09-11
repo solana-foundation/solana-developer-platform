@@ -69,20 +69,6 @@ export const FIELDS: EnvField[] = [
     label: "Deployment mode",
     derive: () => "self_hosted",
   },
-  {
-    key: "EMAIL_FROM",
-    section: "basic",
-    kind: "text",
-    label: "Email from address",
-    help: "Sender address for SDP-owned Transactional Email.",
-  },
-  {
-    key: "RESEND_API_KEY",
-    section: "basic",
-    kind: "password",
-    label: "Resend API key",
-    help: "Required when SDP-owned Transactional Email is enabled.",
-  },
 
   // Database
   {

@@ -18,7 +18,7 @@ const MEMBER: Permission[] = ["tokens:read", "tokens:write"];
 const ADMIN: Permission[] = ["tokens:read", "tokens:write", "tokens:admin"];
 
 describe("workflow action authorization", () => {
-  it.each(["allowlist_add", "allowlist_remove", "send_webhook", "notify", "record"])(
+  it.each(["allowlist_add", "allowlist_remove", "send_webhook", "record"])(
     "lets tokens:write author the automated action %s",
     (action) => {
       expect(permissionForWorkflowAction(action)).toBe("tokens:write");

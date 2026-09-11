@@ -892,7 +892,6 @@ export function DashboardShell({
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
-                  showNotifications={assetProfilesEnabled && issuanceEnabled}
                 />
               </div>
 

@@ -67,13 +67,6 @@ describe("validateActionParams", () => {
       ).toBe(false);
     });
   });
-
-  it("constrains the notify audience and email", () => {
-    expect(validateActionParams("notify", { audience: "everyone" }).ok).toBe(false);
-    expect(validateActionParams("notify", { audience: "admins" }).ok).toBe(true);
-    expect(validateActionParams("notify", { email: "not-an-email" }).ok).toBe(false);
-    expect(validateActionParams("notify", { email: "ops@example.com" }).ok).toBe(true);
-  });
 });
 
 describe("secret redaction", () => {

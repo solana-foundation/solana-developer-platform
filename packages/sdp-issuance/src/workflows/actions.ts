@@ -32,13 +32,6 @@ export const WORKFLOW_ACTIONS = {
     execution: "automated",
     idempotent: false,
   },
-  notify: {
-    labelKey: action("notify"),
-    descriptionKey: desc("notify"),
-    requires: { kind: "none" },
-    execution: "automated",
-    idempotent: false,
-  },
   record: {
     labelKey: action("record"),
     descriptionKey: desc("record"),

@@ -65,7 +65,7 @@ export function validateActionSupported(input: ValidateActionInput): ActionSuppo
   const requires = action.requires;
   switch (requires.kind) {
     case "none":
-      // Pure side effects (webhook, notify, record) need no asset capability.
+      // Pure side effects (webhook, record) need no asset capability.
       return { ok: true };
     case "base":
       // Base ops carry no advanced-setting gate, but minting still needs a live mint

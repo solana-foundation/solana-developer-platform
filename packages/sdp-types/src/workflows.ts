@@ -24,7 +24,6 @@ export const WORKFLOW_ACTION_TYPES = [
   "allowlist_add",
   "allowlist_remove",
   "send_webhook",
-  "notify",
   "record",
   "pause",
   "unpause",
@@ -67,7 +66,7 @@ export type WorkflowActionRequirement =
   // Base on-chain op available on any deployed token (e.g. mint/burn) — no advanced-setting
   // gate; finer runtime checks (deployed, authority still held) happen at execution time.
   | { kind: "base"; action: TokenTransactionType }
-  // Pure side-effect (webhook, notify, record, approval task) — no capability gate.
+  // Pure side-effect (webhook, record, approval task) — no capability gate.
   | { kind: "none" };
 
 export interface WorkflowAction {

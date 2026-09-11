@@ -131,8 +131,8 @@ describe("validateActionSupported (capability gate)", () => {
     );
   });
 
-  it("treats base ops (mint/burn) and side-effects (notify) as always supported", () => {
-    for (const action of ["mint", "burn", "notify", "record"] as WorkflowActionType[]) {
+  it("treats base ops (mint/burn) and side-effects (record) as always supported", () => {
+    for (const action of ["mint", "burn", "record"] as WorkflowActionType[]) {
       assert.deepEqual(
         validateActionSupported({ ...base, action, selectedSettings: {}, hasAllowlist: false }),
         { ok: true },

@@ -65,14 +65,6 @@ const ACTION_PARAM_SCHEMAS = {
   send_webhook: z
     .object({ url: asString.pipe(webhookUrl), secret: z.string().min(8).max(200).optional() })
     .strict(),
-  notify: z
-    .object({
-      audience: z.enum(["admins", "members"]).optional(),
-      email: z.string().email().max(254).optional(),
-      title: z.string().max(200).optional(),
-      message: z.string().max(2_000).optional(),
-    })
-    .strict(),
   record: z.object({ note: z.string().max(1_000).optional() }).strict(),
   pause: z.object({}).strict(),
   unpause: z.object({}).strict(),

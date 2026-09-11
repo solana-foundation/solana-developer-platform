@@ -30,8 +30,6 @@ import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
 import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
-import type { NotificationsRepository } from "./notification.repository";
-import { createPostgresNotificationsRepository } from "./notification.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -237,10 +235,6 @@ export function createWorkflowSecretRetirementsRepository(
   env: Env
 ): WorkflowSecretRetirementsRepository {
   return createPostgresWorkflowSecretRetirementsRepository(getDb(env));
-}
-
-export function createNotificationsRepository(env: Env): NotificationsRepository {
-  return createPostgresNotificationsRepository(getDb(env));
 }
 
 export function createEarnRepository(env: Env): EarnRepository {

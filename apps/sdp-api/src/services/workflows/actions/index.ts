@@ -3,7 +3,6 @@ import type { Env } from "@/types/env";
 import { runAllowlistAdd } from "./allowlist";
 import { runAllowlistRemove } from "./allowlist-remove";
 import { runFreeze, runPause, runUnfreeze, runUnpause } from "./lifecycle";
-import { runNotify } from "./notify";
 import { runBurn, runForceBurn, runMint, runSeize } from "./supply";
 import type { ActionContext, ActionExecutionResult } from "./types";
 import { runSendWebhook } from "./webhook";
@@ -11,7 +10,7 @@ import { runSendWebhook } from "./webhook";
 export type { ActionContext, ActionExecutionResult } from "./types";
 
 // Dispatch a claimed execution to its action handler. The rule's static action params
-// (amount / destination / target wallet / webhook url / notify audience) are resolved by
+// (amount / destination / target wallet / webhook url) are resolved by
 // the cron engine and threaded in via `ctx`. Actions still not wired fail permanently
 // (no retry) with a clear reason rather than looping.
 export async function dispatchWorkflowAction(
@@ -42,8 +41,6 @@ export async function dispatchWorkflowAction(
       return runSeize(env, execution, ctx);
     case "send_webhook":
       return runSendWebhook(env, execution, ctx);
-    case "notify":
-      return runNotify(env, execution, ctx);
     case "record":
       return { status: "succeeded", retryable: false, result: { recorded: true } };
     default:
