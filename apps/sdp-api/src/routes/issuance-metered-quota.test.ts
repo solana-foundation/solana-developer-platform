@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { ISSUANCE_PREPARE_QUOTA, ISSUANCE_SUPPLY_QUOTA } from "@/routes/issuance";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -18,8 +19,8 @@ import {
   seedRateLimit,
 } from "@/test/mocks/kv";
 
-const SUPPLY_ACTOR_COUNTER = `metered:issuance-supply:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
-const PREPARE_ACTOR_COUNTER = `metered:issuance-prepare:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
+const SUPPLY_ACTOR_COUNTER = `metered:${ISSUANCE_SUPPLY_QUOTA.name}:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
+const PREPARE_ACTOR_COUNTER = `metered:${ISSUANCE_PREPARE_QUOTA.name}:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
 
 describe("Issuance routes — metered quota", () => {
   beforeEach(async () => {
@@ -78,7 +79,7 @@ describe("Issuance routes — metered quota", () => {
   });
 
   it("429s a supply refresh once the actor quota is exhausted", async () => {
-    await seedRateLimit(env, SUPPLY_ACTOR_COUNTER, 120);
+    await seedRateLimit(env, SUPPLY_ACTOR_COUNTER, ISSUANCE_SUPPLY_QUOTA.actorMax);
 
     const res = await app.request(
       `/v1/issuance/tokens/${TEST_ACTIVE_TOKEN.id}/supply/refresh`,
@@ -95,7 +96,7 @@ describe("Issuance routes — metered quota", () => {
   });
 
   it("429s a mint prepare once the actor quota is exhausted", async () => {
-    await seedRateLimit(env, PREPARE_ACTOR_COUNTER, 120);
+    await seedRateLimit(env, PREPARE_ACTOR_COUNTER, ISSUANCE_PREPARE_QUOTA.actorMax);
 
     const res = await app.request(
       `/v1/issuance/tokens/${TEST_ACTIVE_TOKEN.id}/mint/prepare`,
