@@ -326,7 +326,8 @@ describe("EarnVaultDepositModal", () => {
     expect(
       (screen.getByRole("radio", { name: /Treasury wallet/ }) as HTMLInputElement).checked
     ).toBe(true);
-    expect(screen.queryByText("Pay with")).toBeNull();
+    expect(screen.getByText("Pay with")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(true);
     const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
     const maxButton = screen.getByRole("button", { name: "Max" });
     expect(amountInput.disabled).toBe(false);
@@ -378,8 +379,9 @@ describe("EarnVaultDepositModal", () => {
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     await screen.findByRole("dialog");
-    expect(screen.queryByText("Pay with")).toBeNull();
+    expect(screen.getByText("Pay with")).toBeTruthy();
     expect(screen.queryByRole("radio", { name: "USDC" })).toBeNull();
+    expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));

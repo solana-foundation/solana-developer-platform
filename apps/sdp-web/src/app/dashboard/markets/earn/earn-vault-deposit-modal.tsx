@@ -914,7 +914,6 @@ function DepositFundingTokenPicker({
   tokens: EarnSwapSourceToken[];
   title: string;
 }) {
-  if (tokens.length <= 1) return null;
   return (
     <fieldset className="mt-4" disabled={disabled}>
       <legend className="text-sm font-medium text-primary">{title}</legend>
