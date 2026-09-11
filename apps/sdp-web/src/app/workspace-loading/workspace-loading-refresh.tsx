@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import DashboardLoading from "@/app/dashboard/loading";
+import DashboardLoading from "@/app/dashboard/(home)/loading";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WORKSPACE_LOADING_RETRY_MS } from "@/lib/workspace-loading";

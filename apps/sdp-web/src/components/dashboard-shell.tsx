@@ -5,6 +5,7 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import DashboardLoading from "@/app/dashboard/(home)/loading";
 import {
   ApiKeyAuthoringSkeleton,
   ApiKeysListSkeleton,
@@ -21,7 +22,6 @@ import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/priva
 import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
 import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
 import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
-import DashboardLoading from "@/app/dashboard/loading";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,

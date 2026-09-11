@@ -5,13 +5,13 @@ import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { HomeWorkspace } from "./home-workspace";
-import { resolveTotalBalance } from "./payments/payments-overview.utils";
+import { HomeWorkspace } from "../home-workspace";
+import { resolveTotalBalance } from "../payments/payments-overview.utils";
 import {
   fetchPaymentsAggregate,
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
-} from "./payments/payments-page.data";
+} from "../payments/payments-page.data";
 
 export default async function DashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
