@@ -56,8 +56,17 @@ holds 50M and the cap is 10%, SDP customers may collectively hold 5M in it.
 Sizing against TVL also bounds the full-utilization exit risk (EARN-015): SDP
 stays a small enough fraction of any vault that its customers can always leave.
 
-- Exposure is computed from current SDP positions in the vault across all orgs
-  and environments on that cluster, not from flow.
+- Exposure is computed across all orgs on the environment from the movement
+  ledger, not from positions: positions are read live from chain and never
+  persisted as balances, so the ledger is the only durable SDP-wide figure.
+  Implementation note (PRO-1934): the figure is the sum of non-failed vault
+  deposits (in-flight included, on purpose) in deposit-token units. Exits are
+  ledgered in shares, so they are NOT subtracted; the result is gross inflow,
+  an over-estimate that only ever errs toward refusing a deposit. Recording
+  the token payout at exit settlement is the follow-up that makes it net.
+  Amounts and caps are in the vault's deposit-token units rather than USD (no
+  price oracle; V1 vaults are dollar stablecoins), and the share bound compares
+  them against the catalogue's USD TVL on that same dollar-for-dollar basis.
 - Enforced inside the single admission predicate
   (`assertVaultDepositAdmissible`, `routes/earn/handlers/admission.ts`), so
   both the custody and external-wallet deposit paths meet it with no new gate
@@ -74,10 +83,14 @@ stays a small enough fraction of any vault that its customers can always leave.
 Reuses the policy engine rather than adding a parallel limits system.
 
 - A new `velocity` rule kind in `@sdp/policy`: rolling-window sum of
-  non-failed movement amounts for a scope (org, wallet, or API key), with
+  non-failed operation amounts for a scope (org, wallet, or API key), with
   `window`, `max` and `assets`. Prior art is the sponsorship budget's
   per-transaction / hourly / daily limits
-  (`sponsorship-budget-operator.ts`). The rule is reusable by payments.
+  (`sponsorship-budget-operator.ts`). Implementation note (PRO-1933): the sum
+  runs over `wallet_operations`, the generic ledger every policy-gated route
+  writes, not `earn_movements`, which is what makes the rule reusable by
+  payments unchanged. On breach the rule's `action` is the decision (default
+  deny); within the limit it abstains.
 - Tier defaults are synthesized as an implicit policy layer evaluated after the
   org's own policy and before `IMPLICIT_DEFAULT_ALLOW_POLICY`. Breaching a
   default yields the **approval** decision, never deny.

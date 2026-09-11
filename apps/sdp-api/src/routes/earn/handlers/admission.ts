@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { getAuth } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
+import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
   assertEarnProviderSurfaced,
   assertProviderAvailable,
@@ -63,18 +64,31 @@ export function assertStrategyDepositable(
 
 /**
  * The ONE vault money-in gate sequence for every handler that commits a
- * strategy to the vault-deposit path — today that is `POST /vault-deposits`.
- * Runs, in order: deposit-style shape, provider registration, surfacing,
- * entitlement/credentials, catalogue admission. Keep it shared if a second
- * money-in caller appears: a second copy is a second thing that can drift
- * toward permissive.
+ * strategy to the vault-deposit path: `POST /vault-deposits` (custody) and
+ * `POST /external-wallet/deposit-transactions` (caller-signed). Runs, in
+ * order: deposit-style shape, provider registration, surfacing,
+ * entitlement/credentials, catalogue admission, and LAST, when the caller
+ * passes the deposit `amount`, the SDP-wide vault exposure cap (ADR 0004
+ * layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
+ * is a second thing that can drift toward permissive.
+ *
+ * The cap runs last on purpose: it is the only step that reads the ledger,
+ * and a caller refused by a cheaper gate should hear that reason, not "the
+ * vault is full". Omitting `amount` skips the cap; only callers that are not
+ * about to move money (none today) may do that, and a new money-in caller
+ * must pass it.
+ *
+ * Money OUT never reaches this function (ADR 0002): withdrawals take none of
+ * these gates, the exposure cap included. A vault over its cap is exit-only,
+ * the same posture as `paused`.
  *
  * Strategy RESOLUTION stays with the caller on purpose: the deposit route
  * resolves bare-by-id (browse policy never gates money).
  */
 export async function assertVaultDepositAdmissible(
   c: AppContext,
-  strategy: EarnStrategyRow
+  strategy: EarnStrategyRow,
+  amount?: string
 ): Promise<EarnProviderId> {
   const environment = resolveSdpEnvironment(c);
 
@@ -100,6 +114,13 @@ export async function assertVaultDepositAdmissible(
     environment === "sandbox"
   );
   assertStrategyDepositable(strategy, environment);
+
+  if (amount !== undefined) {
+    // Deposits only. The withdrawal handlers never call this function, and
+    // must not start to: refusing an exit over a platform cap traps funds
+    // (ADR 0002), which is the one thing no cap may do.
+    await assertVaultExposureWithinCap(c, strategy, amount);
+  }
 
   return provider;
 }

@@ -160,3 +160,64 @@ export const CURATED_VAULTS: Partial<
     ],
   },
 };
+
+/**
+ * SDP-wide exposure ceiling for one vault (ADR 0004, layer 1; PRO-1934).
+ *
+ * Bounds how much SDP's customers may COLLECTIVELY hold in a vault, across
+ * every organization on the environment that funds it. It is not an
+ * allocation opinion about any one org (single-vault V1 programs are 100% in
+ * one vault by construction); it is the "one vault's failure costs SDP
+ * customers at most a known number" promise, and it also keeps SDP a small
+ * enough share of any vault that its customers can always exit (EARN-015).
+ *
+ * Amounts are in the vault's DEPOSIT-TOKEN units, not USD. Every V1 vault is
+ * denominated in a dollar stablecoin (USDC, USDG, PYUSD, USDT), so token units
+ * are dollars to within the peg and no price oracle is needed. The catalogue's
+ * TVL (`risk_metadata.tvlUsd`, refreshed every five minutes) IS in USD, so the
+ * share check compares token units against USD; for a stablecoin vault that
+ * is the same approximation, stated here so nobody mistakes it for a
+ * converted figure. A non-stablecoin vault would need a real conversion
+ * before either bound means anything.
+ */
+export interface VaultExposureCap {
+  /** SDP-wide holdings in this vault may not exceed this share of the vault's TVL. */
+  maxShareOfTvlBps: number;
+  /** Absolute ceiling in the vault's deposit-token units, decimal string. */
+  maxAbsolute: string;
+}
+
+/**
+ * The platform default: 10% of the vault's TVL, ceiling 5M token units. Both
+ * are ADR 0004's placeholders until two weeks of shadow data
+ * (`sdp_api_earn_volume_cap_evaluated`) set real ones.
+ */
+export const DEFAULT_VAULT_EXPOSURE_CAP: VaultExposureCap = {
+  maxShareOfTvlBps: 1000,
+  maxAbsolute: "5000000",
+};
+
+/**
+ * Per-vault overrides of `DEFAULT_VAULT_EXPOSURE_CAP`, keyed by CLUSTER then
+ * `provider:vaultAddress`, for the same reason the curation lists above are
+ * cluster-keyed: a vault is its address and addresses are cluster-specific.
+ *
+ * Three states, and the difference is the point of the shape:
+ * - ABSENT entry: the platform default applies. Nothing needs adding here for
+ *   a vault to be capped.
+ * - An explicit cap: replaces the default for that vault only.
+ * - An explicit `null`: UNCAPPED. This is deliberately loud rather than
+ *   expressed by omission, so a reviewer reading the diff sees "this vault
+ *   has no ceiling" as a line someone wrote. Treat any `null` here as a
+ *   deliberate exception that needs a comment naming who decided it and why;
+ *   there is no legitimate reason for one on a mainnet vault in V1.
+ *
+ * Enforcement lives in `services/earn/vault-exposure.ts`, inside the single
+ * money-in admission predicate; withdrawals never consult this (ADR 0002).
+ */
+export const VAULT_EXPOSURE_CAPS: Partial<
+  Record<SolanaCluster, Record<`${EarnProviderId}:${string}`, VaultExposureCap | null>>
+> = {
+  "mainnet-beta": {},
+  devnet: {},
+};

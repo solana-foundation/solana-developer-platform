@@ -120,3 +120,22 @@ export function isEarnVaultSponsorshipEnabled(
   if (!EARN_VAULT_SPONSORSHIP_CLUSTERS.includes(cluster)) return false;
   return isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED);
 }
+
+/**
+ * Whether the Earn volume caps (ADR 0004) REFUSE, or only observe.
+ *
+ * Off (the default) is SHADOW MODE: every cap still evaluates on every deposit
+ * admission and emits `sdp_api_earn_volume_cap_evaluated` with `would_block`,
+ * but nothing is refused and no preview reports a blocking issue. Defaults
+ * are set from that shadow data, then this flips. Deliberately a plain
+ * truthy flag with no cluster narrowing, unlike sponsorship: a cap is a
+ * platform posture, not a per-cluster capability, and the caps themselves
+ * are already keyed by cluster in `handlers/curation.ts`.
+ *
+ * Fail-closed reads of the cap INPUTS do not consult this: an exposure read
+ * that throws refuses the deposit in shadow mode too (ADR 0004, "fail closed
+ * on deposits, never on exits").
+ */
+export function isEarnVolumeCapsEnforced(env: Pick<Env, "EARN_VOLUME_CAPS_ENFORCED">): boolean {
+  return isTruthyFlag(env.EARN_VOLUME_CAPS_ENFORCED);
+}
