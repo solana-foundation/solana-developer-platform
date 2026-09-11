@@ -17,7 +17,7 @@ import { AnimatePresence } from "motion/react";
 import { Fragment, type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
-import { TokenLogo } from "@/components/token-logo";
+import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { HeightReveal } from "@/components/ui/height-reveal";
@@ -63,10 +63,13 @@ import { useDvpTradeActions } from "./use-dvp-trade-actions";
  */
 function CopyableAddress({
   address,
+  display,
   label,
   className,
 }: {
   address: string;
+  /** Text shown in place of the full value; the copy still takes the full value. */
+  display?: string;
   label: string;
   className?: string;
 }) {
@@ -96,7 +99,7 @@ function CopyableAddress({
           checked against anything, and reading half of it is how somebody
           confirms the wrong account. `break-all` because base58 has no spaces
           to wrap at. */}
-      <span className="break-all">{address}</span>
+      <span className="break-all">{display === undefined ? address : display}</span>
       {copied ? (
         <CheckIcon aria-hidden className="h-3 w-3 shrink-0 text-success" />
       ) : (
@@ -107,19 +110,9 @@ function CopyableAddress({
   );
 }
 
-/** A transaction signature as an explorer link: nobody reads one, they follow it. */
-function TransactionLink({ signature, cluster }: { signature: string; cluster: SolanaCluster }) {
-  return (
-    <a
-      className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
-      href={explorerTxUrl(signature, cluster)}
-      rel="noreferrer noopener"
-      target="_blank"
-    >
-      <span className="font-mono">{`${signature.slice(0, 8)}…${signature.slice(-8)}`}</span>
-      <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-    </a>
-  );
+/** The ends of a signature, enough to match it against an explorer row. */
+function shortenSignature(signature: string): string {
+  return `${signature.slice(0, 8)}…${signature.slice(-8)}`;
 }
 
 /**
@@ -327,6 +320,7 @@ function LegCard({
         ? 0
         : legFundingRatio(leg);
   const percent = ratio === null ? 0 : Math.round(Math.min(ratio, 1) * 100);
+  const receiving = outcome === "awaiting" || outcome === "partial";
   const target = formatLegAmount(leg.amount, leg.decimals);
   const held = leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0";
 
@@ -335,15 +329,19 @@ function LegCard({
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h3 className="flex flex-wrap items-center gap-x-2 font-medium text-base text-primary leading-6">
           {t(side === "a" ? "DashboardMarkets.dvp.legA" : "DashboardMarkets.dvp.legB")}
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 font-normal text-xs leading-6",
-              status.tone
-            )}
-          >
-            <status.Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-            {t(status.key)}
-          </span>
+          {/* The chip flags the exceptional: an ordinary open or funded leg
+              already says so through its progress bar and the funding row. */}
+          {outcome === "funded" || outcome === "awaiting" || outcome === "partial" ? null : (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 font-normal text-xs leading-6",
+                status.tone
+              )}
+            >
+              <status.Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+              {t(status.key)}
+            </span>
+          )}
         </h3>
         <span className="text-sm text-tertiary">
           {leg.party.wallet || leg.party.counterparty ? (
@@ -353,31 +351,26 @@ function LegCard({
           )}
         </span>
       </div>
-      {/* Where this party pays in, directly under who they are. Only while the
-          escrow can still receive: once the leg is funded, frozen, or the trade
-          is closed, an address here is an invitation to send tokens somewhere
-          they will bounce or are not wanted. */}
-      {outcome !== "awaiting" && outcome !== "partial" ? null : (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-fill-subtle px-3 py-2">
-          <span className="text-[11px] text-tertiary">{t("DashboardMarkets.dvp.escrowLabel")}</span>
-          <CopyableAddress
-            address={leg.escrow}
-            className="px-0 hover:bg-transparent"
-            label={t("DashboardMarkets.dvp.escrowLabel")}
-          />
-        </div>
-      )}
 
-      <div className="mt-5 flex items-center gap-3">
-        {leg.symbol ? (
-          <TokenLogo imageUrl={leg.imageUrl} symbol={leg.symbol} className="h-9 w-9" />
-        ) : null}
-        <p className="font-semibold text-3xl text-primary tracking-tight tabular-nums">
-          {target}
-          {leg.symbol ? (
-            <span className="ml-2 font-medium text-secondary text-xl">{leg.symbol}</span>
+      {/* min-h-10 is the button's height, so a card without one keeps its
+          progress bar level with a card that has one. */}
+      <div className="mt-5 flex min-h-10 items-center gap-3">
+        <TokenMark logoUrl={leg.imageUrl} mint={leg.mint} size="md" symbol={leg.symbol} />
+        <div>
+          <p className="font-semibold text-3xl text-primary tracking-tight tabular-nums">
+            {target}
+            {leg.symbol ? (
+              <span className="ml-2 font-medium text-secondary text-xl">{leg.symbol}</span>
+            ) : null}
+          </p>
+          {leg.name !== null && leg.name !== leg.symbol ? (
+            <p className="mt-1 text-secondary text-sm">{leg.name}</p>
           ) : null}
-        </p>
+        </div>
+        {/* On the amount row, not under the progress bar: a card with an
+            action stays the same height as one without, so the two legs
+            line up. */}
+        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
       </div>
 
       <div className="mt-5 flex items-center justify-between text-secondary text-xs tabular-nums">
@@ -395,13 +388,58 @@ function LegCard({
         <div className={cn("h-full rounded-full", status.bar)} style={{ width: `${percent}%` }} />
       </div>
 
-      {leg.fundingSignature ? (
-        <p className="mt-4 text-secondary text-xs">
-          {t("DashboardMarkets.dvp.txFunding")}{" "}
-          <TransactionLink cluster={cluster} signature={leg.fundingSignature} />
-        </p>
-      ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
+      {/* Where this party pays in, as a permanent card under the progress it
+          feeds, so both legs keep the same skeleton. Once the leg can no longer
+          receive (funded, frozen, or the trade closed) the address goes — it
+          would only invite tokens somewhere they bounce — and the transaction
+          that funded the leg takes its place. */}
+      <div className="mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2">
+        <span className="text-[11px] text-tertiary">
+          {receiving ? t("DashboardMarkets.dvp.escrowLabel") : t("DashboardMarkets.dvp.txFunding")}
+        </span>
+        {receiving ? (
+          <span className="inline-flex items-center gap-1.5">
+            <CopyableAddress
+              address={leg.escrow}
+              className="px-0 hover:bg-transparent"
+              label={t("DashboardMarkets.dvp.escrowLabel")}
+            />
+            <a
+              aria-label={t("DashboardMarkets.dvp.escrowLabel")}
+              className="text-secondary hover:text-primary"
+              href={explorerAddressUrl(leg.escrow, cluster)}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+            </a>
+          </span>
+        ) : leg.fundingSignature ? (
+          <span className="inline-flex items-center gap-1.5">
+            <CopyableAddress
+              address={leg.fundingSignature}
+              className="px-0 hover:bg-transparent"
+              display={shortenSignature(leg.fundingSignature)}
+              label={t("DashboardMarkets.dvp.txFunding")}
+            />
+            <a
+              aria-label={t("DashboardMarkets.dvp.txFunding")}
+              className="text-secondary hover:text-primary"
+              href={explorerTxUrl(leg.fundingSignature, cluster)}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+            </a>
+          </span>
+        ) : (
+          <span className="py-1 text-secondary text-xs">
+            {leg.funding !== null && BigInt(leg.funding.observedAmount) > 0n
+              ? t("DashboardMarkets.dvp.txFundingExternal")
+              : t("DashboardMarkets.dvp.txFundingNone")}
+          </span>
+        )}
+      </div>
     </section>
   );
 }
@@ -649,8 +687,11 @@ function TimestampFact({
 
 /** A warning callout's title line: the mark beside the words, the explanation beneath. */
 function WarningTitle({ Icon, label }: { Icon: LucideIcon; label: string }) {
+  // flex, not inline-flex: an inline box sits on the text baseline and grows
+  // the title line by its descender, which pushed the title 3px lower than
+  // the body's bottom padding.
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5">
       <Icon aria-hidden className="h-4 w-4 shrink-0" />
       {label}
     </span>
@@ -756,7 +797,7 @@ export function DvpTradeDetailWorkspace({
 }) {
   const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
-  const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
+  const { act, awaitingApproval, pending } = useDvpTradeActions(trade.id);
   const partyView = isDvpPartyView(trade);
   const expiry = new Date(Number(trade.expiryTimestamp) * 1000).toISOString();
 
@@ -765,22 +806,12 @@ export function DvpTradeDetailWorkspace({
   // fund endpoint naming the side.
   const fundActionFor = (side: DvpTradeSide): ReactNode =>
     canFundLeg(trade.legs[side], trade.status) ? (
-      <div className="flex flex-col gap-2">
-        {/* Clicked, not held. Funding moves your leg into the trade's own
-            escrow, which is a step forward rather than something to walk back;
-            hold is reserved for destroying something (HOO-1230). */}
-        <Button
-          className="self-start"
-          disabled={pending !== null}
-          onClick={() => act("fund", { side })}
-          type="button"
-        >
-          {t("DashboardMarkets.dvp.actionFund")}
-        </Button>
-        <p className="text-[11px] text-tertiary leading-relaxed">
-          {t("DashboardMarkets.dvp.fundHint")}
-        </p>
-      </div>
+      /* Clicked, not held. Funding moves your leg into the trade's own
+         escrow, which is a step forward rather than something to walk back;
+         hold is reserved for destroying something (HOO-1230). */
+      <Button disabled={pending !== null} onClick={() => act("fund", { side })} type="button">
+        {t("DashboardMarkets.dvp.actionFund")}
+      </Button>
     ) : undefined;
 
   // Your leg first, whichever it is. With no custodied leg (agent) or both
@@ -843,12 +874,6 @@ export function DvpTradeDetailWorkspace({
             {t("DashboardMarkets.dvp.approvalPendingDescription")}
           </Callout>
         ) : null}
-        {error ? (
-          <Callout live variant="danger">
-            {error}
-          </Callout>
-        ) : null}
-
         {/* Only the settlement authority can settle or cancel, and a party
             reading somebody else's trade is not it. Offering the buttons put
             two irreversible-looking actions in front of somebody whose click

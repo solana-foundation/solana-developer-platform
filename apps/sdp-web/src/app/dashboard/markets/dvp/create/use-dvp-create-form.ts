@@ -175,10 +175,10 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   const { error, submit: send, submitting } = useDvpCreateSubmit();
 
   const { values, setField } = useZodForm(createFormSchema, {
-    // Both slots start empty: the pickers offer counterparties and pasted
-    // addresses, and neither side has an assumable default.
-    partyA: { mode: "address", address: "" },
-    partyB: { mode: "address", address: "" },
+    // Both slots start empty in the first picker mode; neither side has an
+    // assumable wallet default.
+    partyA: { mode: "wallet", walletId: "" },
+    partyB: { mode: "wallet", walletId: "" },
     expiry: defaultExpiry(),
     refString: "",
   });
