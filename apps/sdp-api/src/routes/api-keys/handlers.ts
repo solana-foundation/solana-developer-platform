@@ -782,7 +782,18 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     projectId,
     gracePeriodHours,
     actor.permissions,
-    c.env.API_KEY_PEPPER
+    c.env.API_KEY_PEPPER,
+    // The pre-flight check above fails fast, but the rows it judged can
+    // change before the rotation lock is taken; this guard re-judges the
+    // bindings the transaction actually copies.
+    rotatingActorKey && isWalletScopedActor(rotatingActorKey)
+      ? ({ signingWalletId, bindingWalletIds }) =>
+          assertBindingsWithinActorWalletScope(
+            rotatingActorKey,
+            [signingWalletId, ...bindingWalletIds],
+            signingWalletId !== null || bindingWalletIds.length > 0 ? "selected" : "all"
+          )
+      : undefined
   );
 
   if (!rotation) {

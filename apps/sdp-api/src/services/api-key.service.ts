@@ -422,7 +422,11 @@ export class ApiKeyService {
     projectId: string,
     gracePeriodHours: number,
     actorPermissions: Permission[],
-    pepper?: string
+    pepper?: string,
+    guardTargetWalletScope?: (target: {
+      signingWalletId: string | null;
+      bindingWalletIds: string[];
+    }) => void
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
@@ -497,6 +501,25 @@ export class ApiKeyService {
           return;
         }
 
+        // The wallet scope is judged on the rows this transaction copies,
+        // not on what the caller read before the lock: a binding written in
+        // that window would otherwise be cloned unchecked.
+        const currentTarget = await tx.queryOne<{ signing_wallet_id: string | null }>(
+          `SELECT signing_wallet_id FROM api_keys WHERE id = $1`,
+          [keyId]
+        );
+        const signingWalletId = currentTarget?.signing_wallet_id ?? null;
+        if (guardTargetWalletScope) {
+          const bindingRows = await tx.queryMany<{ wallet_id: string }>(
+            `SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = $1`,
+            [keyId]
+          );
+          guardTargetWalletScope({
+            signingWalletId,
+            bindingWalletIds: bindingRows.map((row) => row.wallet_id),
+          });
+        }
+
         await tx
           .prepare(
             `INSERT INTO api_keys (
@@ -516,7 +539,7 @@ export class ApiKeyService {
             existing.role,
             existing.permissions,
             existing.allowed_ips,
-            existing.signing_wallet_id,
+            signingWalletId,
             keyId,
             existing.expires_at
           )
