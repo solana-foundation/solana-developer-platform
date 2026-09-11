@@ -197,7 +197,10 @@ export function HeliusRingsWorkspace({
       {loadError ? <Callout variant="danger">{loadError}</Callout> : null}
 
       {setup === null ? (
-        <HeliusRingsWorkspaceSkeleton />
+        // A failed first read leaves setup unset; the error above is then the settled state.
+        loadError ? null : (
+          <HeliusRingsWorkspaceSkeleton />
+        )
       ) : setup.source !== "database" ? (
         <RingsConfigurationCard setup={setup} onConfigured={refresh} />
       ) : null}

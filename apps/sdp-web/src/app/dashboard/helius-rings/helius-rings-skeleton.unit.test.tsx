@@ -54,12 +54,12 @@ describe("Helius Rings loading state", () => {
       ...renderToStaticMarkup(<HeliusRingsLoading />).matchAll(
         /class="([^"]*animate-pulse[^"]*)"/g
       ),
-    ].map((match) => match[1] ?? "");
+    ];
 
     expect(pulses.length).toBeGreaterThan(0);
-    expect(pulses.every((className) => className.includes("motion-reduce:animate-none"))).toBe(
-      true
-    );
+    for (const [, className] of pulses) {
+      expect(className).toContain("motion-reduce:animate-none");
+    }
   });
 });
 
