@@ -75,7 +75,6 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultAmountPrecision": "Use no more than {decimals} decimal places.",
   "DashboardEarn.deposit.vaultOverBalance":
     "This is above the last observed balance; the provider will verify it on submit.",
-  "DashboardEarn.deposit.vaultSwapNotice": "Swap {source} to {target} at {pct}% tolerance.",
   "DashboardEarn.deposit.vaultSwapRow": "Swap",
   "DashboardEarn.deposit.vaultSwapVia": "{source} to {target} via Jupiter",
   "DashboardEarn.deposit.vaultSwapReviewTitle": "Swap required before deposit",
@@ -1487,8 +1486,15 @@ describe("fee sponsorship copy", () => {
     // Sponsorship refuses swap routes, so the copy follows the funding choice.
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
     await user.click(screen.getByRole("radio", { name: "USDG" }));
+    expect(screen.queryByText("Swap USDG to USDC at 0.02% tolerance.")).toBeNull();
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Swap required before deposit")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your USDG will be swapped to the vault's underlying USDC through Jupiter, then deposited in the same transaction."
+      )
+    ).toBeTruthy();
     expect(
       screen.getByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeTruthy();

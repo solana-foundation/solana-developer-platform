@@ -897,14 +897,12 @@ function DepositFundingTokenPicker({
   disabled,
   onSelect,
   selectedMint,
-  swapNotice,
   tokens,
   title,
 }: {
   disabled: boolean;
   onSelect: (mint: string) => void;
   selectedMint: string | undefined;
-  swapNotice: string | null;
   tokens: EarnSwapSourceToken[];
   title: string;
 }) {
@@ -938,11 +936,6 @@ function DepositFundingTokenPicker({
           );
         })}
       </div>
-      {swapNotice ? (
-        <p className="mt-2 text-xs leading-5 text-secondary" role="note">
-          {swapNotice}
-        </p>
-      ) : null}
     </fieldset>
   );
 }
@@ -1071,7 +1064,6 @@ interface DepositDetailsStepProps {
   decimals: number | undefined;
   depositMint: string | undefined;
   fundingDecimals: number | undefined;
-  fundingSymbol: string;
   fundingToken: EarnSwapSourceToken | undefined;
   fundingTokens: EarnSwapSourceToken[];
   onAmountChange: (value: string) => void;
@@ -1082,8 +1074,6 @@ interface DepositDetailsStepProps {
   selectedWallet: EarnFundingWallet | undefined;
   selectedWalletBalance: string | undefined;
   submitting: boolean;
-  swapActive: boolean;
-  symbol: string;
   wallets: readonly EarnFundingWallet[] | undefined;
   walletsError: unknown;
   walletsLoading: boolean;
@@ -1097,7 +1087,6 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
     decimals,
     depositMint,
     fundingDecimals,
-    fundingSymbol,
     fundingToken,
     fundingTokens,
     onAmountChange,
@@ -1108,8 +1097,6 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
     selectedWallet,
     selectedWalletBalance,
     submitting,
-    swapActive,
-    symbol,
     wallets,
     walletsError,
     walletsLoading,
@@ -1134,15 +1121,6 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
         disabled={submitting}
         onSelect={onFundingSelect}
         selectedMint={fundingToken?.mint ?? depositMint}
-        swapNotice={
-          swapActive
-            ? t("DashboardEarn.deposit.vaultSwapNotice", {
-                source: fundingSymbol,
-                target: symbol,
-                pct: String(EARN_SWAP_DEFAULT_SLIPPAGE_BPS / 100),
-              })
-            : null
-        }
         title={t("DashboardEarn.deposit.vaultPayWith")}
         tokens={fundingTokens}
       />
@@ -1652,7 +1630,6 @@ export function EarnVaultDepositModal({
               decimals={decimals}
               depositMint={depositMint}
               fundingDecimals={fundingDecimals}
-              fundingSymbol={fundingSymbol}
               fundingToken={fundingToken}
               fundingTokens={fundingTokens}
               onAmountChange={(value) => {
@@ -1675,8 +1652,6 @@ export function EarnVaultDepositModal({
               selectedWallet={selectedWallet}
               selectedWalletBalance={selectedWalletBalance}
               submitting={submitting}
-              swapActive={swapActive}
-              symbol={symbol}
               wallets={wallets}
               walletsError={walletsError}
               walletsLoading={walletsLoading}

@@ -692,7 +692,6 @@
       "vaultWalletBody": "Choose a wallet and amount. The wallet signs the transaction and receives the vault shares.",
       "vaultAmount": "Amount",
       "vaultPayWith": "Pay with",
-      "vaultSwapNotice": "Your {source} is swapped to {target} through Jupiter inside the same transaction, so the swap and the deposit land together or not at all. The deposit is sized to the swap's guaranteed minimum ({pct}% tolerance); anything better stays in your wallet as {target}.",
       "vaultSwapRow": "Swap",
       "vaultSwapVia": "{source} → {target} via Jupiter",
       "vaultSwapReviewTitle": "Swap required before deposit",
