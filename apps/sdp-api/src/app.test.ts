@@ -20,6 +20,7 @@ const SECRET_PAYMENTS_ERROR_PATH = "/__secret_payments_error_test_throw";
 const SECRET_SIGNING_ERROR_PATH = "/__secret_signing_error_test_throw";
 const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
+const FEE_REJECTED_PATH = "/__fee_rejected_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 
 function makeObservability(): {
@@ -99,6 +100,12 @@ function buildApp(observability: Observability) {
   app.all(FEE_ERROR_PATH, () => {
     throw new FeePaymentError(
       "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1",
+      "SIGNING_FAILED"
+    );
+  });
+  app.all(FEE_REJECTED_PATH, () => {
+    throw new FeePaymentError(
+      "Failed to sign transaction as fee payer: Kora Error -32001: Validation error: Mutable transfer-hook authority found on mint account CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
       "SIGNING_FAILED"
     );
   });
@@ -202,6 +209,21 @@ describe("createApp onError capture", () => {
     );
     expect(body.error.message).not.toContain("custom program error");
     expect(withScope).not.toHaveBeenCalled();
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it("maps deterministic signing rejections to a 422 that does not ask for a retry", async () => {
+    const { obs, captureException } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(FEE_REJECTED_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("SIGNING_REJECTED");
+    expect(body.error.message).not.toContain("Try again");
+    expect(body.error.message).not.toContain("temporarily unavailable");
+    expect(body.error.message).not.toContain("CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM");
     expect(captureException).not.toHaveBeenCalled();
   });
 
