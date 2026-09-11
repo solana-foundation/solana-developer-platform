@@ -10,7 +10,7 @@ import {
   type RequirementField,
   requirementFieldName,
 } from "@sdp/types/ramp-requirements";
-import { CheckIcon, Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -316,6 +316,34 @@ function RequirementFieldInput({
             onChange={(event) => onChange(event.target.value)}
           />
           {error ? <p className="text-sm text-error">{error}</p> : null}
+        </div>
+      );
+    }
+    case "consent": {
+      // The document opens in a new tab from inside the sentence being accepted, so ticking the box
+      // and reading what it commits to happen in the same place. The value is the literal "true".
+      const checked = value === "true";
+      return (
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            id={field.key}
+            className="mt-1"
+            checked={checked}
+            onChange={(event) => onChange(event.target.checked ? "true" : "")}
+          />
+          <Label htmlFor={field.key} className="text-sm font-normal leading-6">
+            {field.label}{" "}
+            <a
+              href={field.documentUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 underline underline-offset-2"
+            >
+              {field.documentLabel ?? field.documentUrl}
+              <ExternalLinkIcon className="size-3.5" aria-hidden />
+            </a>
+          </Label>
         </div>
       );
     }

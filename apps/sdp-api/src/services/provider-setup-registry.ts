@@ -272,6 +272,7 @@ export const PROVIDER_SETUP_REGISTRY = {
     coinbase: rampSetup("coinbase"),
     mural: rampSetup("mural"),
     stripe: rampSetup("stripe"),
+    hercle: rampSetup("hercle"),
   },
 } as const satisfies ProviderSetupRegistryShape;
 

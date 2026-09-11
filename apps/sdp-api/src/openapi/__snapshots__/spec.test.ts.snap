@@ -28,6 +28,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "coinbase",
                       "mural",
                       "stripe",
+                      "hercle",
                     ],
                     "type": "string",
                   },
@@ -283,6 +284,40 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   "key",
                                   "label",
                                   "required",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "properties": {
+                                  "documentLabel": {
+                                    "type": "string",
+                                  },
+                                  "documentUrl": {
+                                    "format": "uri",
+                                    "type": "string",
+                                  },
+                                  "key": {
+                                    "type": "string",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "consent",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "required": {
+                                    "type": "boolean",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "key",
+                                  "label",
+                                  "required",
+                                  "documentUrl",
                                 ],
                                 "type": "object",
                               },
@@ -660,6 +695,40 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         },
                         {
                           "properties": {
+                            "documentLabel": {
+                              "type": "string",
+                            },
+                            "documentUrl": {
+                              "format": "uri",
+                              "type": "string",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "consent",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "documentUrl",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
                             "fields": {
                               "items": {
                                 "oneOf": [
@@ -848,6 +917,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "coinbase",
                       "mural",
                       "stripe",
+                      "hercle",
                     ],
                     "type": "string",
                   },
@@ -1020,6 +1090,40 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             "key",
                             "label",
                             "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "documentLabel": {
+                              "type": "string",
+                            },
+                            "documentUrl": {
+                              "format": "uri",
+                              "type": "string",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "consent",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "documentUrl",
                           ],
                           "type": "object",
                         },
@@ -1379,6 +1483,40 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             "key",
                             "label",
                             "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "documentLabel": {
+                              "type": "string",
+                            },
+                            "documentUrl": {
+                              "format": "uri",
+                              "type": "string",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "consent",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "documentUrl",
                           ],
                           "type": "object",
                         },
@@ -1802,6 +1940,40 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               },
                               {
                                 "properties": {
+                                  "documentLabel": {
+                                    "type": "string",
+                                  },
+                                  "documentUrl": {
+                                    "format": "uri",
+                                    "type": "string",
+                                  },
+                                  "key": {
+                                    "type": "string",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "consent",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "required": {
+                                    "type": "boolean",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "key",
+                                  "label",
+                                  "required",
+                                  "documentUrl",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "properties": {
                                   "fields": {
                                     "items": {
                                       "oneOf": [
@@ -2032,6 +2204,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "coinbase",
                       "mural",
                       "stripe",
+                      "hercle",
                     ],
                     "type": "string",
                   },

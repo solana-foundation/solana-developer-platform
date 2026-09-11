@@ -31,6 +31,7 @@ import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import { BvnkWebhookProcessor } from "./ramps/bvnk";
 import { CoinbaseWebhookProcessor } from "./ramps/coinbase";
+import { HercleWebhookProcessor } from "./ramps/hercle";
 import { LightsparkWebhookProcessor } from "./ramps/lightspark";
 import { MoonpayWebhookProcessor } from "./ramps/moonpay";
 import { MuralWebhookProcessor } from "./ramps/mural";
@@ -46,6 +47,7 @@ const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   coinbase: new CoinbaseWebhookProcessor(),
   mural: new MuralWebhookProcessor(),
   stripe: new StripeWebhookProcessor(),
+  hercle: new HercleWebhookProcessor(),
 } as const satisfies Record<
   Exclude<RampProviderId, "moneygram">,
   WebhookProcessor<unknown, unknown>

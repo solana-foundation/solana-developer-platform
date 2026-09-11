@@ -254,6 +254,9 @@
         "quoteExpired": "Quote expired",
         "quoteExpiredFundingDescription": "This quote expired before the transfer completed. Create a new quote to continue funding.",
         "quoteExpiredPayoutDescription": "This quote expired before the payout completed. Create a new quote to continue the withdrawal.",
+        "canceled": "Transfer canceled",
+        "canceledFundingDescription": "This transfer was canceled, so the funding instructions no longer apply. Create a new quote to continue.",
+        "canceledPayoutDescription": "This payout was canceled, so the deposit instructions no longer apply. Create a new quote to continue.",
         "updated": "Transfer status updated",
         "currentProviderStatus": "Current provider status: {status}.",
         "preparing": "Preparing transfer status",
@@ -320,6 +323,22 @@
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
       "depositSimulated": "Deposit Simulated"
+    },
+    "hercle": {
+      "verificationRequiredTitle": "Verify your business",
+      "verificationRequiredDescription": "Hercle needs to verify your business before it can settle payments for you — this is Hercle's own regulatory requirement as a licensed crypto-asset service provider, and the verdict is theirs. Hit “Complete Verification” to start; this page refreshes automatically once you're approved, and your instructions will appear right here.",
+      "verificationInReviewTitle": "Verification in review",
+      "verificationInReviewDescription": "Hercle is reviewing your business details. There's nothing for you to do — feel free to come back later; your instructions will show up here as soon as you're approved.",
+      "verificationFailedTitle": "Business verification was not approved",
+      "verificationFailedDescription": "Hercle could not verify your business, so payments can't be settled through them. This isn't retryable from here — contact Hercle if you believe this is a mistake.",
+      "onrampProvisioningDetail": "Opening your dedicated EUR account at Hercle's bank",
+      "payerAccountHolder": "Pay from an account held in the name of",
+      "offrampProvisioningDetail": "Hercle does not offer an off-ramp.",
+      "readyTitle": "Preparing your instructions",
+      "readyDescription": "Your business is verified — fetching your payment details now.",
+      "simulateDeposit": "Simulate Wire",
+      "simulating": "Simulating...",
+      "depositSimulated": "Wire Simulated"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",

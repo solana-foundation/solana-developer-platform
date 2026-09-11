@@ -49,6 +49,19 @@ export type RequirementField =
       required: boolean;
       /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
       fields: RequirementField[];
+    }
+  | {
+      /**
+       * An affirmative acceptance of a provider document (terms of service, privacy policy), collected as
+       * the literal `"true"`. The label is the sentence up to the document's name and `documentLabel`
+       * completes it as a link to `documentUrl`, so the person reads what they accept where they accept it.
+       */
+      kind: "consent";
+      key: string;
+      label: string;
+      required: boolean;
+      documentUrl: string;
+      documentLabel?: string;
     };
 
 export type RequirementFieldKind = RequirementField["kind"];
@@ -140,4 +153,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "mural"; status: "customer_verifying" }
   | { provider: "mural"; status: "customer_verification_failed" }
   | { provider: "mural"; status: "funding_account_provisioning" }
+  | { provider: "hercle"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "hercle"; status: "customer_verifying" }
+  | { provider: "hercle"; status: "customer_verification_failed" }
 );

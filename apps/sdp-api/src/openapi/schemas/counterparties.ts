@@ -125,11 +125,21 @@ const requirementDateFieldSchema = z.object({
   before: z.string().optional(),
 });
 
+const requirementConsentFieldSchema = z.object({
+  kind: z.literal("consent"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  documentUrl: z.url(),
+  documentLabel: z.string().optional(),
+});
+
 const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
   requirementCountryFieldSchema,
   requirementDateFieldSchema,
+  requirementConsentFieldSchema,
   z.object({
     kind: z.literal("address"),
     key: z.string(),

@@ -18,6 +18,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
+import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -198,6 +199,12 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           {t("DashboardPayments.ramps.quoteMissingInstructions")}
         </div>
       );
+    }
+
+    // Withdraw the instructions once the transfer can no longer settle: the bank details and
+    // payment reference stay copyable, so leaving them up invites a wire against a dead order.
+    if (isTerminalTransferStatus(transferStatus?.status)) {
+      return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
     }
 
     const labels =

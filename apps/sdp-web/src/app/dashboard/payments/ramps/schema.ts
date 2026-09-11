@@ -140,6 +140,17 @@ export function applyRequirementMask(mask: string, raw: string): string {
   return out;
 }
 
+/** A consent is satisfied by the affirmative literal alone; the form clears it to "" when unticked. */
+function consentFieldError(
+  field: Extract<RequirementField, { kind: "consent" }>,
+  value: string
+): string | null {
+  if (value === "true" || (!field.required && value.length === 0)) {
+    return null;
+  }
+  return `${field.documentLabel ?? field.label} must be accepted.`;
+}
+
 export function requirementFieldError(
   field: RequirementField,
   raw: string | undefined
@@ -148,6 +159,9 @@ export function requirementFieldError(
     throw new Error(`Address field "${field.key}" is validated through its nested fields.`);
   }
   const value = raw === undefined ? "" : raw.trim();
+  if (field.kind === "consent") {
+    return consentFieldError(field, value);
+  }
   if (value.length === 0) {
     return field.required ? `${field.label} is required.` : null;
   }
