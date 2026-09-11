@@ -686,11 +686,13 @@ function StrategyTable({
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex flex-col items-end gap-2">
-                    <EarnDepositAvailabilityBadge
-                      availability={availability}
-                      labels={TREASURY_AVAILABILITY_LABELS}
-                      strategy={strategy}
-                    />
+                    {canDeposit ? null : (
+                      <EarnDepositAvailabilityBadge
+                        availability={availability}
+                        labels={TREASURY_AVAILABILITY_LABELS}
+                        strategy={strategy}
+                      />
+                    )}
                     <Button
                       disabled={!canDeposit}
                       iconLeft={<ArrowDownLeftIcon />}

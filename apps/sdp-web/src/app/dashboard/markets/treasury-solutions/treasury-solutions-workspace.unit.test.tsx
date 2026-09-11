@@ -633,6 +633,7 @@ describe("TreasurySolutionsWorkspace", () => {
       throw new Error("Expected separate vault position and strategy rows");
     }
     expect(vaultStrategyRow.textContent).toContain("6.2%");
+    expect(within(vaultStrategyRow).queryByText("Available")).toBeNull();
 
     const activePositionsTable = vaultPositionRow.closest("table");
     if (!activePositionsTable) throw new Error("Expected the active positions table");
