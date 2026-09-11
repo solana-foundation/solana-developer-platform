@@ -7,13 +7,13 @@
  * without scrolling past the other seven.
  */
 
-import { SegmentedControl } from "@solana/design-system/segmented-control";
 import { HashIcon, UsersIcon, WalletIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { TokenMark } from "@/components/token-mark";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -353,13 +353,15 @@ export function PartySlotPicker({
       label={label}
       labelTrailing={
         <SegmentedControl
-          aria-label={t("DashboardMarkets.dvp.partyModeLabel")}
-          items={[
+          ariaLabel={t("DashboardMarkets.dvp.partyModeLabel")}
+          className="border-border-subtle"
+          optionClassName="whitespace-nowrap"
+          options={[
             { value: "wallet", label: t("DashboardMarkets.dvp.partyModeWallet") },
             { value: "counterparty", label: t("DashboardMarkets.dvp.partyModeCounterparty") },
             { value: "address", label: t("DashboardMarkets.dvp.partyModeAddress") },
           ]}
-          onValueChange={(mode) => {
+          onChange={(mode) => {
             switch (mode) {
               case "wallet":
                 onChange({ mode: "wallet", walletId: "" });
