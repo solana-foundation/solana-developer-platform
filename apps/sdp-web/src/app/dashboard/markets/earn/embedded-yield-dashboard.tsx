@@ -422,9 +422,19 @@ function StrategyWalletDetails({
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-subtle text-secondary">
                     <WalletIcon aria-hidden="true" className="size-3.5" />
                   </span>
-                  <p className="truncate text-sm text-primary" title={position.ownerAddress}>
-                    {compactAddress(position.ownerAddress)}
-                  </p>
+                  <div className="flex min-w-0 items-center gap-1">
+                    <p className="truncate text-sm text-primary" title={position.ownerAddress}>
+                      {compactAddress(position.ownerAddress)}
+                    </p>
+                    <button
+                      aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-strong hover:text-primary"
+                      onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
+                      type="button"
+                    >
+                      <CopyIcon aria-hidden="true" className="size-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-secondary">
                   <TokenMark mint={asset.mint} size="sm" symbol={asset.symbol} />
@@ -457,14 +467,6 @@ function StrategyWalletDetails({
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
-                    className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-strong hover:text-primary"
-                    onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
-                  >
-                    <CopyIcon aria-hidden="true" className="size-3.5" />
-                  </button>
                   <a
                     aria-label={t("DashboardMarkets.earnProgram.openWalletInExplorer")}
                     className="inline-flex size-8 items-center justify-center rounded-lg text-tertiary transition-colors hover:bg-fill-strong hover:text-primary"
