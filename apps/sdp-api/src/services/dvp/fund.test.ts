@@ -8,21 +8,25 @@
  *
  * One suite for every funder now: creator and party funding are the same
  * operation, so the claim always lands on `dvp_leg_funding_claims`, keyed
- * (trade, side) and owned by the organization whose wallet is paying.
+ * (trade, side) and owned by the organization whose wallet authorizes it.
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
 import {
   address,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
   none,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
   some,
 } from "@solana/kit";
-import { generateKeyPairSigner } from "@solana/signers";
+import { generateKeyPairSigner, partiallySignTransactionWithSigners } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
+import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -36,11 +40,32 @@ const readMintDecimals = vi.hoisted(() => vi.fn());
 const claimFunding = vi.hoisted(() => vi.fn());
 const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
+const rebindSignature = vi.hoisted(() => vi.fn());
+const hasClaim = vi.hoisted(() => vi.fn());
+const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeToken = vi.hoisted(() => vi.fn());
+
+let sponsorSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
+
+/** Co-signs a partially signed transaction as the sponsor, the way Kora would. */
+async function sponsorSign(transaction: Uint8Array, lifecycle: OwnedSubmissionLifecycle) {
+  const decoded = getTransactionDecoder().decode(transaction);
+  const signed = await partiallySignTransactionWithSigners([sponsorSigner], decoded);
+  const signature = getSignatureFromTransaction(signed);
+  const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
+  await lifecycle.persistSigned({ signature, signedTransaction });
+  await lifecycle.markStarted();
+  return { signature, signedTransaction, releaseDefinitelyUnbroadcast: vi.fn() };
+}
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   beginApprovedWalletOperationEffect,
+}));
+vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
+  createProjectSponsorshipFeePayment,
 }));
 vi.mock("./read-chain", () => ({ readEscrowState, readDvpAccounts }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
@@ -53,6 +78,8 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({
     claim: claimFunding,
     release: releaseFunding,
+    rebindSignature,
+    hasClaim,
     recordFundingTx,
   }),
 }));
@@ -140,6 +167,7 @@ const context = { env } as never;
 describe("fundDvpTradeLeg", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    sponsorSigner = await generateKeyPairSigner();
     createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
     readDvpAccounts.mockImplementation(async () => {
@@ -170,9 +198,18 @@ describe("fundDvpTradeLeg", () => {
     readMintDecimals.mockResolvedValue(6);
     fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
-    sendTransaction.mockResolvedValue("sig");
+    prepareOwnedSubmission.mockImplementation(sponsorSign);
+    createProjectSponsorshipFeePayment.mockResolvedValue({
+      getFeePayer: async () => sponsorSigner.address,
+      prepareOwnedSubmission,
+    });
+    sendTransaction.mockImplementation(async (_rpc, bytes) =>
+      getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
+    );
     claimFunding.mockResolvedValue(true);
     releaseFunding.mockResolvedValue(undefined);
+    rebindSignature.mockResolvedValue(true);
+    hasClaim.mockResolvedValue(true);
     recordFundingTx.mockResolvedValue(undefined);
   });
 
@@ -383,20 +420,54 @@ describe("fundDvpTradeLeg", () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  it("claims before it broadcasts", async () => {
+  it("claims before Kora signs and before it broadcasts", async () => {
     const order: string[] = [];
     claimFunding.mockImplementation(async () => {
       order.push("claim");
       return true;
     });
+    prepareOwnedSubmission.mockImplementation(async (transaction, lifecycle) => {
+      order.push("sponsor");
+      return sponsorSign(transaction, lifecycle);
+    });
     sendTransaction.mockImplementation(async () => {
       order.push("send");
-      return "sig";
+      const signature = rebindSignature.mock.calls[0][3];
+      return signature;
     });
 
     await fundDvpTradeLeg(context, trade(), FUNDER_A);
 
-    expect(order).toEqual(["claim", "send"]);
+    expect(order).toEqual(["claim", "sponsor", "send"]);
+  });
+
+  it("rebinds the claim to the sponsored signature before broadcast", async () => {
+    const order: string[] = [];
+    rebindSignature.mockImplementation(async () => {
+      order.push("rebind");
+      return true;
+    });
+    sendTransaction.mockImplementation(async (_rpc, bytes) => {
+      order.push("send");
+      return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
+    });
+
+    const result = await fundDvpTradeLeg(context, trade(), FUNDER_A);
+    const claimSignature = claimFunding.mock.calls[0][0].signature;
+
+    expect(rebindSignature).toHaveBeenCalledWith(trade().id, "a", claimSignature, result.signature);
+    expect(order).toEqual(["rebind", "send"]);
+  });
+
+  it("releases the claim when sponsorship fails before signing", async () => {
+    prepareOwnedSubmission.mockRejectedValue(new Error("Kora unavailable"));
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow("Kora unavailable");
+
+    const claimSignature = claimFunding.mock.calls[0][0].signature;
+    expect(releaseFunding).toHaveBeenCalledWith(trade().id, "a", claimSignature);
+    expect(rebindSignature).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   // An ambiguous send may still land, so releasing the claim would invite a
@@ -406,6 +477,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow("socket hang up");
     expect(releaseFunding).not.toHaveBeenCalled();
+    expect(rebindSignature).toHaveBeenCalledTimes(1);
   });
 
   // The fence runs after the claim and before any broadcast. If it throws, no

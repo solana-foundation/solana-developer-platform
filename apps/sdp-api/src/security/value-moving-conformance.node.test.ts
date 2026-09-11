@@ -349,12 +349,9 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
-  // DvP create, settle/cancel and payments share the owned sponsorship
-  // submission sink, which signs and persists before broadcasting; settle only
-  // partially signs as the authority and is not a sink of its own. Fund still
-  // signs from the project's custody wallet and returns fully signed bytes
-  // without sending.
-  "apps/sdp-api/src/services/dvp/fund.ts": ["signTransactionMessageWithSigners"],
+  // DvP create, fund, settle/cancel and payments share the owned sponsorship
+  // submission sink, which signs and persists before broadcasting; fund and
+  // settle only partially sign as authorities and are not sinks of their own.
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
