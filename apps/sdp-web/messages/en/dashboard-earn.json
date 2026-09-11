@@ -61,6 +61,7 @@
       "positionStatusActiveDescription": "This position is active.",
       "positionStatusPending": "Pending",
       "positionStatusPendingDescription": "A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
+      "positionBalanceProjected": "Projected balance. Syncing the exact provider value.",
       "depositStatusPending": "Reconciling",
       "depositStatusPendingDescription": "SDP is checking the transaction because its current network state is not yet known.",
       "depositStatusSubmitted": "Depositing",

@@ -16,7 +16,7 @@ import {
   Layers3Icon,
   WalletIcon,
 } from "lucide-react";
-import { AnimatePresence, domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
+import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -37,6 +37,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnStrategyLiquidityLabel } from "./earn-format";
 import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
@@ -626,39 +627,30 @@ function PortfolioByStrategy({
                         </m.span>
                       </TableCell>
                     </TableRow>
-                    <AnimatePresence initial={false}>
-                      {isOpen ? (
-                        <m.tr id={detailsId} key={`${strategyId}:details`}>
-                          <td className="p-0 align-top" colSpan={8}>
-                            <m.div
-                              animate={{ height: "auto", opacity: 1 }}
-                              className="overflow-hidden will-change-[height,opacity]"
-                              exit={{ height: 0, opacity: 0 }}
-                              initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-                              transition={
-                                reduceMotion
-                                  ? { duration: 0 }
-                                  : {
-                                      height: {
-                                        duration: 0.28,
-                                        ease: [0.22, 1, 0.36, 1],
-                                      },
-                                      opacity: { duration: 0.16, ease: "easeOut" },
-                                    }
-                              }
-                            >
-                              <div className="border-b border-border-subtle">
-                                <StrategyWalletDetails
-                                  cluster={cluster}
-                                  strategy={strategy}
-                                  strategyDefinition={strategyDefinition}
-                                />
-                              </div>
-                            </m.div>
-                          </td>
-                        </m.tr>
-                      ) : null}
-                    </AnimatePresence>
+                    <tr aria-hidden={!isOpen} id={detailsId}>
+                      <td className="p-0 align-top" colSpan={8}>
+                        <div
+                          className={cn(
+                            "grid overflow-hidden",
+                            !reduceMotion &&
+                              "transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                            isOpen
+                              ? "grid-rows-[1fr] opacity-100"
+                              : "pointer-events-none grid-rows-[0fr] opacity-0"
+                          )}
+                        >
+                          <div className="min-h-0 overflow-hidden" inert={!isOpen}>
+                            <div className="border-b border-border-subtle">
+                              <StrategyWalletDetails
+                                cluster={cluster}
+                                strategy={strategy}
+                                strategyDefinition={strategyDefinition}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
                   </Fragment>
                 );
               })}

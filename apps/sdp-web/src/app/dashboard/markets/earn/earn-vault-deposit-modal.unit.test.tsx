@@ -879,6 +879,7 @@ describe("EarnVaultDepositModal", () => {
 
   it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    const onDeposited = vi.fn();
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
         fundingWallet([
@@ -895,7 +896,14 @@ describe("EarnVaultDepositModal", () => {
       data: { kind: "submitted", deposit: vaultDeposit("submitted") },
     });
     const user = userEvent.setup();
-    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
+    );
     await screen.findByRole("dialog");
 
     expect(screen.queryByRole("radio", { name: "PYUSD" })).toBeNull();
@@ -917,6 +925,11 @@ describe("EarnVaultDepositModal", () => {
       },
       IDEMPOTENCY_KEY
     );
+    expect(onDeposited).toHaveBeenCalledWith(expect.anything(), {
+      amount: "5",
+      custodyWalletId: "wallet_1",
+      projectBalance: false,
+    });
     // Paying in a different token is a DIFFERENT request: the held-key
     // fingerprint must not collide with an unswapped deposit of the same
     // amount, or a retry of one would replay the other.

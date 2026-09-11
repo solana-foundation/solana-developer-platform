@@ -201,10 +201,13 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    expect(screen.getByText("T+3 days")).toBeTruthy();
+    const strategyRow = screen.getByRole("row", {
+      name: "View customer wallets for USDC Core Yield",
+    });
+    expect(within(strategyRow).getByText("T+3 days")).toBeTruthy();
     expect(screen.queryByText("Pending")).toBeNull();
 
-    fireEvent.click(screen.getByRole("row", { name: "View customer wallets for USDC Core Yield" }));
+    fireEvent.click(strategyRow);
     const details = screen.getByRole("region", { name: "USDC Core Yield" });
     expect(within(details).getByText("T+3 days")).toBeTruthy();
     expect(within(details).queryByText("Pending")).toBeNull();

@@ -261,6 +261,10 @@ function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
   return outcome.kind === "deposit" && !outcome.absorbedByApproval;
 }
 
+function shouldProjectDepositIntent(outcome: DepositOutcome, swapActive: boolean): boolean {
+  return !swapActive && shouldProjectDepositBalance(outcome);
+}
+
 function observableDepositMovementId(outcome: DepositOutcome | null): string | undefined {
   if (outcome?.kind !== "deposit" || outcome.absorbedByApproval) return undefined;
   return outcome.deposit.movementId;
@@ -1495,7 +1499,10 @@ export function EarnVaultDepositModal({
       onDeposited?.(resolution.deposited, {
         amount,
         custodyWalletId: wallet.id,
-        projectBalance: shouldProjectDepositBalance(resolution.outcome),
+        // A swap request is denominated in the funding token while the
+        // position is denominated in the vault token. Wait for the provider
+        // value instead of presenting those unlike amounts as one balance.
+        projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
       });
     }
   }

@@ -2,11 +2,89 @@
 
 import { CheckIcon, Clock3Icon, LoaderCircleIcon, ShieldCheckIcon } from "lucide-react";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
-import { type ReactNode, useLayoutEffect, useRef } from "react";
+import type { ComponentType, ReactNode, SVGProps } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 const stepTransition = { duration: 0.18, ease: "easeOut" } as const;
+
+function EarnFlowStepConnector({
+  filled,
+  reduceMotion,
+}: {
+  filled: boolean;
+  reduceMotion: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute top-3 right-1/2 h-px w-full overflow-hidden bg-border-default"
+    >
+      <m.span
+        animate={{ scaleX: filled ? 1 : 0 }}
+        className="block h-full origin-left bg-primary"
+        initial={false}
+        transition={reduceMotion ? { duration: 0 } : stepTransition}
+      />
+    </span>
+  );
+}
+
+function stepMarkerClassName(active: boolean, complete: boolean): string {
+  if (complete) return "border-primary bg-primary text-on-primary";
+  if (active) {
+    return "border-primary bg-surface-raised text-primary shadow-[0_0_0_3px_var(--color-fill-subtle)]";
+  }
+  return "border-border-default bg-surface-raised text-tertiary";
+}
+
+function processingMarkerAnimation(
+  active: boolean,
+  processingActive: boolean,
+  reduceMotion: boolean
+) {
+  if (processingActive && !reduceMotion) return { scale: [1.06, 1.14, 1.06] };
+  return { scale: active ? 1.06 : 1 };
+}
+
+function processingMarkerTransition(active: boolean, reduceMotion: boolean) {
+  if (reduceMotion) return { duration: 0 };
+  if (active) {
+    return { duration: 1.6, ease: "easeInOut" as const, repeat: Number.POSITIVE_INFINITY };
+  }
+  return stepTransition;
+}
+
+function EarnFlowStepMarker({
+  active,
+  complete,
+  index,
+  processing,
+  reduceMotion,
+}: {
+  active: boolean;
+  complete: boolean;
+  index: number;
+  processing: boolean;
+  reduceMotion: boolean;
+}) {
+  const processingActive = active && processing;
+  return (
+    <m.span
+      aria-hidden="true"
+      animate={processingMarkerAnimation(active, processingActive, reduceMotion)}
+      className={cn(
+        "relative z-10 flex size-6 items-center justify-center rounded-full border text-[10px] font-medium",
+        stepMarkerClassName(active, complete)
+      )}
+      data-earn-step-processing={processingActive ? "true" : undefined}
+      initial={false}
+      transition={processingMarkerTransition(processingActive, reduceMotion)}
+    >
+      {complete ? <CheckIcon className="size-3" strokeWidth={2.5} /> : index + 1}
+    </m.span>
+  );
+}
 
 function EarnFlowStep({
   active,
@@ -23,50 +101,18 @@ function EarnFlowStep({
   reduceMotion: boolean;
   step: string;
 }) {
-  const processingActive = active && processing;
-
   return (
     <li className="relative flex min-w-0 flex-1 flex-col items-center">
       {index > 0 ? (
-        <span
-          aria-hidden="true"
-          className="absolute top-3 right-1/2 h-px w-full overflow-hidden bg-border-default"
-        >
-          <m.span
-            className="block h-full origin-left bg-primary"
-            initial={false}
-            animate={{ scaleX: complete || active ? 1 : 0 }}
-            transition={reduceMotion ? { duration: 0 } : stepTransition}
-          />
-        </span>
+        <EarnFlowStepConnector filled={complete || active} reduceMotion={reduceMotion} />
       ) : null}
-      <m.span
-        aria-hidden="true"
-        className={cn(
-          "relative z-10 flex size-6 items-center justify-center rounded-full border text-[10px] font-medium",
-          complete
-            ? "border-primary bg-primary text-on-primary"
-            : active
-              ? "border-primary bg-surface-raised text-primary shadow-[0_0_0_3px_var(--color-fill-subtle)]"
-              : "border-border-default bg-surface-raised text-tertiary"
-        )}
-        data-earn-step-processing={processingActive ? "true" : undefined}
-        initial={false}
-        animate={
-          processingActive && !reduceMotion
-            ? { scale: [1.06, 1.14, 1.06] }
-            : { scale: active ? 1.06 : 1 }
-        }
-        transition={
-          reduceMotion
-            ? { duration: 0 }
-            : processingActive
-              ? { duration: 1.6, ease: "easeInOut", repeat: Number.POSITIVE_INFINITY }
-              : stepTransition
-        }
-      >
-        {complete ? <CheckIcon className="size-3" strokeWidth={2.5} /> : index + 1}
-      </m.span>
+      <EarnFlowStepMarker
+        active={active}
+        complete={complete}
+        index={index}
+        processing={processing}
+        reduceMotion={reduceMotion}
+      />
       <span
         aria-current={active ? "step" : undefined}
         className={cn(
@@ -88,57 +134,24 @@ export function EarnFlowTransition({
   stepKey: string;
 }) {
   const reduceMotion = useReducedMotion();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const previousHeightRef = useRef<number | null>(null);
-  const previousStepKeyRef = useRef(stepKey);
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    const content = contentRef.current;
-    if (!container || !content) return;
-
-    const nextHeight = content.getBoundingClientRect().height;
-    const previousHeight = previousHeightRef.current;
-    const stepChanged = previousStepKeyRef.current !== stepKey;
-    previousHeightRef.current = nextHeight;
-    previousStepKeyRef.current = stepKey;
-    if (
-      reduceMotion ||
-      !stepChanged ||
-      previousHeight === null ||
-      Math.abs(previousHeight - nextHeight) < 1 ||
-      typeof container.animate !== "function"
-    ) {
-      return;
-    }
-
-    container.style.overflow = "hidden";
-    const animation = container.animate(
-      [{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }],
-      { duration: 240, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
-    );
-    const clearOverflow = () => {
-      container.style.overflow = "";
-    };
-    animation.addEventListener("finish", clearOverflow, { once: true });
-    animation.addEventListener("cancel", clearOverflow, { once: true });
-    return () => animation.cancel();
-  }, [reduceMotion, stepKey]);
 
   return (
     <LazyMotion features={domAnimation}>
-      <div ref={containerRef}>
+      <m.div
+        layout="size"
+        transition={
+          reduceMotion ? { duration: 0 } : { layout: { duration: 0.24, ease: [0.16, 1, 0.3, 1] } }
+        }
+      >
         <m.div
           key={stepKey}
-          ref={contentRef}
           initial={reduceMotion ? false : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={reduceMotion ? { duration: 0 } : stepTransition}
         >
           {children}
         </m.div>
-      </div>
+      </m.div>
     </LazyMotion>
   );
 }
@@ -188,6 +201,25 @@ const outcomeToneClassNames: Record<EarnOutcomeTone, string> = {
   warning: "bg-warning-bg text-warning",
 };
 
+const outcomeIconByTone: Record<EarnOutcomeTone, ComponentType<SVGProps<SVGSVGElement>>> = {
+  info: ShieldCheckIcon,
+  success: CheckIcon,
+  warning: Clock3Icon,
+};
+
+function outcomeIconAnimation(processing: boolean, reduceMotion: boolean) {
+  if (processing && !reduceMotion) return { opacity: 1, rotate: 360, scale: 1 };
+  return { opacity: 1, rotate: 0, scale: 1 };
+}
+
+function outcomeIconTransition(processing: boolean, reduceMotion: boolean) {
+  if (reduceMotion) return { duration: 0 };
+  if (processing) {
+    return { duration: 1.15, ease: "linear" as const, repeat: Number.POSITIVE_INFINITY };
+  }
+  return { delay: 0.08, duration: 0.18 };
+}
+
 export function EarnOutcomeMark({
   processing = false,
   tone,
@@ -196,13 +228,7 @@ export function EarnOutcomeMark({
   tone: EarnOutcomeTone;
 }) {
   const reduceMotion = useReducedMotion();
-  const Icon = processing
-    ? LoaderCircleIcon
-    : tone === "success"
-      ? CheckIcon
-      : tone === "warning"
-        ? Clock3Icon
-        : ShieldCheckIcon;
+  const Icon = processing ? LoaderCircleIcon : outcomeIconByTone[tone];
 
   return (
     <LazyMotion features={domAnimation}>
@@ -228,18 +254,8 @@ export function EarnOutcomeMark({
         <m.span
           key={processing ? "processing" : tone}
           initial={reduceMotion ? false : { opacity: 0, scale: 0.65 }}
-          animate={
-            processing && !reduceMotion
-              ? { opacity: 1, rotate: 360, scale: 1 }
-              : { opacity: 1, rotate: 0, scale: 1 }
-          }
-          transition={
-            reduceMotion
-              ? { duration: 0 }
-              : processing
-                ? { duration: 1.15, ease: "linear", repeat: Number.POSITIVE_INFINITY }
-                : { delay: 0.08, duration: 0.18 }
-          }
+          animate={outcomeIconAnimation(processing, Boolean(reduceMotion))}
+          transition={outcomeIconTransition(processing, Boolean(reduceMotion))}
         >
           <Icon className="size-6" strokeWidth={2} />
         </m.span>
