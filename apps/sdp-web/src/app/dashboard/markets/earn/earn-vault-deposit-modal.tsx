@@ -838,7 +838,7 @@ function useVaultFundingToken(input: {
   }, [decimals, depositMint, strategy.hostCluster, symbol]);
   const fundingTokens = useMemo(() => {
     if (wallets === undefined) return supportedFundingTokens;
-    const eligibleTokens: {
+    const rankedTokens: {
       balance: string | undefined;
       index: number;
       token: EarnSwapSourceToken;
@@ -856,12 +856,12 @@ function useVaultFundingToken(input: {
         }
       }
       const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
-      if (hasUnknownBalance || compareUnsignedDecimals(balance ?? "0", "0") === 1) {
-        eligibleTokens.push({ balance, index, token });
-      }
+      // Keep every supported stable visible for demo selection. Balance only
+      // controls ranking and the default selection, not visibility.
+      rankedTokens.push({ balance, index, token });
     }
 
-    eligibleTokens.sort((left, right) => {
+    rankedTokens.sort((left, right) => {
       if (left.balance === undefined && right.balance === undefined) {
         return left.index - right.index;
       }
@@ -872,7 +872,7 @@ function useVaultFundingToken(input: {
     });
 
     const tokens: EarnSwapSourceToken[] = [];
-    for (const { token } of eligibleTokens) tokens.push(token);
+    for (const { token } of rankedTokens) tokens.push(token);
     return tokens;
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);

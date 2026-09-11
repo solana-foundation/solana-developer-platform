@@ -311,7 +311,7 @@ describe("exact vault amount helpers", () => {
 });
 
 describe("EarnVaultDepositModal", () => {
-  it("auto-selects the only wallet and stablecoin and fills its balance with Max", async () => {
+  it("auto-selects the only wallet and its largest held stablecoin and fills Max", async () => {
     const user = userEvent.setup();
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
@@ -328,6 +328,8 @@ describe("EarnVaultDepositModal", () => {
     ).toBe(true);
     expect(screen.getByText("Pay with")).toBeTruthy();
     expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement).checked).toBe(false);
     const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
     const maxButton = screen.getByRole("button", { name: "Max" });
     expect(amountInput.disabled).toBe(false);
@@ -359,7 +361,7 @@ describe("EarnVaultDepositModal", () => {
     expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("1.25");
   });
 
-  it("auto-selects a wallet's only held stablecoin even when the vault uses another", async () => {
+  it("auto-selects a wallet's held stablecoin while showing every supported option", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
@@ -380,8 +382,9 @@ describe("EarnVaultDepositModal", () => {
 
     await screen.findByRole("dialog");
     expect(screen.getByText("Pay with")).toBeTruthy();
-    expect(screen.queryByRole("radio", { name: "USDC" })).toBeNull();
+    expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -910,7 +913,7 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
-  it("defaults to the largest supported stablecoin while keeping every held option selectable", async () => {
+  it("defaults to the largest held stablecoin while keeping every supported option selectable", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
     const onDeposited = vi.fn();
     mocks.useEarnFundingWallets.mockReturnValue({
@@ -939,12 +942,18 @@ describe("EarnVaultDepositModal", () => {
     );
     await screen.findByRole("dialog");
 
-    expect(screen.queryByRole("radio", { name: "PYUSD" })).toBeNull();
+    const pyusdOption = screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement;
     const usdcOption = screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement;
     const usdgOption = screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement;
     expect(usdgOption.checked).toBe(true);
     expect(usdcOption.checked).toBe(false);
+    expect(pyusdOption.checked).toBe(false);
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
+
+    await user.click(pyusdOption);
+    expect(pyusdOption.checked).toBe(true);
+    expect(screen.getAllByText("Available $0.00").length).toBeGreaterThan(0);
+    expect((screen.getByRole("button", { name: "Max" }) as HTMLButtonElement).disabled).toBe(true);
 
     await user.click(usdcOption);
     expect(usdcOption.checked).toBe(true);
