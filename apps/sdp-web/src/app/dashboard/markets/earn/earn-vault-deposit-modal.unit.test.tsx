@@ -819,7 +819,8 @@ describe("EarnVaultDepositModal", () => {
         expect(confirmation?.className).toContain("mx-auto");
         expect(terminalStep?.className).toContain("bg-white");
         expect(terminalStep?.className).toContain("text-black");
-        expect(terminalStep?.querySelector('[data-earn-step-check="true"]')).toBeNull();
+        expect(terminalStep?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
+        expect(document.querySelectorAll('[data-earn-step-check="true"]')).toHaveLength(4);
       }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(

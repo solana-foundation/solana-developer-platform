@@ -49,6 +49,7 @@ function renderStepMarker(input: {
 }): ReactNode {
   const { active, complete, index, reduceMotion, terminal } = input;
   const terminalActive = active && terminal;
+  const checked = complete || terminalActive;
   return (
     <m.span
       aria-hidden="true"
@@ -57,12 +58,12 @@ function renderStepMarker(input: {
         "relative z-10 flex size-6 items-center justify-center rounded-full border text-[10px] font-medium transition-[background-color,border-color,color,box-shadow] duration-200 ease-out",
         stepMarkerClassName(active, complete, terminal)
       )}
-      data-earn-step-complete={complete ? "true" : undefined}
+      data-earn-step-complete={checked ? "true" : undefined}
       data-earn-step-terminal-active={terminalActive ? "true" : undefined}
       initial={false}
       transition={reduceMotion ? { duration: 0 } : stepTransition}
     >
-      {complete ? (
+      {checked ? (
         <m.span
           animate={{ opacity: 1, rotate: 0, scale: 1 }}
           className="flex items-center justify-center"
