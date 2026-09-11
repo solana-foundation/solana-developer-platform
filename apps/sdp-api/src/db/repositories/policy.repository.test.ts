@@ -814,6 +814,89 @@ describe("PolicyRepository (postgres)", () => {
     );
   });
 
+  it("sums velocity windows from wallet_operations, skipping failed and canceled rows and the operation under evaluation", async () => {
+    const service = policyStores(repo);
+    const enforcement = new PostgresPolicyEnforcementStore(repo, TEST_SCOPE);
+    const record = (amount: string, status?: "failed" | "canceled") =>
+      service.recordWalletOperation({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        apiKeyId: TEST_API_KEY.id,
+        operationFamily: "program",
+        operationType: "earn_vault_deposit",
+        asset: "USDC",
+        amount,
+        legs: [],
+        status,
+      });
+
+    await record("60000");
+    await record("0.25");
+    await record("500", "failed");
+    await record("700", "canceled");
+    const current = await record("50000");
+    await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "program",
+      operationType: "earn_vault_withdrawal",
+      asset: "USDC",
+      amount: "9",
+      legs: [],
+    });
+    await getDb(env)
+      .prepare(
+        `UPDATE wallet_operations SET created_at = '2020-01-01T00:00:00.000Z'
+         WHERE amount = '0.25'`
+      )
+      .run();
+
+    const [byOrg, byWallet, byKey, depositsOnly] = await enforcement.loadVelocityObservations(
+      current,
+      [
+        { kind: "velocity", scope: "organization", window: "P1D", max: "1", asset: "USDC" },
+        { kind: "velocity", window: "P1D", max: "1", asset: "USDC" },
+        { kind: "velocity", scope: "api_key", window: "P1D", max: "1", asset: "USDC" },
+        {
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "1",
+          asset: "USDC",
+          operationTypes: ["earn_vault_deposit"],
+        },
+      ]
+    );
+
+    expect(byOrg).toMatchObject({ scope: "organization", asset: "USDC", total: "60009" });
+    expect(byWallet).toMatchObject({ scope: "wallet", total: "60009" });
+    expect(byKey).toMatchObject({ scope: "api_key", total: "60009" });
+    expect(depositsOnly).toMatchObject({
+      operationTypes: ["earn_vault_deposit"],
+      total: "60000",
+    });
+
+    const dryRun = await enforcement.loadVelocityObservations({ ...current, id: undefined }, [
+      { kind: "velocity", scope: "organization", window: "P1D", max: "1", asset: "USDC" },
+    ]);
+    expect(dryRun[0]?.total).toBe("110009");
+
+    const otherAsset = await enforcement.loadVelocityObservations(current, [
+      { kind: "velocity", scope: "organization", window: "P1D", max: "1", asset: "USDG" },
+    ]);
+    expect(otherAsset[0]?.total).toBe("0");
+
+    const badWindow = await enforcement.loadVelocityObservations(current, [
+      { kind: "velocity", scope: "organization", window: "P1W", max: "1", asset: "USDC" },
+    ]);
+    expect(badWindow).toEqual([]);
+  });
+
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
     const service = policyStores(repo);
 

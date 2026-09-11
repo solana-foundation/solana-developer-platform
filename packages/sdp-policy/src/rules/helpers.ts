@@ -1,4 +1,13 @@
 import type { PolicyDecision, PolicyRule } from "@sdp/types";
+import type { PolicyEvaluationVelocity } from "../velocity";
+
+/**
+ * Side inputs a rule may need beyond the candidate itself. Today only the
+ * velocity lookup: rolling totals the store measured before evaluation.
+ */
+export interface PolicyRuleEvaluationContext {
+  velocity?: PolicyEvaluationVelocity;
+}
 
 /** The outcome of matching a single rule against an operation. */
 export interface RuleEvaluation {

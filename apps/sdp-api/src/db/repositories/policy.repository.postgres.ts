@@ -35,6 +35,7 @@ import type {
   PolicyEvaluationRow,
   PolicyRepository,
   ReplaceApiKeyWalletPolicyBindingsInput,
+  SumWalletOperationAmountsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionRow,
@@ -2057,6 +2058,67 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         return null;
       }
       return getWalletOperationByIdInternal(db, walletOperationId);
+    },
+
+    async sumWalletOperationAmounts(input: SumWalletOperationAmountsInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.sumWalletOperationAmounts");
+      const conditions: string[] = [
+        "organization_id = ?",
+        "asset = ?",
+        "created_at >= ?",
+        "status NOT IN ('failed', 'canceled')",
+        // `amount` is TEXT; only rows that cast cleanly may reach SUM. The
+        // write path validates amounts, so this guards history, not input.
+        "amount IS NOT NULL",
+        "amount ~ '^[0-9]*\\.?[0-9]*$'",
+        "amount ~ '[0-9]'",
+      ];
+      const params: unknown[] = [scope.organizationId, input.asset, input.since];
+
+      switch (input.scope) {
+        case "organization":
+          break;
+        case "wallet":
+          if (input.custodyWalletId !== null) {
+            conditions.push("custody_wallet_id = ?");
+            params.push(input.custodyWalletId);
+          } else {
+            conditions.push("wallet_id = ?");
+            params.push(input.walletId);
+          }
+          break;
+        case "api_key":
+          if (input.apiKeyId === null) {
+            return "0";
+          }
+          conditions.push("api_key_id = ?");
+          params.push(input.apiKeyId);
+          break;
+        default: {
+          const exhaustive: never = input.scope;
+          throw new Error(`Unhandled velocity scope: ${String(exhaustive)}`);
+        }
+      }
+
+      if (input.excludeWalletOperationId !== null) {
+        conditions.push("id <> ?");
+        params.push(input.excludeWalletOperationId);
+      }
+      if (input.operationTypes !== null && input.operationTypes.length > 0) {
+        conditions.push(`operation_type IN (${input.operationTypes.map(() => "?").join(", ")})`);
+        params.push(...input.operationTypes);
+      }
+
+      const row = await db
+        .prepare(
+          `SELECT COALESCE(SUM(amount::numeric), 0)::text AS total
+           FROM wallet_operations
+           WHERE ${conditions.join("\n             AND ")}`
+        )
+        .bind(...params)
+        .first<{ total: string | number }>();
+
+      return row === null ? "0" : String(row.total);
     },
 
     async updateWalletOperationStatus(
