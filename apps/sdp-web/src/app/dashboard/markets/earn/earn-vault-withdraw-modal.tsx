@@ -149,6 +149,10 @@ type WithdrawalSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: WithdrawalOutcome; withdrawn?: EarnVaultWithdrawal };
 
+function shouldProjectWithdrawalBalance(outcome: WithdrawalOutcome): boolean {
+  return outcome.kind === "withdrawal" && !outcome.absorbedByApproval;
+}
+
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
   fallbackError: string,
@@ -541,7 +545,14 @@ export interface EarnVaultWithdrawModalProps {
   /** Part of the request fingerprint — see `vaultWithdrawalRequestFingerprint`. */
   projectId: string | null;
   onClose: () => void;
-  onWithdrawn?: (withdrawal: EarnVaultWithdrawal) => void;
+  onWithdrawn?: (
+    withdrawal: EarnVaultWithdrawal,
+    intent: {
+      amount: string;
+      /** False when an approval already executed this replayed intent. */
+      projectBalance: boolean;
+    }
+  ) => void;
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
 }
 
@@ -858,7 +869,7 @@ export function EarnVaultWithdrawModal({
   const minAmountOut = derivedMinAmountOut(slippageBps, quote);
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
-  async function submitResolvedIntent(controller: AbortController, shares: string) {
+  async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
     const fingerprint = vaultWithdrawalRequestFingerprint({
       projectId,
       positionId: position.id,
@@ -923,11 +934,23 @@ export function EarnVaultWithdrawModal({
       return;
     }
     setOutcome(resolution.outcome);
-    if (resolution.withdrawn) onWithdrawn?.(resolution.withdrawn);
+    if (resolution.withdrawn) {
+      onWithdrawn?.(resolution.withdrawn, {
+        amount,
+        projectBalance: shouldProjectWithdrawalBalance(resolution.outcome),
+      });
+    }
   }
 
   async function submit() {
-    if (submittingRef.current || submitBlocked || sharesToRedeem === undefined) return;
+    if (
+      submittingRef.current ||
+      submitBlocked ||
+      sharesToRedeem === undefined ||
+      amountValidation.kind !== "valid"
+    ) {
+      return;
+    }
 
     const controller = new AbortController();
     requestControllerRef.current?.abort();
@@ -937,7 +960,7 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      await submitResolvedIntent(controller, sharesToRedeem);
+      await submitResolvedIntent(controller, sharesToRedeem, amountValidation.canonicalAmount);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(

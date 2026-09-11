@@ -615,7 +615,8 @@ describe("EarnVaultDepositModal", () => {
     );
     // The movement is real and may still be settling: refresh and watch it.
     expect(onDeposited).toHaveBeenCalledWith(
-      expect.objectContaining({ movementId: "movement_1", replayed: true })
+      expect.objectContaining({ movementId: "movement_1", replayed: true }),
+      { amount: "1", custodyWalletId: "wallet_1", projectBalance: false }
     );
     // Recorded deposit retires the key, so a deliberate second deposit mints
     // fresh and genuinely moves money.
@@ -794,7 +795,11 @@ describe("EarnVaultDepositModal", () => {
       expect(transaction.getAttribute("href")).toBe(
         `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
       );
-      expect(onDeposited).toHaveBeenCalledWith(deposit);
+      expect(onDeposited).toHaveBeenCalledWith(deposit, {
+        amount: "1",
+        custodyWalletId: "wallet_1",
+        projectBalance: true,
+      });
     }
   );
 

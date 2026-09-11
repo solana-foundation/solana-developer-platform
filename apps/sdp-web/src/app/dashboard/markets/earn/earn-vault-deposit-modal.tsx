@@ -257,6 +257,10 @@ type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
 
+function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
+  return outcome.kind === "deposit" && !outcome.absorbedByApproval;
+}
+
 function observableDepositMovementId(outcome: DepositOutcome | null): string | undefined {
   if (outcome?.kind !== "deposit" || outcome.absorbedByApproval) return undefined;
   return outcome.deposit.movementId;
@@ -791,7 +795,15 @@ export interface EarnVaultDepositModalProps {
    */
   projectId: string | null;
   onClose: () => void;
-  onDeposited?: (deposit: EarnVaultDeposit) => void;
+  onDeposited?: (
+    deposit: EarnVaultDeposit,
+    intent: {
+      amount: string;
+      custodyWalletId: string;
+      /** False when an approval already executed this replayed intent. */
+      projectBalance: boolean;
+    }
+  ) => void;
   onMovementUpdated?: (deposit: EarnVaultDepositRecord) => void;
 }
 
@@ -1479,7 +1491,13 @@ export function EarnVaultDepositModal({
       return;
     }
     setOutcome(resolution.outcome);
-    if (resolution.deposited) onDeposited?.(resolution.deposited);
+    if (resolution.deposited) {
+      onDeposited?.(resolution.deposited, {
+        amount,
+        custodyWalletId: wallet.id,
+        projectBalance: shouldProjectDepositBalance(resolution.outcome),
+      });
+    }
   }
 
   async function submit() {

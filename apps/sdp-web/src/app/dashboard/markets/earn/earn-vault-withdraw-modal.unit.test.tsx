@@ -174,7 +174,10 @@ describe("EarnVaultWithdrawModal", () => {
     expect(document.querySelector('[data-earn-processing="true"]')).toBeTruthy();
     expect(document.querySelector('[data-earn-step-processing="true"]')).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
-    expect(onWithdrawn).toHaveBeenCalledWith(recorded);
+    expect(onWithdrawn).toHaveBeenCalledWith(recorded, {
+      amount: "6",
+      projectBalance: true,
+    });
   });
 });
 

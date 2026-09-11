@@ -87,6 +87,7 @@
       "apy": "APY",
       "liquidity": "Liquidity",
       "balance": "Balance",
+      "balanceSyncing": "Syncing exact balance",
       "yourPosition": "Your position",
       "status": "Status",
       "actions": "Actions",
