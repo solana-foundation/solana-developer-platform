@@ -5,6 +5,7 @@ import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -53,14 +54,13 @@ describe("member session revocation", () => {
           "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, 'member', 'active')"
         )
         .bind(removedMemberId, organizationId, removedUserId),
-      db
-        .prepare(
-          `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Member Removal', 'member-removal', 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, organizationId, administratorId),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId,
+      createdBy: administratorId,
+      members: [],
+      ids: { sandbox: projectId, production: `${projectId}_production` },
+    });
     await seedCachedApiKey(env, keyHash, {
       ...TEST_CACHED_API_KEY,
       organizationId,

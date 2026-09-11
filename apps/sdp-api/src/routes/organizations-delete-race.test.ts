@@ -50,6 +50,7 @@ vi.mock("@/db", async (importOriginal) => {
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -123,13 +124,13 @@ describe("organization deletion vs concurrent API key creation", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id),
     ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    });
 
     await seedKeyRow(ADMIN_KEY.id, adminHash);
     await seedCachedApiKey(env, adminHash, cachedEntry(ADMIN_KEY.id));

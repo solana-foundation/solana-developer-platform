@@ -10,6 +10,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import {
@@ -107,13 +108,18 @@ describe("Unified earn movement ledger (postgres)", () => {
       )
       .bind(ORG, ORG_OTHER)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Primary', 'earn-mv-primary', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: ORG,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    });
+    await seedDefaultProjects(db, {
+      organizationId: ORG_OTHER,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: "prj_earn_mv_other", production: "prj_earn_mv_other_production" },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
@@ -484,13 +490,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       // 0059's founding constraint: a public vault is not claimable by whoever
       // deposits first. The unified holdings table must not quietly reintroduce a
       // global unique that would refuse the second organization.
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES ('prj_earn_mv_other', ?, 'Other', 'earn-mv-other', 'sandbox', 'active', ?)`
-        )
-        .bind(ORG_OTHER, USER)
-        .run();
       await db
         .prepare(
           `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)

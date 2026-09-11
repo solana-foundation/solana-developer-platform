@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   createPostgresDvpLegFundingClaimRepository,
@@ -58,13 +59,12 @@ async function seed(): Promise<void> {
       )
       .bind(org, org, org)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'p', ?, 'sandbox', 'active', ?) ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(`prj_${org}`, org, `prj_${org}`, USER_ID)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: org,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: `prj_${org}`, production: `prj_${org}_production` },
+    });
     if (address === null) {
       continue;
     }

@@ -35,12 +35,14 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
   TEST_ALLOWLIST_TOKEN,
+  TEST_PRODUCTION_PROJECT,
   TEST_PROJECT,
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -190,13 +192,16 @@ async function seedProject(input: {
   slug: string;
   environment: "sandbox" | "production";
 }) {
-  await getDb(env)
-    .prepare(
-      `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?)`
-    )
-    .bind(input.id, input.organizationId, input.name, input.slug, input.environment, TEST_USER.id)
-    .run();
+  const otherId = `${input.id}_${input.environment === "sandbox" ? "production" : "sandbox"}`;
+  await seedDefaultProjects(getDb(env), {
+    organizationId: input.organizationId,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids:
+      input.environment === "sandbox"
+        ? { sandbox: input.id, production: otherId }
+        : { sandbox: otherId, production: input.id },
+  });
 }
 
 function toTestIdPart(value: string): string {
@@ -357,22 +362,12 @@ describe("Issuance Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    // Seed project
-    await db
-      .prepare(
-        `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_PROJECT.organizationId,
-        TEST_PROJECT.name,
-        TEST_PROJECT.slug,
-        TEST_PROJECT.environment,
-        TEST_PROJECT.status,
-        TEST_PROJECT.createdBy
-      )
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+    });
 
     // Seed project-scoped API key
     await db
@@ -1955,16 +1950,21 @@ describe("Issuance Routes", () => {
         const request = await prepareAction(operation);
         await seedOrganization({ id: "org_other_selector", name: "Other", slug: "other-selector" });
         for (const organizationId of [TEST_ORG.id, "org_other_selector"]) {
-          const projectId = `prj_other_${organizationId}`;
+          const projectId =
+            organizationId === TEST_ORG.id
+              ? TEST_PRODUCTION_PROJECT.id
+              : `prj_other_${organizationId}`;
           const configId = `cfg_other_${organizationId}`;
           const custodyWalletId = `cwlt_other_${organizationId}`;
-          await seedProject({
-            id: projectId,
-            organizationId,
-            name: "Other project",
-            slug: "other-project",
-            environment: organizationId === TEST_ORG.id ? "production" : "sandbox",
-          });
+          if (organizationId !== TEST_ORG.id) {
+            await seedProject({
+              id: projectId,
+              organizationId,
+              name: "Other project",
+              slug: "other-project",
+              environment: "sandbox",
+            });
+          }
           await getDb(env)
             .prepare(
               `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
@@ -2359,13 +2359,6 @@ describe("Issuance Routes", () => {
         slug: "issuance-other-org",
       });
       await seedProject({
-        id: "prj_issuance_other_project",
-        organizationId: TEST_ORG.id,
-        name: "Other Project",
-        slug: "issuance-other-project",
-        environment: "production",
-      });
-      await seedProject({
         id: "prj_issuance_other_org",
         organizationId: "org_issuance_other",
         name: "Other Org Project",
@@ -2374,7 +2367,7 @@ describe("Issuance Routes", () => {
       });
       const sameOrgOtherProjectToken = await seedIssuedToken({
         id: "tok_other_project_transactions",
-        projectId: "prj_issuance_other_project",
+        projectId: TEST_PRODUCTION_PROJECT.id,
         mintAddress: null,
       });
       const otherOrgToken = await seedIssuedToken({

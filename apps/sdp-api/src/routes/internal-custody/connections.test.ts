@@ -5,6 +5,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -87,19 +88,13 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, ?, 'admin', 'active')`
       )
       .bind("mem_connections_read", ORG.id, USER.id),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT.id, ORG.id, "Connections Read", "default-sandbox", USER.id),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_connections_read", PROJECT.id, USER.id),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG.id,
+    createdBy: USER.id,
+    members: [USER.id],
+    ids: { sandbox: PROJECT.id, production: `${PROJECT.id}_production` },
+  });
 }
 
 async function seedCredentialAndConnection(input: {

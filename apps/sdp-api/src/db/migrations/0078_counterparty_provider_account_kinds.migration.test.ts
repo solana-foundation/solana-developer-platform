@@ -84,8 +84,10 @@ describe("0078 counterparty provider-account kinds", () => {
       `INSERT INTO users (id, email) VALUES ('usr_0078', 'owner-0078@example.test')`
     );
     await client.query(
-      `INSERT INTO projects (id, organization_id, name, slug, created_by)
-       VALUES ('prj_0078', 'org_0078', 'Project 0078', 'project-0078', 'usr_0078')`
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       VALUES
+         ('prj_0078', 'org_0078', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_0078'),
+         ('prj_0078_production', 'org_0078', 'Default Production Project', 'default-production', 'production', 'active', 'usr_0078')`
     );
     await client.query(
       `INSERT INTO counterparties (
@@ -134,8 +136,10 @@ describe("0078 counterparty provider-account kinds", () => {
       `INSERT INTO users (id, email) VALUES ('usr_0078_check', 'owner-0078-check@example.test')`
     );
     await client.query(
-      `INSERT INTO projects (id, organization_id, name, slug, created_by)
-       VALUES ('prj_0078_check', 'org_0078_check', 'Project 0078 Check', 'project-0078-check', 'usr_0078_check')`
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       VALUES
+         ('prj_0078_check', 'org_0078_check', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_0078_check'),
+         ('prj_0078_check_production', 'org_0078_check', 'Default Production Project', 'default-production', 'production', 'active', 'usr_0078_check')`
     );
     await client.query(
       `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)

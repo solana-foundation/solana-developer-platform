@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { projectContextMiddleware } from "./project-context";
@@ -69,21 +70,12 @@ describe("projectContextMiddleware", () => {
       .bind(USER_ID, "project-context-mw@example.com")
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Member Project', 'member-project', 'sandbox', 'active', ?)`
-      )
-      .bind(MEMBER_PROJECT_ID, ORG_ID, USER_ID)
-      .run();
-
-    await db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_project_context_mw', ?, ?, 'admin')`
-      )
-      .bind(MEMBER_PROJECT_ID, USER_ID)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [USER_ID],
+      ids: { sandbox: MEMBER_PROJECT_ID, production: `${MEMBER_PROJECT_ID}_production` },
+    });
   });
 
   it("resolves projectId from the x-project-id header for a project the session user belongs to", async () => {

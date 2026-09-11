@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as solanaServices from "@/services/solana";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -169,19 +170,14 @@ async function seedRouteState(): Promise<void> {
         ORGANIZATION_ID,
         new Date(Date.now() + 60_000).toISOString()
       ),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Transfer Project', 'pc-transfer-project', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, ACTOR_USER_ID),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_pc_transfers', ?, ?, 'admin')`
-      )
-      .bind(PROJECT_ID, ACTOR_USER_ID),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: ACTOR_USER_ID,
+    members: [ACTOR_USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys

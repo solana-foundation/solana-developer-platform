@@ -15,6 +15,7 @@ import {
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -188,22 +189,12 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
-  // Connections hang off a project since HOO-1226, so the chain needs a real
-  // one to attach to rather than the organization fallback.
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E', 'byok-e2e', 'production', ?)`
-    )
-    .bind(PROJECT_ID, ORG_ID, USER_ID)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E Two', 'byok-e2e-2', 'sandbox', ?)`
-    )
-    .bind(PROJECT_ID_2, ORG_ID, USER_ID)
-    .run();
+  await seedDefaultProjects(db, {
+    organizationId: ORG_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID_2, production: PROJECT_ID },
+  });
 
   // The real secret path: encrypted through the configured backend.
   // The test env has no GCP config; encrypted_db is the backend local dev

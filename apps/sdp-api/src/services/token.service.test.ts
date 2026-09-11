@@ -11,6 +11,7 @@ import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 describe("TokenService", () => {
@@ -90,21 +91,12 @@ describe("TokenService", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_PROJECT.organizationId,
-        TEST_PROJECT.name,
-        TEST_PROJECT.slug,
-        TEST_PROJECT.environment,
-        TEST_PROJECT.status,
-        TEST_PROJECT.createdBy
-      )
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    });
 
     await db
       .prepare(

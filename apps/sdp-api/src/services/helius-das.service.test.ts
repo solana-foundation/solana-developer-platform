@@ -6,6 +6,7 @@ import {
   getTrackedWalletBalancesByOwner,
 } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_ORG_ID = "org_helius_das";
@@ -30,21 +31,14 @@ describe("helius-das service", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(TEST_USER_ID, "helius-das@example.com", 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          TEST_PROJECT_ID,
-          TEST_ORG_ID,
-          "Helius DAS Project",
-          "helius-das-project",
-          "sandbox",
-          "active",
-          TEST_USER_ID
-        ),
+    ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: TEST_ORG_ID,
+      createdBy: TEST_USER_ID,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await getDb(env).batch([
       getDb(env)
         .prepare(
           `INSERT INTO issued_tokens

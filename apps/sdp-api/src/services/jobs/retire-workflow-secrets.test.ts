@@ -17,6 +17,7 @@ import {
 } from "@/services/credential-secret-store";
 import { destroyActionSecret, queuePendingActionSecret } from "@/services/workflows/action-secret";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { retireOrphanedActionSecrets } from "./retire-workflow-secrets";
 
 const secretStore = vi.hoisted(() => ({
@@ -280,13 +281,12 @@ describe("orphaned workflow secret retirement", () => {
         "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr-wfr', 'retire-test@example.com', 1, 'active')"
       )
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj-wfr', 'org-wfr', 'Retire Test', 'retire-test-prj', 'sandbox', 'active', 'usr-wfr')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: "org-wfr",
+      createdBy: "usr-wfr",
+      members: [],
+      ids: { sandbox: "prj-wfr", production: "prj-wfr-production" },
+    });
     await db
       .prepare(
         `INSERT INTO issued_tokens (id, organization_id, project_id, name, symbol, created_by)

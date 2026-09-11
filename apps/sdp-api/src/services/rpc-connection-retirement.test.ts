@@ -21,6 +21,7 @@ import { clearQueuedSecretVersion, queuePendingSecretVersion } from "@/services/
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -128,20 +129,6 @@ function submitInput(label: string) {
   };
 }
 
-async function seedProject(
-  projectId: string,
-  slug: string,
-  environment: "sandbox" | "production"
-): Promise<void> {
-  await getDb(appEnv)
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'RPC Retirement', ?, ?, ?)`
-    )
-    .bind(projectId, ORG_ID, slug, environment, USER_ID)
-    .run();
-}
-
 async function retirementRows(refLike: string): Promise<Array<{ secret_version_ref: string }>> {
   return getDb(appEnv).queryMany<{ secret_version_ref: string }>(
     `SELECT secret_version_ref FROM workflow_action_secret_retirements
@@ -199,8 +186,12 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
-  await seedProject(PROJECT_COMMITTED, "rpc-retirement-committed", "sandbox");
-  await seedProject(PROJECT_DEACTIVATE, "rpc-retirement-deactivate", "production");
+  await seedDefaultProjects(db, {
+    organizationId: ORG_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_COMMITTED, production: PROJECT_DEACTIVATE },
+  });
 });
 
 afterAll(async () => {

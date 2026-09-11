@@ -46,6 +46,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
@@ -162,20 +163,14 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -211,28 +206,6 @@ async function seedSessionAuth(): Promise<void> {
          VALUES (?, ?, ?, 'member', 'active')`
       )
       .bind("om_earn_program_session", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_program_sandbox", TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_program_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
     getDb(env)
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
@@ -1199,18 +1172,16 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Neighbour Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(
-          "prj_earn_program_neighbour",
-          "org_earn_program_neighbour",
-          "neighbour-project",
-          TEST_USER.id
-        ),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId: "org_earn_program_neighbour",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_program_neighbour",
+        production: "prj_earn_program_neighbour_production",
+      },
+    });
     const foreign = await seedProgramWallet({
       organizationId: "org_earn_program_neighbour",
       projectId: "prj_earn_program_neighbour",
@@ -2005,13 +1976,16 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_program_victim", "Victim Org", "earn-program-victim"),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Victim Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind("prj_earn_program_victim", "org_earn_program_victim", "victim-project", TEST_USER.id),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId: "org_earn_program_victim",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_program_victim",
+        production: "prj_earn_program_victim_production",
+      },
+    });
     const repo = createPostgresEarnRepository(db);
     const victimWallet = await repo.insertProviderWallet({
       organizationId: "org_earn_program_victim",

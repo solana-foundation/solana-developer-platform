@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { custodyWalletForParty } from "./custody-party";
 
@@ -42,20 +43,18 @@ describe("custodyWalletForParty", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Other Org Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind("prj_other_org", OTHER_ORG_ID, "prj_other_org", TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
+    await seedDefaultProjects(db, {
+      organizationId: OTHER_ORG_ID,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: "prj_other_org", production: "prj_other_org_production" },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)

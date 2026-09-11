@@ -5,6 +5,7 @@ import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { cleanupRetiredProviderCredentialSecrets } from "./cleanup-provider-credential-secrets";
 
@@ -127,14 +128,13 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
            VALUES (?, 'credential-cleanup@example.test', 1, 'active')`
         )
         .bind(USER_ID),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Credential cleanup', 'credential-cleanup', 'sandbox', 'active', ?)`
-        )
-        .bind(PROJECT_ID, ORGANIZATION_ID, USER_ID),
     ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORGANIZATION_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
   });
 
   it("does not start cleanup when the shared deadline has already expired", async () => {

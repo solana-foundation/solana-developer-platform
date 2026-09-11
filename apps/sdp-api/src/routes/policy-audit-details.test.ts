@@ -11,6 +11,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -142,20 +143,19 @@ async function seedAuthAndWallet() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER_ID, "policy-audit@example.com", 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT_ID,
-        TEST_ORG_ID,
-        "Policy Audit Project",
-        "policy-audit-project",
-        "sandbox",
-        "active",
-        TEST_USER_ID
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG_ID,
+    createdBy: TEST_USER_ID,
+    members: [],
+    ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+  });
+  await seedDefaultProjects(getDb(env), {
+    organizationId: OTHER_ORG_ID,
+    createdBy: TEST_USER_ID,
+    members: [],
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys

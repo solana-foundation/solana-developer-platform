@@ -14,6 +14,7 @@ import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup
 import { scanGcpCredentialContainers } from "@/services/jobs/provider-credential-container-cleanup";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -72,28 +73,6 @@ function buildApp() {
   return { app, token };
 }
 
-async function seedProject(
-  id: string,
-  suffix: string,
-  environment: "sandbox" | "production"
-): Promise<void> {
-  const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?)`
-    )
-    .bind(id, ORGANIZATION_ID, `Lifecycle ${suffix}`, suffix, environment, USER_ID)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-       VALUES (?, ?, ?, 'admin')`
-    )
-    .bind(`pm_lifecycle_${suffix}`, id, USER_ID)
-    .run();
-}
-
 async function seedActor(): Promise<void> {
   const db = getDb(env);
   await db.batch([
@@ -139,8 +118,12 @@ async function seedActor(): Promise<void> {
       )
       .bind("mem_provider_credential_lifecycle", ORGANIZATION_ID, USER_ID),
   ]);
-  await seedProject(PROJECT_A_ID, "default-sandbox", "sandbox");
-  await seedProject(PROJECT_B_ID, "default-production", "production");
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [USER_ID],
+    ids: { sandbox: PROJECT_A_ID, production: PROJECT_B_ID },
+  });
 }
 
 async function seedActiveSharedCredential(): Promise<void> {

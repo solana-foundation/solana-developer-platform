@@ -33,9 +33,11 @@ async function seedCounterpartyPair(suffix: string): Promise<void> {
        ('usr_b_${suffix}', 'owner-b-${slug}@example.test')`
   );
   await client.query(
-    `INSERT INTO projects (id, organization_id, name, slug, created_by) VALUES
-       ('prj_a_${suffix}', 'org_a_${suffix}', 'Project A ${suffix}', 'project-a-${slug}', 'usr_a_${suffix}'),
-       ('prj_b_${suffix}', 'org_b_${suffix}', 'Project B ${suffix}', 'project-b-${slug}', 'usr_b_${suffix}')`
+    `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES
+       ('prj_a_${suffix}', 'org_a_${suffix}', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_a_${suffix}'),
+       ('prj_a_${suffix}_production', 'org_a_${suffix}', 'Default Production Project', 'default-production', 'production', 'active', 'usr_a_${suffix}'),
+       ('prj_b_${suffix}', 'org_b_${suffix}', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_b_${suffix}'),
+       ('prj_b_${suffix}_production', 'org_b_${suffix}', 'Default Production Project', 'default-production', 'production', 'active', 'usr_b_${suffix}')`
   );
   await client.query(
     `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name) VALUES

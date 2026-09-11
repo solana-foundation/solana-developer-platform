@@ -9,6 +9,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -79,13 +80,14 @@ async function seedScope() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "external-activity@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'External activity', 'external-activity', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -385,18 +387,16 @@ describe("external-wallet activity", () => {
     // An owner only a foreign organization has claimed reads as never seen.
     const foreignOrg = "org_external_activity_foreign";
     const foreignProject = "prj_external_activity_foreign";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(foreignOrg, "Foreign", "external-activity-foreign", "enterprise", "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Foreign', 'external-activity-foreign', 'sandbox', 'active', ?)`
-        )
-        .bind(foreignProject, foreignOrg, USER),
-    ]);
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(foreignOrg, "Foreign", "external-activity-foreign", "enterprise", "active")
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: foreignOrg,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: foreignProject, production: `${foreignProject}_production` },
+    });
     await seedPosition({
       ownerAddress: OWNER_B,
       vaultAddress: "vault-foreign",

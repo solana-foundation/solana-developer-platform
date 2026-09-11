@@ -6,6 +6,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -61,34 +62,23 @@ async function seedPolicyInventory(): Promise<string> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(OTHER_USER_ID, "other-policy-inventory@example.com", 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT_ID,
-        TEST_ORG_ID,
-        "Policy Inventory Project",
-        "policy-inventory-project",
-        "sandbox",
-        "active",
-        TEST_USER_ID
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "prj_policy_inventory_foreign",
-        OTHER_ORG_ID,
-        "Foreign Policy Project",
-        "foreign-policy-project",
-        "sandbox",
-        "active",
-        OTHER_USER_ID
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG_ID,
+    createdBy: TEST_USER_ID,
+    members: [],
+    ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+  });
+  await seedDefaultProjects(getDb(env), {
+    organizationId: OTHER_ORG_ID,
+    createdBy: OTHER_USER_ID,
+    members: [],
+    ids: {
+      sandbox: "prj_policy_inventory_foreign",
+      production: "prj_policy_inventory_foreign_production",
+    },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys

@@ -2,49 +2,18 @@
  * Project Service Unit Tests
  */
 
-import type { ProjectEnvironment, ProjectSettings } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db";
 import { ProjectService } from "@/services/project.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import {
+  DEFAULT_PROJECT_NAME,
+  DEFAULT_PROJECT_SLUG,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-
-/**
- * Inserts a project row plus a creator admin membership, mirroring what
- * default-project provisioning produces.
- */
-async function seedProject(
-  id: string,
-  name: string,
-  slug: string,
-  environment: ProjectEnvironment,
-  settings: ProjectSettings | null
-): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`
-      )
-      .bind(
-        id,
-        TEST_ORG.id,
-        name,
-        slug,
-        environment,
-        settings === null ? null : JSON.stringify(settings),
-        TEST_USER.id
-      ),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
-         VALUES (?, ?, ?, 'admin', ?)`
-      )
-      .bind(`pm_${id}`, id, TEST_USER.id, new Date().toISOString()),
-  ]);
-}
 
 describe("ProjectService", () => {
   let projectService: ProjectService;
@@ -86,17 +55,24 @@ describe("ProjectService", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [TEST_USER.id],
+      ids: {
+        sandbox: TEST_PROJECT.id,
+        production: TEST_PRODUCTION_PROJECT.id,
+      },
+    });
   });
 
   describe("getProject", () => {
     it("returns project by ID", async () => {
-      await seedProject("prj_get_test", "Get Test", "get-test", "sandbox", null);
-
-      const project = await projectService.getProject("prj_get_test");
+      const project = await projectService.getProject(TEST_PROJECT.id);
 
       expect(project).not.toBeNull();
-      expect(project?.id).toBe("prj_get_test");
-      expect(project?.name).toBe("Get Test");
+      expect(project?.id).toBe(TEST_PROJECT.id);
+      expect(project?.name).toBe(DEFAULT_PROJECT_NAME.sandbox);
     });
 
     it("returns null for non-existent project", async () => {
@@ -108,57 +84,51 @@ describe("ProjectService", () => {
 
   describe("getProjectBySlug", () => {
     it("returns project by slug within organization", async () => {
-      await seedProject("prj_slug_test", "Slug Test", "slug-test", "sandbox", null);
-
-      const project = await projectService.getProjectBySlug(TEST_ORG.id, "slug-test");
+      const project = await projectService.getProjectBySlug(
+        TEST_ORG.id,
+        DEFAULT_PROJECT_SLUG.sandbox
+      );
 
       expect(project).not.toBeNull();
-      expect(project?.slug).toBe("slug-test");
+      expect(project?.slug).toBe(DEFAULT_PROJECT_SLUG.sandbox);
     });
   });
 
   describe("listProjects", () => {
     it("lists all active projects for organization", async () => {
-      await seedProject("prj_list_1", "Project 1", "project-1", "sandbox", null);
-      await seedProject("prj_list_2", "Project 2", "project-2", "production", null);
-
       const projects = await projectService.listProjects(TEST_ORG.id);
 
       expect(projects.length).toBe(2);
     });
 
     it("excludes archived projects by default", async () => {
-      await seedProject("prj_archive_default", "To Archive", "to-archive-default", "sandbox", null);
       await db
         .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
-        .bind("prj_archive_default")
+        .bind(TEST_PROJECT.id)
         .run();
 
       const projects = await projectService.listProjects(TEST_ORG.id);
 
-      expect(projects.find((p) => p.id === "prj_archive_default")).toBeUndefined();
+      expect(projects.find((p) => p.id === TEST_PROJECT.id)).toBeUndefined();
     });
 
     it("includes archived projects when requested", async () => {
-      await seedProject("prj_archived_one", "Archived One", "archived-one", "sandbox", null);
       await db
         .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
-        .bind("prj_archived_one")
+        .bind(TEST_PROJECT.id)
         .run();
 
       const projects = await projectService.listProjects(TEST_ORG.id, {
         includeArchived: true,
       });
 
-      expect(projects.find((p) => p.id === "prj_archived_one")).toBeDefined();
+      expect(projects.find((p) => p.id === TEST_PROJECT.id)).toBeDefined();
     });
   });
 
   describe("updateProject", () => {
     it("updates project name", async () => {
-      await seedProject("prj_update_name", "Original Name", "original-name", "sandbox", null);
-
-      const updated = await projectService.updateProject("prj_update_name", {
+      const updated = await projectService.updateProject(TEST_PROJECT.id, {
         name: "New Name",
       });
 
@@ -166,15 +136,7 @@ describe("ProjectService", () => {
     });
 
     it("updates project settings", async () => {
-      await seedProject(
-        "prj_update_settings",
-        "Settings Update",
-        "settings-update",
-        "sandbox",
-        null
-      );
-
-      const updated = await projectService.updateProject("prj_update_settings", {
+      const updated = await projectService.updateProject(TEST_PROJECT.id, {
         settings: { webhookUrl: "https://new.example.com/webhook" },
       });
 
@@ -182,15 +144,7 @@ describe("ProjectService", () => {
     });
 
     it("defaults rpc provider to round robin when settings are omitted", async () => {
-      await seedProject(
-        "prj_default_rpc",
-        "Default RPC Provider",
-        "default-rpc-provider",
-        "sandbox",
-        null
-      );
-
-      const updated = await projectService.updateProject("prj_default_rpc", {
+      const updated = await projectService.updateProject(TEST_PROJECT.id, {
         name: "Default RPC Provider Renamed",
       });
 
@@ -198,15 +152,12 @@ describe("ProjectService", () => {
     });
 
     it("preserves existing rpc provider when settings update omits it", async () => {
-      await seedProject(
-        "prj_preserve_rpc",
-        "Preserve RPC Provider",
-        "preserve-rpc-provider",
-        "sandbox",
-        { rpcProvider: "triton" }
-      );
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_PROJECT.id)
+        .run();
 
-      const updated = await projectService.updateProject("prj_preserve_rpc", {
+      const updated = await projectService.updateProject(TEST_PROJECT.id, {
         settings: { webhookUrl: "https://updated.example.com/webhook" },
       });
 
@@ -214,12 +165,18 @@ describe("ProjectService", () => {
     });
 
     it("switches provider to default and clears custom endpoint", async () => {
-      await seedProject("prj_switch_rpc", "Switch RPC Provider", "switch-rpc-provider", "sandbox", {
-        rpcProvider: "custom",
-        rpcEndpoint: "https://rpc.custom.example.com",
-      });
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({
+            rpcProvider: "custom",
+            rpcEndpoint: "https://rpc.custom.example.com",
+          }),
+          TEST_PROJECT.id
+        )
+        .run();
 
-      const updated = await projectService.updateProject("prj_switch_rpc", {
+      const updated = await projectService.updateProject(TEST_PROJECT.id, {
         settings: { rpcProvider: "default" },
       });
 
@@ -236,26 +193,20 @@ describe("ProjectService", () => {
 
   describe("active project environment invariant", () => {
     it("rejects a second active project for the same organization and environment", async () => {
-      await seedProject("prj_active_sandbox", "Active Sandbox", "active-sandbox", "sandbox", null);
-
       await expect(
-        seedProject(
-          "prj_duplicate_sandbox",
-          "Duplicate Sandbox",
-          "duplicate-sandbox",
-          "sandbox",
-          null
-        )
+        db
+          .prepare(
+            `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+             VALUES ('prj_duplicate_sandbox', ?, 'Duplicate Sandbox', 'duplicate-sandbox', 'sandbox', 'active', ?)`
+          )
+          .bind(TEST_ORG.id, TEST_USER.id)
+          .run()
       ).rejects.toMatchObject({ code: "23505" });
     });
   });
 
   describe("Project Members", () => {
-    const projectId = "prj_member_test";
-
-    beforeEach(async () => {
-      await seedProject(projectId, "Member Test Project", "member-test-project", "sandbox", null);
-    });
+    const projectId = TEST_PROJECT.id;
 
     describe("addMember", () => {
       it("adds a member with specified role", async () => {

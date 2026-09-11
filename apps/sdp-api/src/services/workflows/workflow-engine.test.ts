@@ -9,6 +9,7 @@ import {
 import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { emitKycApprovedForClearedEnrollments } from "./clearance";
 
@@ -43,13 +44,12 @@ describe("workflow engine (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', 'test-project', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO issued_tokens (id, organization_id, project_id, name, symbol, created_by)
@@ -447,13 +447,12 @@ describe("workflow engine (postgres)", () => {
         )
         .bind(FOREIGN_ORG_ID, FOREIGN_ORG_ID)
         .run();
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Foreign Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(FOREIGN_PROJECT_ID, FOREIGN_ORG_ID, FOREIGN_PROJECT_ID, TEST_USER.id)
-        .run();
+      await seedDefaultProjects(db, {
+        organizationId: FOREIGN_ORG_ID,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: { sandbox: FOREIGN_PROJECT_ID, production: `${FOREIGN_PROJECT_ID}_production` },
+      });
       await db
         .prepare(
           `INSERT INTO issued_tokens (id, organization_id, project_id, name, symbol, created_by)

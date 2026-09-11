@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { HeliusRingsConnectionStore } from "./helius-rings-connection.store";
 import { ProviderCredentialStore } from "./provider-credential.store";
@@ -59,16 +60,12 @@ describe("HeliusRingsConnectionStore", () => {
       TEST_USER.id,
       TEST_USER.email,
     ]);
-    for (const [projectId, environment] of [
-      [PROJECT_A, "sandbox"],
-      [PROJECT_B, "production"],
-    ] as const) {
-      await db.execute(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [projectId, TEST_ORG.id, projectId, projectId, environment, TEST_USER.id]
-      );
-    }
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_A, production: PROJECT_B },
+    });
   });
 
   it("resolves only the active default belonging to the requested project", async () => {

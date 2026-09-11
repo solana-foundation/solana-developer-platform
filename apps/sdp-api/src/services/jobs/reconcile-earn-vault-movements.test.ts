@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getSignatureStatuses = vi.hoisted(() => vi.fn());
@@ -39,27 +40,30 @@ const WALLET = "cwlt_vault_reconcile";
 beforeEach(async () => {
   await seedTestDatabase(env);
   vi.clearAllMocks();
-  await getDb(env).batch([
-    getDb(env)
+  const db = getDb(env);
+  await db.batch([
+    db
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
       .bind(ORG, "Vault Reconcile", "vault-reconcile", "enterprise", "active"),
-    getDb(env)
+    db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "vault-reconcile@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Vault Reconcile', 'vault-reconcile', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
-    getDb(env)
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  await db.batch([
+    db
       .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, status)
          VALUES ('cfg_vault_reconcile', ?, ?, 'privy', 'test', 'active')`
       )
       .bind(ORG, PROJECT),
-    getDb(env)
+    db
       .prepare(
         `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, status)

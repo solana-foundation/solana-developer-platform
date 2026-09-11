@@ -58,6 +58,7 @@ import { getDb } from "@/db";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import { reconcileRevokedApiKeyCache } from "./reconcile-revoked-api-key-cache";
@@ -121,13 +122,13 @@ describe("reconcileRevokedApiKeyCache", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id),
     ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    });
 
     await seedRevokedKeyRow(CORRUPT_KEY.id, corruptHash);
     await seedRevokedKeyRow(STALE_KEY.id, staleHash);

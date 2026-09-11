@@ -6,6 +6,7 @@ import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -143,16 +144,12 @@ describe("custody Connection deactivation", () => {
       VALUES ('mem_connection_deactivation', ?, ?, 'admin', 'active')`,
       [ORG, USER]
     );
-    await db.execute(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-      VALUES (?, ?, 'Deactivation', 'connection-deactivation', 'sandbox', 'active', ?)`,
-      [PROJECT, ORG, USER]
-    );
-    await db.execute(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-      VALUES ('pm_connection_deactivation', ?, ?, 'admin')`,
-      [PROJECT, USER]
-    );
+    await seedDefaultProjects(db, {
+      organizationId: ORG,
+      createdBy: USER,
+      members: [USER],
+      ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    });
     await db.execute(
       `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
       VALUES (?, ?, ?, 'session', '2999-01-01T00:00:00.000Z')`,

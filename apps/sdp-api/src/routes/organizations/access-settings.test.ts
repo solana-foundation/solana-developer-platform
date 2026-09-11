@@ -13,6 +13,7 @@ import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
@@ -64,19 +65,12 @@ async function seedMemberWithProject(): Promise<void> {
     )
     .bind(TEST_MEMBER.id, ORGANIZATION_ID, TEST_USER.id, TEST_MEMBER.role, TEST_MEMBER.status)
     .run();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Access Settings', 'access-settings', 'sandbox', 'active', ?)`
-    )
-    .bind(PROJECT_ID, ORGANIZATION_ID, TEST_USER.id)
-    .run();
-  await getDb(env)
-    .prepare(
-      "INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'developer')"
-    )
-    .bind("pm_access_settings", PROJECT_ID, TEST_USER.id)
-    .run();
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 function get(headers: Record<string, string>) {
