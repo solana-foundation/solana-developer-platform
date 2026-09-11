@@ -22,11 +22,24 @@ describe("MarketsLanding", () => {
   it("links each path to its existing subnav destination", () => {
     expect(markup).toContain('href="/dashboard/markets/treasury-solutions"');
     expect(markup).toContain('href="/dashboard/markets/embedded-yield"');
+    expect(markup).toContain('href="/dashboard/markets/dvp"');
   });
 
-  it("names the audience for both paths", () => {
+  it("groups earning and settlement paths under separate headings", () => {
+    expect(markup).toContain('aria-labelledby="markets-earn-heading"');
+    expect(markup).toContain('id="markets-earn-heading"');
+    expect(markup).toContain("DashboardMarkets.landing.earnHeading");
+    expect(markup).toContain('aria-labelledby="markets-settlement-heading"');
+    expect(markup).toContain('id="markets-settlement-heading"');
+    expect(markup).toContain("DashboardMarkets.landing.settlementHeading");
+    expect(markup).not.toContain("DashboardMarkets.landing.eyebrow");
+    expect(markup).not.toContain("DashboardMarkets.landing.description");
+  });
+
+  it("keeps audience context on the two earn paths", () => {
     expect(markup).toContain("DashboardMarkets.landing.treasuryAudience");
     expect(markup).toContain("DashboardMarkets.landing.programAudience");
+    expect(markup).not.toContain("DashboardMarkets.dvp.landingAudience");
   });
 
   it("titles the cards with the shared subnav labels so they cannot drift", () => {

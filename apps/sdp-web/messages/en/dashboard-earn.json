@@ -1,8 +1,8 @@
 {
   "DashboardMarkets": {
     "landing": {
-      "eyebrow": "Choose a path",
-      "description": "Deposit your organization's own treasury, or offer earn to your customers.",
+      "earnHeading": "Earn",
+      "settlementHeading": "Settlement",
       "treasuryAudience": "For corporate treasury",
       "treasuryDescription": "Deposit from your custody wallets into provider strategies, and track positions and yield in one place.",
       "programAudience": "For payments platforms",
