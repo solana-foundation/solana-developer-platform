@@ -454,9 +454,10 @@ function isRetryableGetFeePayerError(error: unknown): boolean {
 }
 
 // Kora's stable error codes (crates/lib/src/error.rs `KoraErrorCode`).
-// Deterministic rejections (the same bytes will be refused again) map to
-// codes the sponsorship budget releases immediately; anything ambiguous stays
-// NETWORK_ERROR so the reservation is held for reconciliation.
+// A structured Kora refusal proves nothing was signed or sent and the same
+// bytes will be refused again, so it maps to PROVIDER_REJECTED and the
+// sponsorship budget releases the reservation immediately. Anything ambiguous
+// stays NETWORK_ERROR so the reservation is held for reconciliation.
 function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
   switch (code) {
     case -32000: // InvalidTransaction
@@ -464,6 +465,7 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
     case -32002: // UnsupportedFeeToken
     case -32004: // InvalidRequest
     case -32032: // Unauthorized
+      return "PROVIDER_REJECTED";
     case -32600: // JSON-RPC invalid request
     case -32602: // JSON-RPC invalid params
       return "SIGNING_FAILED";

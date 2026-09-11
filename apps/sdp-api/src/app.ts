@@ -190,10 +190,13 @@ function mapFeePaymentError(err: FeePaymentError): {
         code: err.code,
         message: "The signing provider is busy. Try again.",
       };
-    case "SIGNING_FAILED":
-      // Deterministic: the provider refused these exact bytes (policy,
-      // allowlist, malformed request). Retrying the same transaction cannot
-      // succeed, so do not tell the caller to try again.
+    case "PROVIDER_REJECTED":
+      // The provider returned a structured refusal of these exact bytes
+      // (policy, allowlist, malformed request). Nothing was signed and a
+      // retry cannot succeed, so do not tell the caller to try again.
+      // SIGNING_FAILED stays on the ambiguous 502 path below: the native
+      // adapter uses it for any signing exception, including post-sign
+      // timeouts, where a retry may be valid.
       return {
         status: 422,
         code: "SIGNING_REJECTED",

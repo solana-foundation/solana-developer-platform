@@ -124,6 +124,13 @@ export type FeePaymentErrorCode =
   | "PROVIDER_NOT_AVAILABLE"
   | "INSUFFICIENT_BALANCE"
   | "TRANSACTION_TOO_LARGE"
+  /**
+   * The provider answered with a structured refusal of these exact bytes
+   * (policy, allowlist, malformed transaction). It proves nothing was signed
+   * or sent, and a retry of the same transaction cannot succeed.
+   */
+  | "PROVIDER_REJECTED"
+  /** Signing threw without a structured verdict; the outcome may be ambiguous. */
   | "SIGNING_FAILED"
   | "SUBMISSION_FAILED"
   | "NETWORK_ERROR"

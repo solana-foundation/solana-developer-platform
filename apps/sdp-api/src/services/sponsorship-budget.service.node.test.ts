@@ -338,6 +338,29 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.cancel).not.toHaveBeenCalled();
   });
 
+  it("releases a sign-only reservation when Kora returns a structured policy rejection", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+      new FeePaymentError(
+        "Kora Error -32001: Validation error: Mutable transfer-hook authority found on mint account",
+        "PROVIDER_REJECTED"
+      )
+    );
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_REJECTED",
+    });
+
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      expect.stringContaining("Mutable transfer-hook authority")
+    );
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).toHaveBeenCalledOnce();
+  });
+
   it("retains ambiguous sign-only failures and blocks an unsafe retry", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     const transaction = buildTransaction();
