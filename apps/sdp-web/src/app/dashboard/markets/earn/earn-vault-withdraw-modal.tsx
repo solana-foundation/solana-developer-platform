@@ -734,7 +734,9 @@ export function EarnVaultWithdrawModal({
         ) : null}
 
         <p className="mt-4 text-xs leading-5 text-tertiary" id="earn-vault-withdraw-note">
-          {quote.kind === "quoted" && quote.preview.feeSponsored === true
+          {/* From the position, not the quote: Kamino declares no exit floor
+              and so never quotes, which left its note stuck on wallet-pays. */}
+          {position.feeSponsored
             ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
             : t("DashboardEarn.vaultWithdraw.confirmNote")}
         </p>

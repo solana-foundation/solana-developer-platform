@@ -17,6 +17,7 @@ import {
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze Operations", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   let deployedTokenId = "";
   let tokenAccount = "";
   const request = requestWithApiKey();
@@ -25,6 +26,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -34,6 +36,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -43,6 +46,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
       body: JSON.stringify({
         name: "Freeze Test Token",
         symbol: "FREEZE",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 9,
         isMintable: true,
         isFreezable: true,
@@ -54,6 +58,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
 
     await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     const mintRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint`, {
@@ -62,6 +68,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         mint: {
           destination: custodyAddress,
           amount: "1",
@@ -82,6 +89,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
       body: JSON.stringify({
         accountAddress: tokenAccount,
         reason: "Integration test freeze",
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -101,6 +109,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -111,6 +120,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 

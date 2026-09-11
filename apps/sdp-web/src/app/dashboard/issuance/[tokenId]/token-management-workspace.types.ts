@@ -29,7 +29,7 @@ export interface ActionExecutionInput {
   label: string;
   method: HttpMethod;
   path: string;
-  body?: unknown;
+  body?: Record<string, unknown>;
 }
 
 export interface ActionExecutionResult {
@@ -40,6 +40,8 @@ export interface ActionExecutionResult {
 }
 
 export interface RunActionOptions {
+  /** Authority-matching candidates. One is automatic; several require confirmation. */
+  signerWallets?: PaymentsDashboardWallet[];
   requiresConfirmation?: boolean;
   confirmationTitle?: string;
   confirmationDescription?: string;
@@ -53,6 +55,8 @@ export interface RunActionOptions {
 
 export interface ActionConfirmationState {
   input: ActionExecutionInput;
+  signerWallets?: PaymentsDashboardWallet[];
+  signingCustodyWalletId?: string;
   options: Required<
     Pick<
       RunActionOptions,
@@ -153,6 +157,7 @@ export interface AuthorityFormState {
 export interface FreezeFormState {
   accountAddress: string;
   reason: string;
+  signingWalletId: string;
 }
 
 export interface AllowlistFormState {

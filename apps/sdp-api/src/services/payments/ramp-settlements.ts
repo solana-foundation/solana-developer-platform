@@ -1,4 +1,5 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
+import { isTerminalRampTransferStatus } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
 import type {
   PaymentsRepository,
@@ -23,15 +24,13 @@ const RAMP_SETTLEMENT_STATUS = {
   expired: "expired",
 } as const satisfies Record<Exclude<RampSettlementEvent["kind"], "ignore">, PaymentTransferStatus>;
 
-// `expired` is deliberately absent: it is derived from provider ABSENCE (an
-// abandoned checkout the provider never saw), and a provider event proving
-// activity must be able to revive it — signed widget URLs do not expire, so a
-// customer can complete checkout after the abandonment horizon.
-const TERMINAL_RAMP_TRANSFER_STATUSES = [
-  "completed",
-  "failed",
-  "canceled",
-] as const satisfies readonly PaymentTransferStatus[];
+// `expired` is carved out of the shared terminal set: it is derived from provider
+// ABSENCE (an abandoned checkout the provider never saw), and a provider event
+// proving activity must be able to revive it — signed widget URLs do not expire,
+// so a customer can complete checkout after the abandonment horizon.
+function isSettlementFinalStatus(status: PaymentTransferStatus): boolean {
+  return status !== "expired" && isTerminalRampTransferStatus(status);
+}
 
 // awaiting_payment self-transition is allowed: a provider may issue a NEW
 // deposit wallet while still awaiting payment (MoonPay does on sale
@@ -64,10 +63,6 @@ const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
   Exclude<RampSettlementEvent["kind"], "ignore">,
   readonly PaymentTransferStatus[]
 >;
-
-function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
-  return (TERMINAL_RAMP_TRANSFER_STATUSES as readonly PaymentTransferStatus[]).includes(status);
-}
 
 /**
  * Builds the guarded transfer update one settlement event produces.
@@ -156,7 +151,7 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   }
   // Out-of-order or redelivered events must not regress a settled transfer
   // (e.g. a retried PENDING arriving after COMPLETED).
-  if (isTerminalRampTransferStatus(transfer.status)) {
+  if (isSettlementFinalStatus(transfer.status)) {
     return;
   }
 

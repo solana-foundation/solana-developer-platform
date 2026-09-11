@@ -2,6 +2,8 @@ import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import {
   type BuildOperationInput,
   type BuildOperationResult,
+  type EnsureMergingEnabledInput,
+  type EnsureMergingEnabledResult,
   HeliusRingsError,
   type ProvisionIdentityInput,
   type ProvisionIdentityResult,
@@ -18,16 +20,13 @@ import {
 } from "@sdp/helius-rings";
 import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
-import {
-  createDeterministicMaterialSource,
-  DETERMINISTIC_KA_SEED,
-  warnDeterministicKeyAuthority,
-} from "./deterministic-ka/index.js";
+import { createCustodyMaterialSource } from "./custody-ka/index.js";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";
 import { verifyRingsIndexed } from "./indexed.js";
 import type { ShieldedMaterialSource } from "./material.js";
+import { ensureRingsMergingEnabled } from "./merging.js";
 import { provisionRingsIdentity, rekeyRingsIdentity } from "./provision.js";
 import { provisionCustomRing } from "./provision-ring.js";
 import { syncRingsWallet } from "./sync.js";
@@ -41,11 +40,19 @@ export interface RingsGatewayConfig {
   readonly signTransaction: (unsignedTxBase64: string, owner: string) => Promise<string>;
   readonly submitTransaction: (signedTxBase64: string) => Promise<string>;
   /**
-   * Signs a raw message with the custody key for `owner`. Only ring bring-up
-   * needs it — the auditor-key attestation is a signed message, not a
-   * transaction — so the rest of the gateway stays constructible without it.
+   * Signs a raw message with the custody key for `owner`.
+   *
+   * Required, because it is what roots the shielded keys: the owner's signature
+   * over Zolana's derivation message is the seed they expand from. Ring bring-up
+   * uses the same callback for its auditor-key attestation.
    */
-  readonly signMessage?: (messageBase64: string, owner: string) => Promise<string>;
+  readonly signMessage: (messageBase64: string, owner: string) => Promise<string>;
+  /**
+   * Overrides where shielded key material comes from. Absent, the gateway roots
+   * it in custody through {@link signMessage}. This is the seam an enclave-backed
+   * holder would arrive through, and the one tests inject at.
+   */
+  readonly material?: ShieldedMaterialSource;
   /** Helius ring RPC that mints custom-ring auditor keys. Only bring-up needs it. */
   readonly ringRpcUrl?: string;
   /**
@@ -60,14 +67,23 @@ export interface RingsGatewayConfig {
   readonly tree?: string;
   readonly allowInsecureHttp?: boolean;
   readonly healthTimeoutMs?: number;
+  /**
+   * Carries every leg this package dials directly — health probes, the
+   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's
+   * own Solana RPC transport cannot take one (upstream gap), so that leg
+   * stays on the library's plain transport.
+   */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };
 
 function describeClientFailure(error: unknown, config: RingsGatewayConfig): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
-  const apiKey = readApiKey(config.solanaRpcUrl);
-  const secrets = apiKey === null ? [config.solanaRpcUrl] : [config.solanaRpcUrl, apiKey];
+  const secrets = [config.solanaRpcUrl, config.indexerUrl, config.proverUrl].flatMap((url) => [
+    url,
+    ...readQueryValues(url),
+  ]);
 
   return secrets.reduce(
     (message, secret) => (secret.length === 0 ? message : message.replaceAll(secret, "[redacted]")),
@@ -75,11 +91,11 @@ function describeClientFailure(error: unknown, config: RingsGatewayConfig): stri
   );
 }
 
-function readApiKey(rpcUrl: string): string | null {
+function readQueryValues(endpointUrl: string): string[] {
   try {
-    return new URL(rpcUrl).searchParams.get("api-key");
+    return [...new URL(endpointUrl).searchParams.values()].filter((value) => value.length > 0);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -90,14 +106,11 @@ function readApiKey(rpcUrl: string): string | null {
  */
 function requireRingBringUpConfig(config: RingsGatewayConfig): {
   ringRpcUrl: string;
-  signMessage: NonNullable<RingsGatewayConfig["signMessage"]>;
+  signMessage: RingsGatewayConfig["signMessage"];
 } {
   const { ringRpcUrl, signMessage } = config;
   if (!ringRpcUrl) {
     throw new HeliusRingsError("config_error", "ring bring-up needs a ring RPC URL");
-  }
-  if (!signMessage) {
-    throw new HeliusRingsError("config_error", "ring bring-up needs a custody message signer");
   }
 
   let protocol: string;
@@ -121,10 +134,8 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
   let materialSource: ShieldedMaterialSource | undefined;
 
   function requireMaterial(): ShieldedMaterialSource {
-    if (!materialSource) {
-      warnDeterministicKeyAuthority();
-      materialSource = createDeterministicMaterialSource({ seed: DETERMINISTIC_KA_SEED });
-    }
+    materialSource ??=
+      config.material ?? createCustodyMaterialSource({ signMessage: config.signMessage });
     return materialSource;
   }
 
@@ -140,9 +151,10 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
 
   return {
     async probeHealth(): Promise<RuntimeHealth> {
-      let resolved: ZolanaClient;
       try {
-        resolved = await withHealthTimeout(client(), config.healthTimeoutMs);
+        // The probes dial the endpoints themselves; the client is constructed
+        // only to surface a configuration it cannot even initialize from.
+        await withHealthTimeout(client(), config.healthTimeoutMs);
       } catch (error) {
         // The Zolana client couldn't even initialize — none of the per-upstream
         // probes ran. Repeat the reason on each so the operator sees it whichever
@@ -155,10 +167,11 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
       }
 
       return probeRingsHealth({
-        client: resolved,
+        solanaRpcUrl: config.solanaRpcUrl,
         indexerUrl: config.indexerUrl,
         proverUrl: config.proverUrl,
         timeoutMs: config.healthTimeoutMs,
+        ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
       });
     },
 
@@ -178,6 +191,21 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
       );
     },
 
+    async ensureMergingEnabled(
+      input: EnsureMergingEnabledInput
+    ): Promise<EnsureMergingEnabledResult> {
+      return withZolanaErrorBridge(async () =>
+        ensureRingsMergingEnabled(
+          {
+            client: await client(),
+            signTransaction: config.signTransaction,
+            submitTransaction: config.submitTransaction,
+          },
+          { owner: input.owner }
+        )
+      );
+    },
+
     async provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult> {
       const bringUp = requireRingBringUpConfig(config);
       const recordRingLookupTable = config.recordRingLookupTable;
@@ -189,6 +217,7 @@ export function createRingsGateway(config: RingsGatewayConfig): RingsGatewayPort
             signTransaction: config.signTransaction,
             signMessage: bringUp.signMessage,
             submitTransaction: config.submitTransaction,
+            ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
             ...(recordRingLookupTable
               ? {
                   recordLookupTable: (lookupTableAddress: string) =>

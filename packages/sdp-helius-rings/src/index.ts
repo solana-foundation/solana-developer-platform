@@ -25,6 +25,8 @@ export {
 export type {
   BuildOperationInput,
   BuildOperationResult,
+  EnsureMergingEnabledInput,
+  EnsureMergingEnabledResult,
   KnownAsset,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
@@ -54,7 +56,6 @@ export type {
   AssetBalance,
   FailureCode,
   KeyKind,
-  KeyRef,
   MaterialTag,
   OperationEvent,
   OperationFailure,

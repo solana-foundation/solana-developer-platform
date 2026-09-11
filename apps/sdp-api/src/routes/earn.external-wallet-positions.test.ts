@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -188,9 +188,9 @@ describe("external-wallet position reads", () => {
       label: "USDT vault",
     });
 
-    const response = await get("/v1/earn/external-wallet/positions/summary");
+    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: { summary: Record<string, unknown> } };
+    const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
 
     expect(body.data.summary).toMatchObject({
       walletCount: 2,
@@ -221,6 +221,48 @@ describe("external-wallet position reads", () => {
     expect(resolveVaultDirectClient.mock.calls[0]?.[2]).not.toBe(
       resolveVaultDirectClient.mock.calls[1]?.[2]
     );
+    const strategies = body.data.summary.totalsByStrategy;
+    expect(strategies.find((strategy) => strategy.label === "USDC vault")?.positions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ownerAddress: OWNER_A,
+          tokenMint: USDC,
+          tokenValue: "10.1",
+          shares: "1",
+          withdrawableShares: "1",
+        }),
+        expect.objectContaining({
+          ownerAddress: OWNER_B,
+          tokenMint: USDC,
+          tokenValue: "20.2",
+        }),
+      ])
+    );
+  });
+
+  it("keeps owner addresses but omits position details from the default summary", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get("/v1/earn/external-wallet/positions/summary");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        summary: {
+          totalsByStrategy: Array<Record<string, unknown>>;
+        };
+      };
+    };
+
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      ownerAddresses: [OWNER_A],
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
   });
 
   it("returns exactly one wallet and leaves an unreadable live value unavailable", async () => {
@@ -270,6 +312,56 @@ describe("external-wallet position reads", () => {
     };
     expect(summary.data.summary.unavailablePositionCount).toBe(1);
     expect(summary.data.summary.totalsByToken[0]).not.toHaveProperty("tokenValue");
+  });
+
+  it("summary omits every owner address when the caller asks for totals only (EARN-028, PRO-1873)", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { summary: { walletCount: number; totalsByStrategy: Array<Record<string, unknown>> } };
+    };
+
+    // Totals survive; the address book does not. Omitted rather than emptied,
+    // so "not requested" can never read as "no owners".
+    expect(body.data.summary.walletCount).toBe(2);
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      walletCount: 2,
+      positionCount: 2,
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
+    expect(JSON.stringify(body)).not.toContain(OWNER_A);
+    expect(JSON.stringify(body)).not.toContain(OWNER_B);
+  });
+
+  it("summary rejects a malformed includeOwnerAddresses rather than guessing", async () => {
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=maybe"
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects position details when owner addresses are explicitly omitted", async () => {
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false&includePositions=true"
+    );
+    expect(response.status).toBe(400);
   });
 
   it("summary excludes a sibling project's positions and never leaks their owner addresses (EARN-028)", async () => {

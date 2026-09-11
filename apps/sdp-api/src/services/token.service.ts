@@ -25,6 +25,10 @@ import { AppError, badRequest } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 
+type StoredTokenTransactionListItem = Omit<TokenTransactionListItem, "transaction"> & {
+  transaction: TokenTransaction;
+};
+
 // How long a mint can still land after SDP last touched its row. A Solana blockhash
 // is valid for ~150 slots (roughly 60-90s), so a transaction older than this can no
 // longer be submitted; five minutes leaves generous room for a slow signer without
@@ -156,6 +160,7 @@ export interface CreateTokenInput {
   projectId: string;
   organizationId: string;
   createdBy: string;
+  signingCustodyWalletId?: string | null;
   signingWalletId?: string | null;
   name: string;
   symbol: string;
@@ -172,6 +177,7 @@ export interface CreateTokenInput {
 }
 
 export interface UpdateTokenInput {
+  signingCustodyWalletId?: string | null;
   name?: string;
   /** Only accepted while the token is undeployed (enforced by the route handler). */
   symbol?: string;
@@ -193,6 +199,7 @@ export interface UpdateTokenInput {
 export interface CreateTokenTransactionInput {
   tokenId: string;
   organizationId: string;
+  custodyWalletId?: string | null;
   type: TokenTransactionType;
   params: Record<string, unknown>;
   serializedTx?: string;
@@ -270,6 +277,7 @@ interface TokenRow {
   id: string;
   project_id: string;
   organization_id: string;
+  signing_custody_wallet_id: string | null;
   signing_wallet_id: string | null;
   mint_address: string | null;
   mint_authority: string | null;
@@ -310,6 +318,7 @@ interface TokenTransactionRow {
   id: string;
   token_id: string;
   organization_id: string;
+  custody_wallet_id: string | null;
   type: string;
   status: string;
   idempotency_key: string | null;
@@ -524,6 +533,7 @@ export class TokenService {
       id,
       projectId: input.projectId,
       organizationId: input.organizationId,
+      signingCustodyWalletId: input.signingCustodyWalletId ?? null,
       signingWalletId: input.signingWalletId ?? null,
       mintAddress: null,
       mintAuthority: null,
@@ -553,17 +563,18 @@ export class TokenService {
     await this.db
       .prepare(
         `INSERT INTO issued_tokens (
-          id, project_id, organization_id, signing_wallet_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+          id, project_id, organization_id, signing_custody_wallet_id, signing_wallet_id, mint_address, mint_authority, metadata_authority, freeze_authority,
           abl_list_address, name, symbol, decimals, description, uri, image_url, template,
           total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
           freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         token.id,
         token.projectId,
         token.organizationId,
+        token.signingCustodyWalletId,
         token.signingWalletId,
         token.mintAddress,
         token.mintAuthority,
@@ -616,7 +627,7 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
-                signing_wallet_id,
+                signing_custody_wallet_id, signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -644,7 +655,7 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
-                signing_wallet_id,
+                signing_custody_wallet_id, signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -714,7 +725,7 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
-                signing_wallet_id,
+                signing_custody_wallet_id, signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -730,6 +741,33 @@ export class TokenService {
 
     const extensionState = await this.getTokenExtensionState(row.id);
     return this.mapRowToToken(row, extensionState);
+  }
+
+  /**
+   * The image URL of each issued token behind the given mints, in one query.
+   *
+   * A mint the tenant never issued is absent from the result; callers decide
+   * what absence means for them. Reads only the token record's own image
+   * column, never chain or off-chain metadata.
+   *
+   * @param mints - Mint addresses to look up; duplicates are harmless.
+   * @returns Mint address to image URL (null when the token has no artwork).
+   */
+  async listTokenImagesByMints(mints: readonly string[]): Promise<Map<string, string | null>> {
+    if (mints.length === 0) {
+      return new Map();
+    }
+    const tenant = this.tenantTokenScope();
+    const placeholders = mints.map(() => "?").join(", ");
+    const result = await this.db
+      .prepare(
+        `SELECT mint_address, image_url
+         FROM issued_tokens
+         WHERE mint_address IN (${placeholders})${tenant.clause}`
+      )
+      .bind(...mints, ...tenant.values)
+      .all<{ mint_address: string; image_url: string | null }>();
+    return new Map(result.results.map((row) => [row.mint_address, row.image_url]));
   }
 
   /**
@@ -765,7 +803,7 @@ export class TokenService {
       this.db
         .prepare(
           `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
-                  signing_wallet_id,
+                  signing_custody_wallet_id, signing_wallet_id,
                   abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                   total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                   freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -894,6 +932,11 @@ export class TokenService {
     if (input.signingWalletId !== undefined) {
       updates.push("signing_wallet_id = ?");
       values.push(input.signingWalletId);
+    }
+
+    if (input.signingCustodyWalletId !== undefined) {
+      updates.push("signing_custody_wallet_id = ?");
+      values.push(input.signingCustodyWalletId);
     }
 
     if (input.requiresAllowlist !== undefined) {
@@ -1201,15 +1244,34 @@ export class TokenService {
    * `active` via {@link setTokenDeployed} or back to `pending` via
    * {@link releaseTokenDeploy}.
    */
-  async beginTokenDeploy(tokenId: string): Promise<Token | null> {
+  async beginTokenDeploy(
+    tokenId: string,
+    wallet: { custodyWalletId: string; providerWalletId: string } | null,
+    expectedCustodyWalletId?: string
+  ): Promise<Token | null> {
     const now = new Date().toISOString();
     const tenant = this.tenantMutationScope();
+    // Implicit deployment must not overwrite a wallet selected by a concurrent PATCH.
+    const walletCondition =
+      expectedCustodyWalletId === undefined ? "" : " AND signing_custody_wallet_id = ?";
     const rowsAffected = await this.db
       .prepare(
-        `UPDATE issued_tokens SET status = 'deploying', updated_at = ?
-         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL`
+        `UPDATE issued_tokens
+         SET status = 'deploying',
+             signing_custody_wallet_id = COALESCE(?, signing_custody_wallet_id),
+             signing_wallet_id = COALESCE(?, signing_wallet_id),
+             updated_at = ?
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL${walletCondition}`
       )
-      .bind(now, tokenId, ...tenant.values)
+      // Legacy confirm claims without replacing the identity that prepare saved.
+      .bind(
+        wallet?.custodyWalletId ?? null,
+        wallet?.providerWalletId ?? null,
+        now,
+        tokenId,
+        ...tenant.values,
+        ...(expectedCustodyWalletId === undefined ? [] : [expectedCustodyWalletId])
+      )
       .run();
 
     if (rowsAffected === 0) {
@@ -2200,6 +2262,7 @@ export class TokenService {
       id,
       tokenId: input.tokenId,
       organizationId: input.organizationId,
+      custodyWalletId: input.custodyWalletId ?? null,
       type: input.type,
       status: "pending",
       idempotencyKey: input.idempotencyKey ?? null,
@@ -2220,14 +2283,15 @@ export class TokenService {
       await this.db
         .prepare(
           `INSERT INTO issuance_transactions (
-          id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+          id, token_id, organization_id, custody_wallet_id, type, status, idempotency_key, idempotency_fingerprint,
           signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           tx.id,
           tx.tokenId,
           tx.organizationId,
+          tx.custodyWalletId,
           tx.type,
           tx.status,
           tx.idempotencyKey ?? null,
@@ -2278,8 +2342,7 @@ export class TokenService {
 
   /**
    * Remove a transaction record that is known not to have reached an external
-   * submission boundary. Approved-operation recovery uses this to release its
-   * durable idempotency key after a fenced attempt fails before submission.
+   * submission boundary so a corrected request can reuse its idempotency key.
    */
   async deleteUnsubmittedTransaction(transactionId: string): Promise<boolean> {
     const tenant = this.tenantTokenScope("token");
@@ -2392,7 +2455,7 @@ export class TokenService {
     const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT tx.id, tx.token_id, tx.organization_id, tx.type, tx.status, tx.idempotency_key,
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.custody_wallet_id, tx.type, tx.status, tx.idempotency_key,
                 tx.idempotency_fingerprint, tx.signature, tx.serialized_tx, tx.operation_params,
                 tx.slot, tx.block_time, tx.fee, tx.error, tx.initiated_by_key_id,
                 tx.created_at, tx.updated_at
@@ -2420,7 +2483,7 @@ export class TokenService {
     const tenant = this.tenantTokenScope("tenant_token");
     const row = await this.db
       .prepare(
-        `SELECT tx.id, tx.token_id, tx.organization_id, tx.type, tx.status, tx.idempotency_key,
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.custody_wallet_id, tx.type, tx.status, tx.idempotency_key,
                 tx.idempotency_fingerprint, tx.signature, tx.serialized_tx, tx.operation_params,
                 tx.slot, tx.block_time, tx.fee, tx.error, tx.initiated_by_key_id,
                 tx.created_at, tx.updated_at
@@ -2456,7 +2519,7 @@ export class TokenService {
     }
 
     let countQuery = "SELECT COUNT(*) as count FROM issuance_transactions WHERE token_id = ?";
-    let selectQuery = `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+    let selectQuery = `SELECT id, token_id, organization_id, custody_wallet_id, type, status, idempotency_key, idempotency_fingerprint,
               signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
               created_at, updated_at
        FROM issuance_transactions WHERE token_id = ?`;
@@ -2539,7 +2602,7 @@ export class TokenService {
     walletScope?: WalletTransactionScope;
     limit?: number;
     offset?: number;
-  }): Promise<{ transactions: TokenTransactionListItem[]; total: number }> {
+  }): Promise<{ transactions: StoredTokenTransactionListItem[]; total: number }> {
     this.assertTenantOptions(options);
     const {
       organizationId,
@@ -2643,6 +2706,7 @@ export class TokenService {
         tx.id,
         tx.token_id,
         tx.organization_id,
+        tx.custody_wallet_id,
         tx.type,
         tx.status,
         tx.idempotency_key,
@@ -3419,6 +3483,7 @@ export class TokenService {
       id: row.id,
       projectId: row.project_id,
       organizationId: row.organization_id,
+      signingCustodyWalletId: row.signing_custody_wallet_id,
       signingWalletId: row.signing_wallet_id,
       mintAddress: row.mint_address,
       mintAuthority: row.mint_authority,
@@ -3455,6 +3520,7 @@ export class TokenService {
       id: row.id,
       tokenId: row.token_id,
       organizationId: row.organization_id,
+      custodyWalletId: row.custody_wallet_id,
       type: row.type as TokenTransactionType,
       status: row.status as TokenTransactionStatus,
       idempotencyKey: row.idempotency_key,

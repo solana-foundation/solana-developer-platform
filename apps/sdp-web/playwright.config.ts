@@ -53,22 +53,27 @@ export default defineConfig({
           },
         ]
       : []),
-    {
-      command: webCommand,
-      cwd: __dirname,
-      url: env.baseURL,
-      reuseExistingServer: false,
-      env: {
-        ...resolveProcessEnv(),
-        ...env.webServerEnv,
-        PLAYWRIGHT_NEXT_DIST_DIR: nextDistDir,
-        SDP_API_BASE_URL: apiBaseUrl,
-        NEXT_PUBLIC_SDP_API_BASE_URL: apiBaseUrl,
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 180_000,
-    },
+    // A deployed dashboard (stage smoke) is already serving; nothing to start locally.
+    ...(!env.deployedWeb
+      ? [
+          {
+            command: webCommand,
+            cwd: __dirname,
+            url: env.baseURL,
+            reuseExistingServer: false,
+            env: {
+              ...resolveProcessEnv(),
+              ...env.webServerEnv,
+              PLAYWRIGHT_NEXT_DIST_DIR: nextDistDir,
+              SDP_API_BASE_URL: apiBaseUrl,
+              NEXT_PUBLIC_SDP_API_BASE_URL: apiBaseUrl,
+            },
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            timeout: 180_000,
+          },
+        ]
+      : []),
   ],
   projects: [
     {

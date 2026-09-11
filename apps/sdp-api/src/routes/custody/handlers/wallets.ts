@@ -125,7 +125,7 @@ async function queryWalletSummaries(
     : wallets.filter((wallet) => allowedWalletIds.includes(wallet.id));
 }
 
-async function findAuthorizedOperationalWallet(
+export async function findAuthorizedOperationalWallet(
   c: AppContext,
   walletId: string,
   permissions: Parameters<typeof resolveApiKeyCustodyWalletId>[2],

@@ -1,4 +1,4 @@
-import { DVP_TRADE_SIDES } from "@sdp/types";
+import { DVP_TRADE_SIDES, DVP_TRADE_STATUSES, type DvpTradeStatus } from "@sdp/types";
 import { address } from "@solana/kit";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
@@ -48,15 +48,22 @@ export const dvpTradeIdParamsSchema = z.object({
   tradeId: z.string().min(1),
 });
 
-/** Terms shared by both kinds of trade. Only the parties differ. */
-const dvpTradeTermsShape = {
-  /**
-   * Custody wallet behind the trade. Signs the create, pays the network fee and
-   * pays rent for both escrows. On a principal trade it also delivers a leg; on
-   * an agent trade it delivers nothing.
-   */
-  sdpWalletId: z.string().min(1),
+/**
+ * One party slot, used for both `partyA` and `partyB`.
+ *
+ * `z.union` of three strict objects (no shared tag key; exactly one key
+ * present acts as the discriminator): `walletId` (resolves to its address,
+ * stores nothing), `counterpartyAccountId` (resolves the linked address,
+ * stores the ref), or a bare external `address`.
+ */
+const dvpPartySchema = z.union([
+  z.strictObject({ walletId: z.string().min(1) }),
+  z.strictObject({ counterpartyAccountId: z.string().min(1) }),
+  z.strictObject({ address: dvpAddressSchema }),
+]);
 
+/** Terms shared by every trade. Only the parties differ. */
+const dvpTradeTermsShape = {
   mintA: dvpAddressSchema,
   tokenProgramA: dvpAddressSchema,
   mintB: dvpAddressSchema,
@@ -69,77 +76,72 @@ const dvpTradeTermsShape = {
   earliestSettlementTimestamp: i64StringSchema.nullish(),
 
   /**
-   * Where each party's proceeds are delivered, when that is not the party.
-   *
-   * An execution desk routinely settles into an account other than the one it
-   * funded from, and the program has always supported it — `CreateDvp` takes
-   * both destinations as arguments and records the party's own address when
-   * they are omitted. Everything downstream already reads them; only create
-   * was dropping them on the floor.
-   *
-   * Omit for the ordinary trade. A destination that differs from its party is
-   * exactly the shape a forged trade takes, so surfaces that show a trade to a
-   * counterparty must say when these are set rather than render them quietly.
+   * Where each party's proceeds are delivered instead of to the party. Omit
+   * for the ordinary trade; a differing destination is also the shape a forged
+   * trade takes, so surfaces showing a trade to a counterparty must surface it.
    */
   userASettlementDestination: dvpAddressSchema.nullish(),
   userBSettlementDestination: dvpAddressSchema.nullish(),
 
-  /**
-   * Opaque client reference, at most 64 bytes. Unauthenticated: anyone's forged
-   * create can carry the same value, so it is a correlation hint and never an
-   * identity on its own.
-   */
+  /** Opaque client reference, at most 64 bytes; a correlation hint, never an identity. */
   refString: z.string().max(64).nullish(),
 } as const;
 
 /**
- * The original shape: SDP holds one leg, the counterparty is any address.
+ * The create body: two symmetric party slots and the trade terms.
  *
- * The V1 shape (PRO-1830), and still the default.
+ * `partyA` and `partyB` are {@link dvpPartySchema} slots. Fee and rent are paid
+ * by SDP's sponsored fee payer; nothing about the payer is configurable or a
+ * term of the trade.
  */
-const createPrincipalDvpTradeSchema = z.object({
+export const createDvpTradeSchema = z.object({
+  partyA: dvpPartySchema,
+  partyB: dvpPartySchema,
   ...dvpTradeTermsShape,
-  /** Omitted is principal, so existing callers keep working unchanged. */
-  tradeKind: z.literal("principal").optional(),
-  /** Which leg SDP delivers. The counterparty takes the other. */
-  sdpSide: z.enum(DVP_TRADE_SIDES),
-  /** The other party. Any address; SDP holds no key for it and it signs nothing. */
-  counterparty: dvpAddressSchema,
 });
 
 /**
- * The execution-desk shape: SDP sets the terms and two other parties do the
- * swaps.
+ * A comma-separated list of real trade statuses, parsed to a validated array.
  *
- * The party that submits a trade is not necessarily a party to it. An execution
- * agent setting up the on-chain swap details and having two counterparties do
- * the swaps is the more common arrangement, and nothing here ruled it out.
- *
- * The program always allowed this: `CreateDvp`'s only signer is the payer, and
- * both parties are plain accounts. There is deliberately no `sdpSide` here —
- * SDP holds neither leg, and a side would name one it has no key for.
+ * Follows the multi-value convention `listTransfersQuerySchema` set for
+ * `status`/`type` (payments/schemas.ts): one query param, split on commas,
+ * piped into a non-empty array of the canonical enum. An unknown value fails
+ * the parse and the handler names it in the 400.
  */
-const createAgentDvpTradeSchema = z.object({
-  ...dvpTradeTermsShape,
-  tradeKind: z.literal("agent"),
-  /** Delivers leg A. An arbitrary address; signs nothing here. */
-  partyA: dvpAddressSchema,
-  /** Delivers leg B. Likewise. */
-  partyB: dvpAddressSchema,
-});
-
-/**
- * Discriminated so the two kinds cannot blur. A body carrying both a side and
- * two parties is refused rather than silently resolved, because guessing which
- * the caller meant is guessing which leg SDP is about to fund.
- */
-export const createDvpTradeSchema = z
-  .discriminatedUnion("tradeKind", [
-    createPrincipalDvpTradeSchema.extend({ tradeKind: z.literal("principal") }),
-    createAgentDvpTradeSchema,
-  ])
-  .or(createPrincipalDvpTradeSchema);
+const dvpTradeStatusListSchema = z
+  .string()
+  .min(1)
+  .transform((value) => value.split(","))
+  .pipe(
+    z
+      .array(z.enum(DVP_TRADE_STATUSES))
+      .min(1)
+      .transform((statuses): DvpTradeStatus[] => Array.from(new Set(statuses)))
+  );
 
 export const listDvpTradesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
+  /** Comma-separated trade statuses to filter to; absent means unfiltered. */
+  status: dvpTradeStatusListSchema.optional(),
+  /**
+   * Case-insensitive substring search over id, swap_dvp, both parties, both
+   * escrows, both mints and both leg symbols. Absent means unfiltered.
+   */
+  q: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value.length === 0 || value.length >= 2, {
+      message: "Search must be blank or contain at least 2 characters",
+    })
+    .optional(),
+});
+
+/**
+ * The fund body: which leg, and optionally which of the caller's wallets pays
+ * (it must hold that side's party address — naming one narrows, never widens).
+ */
+export const fundDvpTradeSchema = z.object({
+  side: z.enum(DVP_TRADE_SIDES),
+  walletId: z.string().min(1).nullish(),
 });

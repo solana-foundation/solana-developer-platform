@@ -4,6 +4,7 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
+import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
@@ -81,14 +82,16 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   );
 
   await expect
-    .poll(() =>
-      target.evaluate(() => {
-        return (
-          window as unknown as {
-            Clerk?: { organization?: { id?: string } };
-          }
-        ).Clerk?.organization?.id;
-      })
+    .poll(
+      () =>
+        target.evaluate(() => {
+          return (
+            window as unknown as {
+              Clerk?: { organization?: { id?: string } };
+            }
+          ).Clerk?.organization?.id;
+        }),
+      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
     )
     .toBe(identity.organizationId);
 
@@ -106,7 +109,11 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   }
 
   await target.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
-  await expect(target).toHaveURL(/\/dashboard/);
+  // Local suites seed the SDP organization in beforeAll, after this auth-only
+  // setup. A Clerk session without that mapping must stop at the sync gate.
+  await expect(target).toHaveURL(
+    env.useExternalApi ? /\/dashboard/ : /\/(dashboard|workspace-loading)(?:[/?]|$)/
+  );
   fs.mkdirSync(path.dirname(authStatePath), { recursive: true });
   await target.context().storageState({ path: authStatePath });
   await ticketContext?.close();

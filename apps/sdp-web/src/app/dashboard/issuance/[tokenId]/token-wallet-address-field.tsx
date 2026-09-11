@@ -38,7 +38,12 @@ export function TokenWalletAddressField({
   const t = useTranslations();
   const inputId = useId();
   const errorId = useId();
-  const { message: nativeError, onInvalid, revalidate } = useInlineValidationMessage(label);
+  const {
+    message: nativeError,
+    onInvalid,
+    revalidate,
+    clearValidationMessage,
+  } = useInlineValidationMessage(label);
   const hasError = Boolean(error) || nativeError !== null;
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -114,6 +119,7 @@ export function TokenWalletAddressField({
             aria-label={t("DashboardIssuance.wallet.clear", { label: label.toLowerCase() })}
             onClick={() => {
               onChange("");
+              clearValidationMessage();
               setIsOpen(false);
             }}
             className="absolute top-1/2 right-11 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-tertiary transition-colors hover:bg-fill hover:text-primary"
@@ -141,6 +147,7 @@ export function TokenWalletAddressField({
                 type="button"
                 onClick={() => {
                   onChange(wallet.publicKey);
+                  clearValidationMessage();
                   setIsOpen(false);
                 }}
                 className="flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"

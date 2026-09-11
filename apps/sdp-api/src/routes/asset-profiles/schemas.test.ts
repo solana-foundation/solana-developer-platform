@@ -52,11 +52,113 @@ describe("issuanceMetadataSchema asset link validation", () => {
 
   it("does not constrain link-shaped text in non-link keys", () => {
     const result = issuanceMetadataSchema.safeParse({
-      asset: { notes: "javascript:alert(1) quoted in an incident report" },
+      asset: { notes: "an incident report quoting javascript:alert(1) inline" },
       compliance: { website: "javascript:not-validated-here" },
     });
     // compliance.* is never publicly projected; only the asset namespace is
     // clamped. The schema stays permissive elsewhere by design.
+    expect(result.success).toBe(true);
+  });
+
+  it("refuses an active-content scheme that opens a value carrying prose", () => {
+    for (const notes of [
+      "javascript:alert(1) // note",
+      "data:text/html,<script>alert(1)</script> screenshot below",
+      "  vbscript:evil payload seen in the wild",
+    ]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(false);
+    }
+  });
+
+  it("refuses an active-content scheme split by characters a URL parser drops", () => {
+    for (const notes of [
+      "java\tscript:alert(1)",
+      "java\nscript:alert(1)",
+      "java\rscript:alert(1)",
+      "\u0001javascript:alert(1)",
+      "da\tta:text/html,<script>alert(1)</script>",
+    ]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(false);
+    }
+  });
+
+  it("leaves values that parse to no scheme unconstrained", () => {
+    for (const notes of [
+      "Follow us: javascript is fun",
+      "A description with: a colon",
+      "1st place: winner",
+    ]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(true);
+    }
+  });
+
+  it("keeps non-executing schemes usable", () => {
+    for (const notes of ["urn:uuid:1-2-3", "mailto:team@example.test"]) {
+      expect(issuanceMetadataSchema.safeParse({ asset: { notes } }).success, notes).toBe(true);
+    }
+  });
+
+  it("refuses an active-content URI under a key the name pattern never covered", () => {
+    for (const key of ["banner", "avatar", "thumbnail"]) {
+      const result = issuanceMetadataSchema.safeParse({
+        asset: { [key]: "javascript:alert(1)" },
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("refuses an active-content URI nested below the top level", () => {
+    const result = issuanceMetadataSchema.safeParse({
+      asset: { links: { docs: "javascript:alert(1)" } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses an active-content URI inside an array", () => {
+    const result = issuanceMetadataSchema.safeParse({
+      asset: { gallery: ["https://example.com/a.png", "data:text/html,<script>"] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("keeps ordinary nested http(s) links and plain values", () => {
+    const result = issuanceMetadataSchema.safeParse({
+      asset: {
+        links: { docs: "https://example.com/docs" },
+        gallery: ["https://example.com/a.png"],
+        supply: 1000,
+        notes: "see https://example.com for details",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("still requires a link-named key to hold a real http(s) URL", () => {
+    expect(issuanceMetadataSchema.safeParse({ asset: { website: "not a url" } }).success).toBe(
+      false
+    );
+    expect(
+      issuanceMetadataSchema.safeParse({
+        asset: { website: `https://x.example/${"a".repeat(2100)}` },
+      }).success
+    ).toBe(false);
+  });
+
+  it("sees through whitespace padding around an active-content URI", () => {
+    expect(
+      issuanceMetadataSchema.safeParse({ asset: { banner: " javascript:alert(1)" } }).success
+    ).toBe(false);
+    expect(
+      issuanceMetadataSchema.safeParse({ asset: { banner: "javascript:alert(1)\n" } }).success
+    ).toBe(false);
+  });
+
+  it("keeps inert non-http URIs outside link-named keys", () => {
+    // The rule is about active content, not about being an http URL: an open
+    // namespace legitimately carries identifiers and contact addresses.
+    const result = issuanceMetadataSchema.safeParse({
+      asset: { identifier: "urn:isin:US0000000000", contact: "mailto:ops@example.com" },
+    });
     expect(result.success).toBe(true);
   });
 });

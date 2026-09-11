@@ -1,5 +1,11 @@
 import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk";
-import { createRpc, getSignatureStatuses, type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
+import {
+  createRpc,
+  createRpcFromTransport,
+  getSignatureStatuses,
+  type SolanaRpc,
+  sendTransaction,
+} from "@sdp/rpc/solana";
 import { getBase64Codec } from "@solana/codecs";
 import {
   isSolanaError,
@@ -7,6 +13,7 @@ import {
   SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
 } from "@solana/kit";
+import { createRpcTransportForTarget } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, type RingsAdapterFailureCode } from "./adapter-error";
 import { requireRingsHeliusRpcUrl } from "./rpc-config";
@@ -28,6 +35,8 @@ function createRingsHeliusRpc(env: Env): { rpc: SolanaRpc; rpcUrl: string } {
 export interface SubmitRingsOuterTransactionInput {
   env: Env;
   signedTxBase64: string;
+  /** Persisted Rings connection URL. Legacy callers may omit it. */
+  rpcUrl?: string;
   /** Test seam; production resolves the env RPC. */
   rpc?: SolanaRpc;
 }
@@ -39,6 +48,21 @@ export async function submitRingsOuterTransaction(
   let rpc: SolanaRpc;
   if (input.rpc) {
     rpc = input.rpc;
+  } else if (input.rpcUrl) {
+    resolvedRpcUrl = input.rpcUrl;
+    // A persisted connection URL is tenant-controlled, so outside development
+    // it is dialed through the guarded transport: DNS-checked at connect time,
+    // redirects re-guarded per hop. Development keeps the plain client — local
+    // endpoints legitimately resolve to loopback.
+    rpc =
+      input.env.ENVIRONMENT === "development"
+        ? createRpc(input.env, { rpcUrl: input.rpcUrl })
+        : createRpcFromTransport(
+            createRpcTransportForTarget({
+              endpoint: input.rpcUrl,
+              connectionId: "rings-connection",
+            })
+          );
   } else {
     const configuredRpc = createRingsHeliusRpc(input.env);
     rpc = configuredRpc.rpc;

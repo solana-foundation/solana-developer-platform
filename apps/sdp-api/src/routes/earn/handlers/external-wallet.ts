@@ -132,7 +132,10 @@ const EXTERNAL_POSITION_PAGE_SIZE = 100;
  * plausible-looking partial total.
  */
 export async function getEarnExternalWalletPositionSummary(c: AppContext) {
-  parseQuery(c, earnExternalWalletPositionSummaryQuerySchema);
+  const { includeOwnerAddresses = true, includePositions = false } = parseQuery(
+    c,
+    earnExternalWalletPositionSummaryQuerySchema
+  );
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -149,7 +152,10 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   );
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
-  const summary = summarizeExternalWalletPositions(holdings, live);
+  const summary = summarizeExternalWalletPositions(holdings, live, {
+    includeOwnerAddresses,
+    includePositions,
+  });
   if (summary.unavailablePositionCount > 0) {
     getLogger().warn(
       {
@@ -602,6 +608,7 @@ export async function createEarnExternalWalletDepositTransaction(
     projectId,
     environment,
     provider,
+    strategyId: strategy.id,
     providerReference: strategy.provider_reference,
     ownerAddress: body.ownerAddress,
     ...(feePayer === undefined ? {} : { feePayer }),
@@ -1054,13 +1061,18 @@ interface MutableStrategyTotal {
   providerReference: string;
   label: string;
   owners: Set<string>;
+  positions?: EarnExternalWalletPosition[];
   positionCount: number;
   tokens: Map<string, MutableTokenTotal>;
 }
 
 function summarizeExternalWalletPositions(
   holdings: readonly ExternalWalletHolding[],
-  live: ReadonlyMap<string, HydratedVaultPositionValue>
+  live: ReadonlyMap<string, HydratedVaultPositionValue>,
+  options: { includeOwnerAddresses: boolean; includePositions: boolean } = {
+    includeOwnerAddresses: true,
+    includePositions: false,
+  }
 ): EarnExternalWalletPositionSummary {
   const owners = new Set<string>();
   const strategies = new Map<string, MutableStrategyTotal>();
@@ -1082,12 +1094,14 @@ function summarizeExternalWalletPositions(
         providerReference: holding.vaultAddress,
         label: holding.label,
         owners: new Set(),
+        ...(options.includePositions ? { positions: [] } : {}),
         positionCount: 0,
         tokens: new Map(),
       };
       strategies.set(strategyKey, strategy);
     }
     strategy.owners.add(holding.ownerAddress);
+    strategy.positions?.push(toExternalWalletPositionWire(holding, live.get(holding.id)));
     strategy.positionCount += 1;
     addToTokenTotal(strategy.tokens, holding, value);
     addToTokenTotal(tokens, holding, value);
@@ -1102,7 +1116,21 @@ function summarizeExternalWalletPositions(
         provider: strategy.provider,
         providerReference: strategy.providerReference,
         label: strategy.label,
-        ownerAddresses: [...strategy.owners].sort(compareWireStrings),
+        // The address list is the PII-bearing half of this read (EARN-028):
+        // omitted, not emptied, when the caller asked for totals only, so a
+        // consumer cannot mistake "not requested" for "no owners".
+        ...(options.includeOwnerAddresses
+          ? { ownerAddresses: [...strategy.owners].sort(compareWireStrings) }
+          : {}),
+        ...(strategy.positions
+          ? {
+              positions: strategy.positions.sort(
+                (left, right) =>
+                  compareWireStrings(left.ownerAddress, right.ownerAddress) ||
+                  compareWireStrings(left.id, right.id)
+              ),
+            }
+          : {}),
         walletCount: strategy.owners.size,
         positionCount: strategy.positionCount,
         totalsByToken: [...strategy.tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),

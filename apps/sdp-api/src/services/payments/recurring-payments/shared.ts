@@ -21,12 +21,12 @@ import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recur
 import { AppError, badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
-import {
-  type SignedSubmissionStore,
-  submitSignedPaymentTransaction,
-} from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  type SignedSubmissionStore,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -145,7 +145,7 @@ export async function sendSubscriptionInstructions(input: {
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
   return input.submissionStore
-    ? submitSignedPaymentTransaction({
+    ? submitSponsoredTransaction({
         feePayment,
         rpc,
         transaction: txBytes,

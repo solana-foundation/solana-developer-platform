@@ -1,8 +1,12 @@
+import { signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { type DvpTradeExpectation, type DvpTradeObservation, deriveDvpTradeState } from "./observe";
 
 const NOW_MS = 1_800_000_000_000;
 const NOW_SECONDS = Math.floor(NOW_MS / 1000);
+const CLOSE_SIGNATURE = signature(
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+);
 
 function observation(overrides: Partial<DvpTradeObservation> = {}): DvpTradeObservation {
   return {
@@ -10,6 +14,7 @@ function observation(overrides: Partial<DvpTradeObservation> = {}): DvpTradeObse
     legA: { exists: true, amount: 0n, frozen: false },
     legB: { exists: true, amount: 0n, frozen: false },
     blockHeight: 1_000n,
+    closeResolution: null,
     ...overrides,
   };
 }
@@ -21,6 +26,9 @@ function trade(overrides: Partial<DvpTradeExpectation> = {}): DvpTradeExpectatio
     amountB: "2000",
     expiryTimestamp: String(NOW_SECONDS + 3600),
     createLastValidBlockHeight: "1500",
+    createSignature:
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+    createdAt: new Date(NOW_MS - 1_000).toISOString(),
     ...overrides,
   };
 }
@@ -157,6 +165,18 @@ describe("deriveDvpTradeState", () => {
   });
 
   describe("closure", () => {
+    it.each(["settled", "cancelled", "rejected"] as const)("uses a decoded %s close", (status) => {
+      const result = deriveDvpTradeState(
+        observation({
+          tradeAccountExists: false,
+          closeResolution: { status, signature: CLOSE_SIGNATURE },
+        }),
+        trade({ status: "funded" }),
+        NOW_MS
+      );
+      expect(result.status).toBe(status);
+    });
+
     it("reports closed_unknown for a trade whose account has gone", () => {
       for (const status of ["created", "partially_funded", "funded", "expired"] as const) {
         const result = deriveDvpTradeState(

@@ -94,7 +94,9 @@ export type RingsOperationOpType =
   | "merge"
   | "timelock_create"
   | "timelock_settle"
-  | "zone_create";
+  | "zone_create"
+  | "ring_exit"
+  | "ring_entry";
 
 export interface RingsOperationSummary {
   id: string;
@@ -228,6 +230,11 @@ export interface RingsShieldedBalance {
   decimals: number | null;
   /** Ring the notes are bound to; null = the default public pool. Never merged across rings. */
   ringProgramId: string | null;
+  /**
+   * Unspent notes making up this balance. More than one means the position is
+   * fragmented, which is what a merge consolidates.
+   */
+  noteCount: number;
   /** USD per whole unit, when pricing was reachable. */
   usdPrice?: number;
   /** amountRaw × usdPrice, rounded to 2dp; absent when the mint went unpriced. */
@@ -325,18 +332,26 @@ export async function fetchRingsWalletIdentity(
  * rejects anything else on a strict schema, so widening this without widening
  * that one only moves the refusal later.
  */
-export type RingsOpType = "shield" | "withdraw" | "transfer_registered";
+export type RingsOpType =
+  | "shield"
+  | "withdraw"
+  | "transfer_registered"
+  | "merge"
+  | "ring_exit"
+  | "ring_entry";
 
 export interface PrepareRingsOperationInput {
   walletId: string;
   opType: RingsOpType;
-  asset: { mint: string; amountRaw: string };
+  /** No `amountRaw` on a merge: it consolidates whatever the notes already hold. */
+  asset: { mint: string; amountRaw?: string };
   /** Withdrawals only: the public address the funds leave the pool for. */
   to?: string;
   /**
    * Ring NAME the operation targets; the server resolves and pins the program
-   * id at prepare. Omitted = the default pool. For spends the named ring is
-   * the source of funds.
+   * id at prepare. Omitted = the default pool. For ring-bound spends and
+   * ring_exit the named ring is the source of funds; for ring shields and
+   * ring_entry it is the destination. Required for ring moves, never "default".
    */
   ring?: string;
 }
@@ -393,8 +408,11 @@ export function voidRingsOperation(
   );
 }
 
-/** Devnet assets seeded in the rings allowlist. */
+/** Native SOL. Merge (and this build's withdraw/transfer) accept only this mint. */
+export const RINGS_NATIVE_SOL_MINT = "So11111111111111111111111111111111111111112";
+
+/** Devnet assets seeded in the rings allowlist. Order is not a contract. */
 export const RINGS_ALLOWLISTED_ASSETS = [
-  { mint: "So11111111111111111111111111111111111111112", symbol: "SOL", decimals: 9 },
+  { mint: RINGS_NATIVE_SOL_MINT, symbol: "SOL", decimals: 9 },
   { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", symbol: "USDC", decimals: 6 },
 ] as const;

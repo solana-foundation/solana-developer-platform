@@ -107,6 +107,9 @@ jobs:
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
+      - name: Check pinned dependencies
+        run: pnpm check:pinned-dependencies
+
   translation_agent:
     name: Translation Agent
     runs-on: ubuntu-latest
@@ -181,6 +184,8 @@ jobs:
     outputs:
       api: ${{ steps.detect.outputs.api }}
       rest: ${{ steps.detect.outputs.rest }}
+      e2e: ${{ steps.detect.outputs.e2e }}
+      docker: ${{ steps.detect.outputs.docker }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -191,36 +196,43 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "api=true" >> "$GITHUB_OUTPUT"; echo "rest=true" >> "$GITHUB_OUTPUT"; exit 0
+            for scope in api rest e2e docker; do echo "${scope}=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
           fi
           changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(apps/sdp-api/|packages/|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|scripts/run-workspace-tests\.mjs|scripts/doppler/|\.github/workflows/ci\.yml)'; then
-            echo "api=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "api=false" >> "$GITHUB_OUTPUT"
-          fi
-          if printf '%s\n' "$changed" | grep -qE '^(apps/|packages/|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|scripts/|\.github/workflows/ci\.yml)'; then
-            echo "rest=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "rest=false" >> "$GITHUB_OUTPUT"
-          fi
+          detect() {
+            if printf '%s\n' "$changed" | grep -qE "$2"; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          detect api '^(apps/sdp-api/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/run-workspace-tests\.mjs|scripts/doppler/|\.github/workflows/ci\.yml)'
+          detect rest '^(apps/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
+          detect e2e '^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
+          detect docker '^(apps/|packages/|package\.json|\.npmrc|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|docker-compose(\.ci)?\.yml|\.dockerignore|\.github/workflows/ci\.yml)'
 
   test:
-    name: Unit Tests
+    name: Unit Tests (api ${{ matrix.shard }}/8)
     needs: unit_test_scope
     if: needs.unit_test_scope.outputs.api == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       TURBO_CACHE_DIR: ${{ github.workspace }}/.turbo-ci-cache
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       TEST_WORKSPACE_SPLIT: api
       TEST_CHANGED_SINCE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
-      DOPPLER_PRESERVE_ENV: TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT
+      TEST_SHARD: ${{ matrix.shard }}/8
+      DOPPLER_PRESERVE_ENV: TEST_CHANGED_SINCE,TEST_WORKSPACE_SPLIT,TEST_SHARD
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -242,9 +254,9 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo-ci-cache
-          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ github.job }}-${{ runner.os }}-
+            turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -279,13 +291,80 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo-ci-cache
-          key: turbo-${{ github.job }}-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
 
       - name: Unit tests (fork-safe)
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
           node scripts/run-workspace-tests.mjs unit
+
+      - name: Upload vitest shard artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: vitest-api-shard-${{ matrix.shard }}
+          path: apps/sdp-api/.vitest-reports/blob-${{ matrix.shard }}-8.json
+          include-hidden-files: true
+          if-no-files-found: error
+
+  test_merge:
+    name: Unit Tests
+    needs: [unit_test_scope, test]
+    if: always() && needs.unit_test_scope.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Report shard results
+        env:
+          SHARD_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "${SHARD_RESULT}" != "success" ]; then
+            echo "One or more Unit Tests (api) shards finished with ${SHARD_RESULT}." >&2
+            exit 1
+          fi
+          echo "All Unit Tests (api) shards passed."
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: vitest-api-shard-*
+          path: shard-artifacts
+
+      - name: Verify and assemble shard blobs
+        run: |
+          set -euo pipefail
+          mkdir -p apps/sdp-api/.vitest-reports
+          for shard in 1 2 3 4 5 6 7 8; do
+            blob="shard-artifacts/vitest-api-shard-${shard}/blob-${shard}-8.json"
+            if [ ! -f "${blob}" ]; then
+              echo "Missing blob report for shard ${shard} (expected ${blob})." >&2
+              exit 1
+            fi
+            cp "${blob}" apps/sdp-api/.vitest-reports/
+          done
+          echo "Assembled $(find apps/sdp-api/.vitest-reports -type f | wc -l | tr -d ' ') blob files."
+
+      - name: Merge coverage and enforce thresholds
+        working-directory: apps/sdp-api
+        run: pnpm exec vitest run --merge-reports --coverage
 
   test_packages:
     name: Unit Tests (packages)
@@ -410,6 +489,8 @@ jobs:
 
   docker_build_api:
     name: Docker Build API
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.docker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -436,6 +517,8 @@ jobs:
 
   docker_build_docs:
     name: Docker Build Docs
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.docker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -462,6 +545,8 @@ jobs:
 
   docker_build_web:
     name: Docker Build Web
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.docker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -490,17 +575,23 @@ jobs:
 
   docker_compose_smoke:
     name: Docker Compose Smoke
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.docker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_c21va2UubG9jYWwuY2xlcmsuZGV2JA
       CLERK_SECRET_KEY: sk_test_dummy_smoke_for_ci_only
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Expose GitHub Actions cache to BuildKit
+        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
       - name: Build compose stack
         run: docker compose build
@@ -789,6 +880,8 @@ jobs:
 
   browser_e2e:
     name: ${{ matrix.name }}
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -804,9 +897,21 @@ jobs:
           - name: Dashboard E2E (Transactions / Surfpool Local)
             test_script: test:e2e:dashboard-transactions
             artifact_suffix: dashboard-transactions-surfpool
-          - name: Issuance E2E (Surfpool Shards)
-            test_script: kora:surfpool:e2e:issuance
-            artifact_suffix: issuance
+          - name: Issuance E2E (basics)
+            issuance_group: basics
+            artifact_suffix: issuance-basics
+          - name: Issuance E2E (authority and supply)
+            issuance_group: authority-and-supply
+            artifact_suffix: issuance-authority-and-supply
+          - name: Issuance E2E (freeze controls)
+            issuance_group: freeze-controls
+            artifact_suffix: issuance-freeze-controls
+          - name: Issuance E2E (pause controls)
+            issuance_group: pause-controls
+            artifact_suffix: issuance-pause-controls
+          - name: Issuance E2E (allowlist)
+            issuance_group: allowlist
+            artifact_suffix: issuance-allowlist
     env:
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
@@ -925,7 +1030,7 @@ jobs:
 
       - name: Install Playwright browser
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
-        run: pnpm --filter sdp-web exec playwright install --with-deps chromium
+        run: pnpm --filter sdp-web exec playwright install chromium
 
       - name: Build web app for Playwright
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -942,8 +1047,8 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
-          if [ "${{ matrix.test_script }}" = "kora:surfpool:e2e:issuance" ]; then
-            scripts/doppler/run-with-config.sh pnpm ${{ matrix.test_script }}
+          if [ -n "${{ matrix.issuance_group }}" ]; then
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance ${{ matrix.issuance_group }}
           else
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
           fi
@@ -962,3 +1067,27 @@ jobs:
             apps/sdp-web/playwright-report
             apps/sdp-web/test-results
           if-no-files-found: ignore
+
+  issuance_e2e:
+    name: Issuance E2E (Surfpool Shards)
+    runs-on: ubuntu-latest
+    needs: [unit_test_scope, browser_e2e]
+    if: always() && needs.unit_test_scope.outputs.e2e == 'true'
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Require all five issuance groups green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist)\\)$")) | .conclusion]')
+          count=$(jq 'length' <<<"${conclusions}")
+          green=$(jq '[.[] | select(. == "success")] | length' <<<"${conclusions}")
+          if [ "${count}" -ne 5 ] || [ "${green}" -ne 5 ]; then
+            echo "Expected 5 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
+            exit 1
+          fi
+          echo "All 5 issuance e2e groups passed."

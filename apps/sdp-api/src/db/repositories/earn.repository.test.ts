@@ -228,6 +228,76 @@ describe("EarnRepository (postgres)", () => {
     });
   });
 
+  /**
+   * The "before" the anomaly check (PRO-1867) diffs against: the whole stored
+   * shelf for one (provider, environment), every status and both clusters.
+   */
+  describe("listStrategyFigures", () => {
+    it("returns every row for the provider and environment with TVL lifted out of the metadata", async () => {
+      await seedStrategy({
+        providerReference: "a",
+        currentApy: "0.05",
+        riskMetadata: { tvlUsd: 1_500_000 },
+      });
+      await seedStrategy({
+        providerReference: "b",
+        currentApy: null,
+        riskMetadata: {},
+        status: "paused",
+      });
+      await seedStrategy({
+        providerReference: "m",
+        hostCluster: "mainnet-beta",
+        riskMetadata: { tvlUsd: 9e7 },
+      });
+      // Other provider and other environment: out of scope.
+      await seedStrategy({ provider: "kamino", providerReference: "a" });
+      await seedStrategy({
+        providerReference: "a",
+        environment: "production",
+        hostCluster: "mainnet-beta",
+      });
+
+      const figures = await repo.listStrategyFigures({ provider: "veda", environment: "sandbox" });
+
+      expect(figures).toEqual([
+        {
+          provider_reference: "a",
+          host_cluster: "devnet",
+          status: "active",
+          current_apy: "0.05",
+          tvl_usd: 1_500_000,
+        },
+        {
+          provider_reference: "b",
+          host_cluster: "devnet",
+          status: "paused",
+          current_apy: null,
+          tvl_usd: null,
+        },
+        {
+          provider_reference: "m",
+          host_cluster: "mainnet-beta",
+          status: "active",
+          current_apy: "0.052",
+          tvl_usd: 90_000_000,
+        },
+      ]);
+    });
+
+    it("reads a non-numeric tvlUsd as no figure and a NULL host_cluster as the environment's cluster", async () => {
+      const seeded = await seedStrategy({ riskMetadata: { tvlUsd: "12M" } });
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?")
+        .bind(seeded.id)
+        .run();
+
+      const [figure] = await repo.listStrategyFigures({ provider: "veda", environment: "sandbox" });
+
+      expect(figure).toMatchObject({ tvl_usd: null, host_cluster: "devnet" });
+    });
+  });
+
   describe("upsertStrategy", () => {
     it("inserts a catalogue row and round-trips the jsonb columns", async () => {
       const row = await seedStrategy();
@@ -880,6 +950,7 @@ describe("EarnRepository (postgres)", () => {
     ): Promise<ListEarnProviderWalletsResult> {
       return repo.listProviderWallets({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
         environment: "sandbox",
         limit: 20,
         offset: 0,
@@ -1047,7 +1118,10 @@ describe("EarnRepository (postgres)", () => {
         await expect(listPrograms({ environment: "production" })).resolves.toMatchObject({
           total: 1,
         });
-        const theirs = await listPrograms({ organizationId: OTHER_ORG.id });
+        const theirs = await listPrograms({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+        });
         expect(theirs.rows.map((row) => row.id)).toEqual([sibling.id]);
       });
 
@@ -1108,14 +1182,18 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      // project_id is still provisioning context only — a program created from a
-      // sibling project joins the same org+environment collection.
+      // A sibling project may hold its own program, but it belongs to THAT
+      // project's collection: the project is a boundary on the list exactly as
+      // it is on every per-program route (HOO-1563).
       await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
         project_id: OTHER_PROJECT_ID,
       });
+      await expect(listPrograms({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
+        total: 1,
+      });
 
       const { total } = await listPrograms();
-      expect(total).toBe(4);
+      expect(total).toBe(3);
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {

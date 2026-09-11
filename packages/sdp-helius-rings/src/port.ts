@@ -26,13 +26,22 @@ export interface ProvisionIdentityInput {
 export interface ProvisionIdentityResult {
   identity: ShieldedIdentity;
   registrationSignatures: string[];
-  mergingEnabled: boolean;
   materialTag: MaterialTag;
 }
 
 export interface ReadIdentityInput {
   walletId: string;
   owner: string;
+}
+
+export interface EnsureMergingEnabledInput {
+  walletId: string;
+  owner: string;
+}
+
+export interface EnsureMergingEnabledResult {
+  /** Null when the record already permitted merging and nothing was sent. */
+  signature: string | null;
 }
 
 /**
@@ -155,6 +164,13 @@ export interface RingsGatewayPort {
    * human confirmation — nothing about this is recoverable.
    */
   rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult>;
+  /**
+   * Clears the on-chain precondition for merging, which registration cannot
+   * set. Idempotent and cheap when already on: it reads the record first and
+   * sends nothing in the common case. Provisioning runs it for new wallets, so
+   * this is reached only by wallets registered before merge shipped.
+   */
+  ensureMergingEnabled(input: EnsureMergingEnabledInput): Promise<EnsureMergingEnabledResult>;
   syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult>;
   buildOperation(input: BuildOperationInput): Promise<BuildOperationResult>;
   verifyIndexed(signature: string): Promise<VerifyIndexedResult | null>;

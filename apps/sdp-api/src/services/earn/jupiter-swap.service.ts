@@ -191,6 +191,12 @@ export interface JupiterSwapLeg {
    * This is the amount a composed vault deposit must be sized to.
    */
   minOutAmount: string;
+  /**
+   * The same floor in deposit-token BASE UNITS, exactly as the chain enforces
+   * it. The orphaned split-swap detector compares it to balance reads, which
+   * also answer in atoms; the decimal twin above is display only (PRO-1864).
+   */
+  minOutAtoms: string;
   /** Quoted price impact as a decimal ratio string. */
   priceImpactPct: string;
   /** Venue labels along the route, for display and diagnostics. */
@@ -733,6 +739,7 @@ export async function fetchJupiterSwapLeg(
     sourceAmount: request.sourceAmount,
     quotedAmount: formatDecimalAmount(BigInt(body.outAmount), depositDecimals),
     minOutAmount: formatDecimalAmount(minOutAtoms, depositDecimals),
+    minOutAtoms: minOutAtoms.toString(),
     priceImpactPct: String(body.priceImpactPct ?? "0"),
     routeLabels: (body.routePlan ?? [])
       .map((step) => step.swapInfo?.label)

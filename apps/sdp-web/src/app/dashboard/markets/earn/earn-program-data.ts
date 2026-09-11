@@ -589,15 +589,26 @@ export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExte
   return body.data.summary;
 }
 
-const EXTERNAL_WALLET_SUMMARY_REFRESH_INTERVAL_MS =
-  process.env.NODE_ENV === "development" ? 3_000 : 60_000;
+export function earnExternalWalletSummaryRefreshInterval(
+  detailsVisible: boolean,
+  environment = process.env.NODE_ENV
+): number {
+  if (environment === "development") return 3_000;
+  return detailsVisible ? 15_000 : 60_000;
+}
 
 /** Live customer portfolio totals refresh while the Embedded Yield dashboard is mounted. */
-export function useEarnExternalWalletPositionSummary() {
+export function useEarnExternalWalletPositionSummary({
+  detailsVisible = false,
+}: {
+  detailsVisible?: boolean;
+} = {}) {
   const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-external-wallet-position-summary",
     () => fetchEarnExternalWalletPositionSummary(),
-    { refreshInterval: EXTERNAL_WALLET_SUMMARY_REFRESH_INTERVAL_MS }
+    {
+      refreshInterval: earnExternalWalletSummaryRefreshInterval(detailsVisible),
+    }
   );
   return {
     summary: data,

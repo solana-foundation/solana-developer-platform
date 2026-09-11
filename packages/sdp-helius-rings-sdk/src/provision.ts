@@ -14,9 +14,11 @@ import {
 } from "@solana/kit";
 import {
   canonicalShieldedIdentity,
+  publishedHalves,
   type ShieldedMaterial,
   type ShieldedMaterialSource,
 } from "./material.js";
+import { ensureRingsMergingEnabled } from "./merging.js";
 
 /**
  * Registers a shielded identity on chain.
@@ -89,13 +91,20 @@ export async function provisionRingsIdentity(
       }
       assertRecordMatchesMaterial(confirmed, material, input.owner);
 
+      // Registration cannot carry the merging flag, so a freshly published
+      // record refuses merges until this lands. Doing it here means the wallet
+      // is complete when provisioning returns rather than on its first merge.
+      if (!confirmed.mergingEnabled) {
+        const enabled = await ensureRingsMergingEnabled(deps, { owner: input.owner });
+        if (enabled.signature) signatures.push(enabled.signature);
+      }
+
       return {
         identity: {
           shieldedAddress: canonicalShieldedIdentity(material.shieldedAddress),
           owner: input.owner,
         },
         registrationSignatures: signatures,
-        mergingEnabled: confirmed.mergingEnabled,
         materialTag: "live",
       };
     }
@@ -170,7 +179,6 @@ export async function rekeyRingsIdentity(
           owner: input.owner,
         },
         registrationSignatures: signatures,
-        mergingEnabled: confirmed.mergingEnabled,
         materialTag: "live",
       };
     }
@@ -206,10 +214,12 @@ function firstMismatch(
   owner: string
 ): string | undefined {
   if (record.owner !== owner) return "owner";
-  if (!sameBytes(record.nullifierPublicKey, material.nullifierKey.publicKey())) {
+
+  const derived = publishedHalves(material.shieldedAddress);
+  if (!sameBytes(record.nullifierPublicKey, derived.nullifierPublicKey)) {
     return "nullifier key";
   }
-  if (!sameBytes(record.viewingPublicKey, material.viewingKey.publicKey().toBytes())) {
+  if (!sameBytes(record.viewingPublicKey, derived.viewingPublicKey)) {
     return "viewing key";
   }
   return undefined;

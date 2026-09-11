@@ -1,41 +1,55 @@
 "use client";
 
-import type { SolanaCluster } from "@sdp/types";
+import type { DvpLegOutcome, DvpTradeSide, SolanaCluster } from "@sdp/types";
 import {
-  ArrowLeftRightIcon,
   CheckIcon,
+  ChevronRightIcon,
   CircleCheckIcon,
   ClockIcon,
   CopyIcon,
   ExternalLinkIcon,
+  InfoIcon,
   type LucideIcon,
   SnowflakeIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { AnimatePresence } from "motion/react";
+import { Fragment, type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { EntityLink } from "@/components/entity-link";
+import { TokenLogo } from "@/components/token-logo";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
+import { HeightReveal } from "@/components/ui/height-reveal";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
-
 import { cn } from "@/lib/utils";
+import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
+  type DvpPartyRef,
   type DvpTrade,
+  type DvpTradeKind,
   type DvpTradeLeg,
   formatLegAmount,
   frozenLegs,
-  isDvpAgentTrade,
   isDvpPartyView,
   isDvpTradeClosed,
   legFundingRatio,
   overFundedLegs,
-  sdpLegSideOf,
 } from "./dvp-trade";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -47,12 +61,23 @@ import { useDvpTradeActions } from "./use-dvp-trade-actions";
  * goes on the clipboard while the display stays shortened — copying a truncated
  * address would send tokens nowhere.
  */
-function CopyableAddress({ address, label }: { address: string; label: string }) {
+function CopyableAddress({
+  address,
+  label,
+  className,
+}: {
+  address: string;
+  label: string;
+  className?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   return (
     <button
-      className="inline-flex max-w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left font-mono text-secondary text-xs transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
+      className={cn(
+        "inline-flex max-w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left font-mono text-secondary text-xs transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong",
+        className
+      )}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(address);
@@ -82,44 +107,18 @@ function CopyableAddress({ address, label }: { address: string; label: string })
   );
 }
 
-/** Lamports as SOL, to three places — enough to read a rent figure. */
-function formatLamports(lamports: bigint): string {
-  const whole = lamports / 1_000_000_000n;
-  const fraction = (lamports % 1_000_000_000n).toString().padStart(9, "0").slice(0, 3);
-  return `${whole}.${fraction}`;
-}
-
-/**
- * One transaction, linked to an explorer.
- *
- * A signature is not something anybody reads — its only use is following it, so
- * it renders as a link rather than as forty-four characters of base58 the way
- * the addresses do.
- */
-function TransactionLink({
-  signature,
-  label,
-  cluster,
-}: {
-  signature: string;
-  label: string;
-  cluster: SolanaCluster;
-}) {
+/** A transaction signature as an explorer link: nobody reads one, they follow it. */
+function TransactionLink({ signature, cluster }: { signature: string; cluster: SolanaCluster }) {
   return (
-    <div>
-      <dt className="text-tertiary text-xs">{label}</dt>
-      <dd className="mt-0.5">
-        <a
-          className="inline-flex items-center gap-1 text-primary text-xs underline underline-offset-2"
-          href={explorerTxUrl(signature, cluster)}
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          <span className="font-mono">{`${signature.slice(0, 8)}…${signature.slice(-8)}`}</span>
-          <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-        </a>
-      </dd>
-    </div>
+    <a
+      className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
+      href={explorerTxUrl(signature, cluster)}
+      rel="noreferrer noopener"
+      target="_blank"
+    >
+      <span className="font-mono">{`${signature.slice(0, 8)}…${signature.slice(-8)}`}</span>
+      <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+    </a>
   );
 }
 
@@ -131,462 +130,530 @@ function TransactionLink({
  * from it, and a warning triangle captioned for the wrong reason is worse than
  * no icon at all.
  */
-function legStatus(
-  leg: DvpTradeLeg,
-  closed: boolean
-): { Icon: LucideIcon; tone: string; key: MessageKey } {
-  if (closed) {
-    return {
-      Icon: CircleCheckIcon,
-      tone: "text-success",
-      key: "DashboardMarkets.dvp.legDelivered",
-    };
+function legStatus(leg: DvpTradeLeg): {
+  Icon: LucideIcon;
+  tone: string;
+  bar: string;
+  key: MessageKey;
+} {
+  switch (leg.outcome) {
+    case "delivered":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-success",
+        bar: "bg-success",
+        key: "DashboardMarkets.dvp.legDelivered",
+      };
+    case "refunded":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-tertiary",
+        bar: "bg-fill-strong",
+        key: "DashboardMarkets.dvp.legRefunded",
+      };
+    case "closed":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-tertiary",
+        bar: "bg-fill-strong",
+        key: "DashboardMarkets.dvp.legClosed",
+      };
+    case "expired":
+      return {
+        Icon: ClockIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legExpired",
+      };
+    case "frozen":
+      return {
+        Icon: SnowflakeIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legFrozen",
+      };
+    case "overfunded":
+      return {
+        Icon: TriangleAlertIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legOverFunded",
+      };
+    case "funded":
+      return {
+        Icon: CircleCheckIcon,
+        tone: "text-success",
+        bar: "bg-success",
+        key: "DashboardMarkets.dvp.legFunded",
+      };
+    case "reclaimed":
+      return {
+        Icon: ClockIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legReclaimed",
+      };
+    case "recoverable":
+      return {
+        Icon: TriangleAlertIcon,
+        tone: "text-warning",
+        bar: "bg-warning",
+        key: "DashboardMarkets.dvp.legRecoverable",
+      };
+    case "awaiting":
+    case "partial":
+      return {
+        Icon: ClockIcon,
+        tone: "text-tertiary",
+        bar: "bg-info",
+        key: "DashboardMarkets.dvp.legAwaiting",
+      };
+    default: {
+      const unreachable: never = leg.outcome;
+      throw new Error(`Unhandled DvP leg outcome ${String(unreachable)}`);
+    }
   }
-  if (leg.funding?.frozen) {
-    return { Icon: SnowflakeIcon, tone: "text-warning", key: "DashboardMarkets.dvp.legFrozen" };
-  }
-  if (leg.funding?.surplus) {
-    return {
-      Icon: TriangleAlertIcon,
-      tone: "text-warning",
-      key: "DashboardMarkets.dvp.legOverFunded",
-    };
-  }
-  if (leg.funding?.funded) {
-    return { Icon: CircleCheckIcon, tone: "text-success", key: "DashboardMarkets.dvp.legFunded" };
-  }
-  return { Icon: ClockIcon, tone: "text-tertiary", key: "DashboardMarkets.dvp.legAwaiting" };
 }
 
 /**
- * Which way the value moves, stated once, between the two legs.
- *
- * A DvP trade IS an exchange, and two cards sitting side by side never said so
- * — nothing on the page connected them, or named which direction anything went.
- * This is the one place the page earns its width.
+ * The caption for a leg held by a bare external address: a party of the trade,
+ * named by its slot. Wallets and registered counterparties are linked instead
+ * ({@link PartyLink}).
  */
+function holderLabel(t: ReturnType<typeof useTranslations>, side: DvpTradeSide): string {
+  return t(side === "a" ? "DashboardMarkets.dvp.legPartyA" : "DashboardMarkets.dvp.legPartyB");
+}
+
 /**
- * Which words the exchange band uses for each side.
+ * Which words the exchange summary uses for each side.
  *
- * Past tense once the trade is closed, on BOTH shapes. The principal labels
- * already did this and the agent ones did not, so a settled agent trade read
- * "First party delivers" about a delivery that finished minutes ago. Pulled out
- * of the component because it is four independent choices over two booleans and
- * none of them is rendering.
+ * Past tense once the trade settled; a cancelled trade delivered nothing. A
+ * bilateral trade is two of the caller's
+ * own legs going the other way, so "you deliver" / "you receive" has no single
+ * referent — the party words are the honest ones there, and for an agent too.
  */
-function exchangeBandLabelKeys(
-  agent: boolean,
-  closed: boolean
+function exchangeLabelKeys(
+  kind: DvpTradeKind,
+  settled: boolean
 ): { given: MessageKey; taken: MessageKey } {
-  if (agent) {
-    return closed
-      ? {
-          given: "DashboardMarkets.dvp.summaryPartyADelivered",
-          taken: "DashboardMarkets.dvp.summaryPartyBDelivered",
-        }
-      : {
-          given: "DashboardMarkets.dvp.summaryPartyADelivers",
-          taken: "DashboardMarkets.dvp.summaryPartyBDelivers",
-        };
+  if (kind === "principal") {
+    return settled
+      ? { given: "DashboardMarkets.dvp.youDelivered", taken: "DashboardMarkets.dvp.youReceived" }
+      : { given: "DashboardMarkets.dvp.youDeliver", taken: "DashboardMarkets.dvp.youReceive" };
   }
-  return closed
+  return settled
     ? {
-        given: "DashboardMarkets.dvp.youDelivered",
-        taken: "DashboardMarkets.dvp.youReceived",
+        given: "DashboardMarkets.dvp.summaryPartyADelivered",
+        taken: "DashboardMarkets.dvp.summaryPartyBDelivered",
       }
     : {
-        given: "DashboardMarkets.dvp.youDeliver",
-        taken: "DashboardMarkets.dvp.youReceive",
+        given: "DashboardMarkets.dvp.summaryPartyADelivers",
+        taken: "DashboardMarkets.dvp.summaryPartyBDelivers",
       };
 }
 
-function ExchangeBand({ trade, closed }: { trade: DvpTrade; closed: boolean }) {
+/** "You deliver 100 UDVP · you receive 100 USDC", from the caller's side. */
+function ExchangeSummary({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  const sdpSide = sdpLegSideOf(trade);
-  const agent = sdpSide === null;
-
-  // On an agent trade nobody here delivers or receives anything, so the band
-  // reads as the swap between the two parties instead of as your own position.
-  // Left is always the first party's leg then, because "you" has no referent.
-  const given = agent || sdpSide === "a" ? trade.legs.a : trade.legs.b;
-  const taken = agent || sdpSide === "a" ? trade.legs.b : trade.legs.a;
-  const { given: givenKey, taken: takenKey } = exchangeBandLabelKeys(agent, closed);
-  const givenLabel = t(givenKey);
-  const takenLabel = t(takenKey);
-
+  const labels = exchangeLabelKeys(trade.kind, trade.status === "settled");
+  // On a principal trade the caller's leg is "given"; the party words are
+  // fixed to A then B and need no swap.
+  const [given, taken] =
+    trade.kind === "principal" && trade.legs.b.party.wallet !== null
+      ? [trade.legs.b, trade.legs.a]
+      : [trade.legs.a, trade.legs.b];
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 rounded-xl border border-border-subtle bg-surface-sunken px-4 py-3">
-      <span className="flex items-center gap-2">
-        <span className="text-tertiary text-xs">{givenLabel}</span>
-        <span className="font-medium text-primary text-sm tabular-nums">
-          {formatLegAmount(given.amount, given.decimals)}
-          {given.symbol ? ` ${given.symbol}` : ""}
-        </span>
-      </span>
-      <ArrowLeftRightIcon aria-hidden className="h-4 w-4 shrink-0 text-tertiary" />
-      <span className="flex items-center gap-2">
-        <span className="text-tertiary text-xs">{takenLabel}</span>
-        <span className="font-medium text-primary text-sm tabular-nums">
-          {formatLegAmount(taken.amount, taken.decimals)}
-          {taken.symbol ? ` ${taken.symbol}` : ""}
-        </span>
-      </span>
-    </div>
+    <span className="text-secondary text-sm">
+      {t(labels.given)} {legAmountWithSymbol(given)} · {t(labels.taken)}{" "}
+      {legAmountWithSymbol(taken)}
+    </span>
   );
 }
 
-/** One leg: what it owes, what the escrow holds, and where to pay it. */
+/** "100 USDC", or just "100" for a mint without a symbol. */
+function legAmountWithSymbol(leg: DvpTradeLeg): string {
+  return `${formatLegAmount(leg.amount, leg.decimals)}${leg.symbol ? ` ${leg.symbol}` : ""}`;
+}
+
+/** The line under the amount: progress while open, the outcome once closed. */
+function legProgressCaption(
+  t: ReturnType<typeof useTranslations>,
+  outcome: DvpLegOutcome,
+  held: string,
+  target: string
+): string {
+  switch (outcome) {
+    case "delivered":
+      return t("DashboardMarkets.dvp.deliveredLabel");
+    case "refunded":
+      return t("DashboardMarkets.dvp.refundedLabel");
+    case "closed":
+      return t("DashboardMarkets.dvp.closedLabel");
+    case "awaiting":
+    case "partial":
+    case "funded":
+    case "overfunded":
+    case "frozen":
+    case "reclaimed":
+    case "recoverable":
+    case "expired":
+      return `${held} / ${target}`;
+  }
+}
+
+/**
+ * One leg as a fund manager reads it: what it is, who holds it, whether it has
+ * arrived, and the transaction that brought it. No addresses; those live in the
+ * on-chain details at the foot of the page.
+ */
 function LegCard({
-  leg,
-  title,
-  holder,
   action,
-  closed,
+  cluster,
+  leg,
+  side,
 }: {
+  action: ReactNode | undefined;
+  cluster: SolanaCluster;
   leg: DvpTradeLeg;
-  title: string;
-  holder: string;
-  action?: ReactNode;
-  /**
-   * The trade is over and this escrow no longer exists on chain.
-   *
-   * Everything about paying into it has to go: the address stays in the record
-   * after the account is closed, and a page still captioned "send exactly the
-   * target amount here" is instructing someone to transfer tokens into a closed
-   * account, where they are simply gone.
-   */
-  closed: boolean;
+  side: DvpTradeSide;
 }) {
   const t = useTranslations();
-  const ratio = legFundingRatio(leg);
-  const status = legStatus(leg, closed);
+  const outcome = leg.outcome;
+  const status = legStatus(leg);
+  const ratio =
+    outcome === "delivered"
+      ? 1
+      : outcome === "refunded" || outcome === "closed"
+        ? 0
+        : legFundingRatio(leg);
+  const percent = ratio === null ? 0 : Math.round(Math.min(ratio, 1) * 100);
+  const target = formatLegAmount(leg.amount, leg.decimals);
+  const held = leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0";
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-      {/* Centred, not baseline-aligned. A flex row takes its baseline from its
-          first flex item, and this heading's first item is an SVG — whose
-          baseline is its bottom edge. Aligning the row on that pushed the icon
-          and the title up off the line they share with the holder beside them,
-          which is what made the status icon look hung above its own heading. */}
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-1.5 font-medium text-primary text-sm">
-          <status.Icon aria-hidden className={cn("h-4 w-4 shrink-0", status.tone)} />
-          {title}
-        </h2>
-        <span className="text-tertiary text-xs">{holder}</span>
-      </div>
-      {/* The icon above is decorative; this carries its meaning for everyone. */}
-      <p className={cn("mt-1 text-xs", status.tone)}>{t(status.key)}</p>
-
-      {/* One number at full weight; the target is context beneath it. */}
-      <p className="mt-3 flex items-baseline gap-1.5 font-semibold text-2xl text-primary">
-        <span className="tabular-nums">
-          {leg.funding
-            ? formatLegAmount(leg.funding.observedAmount, leg.decimals)
-            : closed
-              ? formatLegAmount(leg.amount, leg.decimals)
-              : t("DashboardMarkets.dvp.notObserved")}
+    <section className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <h3 className="flex flex-wrap items-center gap-x-2 font-medium text-base text-primary leading-6">
+          {t(side === "a" ? "DashboardMarkets.dvp.legA" : "DashboardMarkets.dvp.legB")}
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 font-normal text-xs leading-6",
+              status.tone
+            )}
+          >
+            <status.Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            {t(status.key)}
+          </span>
+        </h3>
+        <span className="text-sm text-tertiary">
+          {leg.party.wallet || leg.party.counterparty ? (
+            <PartyLink party={leg.party} />
+          ) : (
+            holderLabel(t, side)
+          )}
         </span>
-        {/* A number with no unit is not an amount, and this screen shows two
-            different tokens side by side. Falls back to nothing rather than the
-            mint address, which would read as a second, longer number. */}
-        {leg.symbol ? (
-          <span className="font-medium text-base text-secondary">{leg.symbol}</span>
-        ) : null}
-      </p>
-      <p className="mt-0.5 text-tertiary text-xs">
-        {closed
-          ? t("DashboardMarkets.dvp.deliveredLabel")
-          : `${t("DashboardMarkets.dvp.targetLabel")} ${formatLegAmount(leg.amount, leg.decimals)}`}
-      </p>
-
-      {closed ? null : ratio === null ? (
-        <p className="mt-3 text-tertiary text-xs">{t("DashboardMarkets.dvp.notObservedHint")}</p>
-      ) : (
-        <div
-          aria-label={t("DashboardMarkets.dvp.fundedLabel")}
-          aria-valuemax={100}
-          aria-valuemin={0}
-          aria-valuenow={Math.round(ratio * 100)}
-          className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-fill-subtle"
-          role="progressbar"
-        >
-          <div
-            className={cn("h-full rounded-full", leg.funding?.funded ? "bg-success" : "bg-info")}
-            style={{ width: `${Math.round(ratio * 100)}%` }}
+      </div>
+      {/* Where this party pays in, directly under who they are. Only while the
+          escrow can still receive: once the leg is funded, frozen, or the trade
+          is closed, an address here is an invitation to send tokens somewhere
+          they will bounce or are not wanted. */}
+      {outcome !== "awaiting" && outcome !== "partial" ? null : (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-fill-subtle px-3 py-2">
+          <span className="text-[11px] text-tertiary">{t("DashboardMarkets.dvp.escrowLabel")}</span>
+          <CopyableAddress
+            address={leg.escrow}
+            className="px-0 hover:bg-transparent"
+            label={t("DashboardMarkets.dvp.escrowLabel")}
           />
         </div>
       )}
 
-      {closed ? null : (
-        <>
-          <dl className="mt-4 space-y-2 border-border-subtle border-t pt-3">
-            <div>
-              <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.escrowLabel")}</dt>
-              <dd className="mt-0.5">
-                <CopyableAddress
-                  address={leg.escrow}
-                  label={t("DashboardMarkets.dvp.escrowLabel")}
-                />
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
-            {t("DashboardMarkets.dvp.escrowHint")}
-          </p>
-        </>
-      )}
-      {action ? <div className="mt-3 border-border-subtle border-t pt-3">{action}</div> : null}
-    </section>
-  );
-}
-
-/**
- * Everything the trade IS, before anything you can do about it.
- *
- * Extracted because the workspace had grown past three hundred lines and read
- * as one wall: the badge and its reading age, the two accounts SDP created and
- * what each is for, the wallet funding your leg, the counterparty, and every
- * transaction the trade has produced. Those are one answer to one question —
- * what am I looking at — and the rest of the page is a different question.
- */
-/**
- * One account this page explains: its address, what it is for, and a way out to
- * the explorer.
- *
- * Both of the accounts above are ones SDP created and neither is one a reader
- * has seen before, so an address with a bare label is not an explanation. The
- * settlement authority in particular is minted silently on a project's first
- * trade, holds the only key that can close one, and has to hold SOL to do it.
- */
-function ExplorerAddressField({
-  address,
-  cluster,
-  hint,
-  label,
-}: {
-  address: string;
-  cluster: SolanaCluster;
-  hint: string;
-  label: string;
-}) {
-  const t = useTranslations();
-  return (
-    <div>
-      <dt className="text-tertiary text-xs">{label}</dt>
-      <dd className="mt-0.5">
-        <CopyableAddress address={address} label={label} />
-      </dd>
-      <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-        {hint}{" "}
-        <a
-          className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-          href={explorerAddressUrl(address, cluster)}
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          {t("DashboardMarkets.dvp.viewOnExplorer")}
-          <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-        </a>
-      </p>
-    </div>
-  );
-}
-
-/** The custody wallet this organization put behind the trade, when it has one. */
-function SdpWalletRow({ trade }: { trade: DvpTrade }) {
-  const t = useTranslations();
-  const agentTrade = isDvpAgentTrade(trade);
-  // "Funded from" is only true when this wallet delivers a leg. On an agent
-  // trade it signs the create and pays the fee and the escrow rent and nothing
-  // else, so the row is titled by what it actually did. Keyed off `sdpWallet`
-  // rather than the side, which is why sweeping every `sdpSide` read missed it.
-  const walletLabelKey = agentTrade
-    ? ("DashboardMarkets.dvp.sdpWalletLabelAgent" as const)
-    : ("DashboardMarkets.dvp.sdpWalletLabel" as const);
-
-  if (!trade.sdpWallet) {
-    return null;
-  }
-
-  return (
-    <dl className="mt-3 border-border-subtle border-t pt-3">
-      <div>
-        <dt className="text-tertiary text-xs">
-          {t(walletLabelKey)}
-          {trade.sdpWallet.label ? ` · ${trade.sdpWallet.label}` : ""}
-        </dt>
-        <dd className="mt-0.5">
-          <CopyableAddress address={trade.sdpWallet.address} label={t(walletLabelKey)} />
-        </dd>
-        <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-          {t(
-            agentTrade
-              ? "DashboardMarkets.dvp.sdpWalletHintAgent"
-              : "DashboardMarkets.dvp.sdpWalletHint"
-          )}
+      <div className="mt-5 flex items-center gap-3">
+        {leg.symbol ? (
+          <TokenLogo imageUrl={leg.imageUrl} symbol={leg.symbol} className="h-9 w-9" />
+        ) : null}
+        <p className="font-semibold text-3xl text-primary tracking-tight tabular-nums">
+          {target}
+          {leg.symbol ? (
+            <span className="ml-2 font-medium text-secondary text-xl">{leg.symbol}</span>
+          ) : null}
         </p>
       </div>
-    </dl>
+
+      <div className="mt-5 flex items-center justify-between text-secondary text-xs tabular-nums">
+        <span>{legProgressCaption(t, outcome, held, target)}</span>
+        <span>{percent}%</span>
+      </div>
+      <div
+        aria-label={t("DashboardMarkets.dvp.fundedLabel")}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={percent}
+        className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-fill-subtle"
+        role="progressbar"
+      >
+        <div className={cn("h-full rounded-full", status.bar)} style={{ width: `${percent}%` }} />
+      </div>
+
+      {leg.fundingSignature ? (
+        <p className="mt-4 text-secondary text-xs">
+          {t("DashboardMarkets.dvp.txFunding")}{" "}
+          <TransactionLink cluster={cluster} signature={leg.fundingSignature} />
+        </p>
+      ) : null}
+      {action ? <div className="mt-4">{action}</div> : null}
+    </section>
   );
 }
 
 /**
- * Who the trade is WITH.
- *
- * This page carried four addresses, both escrows, the settlement authority and
- * your own wallet, and not the one fact that identifies the trade commercially.
- * It is also the address somebody hands back to the other side to confirm they
- * are looking at the same trade, so it is copyable in full like the rest.
+ * A table cell for an on-chain value: the full address or signature with copy,
+ * and a way out to the explorer. Full, not shortened — in a column of values a
+ * reader compares against a wallet or an explorer, half of one is no use.
  */
-function CounterpartyRow({
-  cluster,
-  counterparty,
-  trade,
-}: {
-  cluster: SolanaCluster;
-  counterparty: string | null;
-  trade: DvpTrade;
-}) {
+function ChainValueCell({ value, href }: { value: string; href: string }) {
   const t = useTranslations();
   return (
-    <dl className="mt-3 border-border-subtle border-t pt-3">
-      {counterparty === null ? (
-        // Two parties, neither of them us, so there is no single "the other
-        // side" to name. Both are listed instead, in the order they were
-        // entered, which is the order the legs are captioned in.
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(
-            [
-              ["DashboardMarkets.dvp.legPartyA", trade.legs.a.party],
-              ["DashboardMarkets.dvp.legPartyB", trade.legs.b.party],
-            ] as const
-          ).map(([key, party]) => (
-            <div key={key}>
-              <dt className="text-tertiary text-xs">{t(key)}</dt>
-              <dd className="mt-0.5">
-                <CopyableAddress address={party} label={t(key)} />
-              </dd>
-              <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-                <a
-                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-                  href={explorerAddressUrl(party, cluster)}
-                  rel="noreferrer noopener"
-                  target="_blank"
-                >
-                  {t("DashboardMarkets.dvp.viewOnExplorer")}
-                  <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-                </a>
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div>
-          <dt className="text-tertiary text-xs">{t("DashboardMarkets.dvp.counterpartyLabel")}</dt>
-          <dd className="mt-0.5">
-            <CopyableAddress
-              address={counterparty}
-              label={t("DashboardMarkets.dvp.counterpartyLabel")}
-            />
-          </dd>
-          <p className="mt-1 text-tertiary text-[11px] leading-relaxed">
-            {t("DashboardMarkets.dvp.counterpartyHint")}{" "}
-            <a
-              className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2"
-              href={explorerAddressUrl(counterparty, cluster)}
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              {t("DashboardMarkets.dvp.viewOnExplorer")}
-              <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-            </a>
-          </p>
-        </div>
-      )}
-    </dl>
+    <span className="flex flex-wrap items-center gap-x-2">
+      <CopyableAddress
+        address={value}
+        className="px-0 hover:bg-transparent"
+        label={t("DashboardMarkets.dvp.detailsAddress")}
+      />
+      <a
+        aria-label={t("DashboardMarkets.dvp.viewOnExplorer")}
+        className="text-tertiary hover:text-primary"
+        href={href}
+        rel="noreferrer noopener"
+        target="_blank"
+      >
+        <ExternalLinkIcon aria-hidden className="h-3 w-3" />
+      </a>
+    </span>
   );
 }
 
-function TradeSummary({
-  cluster,
-  counterparty,
-  trade,
-}: {
-  cluster: SolanaCluster;
-  /** Null on an agent trade, which has two counterparties and neither is us. */
-  counterparty: string | null;
-  trade: DvpTrade;
-}) {
+/** The link to a party's own page, when it is a wallet or a registered counterparty. */
+function PartyLink({ party }: { party: DvpPartyRef }) {
   const t = useTranslations();
+  if (party.wallet) {
+    return (
+      <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
+        {party.wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : party.wallet.name}
+      </EntityLink>
+    );
+  }
+  if (party.counterparty) {
+    return (
+      <EntityLink
+        href={`/dashboard/payments/counterparty/${encodeURIComponent(party.counterparty.id)}`}
+      >
+        {party.counterparty.label}
+      </EntityLink>
+    );
+  }
+  return null;
+}
+
+/**
+ * Every account and transaction behind the trade, folded away.
+ *
+ * The page above answers a fund manager's questions without an address in
+ * sight. The escrow addresses still have to be reachable, because paying into
+ * one is how a counterparty funds a leg, and everything else here is what an
+ * ops person or an on-chain enthusiast checks the trade against. Closed by
+ * default; the table mounts on open and slides in, so nothing below it jumps.
+ */
+function OnChainDetails({ cluster, trade }: { cluster: SolanaCluster; trade: DvpTrade }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  const accounts: { role: ReactNode; address: string }[] = [
+    { role: t("DashboardMarkets.dvp.onChainAddress"), address: trade.swapDvp },
+    { role: t("DashboardMarkets.dvp.settlementAuthority"), address: trade.settlementAuthority },
+    {
+      role: (
+        <span className="flex items-center gap-2">
+          {t("DashboardMarkets.dvp.legPartyA")}
+          <PartyLink party={trade.legs.a.party} />
+        </span>
+      ),
+      address: trade.legs.a.party.address,
+    },
+    {
+      role: (
+        <span className="flex items-center gap-2">
+          {t("DashboardMarkets.dvp.legPartyB")}
+          <PartyLink party={trade.legs.b.party} />
+        </span>
+      ),
+      address: trade.legs.b.party.address,
+    },
+    { role: t("DashboardMarkets.dvp.escrowA"), address: trade.legs.a.escrow },
+    { role: t("DashboardMarkets.dvp.escrowB"), address: trade.legs.b.escrow },
+    // Where each party's proceeds land at settlement. Usually the party itself;
+    // an execution desk may name another account, and a forged trade will.
+    { role: t("DashboardMarkets.dvp.receivesAtA"), address: trade.legs.a.settlementDestination },
+    { role: t("DashboardMarkets.dvp.receivesAtB"), address: trade.legs.b.settlementDestination },
+  ];
+  const transactions = [
+    { role: t("DashboardMarkets.dvp.txCreate"), signature: trade.createSignature },
+    { role: t("DashboardMarkets.dvp.txClose"), signature: trade.closeSignature },
+  ].flatMap((row) => (row.signature ? [{ role: row.role, signature: row.signature }] : []));
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <DvpStatusBadge status={trade.status} />
-        <span className="text-tertiary text-xs">
-          {trade.observedAt
-            ? t("DashboardMarkets.dvp.observedAt", {
-                when: formatTimestamp(trade.observedAt, t),
-              })
-            : t("DashboardMarkets.dvp.neverObserved")}
-        </span>
-      </div>
-      <p className="mt-2 text-tertiary text-[11px] leading-relaxed">
-        {t("DashboardMarkets.dvp.observedHint")}
-      </p>
-      <dl className="mt-4 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-2">
-        {/* Both of these are accounts SDP created, and neither is one a
-            reader has seen before. An address with a bare label is not an
-            explanation — the settlement authority in particular is minted
-            silently on a project's first trade, holds the only key that can
-            close one, and has to hold SOL to do it. */}
-        <ExplorerAddressField
-          address={trade.swapDvp}
-          cluster={cluster}
-          hint={t("DashboardMarkets.dvp.onChainAddressHint")}
-          label={t("DashboardMarkets.dvp.onChainAddress")}
+    <section>
+      <button
+        aria-expanded={open}
+        className="flex items-center gap-1.5 font-medium text-primary text-sm"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <ChevronRightIcon
+          aria-hidden
+          className={cn("h-4 w-4 text-tertiary transition-transform", open && "rotate-90")}
         />
-        <ExplorerAddressField
-          address={trade.settlementAuthority}
-          cluster={cluster}
-          hint={t("DashboardMarkets.dvp.settlementAuthorityHint")}
-          label={t("DashboardMarkets.dvp.settlementAuthority")}
-        />
-      </dl>
-
-      <SdpWalletRow trade={trade} />
-
-      <CounterpartyRow cluster={cluster} counterparty={counterparty} trade={trade} />
-
-      {/* Every transaction this trade produced, in the order it happened.
-          The close is the one that matters and was the one not recorded. */}
-      {trade.createSignature || trade.fundingSignature || trade.closeSignature ? (
-        <dl className="mt-3 grid gap-3 border-border-subtle border-t pt-3 sm:grid-cols-3">
-          {trade.createSignature ? (
-            <TransactionLink
-              cluster={cluster}
-              label={t("DashboardMarkets.dvp.txCreate")}
-              signature={trade.createSignature}
-            />
-          ) : null}
-          {trade.fundingSignature ? (
-            <TransactionLink
-              cluster={cluster}
-              label={t("DashboardMarkets.dvp.txFunding")}
-              signature={trade.fundingSignature}
-            />
-          ) : null}
-          {trade.closeSignature ? (
-            <TransactionLink
-              cluster={cluster}
-              label={t("DashboardMarkets.dvp.txClose")}
-              signature={trade.closeSignature}
-            />
-          ) : null}
-        </dl>
-      ) : null}
+        {t("DashboardMarkets.dvp.onChainDetails")}
+      </button>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <HeightReveal key="on-chain-details">
+            {/* Padding, not margin: the reveal measures its child's offsetHeight,
+                and a top margin collapses out of that, clipping the table's
+                last row by the same amount. */}
+            <div className="overflow-x-auto pt-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[30%]">
+                      {t("DashboardMarkets.dvp.detailsRole")}
+                    </TableHead>
+                    <TableHead>{t("DashboardMarkets.dvp.detailsAddress")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {accounts.map((row) => (
+                    <TableRow key={row.address + String(row.role)}>
+                      <TableCell className="text-secondary text-sm">{row.role}</TableCell>
+                      <TableCell>
+                        <ChainValueCell
+                          href={explorerAddressUrl(row.address, cluster)}
+                          value={row.address}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {transactions.map((row) => (
+                    <TableRow key={row.signature}>
+                      <TableCell className="text-secondary text-sm">{row.role}</TableCell>
+                      <TableCell>
+                        <ChainValueCell
+                          href={explorerTxUrl(row.signature, cluster)}
+                          value={row.signature}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {trade.refString ? (
+                    <TableRow>
+                      <TableCell className="text-secondary text-sm">
+                        {t("DashboardMarkets.dvp.fieldRef")}
+                      </TableCell>
+                      <TableCell className="text-primary text-sm">{trade.refString}</TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </div>
+          </HeightReveal>
+        ) : null}
+      </AnimatePresence>
     </section>
+  );
+}
+
+/**
+ * A moment written out in full for one zone, with the zone's name split off so
+ * two zones can be laid out as aligned columns.
+ */
+function formatZoned(date: Date, timeZone: string | undefined): { when: string; zone: string } {
+  const parts = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+    timeZoneName: "short",
+  }).formatToParts(date);
+  const zone = parts.find((part) => part.type === "timeZoneName");
+  const when = parts
+    .filter((part) => part.type !== "timeZoneName")
+    .map((part) => part.value)
+    .join("")
+    .trim()
+    .replace(/,$/, "");
+  return { when, zone: zone ? zone.value : "" };
+}
+
+/**
+ * One dated fact about the trade: a label, the local time, and an info mark
+ * whose tooltip spells the exact moment out in the reader's zone and in UTC.
+ *
+ * Local time depends on the browser, so the server renders it in its own zone
+ * and the client corrects it on hydration; the mismatch warning is silenced
+ * for exactly that span.
+ */
+function TimestampFact({
+  label,
+  iso,
+  children,
+}: {
+  label: string;
+  iso: string;
+  /** Anything to say after the time, such as a countdown. */
+  children?: ReactNode;
+}) {
+  const t = useTranslations();
+  const date = new Date(iso);
+  return (
+    <span className="flex items-center gap-1.5">
+      <span>{label}</span>
+      <span className="text-secondary" suppressHydrationWarning>
+        {formatTimestamp(iso, t)}
+      </span>
+      {children}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={t("DashboardMarkets.dvp.exactTime")}
+            className="text-tertiary hover:text-primary"
+            type="button"
+          >
+            <InfoIcon aria-hidden className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="text-xs tabular-nums" side="bottom">
+          <span className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5">
+            {[formatZoned(date, undefined), formatZoned(date, "UTC")].map((zoned) => (
+              <Fragment key={zoned.zone}>
+                <span>{zoned.when}</span>
+                <span className="text-right text-tertiary">{zoned.zone}</span>
+              </Fragment>
+            ))}
+          </span>
+        </TooltipContent>
+      </Tooltip>
+    </span>
+  );
+}
+
+/** A warning callout's title line: the mark beside the words, the explanation beneath. */
+function WarningTitle({ Icon, label }: { Icon: LucideIcon; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon aria-hidden className="h-4 w-4 shrink-0" />
+      {label}
+    </span>
   );
 }
 
@@ -597,11 +664,10 @@ function TradeSummary({
  * only a position on the page, and holding them inline meant the workspace's
  * control flow was mostly this. Each decides for itself whether it applies.
  */
-function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) {
+function TradeWarnings({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
   const frozen = frozenLegs(trade);
   const overFunded = overFundedLegs(trade);
-  const readiness = trade.settlementReadiness;
   // A leg paying out somewhere other than the address that funds it.
   // Legitimate and ordinary for an execution desk, and simultaneously the
   // exact shape of a forged trade: create is permissionless and the economic
@@ -609,60 +675,53 @@ function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) 
   // naming you with the proceeds pointed at themselves. Rendering the redirect
   // silently is what would make that work.
   const redirected = [trade.legs.a, trade.legs.b].filter(
-    (leg) => leg.settlementDestination !== leg.party
+    (leg) => leg.settlementDestination !== leg.party.address
   );
 
   return (
     <>
       {redirected.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.destinationDiffersTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {t("DashboardMarkets.dvp.destinationDiffersBody")}
-              <span className="mt-2 block">
-                {redirected.map((leg) => (
-                  <span className="block text-xs" key={leg.settlementDestination}>
-                    {t("DashboardMarkets.dvp.destinationDiffersLeg", {
-                      address: leg.settlementDestination,
-                    })}
-                  </span>
-                ))}
+        <Callout
+          title={
+            <WarningTitle
+              Icon={TriangleAlertIcon}
+              label={t("DashboardMarkets.dvp.destinationDiffersTitle")}
+            />
+          }
+          variant="warning"
+        >
+          {t("DashboardMarkets.dvp.destinationDiffersBody")}
+          <span className="mt-2 block">
+            {redirected.map((leg) => (
+              <span className="block text-xs" key={leg.settlementDestination}>
+                {t("DashboardMarkets.dvp.destinationDiffersLeg", {
+                  address: leg.settlementDestination,
+                })}
               </span>
-            </span>
+            ))}
           </span>
         </Callout>
       ) : null}
 
       {frozen.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.frozenTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <SnowflakeIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            {t("DashboardMarkets.dvp.frozenDescription")}
-          </span>
+        <Callout
+          title={
+            <WarningTitle Icon={SnowflakeIcon} label={t("DashboardMarkets.dvp.frozenTitle")} />
+          }
+          variant="warning"
+        >
+          {t("DashboardMarkets.dvp.frozenDescription")}
         </Callout>
       ) : null}
 
       {overFunded.length > 0 ? (
-        <Callout title={t("DashboardMarkets.dvp.surplusTitle")} variant="warning">
-          <span className="inline-flex items-start gap-2">
-            <TriangleAlertIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            {t("DashboardMarkets.dvp.surplusDescription")}
-          </span>
-        </Callout>
-      ) : null}
-
-      {/* Before the button, not after the failure. The authority is minted
-          empty and pays the fee and the account rent for every close, so the
-          first settle in a project failed in simulation with an error that
-          named neither the account nor the amount. Shown only while the trade
-          can still be closed — on a settled one it is history. */}
-      {!closed && readiness && !readiness.funded ? (
-        <Callout live title={t("DashboardMarkets.dvp.authorityUnfundedTitle")} variant="warning">
-          {t("DashboardMarkets.dvp.authorityUnfundedBody", {
-            address: readiness.address,
-            sol: formatLamports(BigInt(readiness.required) - BigInt(readiness.balance)),
-          })}
+        <Callout
+          title={
+            <WarningTitle Icon={TriangleAlertIcon} label={t("DashboardMarkets.dvp.surplusTitle")} />
+          }
+          variant="warning"
+        >
+          {t("DashboardMarkets.dvp.surplusDescription")}
         </Callout>
       ) : null}
     </>
@@ -670,110 +729,17 @@ function TradeWarnings({ closed, trade }: { closed: boolean; trade: DvpTrade }) 
 }
 
 /**
- * The two legs, yours first.
+ * Whether the caller may fund a leg right now.
  *
- * Ordered rather than written twice. The previous version branched on which
- * side was SDP's and then re-tested that same flag inside every prop of both
- * copies, where it is provably constant - the create form's LegCards hit the
- * identical problem and the compiler said so. Holding the cards as values and
- * ordering them keeps one copy of the markup and one decision.
+ * The API says which sides are the caller's via `party.wallet`; beyond that the
+ * escrow has to still be payable: the trade must not be over, the leg must not
+ * already hold its target, and a frozen escrow bounces transfers.
  */
-function LegCards({
-  action,
-  closed,
-  trade,
-}: {
-  action?: ReactNode;
-  closed: boolean;
-  trade: DvpTrade;
-}) {
-  const t = useTranslations();
-  const sdpSide = sdpLegSideOf(trade);
-  const agent = sdpSide === null;
-
-  // Which card carries the action. The author funds the leg it holds; a party
-  // reading somebody else's trade funds the leg NAMING them, which on an agent
-  // trade is a leg this function would otherwise give no action to at all.
-  const actionSide = trade.yourSide ?? sdpSide;
-
-  // On an agent trade both legs belong to other parties, so neither card can be
-  // captioned "held by this organization" and neither carries a fund action.
-  const holderA = agent
-    ? t("DashboardMarkets.dvp.legPartyA")
-    : sdpSide === "a"
-      ? t("DashboardMarkets.dvp.legSdp")
-      : t("DashboardMarkets.dvp.legCounterparty");
-  const holderB = agent
-    ? t("DashboardMarkets.dvp.legPartyB")
-    : sdpSide === "a"
-      ? t("DashboardMarkets.dvp.legCounterparty")
-      : t("DashboardMarkets.dvp.legSdp");
-
-  const cardA = (
-    <LegCard
-      action={actionSide === "a" ? action : undefined}
-      closed={closed}
-      holder={holderA}
-      key="a"
-      leg={trade.legs.a}
-      title={t("DashboardMarkets.dvp.legA")}
-    />
+function canFundLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
+  const fundableStatus = status === "created" || status === "partially_funded";
+  return (
+    leg.party.wallet !== null && fundableStatus && !leg.funding?.funded && !leg.funding?.frozen
   );
-  const cardB = (
-    <LegCard
-      action={actionSide === "b" ? action : undefined}
-      closed={closed}
-      holder={holderB}
-      key="b"
-      leg={trade.legs.b}
-      title={t("DashboardMarkets.dvp.legB")}
-    />
-  );
-
-  // Your leg first, whichever it is. The exchange band above already reads as
-  // what you give then what you get, so fixed A-then-B order made the band and
-  // the cards under it run opposite ways on a trade where SDP holds leg B.
-  //
-  // An agent trade has no leg of yours to lead with, so it keeps the trade's
-  // own A-then-B order, which is the order the parties were named in.
-  return agent || sdpSide === "a" ? [cardA, cardB] : [cardB, cardA];
-}
-
-/**
- * Which leg the reader may act on, and who the trade is with.
- *
- * Only SDP's own leg is fundable from the author's view. The counterparty funds
- * theirs with an ordinary transfer to the escrow, and making that a button would
- * mean spending their wallet, which is the whole thing a DvP trade prevents.
- *
- * On an agent trade there is no own leg, so there is nothing to fund here at
- * all. That read used to be `sdpSide === "a" ? a : b`, which answered "b" for a
- * trade with no SDP leg and offered to fund a leg we hold no key for.
- *
- * A party reading somebody else's trade funds THEIR leg, through the party
- * endpoint, under their own wallet policy. `sdpSide` describes the author and
- * says nothing about them.
- */
-function useTradeLegView(trade: DvpTrade) {
-  // Null on an agent trade, where this organization delivers neither leg.
-  const sdpSide = sdpLegSideOf(trade);
-  const sdpLeg = sdpSide === null ? null : sdpSide === "a" ? trade.legs.a : trade.legs.b;
-  const partyView = isDvpPartyView(trade);
-  const fundableLeg = partyView ? (trade.yourSide === "a" ? trade.legs.a : trade.legs.b) : sdpLeg;
-  const fundableStatus = trade.status === "created" || trade.status === "partially_funded";
-
-  return {
-    partyView,
-    // The other side's address, whichever leg is not ours. An agent trade has
-    // two counterparties and we are neither, so it has no "other side".
-    counterparty:
-      sdpSide === null ? null : sdpSide === "a" ? trade.legs.b.party : trade.legs.a.party,
-    canFund:
-      fundableLeg !== null &&
-      fundableStatus &&
-      !fundableLeg.funding?.funded &&
-      !fundableLeg.funding?.frozen,
-  };
 }
 
 export function DvpTradeDetailWorkspace({
@@ -791,49 +757,86 @@ export function DvpTradeDetailWorkspace({
   const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
   const { act, awaitingApproval, error, pending } = useDvpTradeActions(trade.id);
+  const partyView = isDvpPartyView(trade);
+  const expiry = new Date(Number(trade.expiryTimestamp) * 1000).toISOString();
 
-  const { counterparty, canFund, partyView } = useTradeLegView(trade);
+  // One fund action per custodied side: a bilateral trade funds both legs,
+  // each from the wallet that holds its party address, through the unified
+  // fund endpoint naming the side.
+  const fundActionFor = (side: DvpTradeSide): ReactNode =>
+    canFundLeg(trade.legs[side], trade.status) ? (
+      <div className="flex flex-col gap-2">
+        {/* Clicked, not held. Funding moves your leg into the trade's own
+            escrow, which is a step forward rather than something to walk back;
+            hold is reserved for destroying something (HOO-1230). */}
+        <Button
+          className="self-start"
+          disabled={pending !== null}
+          onClick={() => act("fund", { side })}
+          type="button"
+        >
+          {t("DashboardMarkets.dvp.actionFund")}
+        </Button>
+        <p className="text-[11px] text-tertiary leading-relaxed">
+          {t("DashboardMarkets.dvp.fundHint")}
+        </p>
+      </div>
+    ) : undefined;
 
-  const fundAction = canFund ? (
-    <div className="flex flex-col gap-2">
-      {/* Clicked, not held. Funding moves your leg into the trade's own escrow,
-          which is a step forward rather than something to walk back; hold is
-          reserved for destroying something (HOO-1230). */}
-      <Button
-        className="self-start"
-        disabled={pending !== null}
-        onClick={() => act(partyView ? "fund-as-party" : "fund")}
-        type="button"
-      >
-        {t("DashboardMarkets.dvp.actionFund")}
-      </Button>
-      <p className="text-tertiary text-[11px] leading-relaxed">
-        {t("DashboardMarkets.dvp.fundHint")}
-      </p>
-    </div>
-  ) : undefined;
+  // Your leg first, whichever it is. With no custodied leg (agent) or both
+  // custodied (bilateral) the trade's own asset-then-cash order stays.
+  const custodiedA = trade.legs.a.party.wallet !== null;
+  const custodiedB = trade.legs.b.party.wallet !== null;
+  const sides: DvpTradeSide[] = custodiedB && !custodiedA ? ["b", "a"] : ["a", "b"];
 
   return (
     <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-6">
-        <TradeSummary cluster={cluster} counterparty={counterparty} trade={trade} />
-
-        {/* Whose move it is. The badge above says what state the trade is in;
-            it does not say what to do about it. */}
-        <DvpNextStep trade={trade} />
-
-        <TradeWarnings closed={tradeClosed} trade={trade} />
-
-        <ExchangeBand closed={tradeClosed} trade={trade} />
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Your leg first, whichever it is. These were fixed in A-then-B
-              order while the exchange band directly above already reads as
-              what you give and then what you get — so on a trade where SDP
-              holds leg B, the band and the two cards under it ran opposite
-              ways. Same ordering as the create form, for the same reason. */}
-          <LegCards action={fundAction} closed={tradeClosed} trade={trade} />
+      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-8">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <DvpStatusBadge status={trade.status} />
+            <TooltipProvider>
+              <div className="flex flex-wrap items-center gap-3 text-tertiary text-xs">
+                <TimestampFact
+                  iso={trade.createdAt}
+                  label={t("DashboardMarkets.dvp.columnCreated")}
+                />
+                {tradeClosed ? null : (
+                  <>
+                    <span aria-hidden className="h-4 w-px bg-border-default" />
+                    <TimestampFact iso={expiry} label={t("DashboardMarkets.dvp.fieldExpiry")}>
+                      <span suppressHydrationWarning>({formatRelativeTime(expiry)})</span>
+                    </TimestampFact>
+                  </>
+                )}
+              </div>
+            </TooltipProvider>
+          </div>
+          <DvpNextStep trade={trade} />
         </div>
+
+        <section>
+          <div className="flex flex-wrap items-center gap-4">
+            <h2 className="font-medium text-lg text-primary tracking-tight">
+              {t("DashboardMarkets.dvp.legsHeading")}
+            </h2>
+            <span aria-hidden className="hidden h-px flex-1 bg-border-subtle sm:block" />
+            <ExchangeSummary trade={trade} />
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {sides.map((side) => (
+              <LegCard
+                action={fundActionFor(side)}
+                cluster={cluster}
+                key={side}
+                leg={trade.legs[side]}
+                side={side}
+              />
+            ))}
+          </div>
+        </section>
+
+        <TradeWarnings trade={trade} />
 
         {awaitingApproval ? (
           <Callout live title={t("DashboardMarkets.dvp.approvalPending")} variant="info">
@@ -857,6 +860,8 @@ export function DvpTradeDetailWorkspace({
         ) : (
           <DvpCloseActions onAct={act} pending={pending} trade={trade} />
         )}
+
+        <OnChainDetails cluster={cluster} trade={trade} />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

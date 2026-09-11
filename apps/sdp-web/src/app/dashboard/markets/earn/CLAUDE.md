@@ -67,7 +67,9 @@ program create still sends the body `requestId` form.
 ## Routes
 
 - `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
-  customer portfolio and entry point for configuration.
+  customer portfolio and entry point for configuration. Its strategy drawer
+  renders the positions already hydrated by the project summary; it must not
+  fan out one metered request per customer wallet.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy

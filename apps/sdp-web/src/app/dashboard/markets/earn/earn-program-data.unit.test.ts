@@ -9,6 +9,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEarnVaultDeposit,
+  earnExternalWalletSummaryRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
@@ -41,6 +42,7 @@ function strategy(id: string): EarnStrategy {
     withdrawalSlippage: null,
     hostCluster: "devnet",
     fundable: true,
+    feeSponsored: false,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
   };
@@ -87,6 +89,15 @@ describe("earnVaultMovementRefreshInterval", () => {
 
   it("stops polling only after the movement reaches a terminal state", () => {
     expect(earnVaultMovementRefreshInterval({ settled: true, startedAt: 0, now: 120_000 })).toBe(0);
+  });
+});
+
+describe("earnExternalWalletSummaryRefreshInterval", () => {
+  it("refreshes drawer details at the prior cadence without polling the overview as often", () => {
+    expect(earnExternalWalletSummaryRefreshInterval(false, "production")).toBe(60_000);
+    expect(earnExternalWalletSummaryRefreshInterval(true, "production")).toBe(15_000);
+    expect(earnExternalWalletSummaryRefreshInterval(false, "development")).toBe(3_000);
+    expect(earnExternalWalletSummaryRefreshInterval(true, "development")).toBe(3_000);
   });
 });
 
@@ -189,6 +200,7 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
     shareMint: `${id}-share-mint`,
     createdAt: TIMESTAMP,
     closedAt: null,
+    feeSponsored: false,
     shares: "1",
     tokenValue: "1.05",
   };

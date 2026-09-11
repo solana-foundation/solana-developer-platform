@@ -11,6 +11,7 @@
 
 import { type ScheduledTask, schedule } from "node-cron";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
+import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
 import { runWithSystemDatabaseIdentity } from "@/db";
 import {
   isAssetProfilesEnabled,
@@ -49,6 +50,10 @@ import {
   PENDING_WITHDRAWALS_MONITOR,
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
+import {
+  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
+  runProviderCredentialSecretCleanup,
+} from "./provider-credential-secret-cleanup";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -278,6 +283,14 @@ export function startCron(deps: CronDeps): CronHandle | null {
     )
   );
 
+  tasks.push(
+    scheduleSystemTask(
+      PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
+      "cron:provider-credential-secret-cleanup",
+      runProviderCredentialSecretCleanup
+    )
+  );
+
   // Durable signed intents outlive the feature flag that admitted them. Keep
   // draining their outbox even when Earn is disabled during an incident.
   tasks.push(
@@ -297,6 +310,16 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // so a bare tick would read zero open trades, find no funding, and go on
   // reporting success while a counterparty's escrowed deposit sat unnoticed.
   tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
+
+  // Orphaned split-swap detection (PRO-1864). Advisory and read-only against
+  // the ledger, but cross-tenant like every sweep, so it takes the system
+  // identity through scheduleSystemTask: under 0081's forced row-level
+  // security an identity-less tick would read zero open advisories and report
+  // a clean sweep over swaps it never looked at. Registered unconditionally:
+  // an advisory written before an incident flag flip must keep being watched.
+  tasks.push(
+    scheduleSystemTask(EARN_SPLIT_SWAPS_CRON, "cron:earn-split-swaps", runEarnSplitSwapDetection)
+  );
 
   return {
     stop() {

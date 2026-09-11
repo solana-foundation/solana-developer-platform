@@ -386,7 +386,10 @@ apps/sdp-api/src/
                                    signer shape, PRO-1722) and
                                    earn_external_wallet_transactions (the
                                    built-unsigned-transaction store its submit
-                                   step verifies against).
+                                   step verifies against); 0091 adds
+                                   earn_split_swap_advisories (PRO-1864, the
+                                   orphan-detection record for split swaps:
+                                   advisory state, never a movement).
                                    The mechanism-split tables above take no
                                    reads and no writes any more; a later
                                    migration drops them.
@@ -493,6 +496,27 @@ refresh is update-only.
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
+
+### Orphaned split-swap detection (`services/jobs/detect-orphaned-earn-split-swaps.ts`)
+
+- **What it does:** judges every open `earn_split_swap_advisories` row (written
+  when an external-wallet swap-funded deposit had to split) against the chain:
+  a confirmed/finalized follow-up deposit resolves it, an in-flight deposit or
+  recent follow-up build is the partner still working, and past the swap's
+  blockhash plus a 30-minute grace the owner's deposit-token balance is read
+  with the same call as the build-time baseline. A rise of at least the swap's
+  floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
+  it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
+- **When it runs:** on both schedulers, unconditionally (no earn flag gate: an
+  advisory written before an incident flag flip must keep being watched), under
+  the system database identity like every sweep. In-process the crontab is every
+  minute (`EARN_SPLIT_SWAPS_CRON`); the managed Cloud Run Job invokes it at the
+  deployment-provided Managed Reconciliation Cadence (three minutes in
+  production), which is what bounds alert latency there.
+- **Failure behaviour:** a chain read failure emits its own error event, marks
+  the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
+  cron run reads error; the job's own query failing emits no tick at all.
+- **Cadence:** `EARN_SPLIT_SWAPS_CRON` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue are deleted, scoped to the
   cluster sub-shelf the responding lane is the truth for. Operator-paused or
@@ -501,6 +525,32 @@ refresh is update-only.
   listed" answer (an empty accepted mainnet shelf, or a steady-state
   production skip), so orphaned mirror rows never outlive their truth source;
   fundable own shelves keep the absolute empty-keep-set refusal.
+
+### Figure anomaly check (`services/earn/catalogue-anomaly.ts`)
+
+Both passes take provider-reported APY and TVL at face value; this is the
+one check between a provider's number and the comparison table (PRO-1867,
+threat model EARN-010).
+
+- **What it does:** before either pass writes, it reads the stored figures for
+  the (provider, environment) it is about to write (`listStrategyFigures`,
+  the sync scoped to its lane's cluster sub-shelf) and diffs the incoming
+  figures against them. Every APY or TVL move past a bound, or an APY above
+  the absolute ceiling, is one `sdp_api_earn_catalogue_figure_anomaly` warn
+  event; a lane that held rows and reliably received an empty catalogue is
+  one `sdp_api_earn_catalogue_shelf_disappeared` error event, whether or not
+  the lane then delists. New rows are exempt from the diff, never from the
+  ceiling. A missing or unparseable figure on either side is skipped, not
+  guessed.
+- **What it never does:** block or alter a write. The write paths' own
+  invariants (update-only refresh, gated admission, the empty-keep-set
+  refusal) are untouched, and a failure reading the stored figures costs the
+  pass its diff, not its write.
+- **Bounds** live in `EARN_FIGURE_BOUNDS` (3x ratio with an absolute floor
+  for both metrics, 100% APY ceiling) and are starting points, pinned by a
+  test so a change is a deliberate diff. The Grafana rules
+  (`sdp-infra/kora/alert-rules/sdp-earn-catalogue-*.json`) key on the event
+  names, not the numbers.
 
 ## Invariants (do not break)
 

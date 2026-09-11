@@ -4,6 +4,7 @@ import {
   earnExternalWalletEarningsQuerySchema,
   earnExternalWalletMovementParamsSchema,
   earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionSummaryQuerySchema,
   earnExternalWalletPositionsQuerySchema,
   earnStrategyIdParamsSchema,
   listEarnStrategiesQuerySchema,
@@ -197,9 +198,11 @@ function registerEarnExternalWalletPaths(
     description:
       "Returns a complete live aggregate across the active partner project's end-user wallets, " +
       "grouped by strategy and token. The service pages every stored claim before hydration. " +
-      "A total is omitted when any contributing live value is unavailable, never reported as zero or partial.",
+      "Pass `includePositions=true` when a UI needs the already hydrated per-customer positions; " +
+      "this avoids a separate paid chain read for every owner. A total is omitted when any " +
+      "contributing live value is unavailable, never reported as zero or partial.",
     security,
-    request: { headers: projectScopeHeaders },
+    request: { headers: projectScopeHeaders, query: earnExternalWalletPositionSummaryQuerySchema },
     responses: {
       200: {
         description: "Complete external-wallet position aggregate",

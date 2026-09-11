@@ -36,13 +36,6 @@ export interface ProofArtifact {
   createdAt: string;
 }
 
-export interface KeyRef {
-  kind: KeyKind;
-  material: SecretRef<Uint8Array>;
-  materialTag: MaterialTag;
-  keyVersion: string;
-}
-
 export interface PrivateWallet {
   id: string;
   sdpWalletId: string;
@@ -99,6 +92,12 @@ export interface AssetBalance {
    * boundary inside a spend, so a merged number would overstate every position.
    */
   ringProgramId: string | null;
+  /**
+   * Unspent notes making up this balance. One note is the consolidated ideal;
+   * many means the position is fragmented, which is what a merge fixes and
+   * what caps how much of the balance a single spend can reach.
+   */
+  noteCount: number;
 }
 
 export interface PrivateHistoryEntry {
@@ -157,8 +156,10 @@ export interface PrivateOperationInput {
   timelock?: { unlockAt: string; beneficiary: string };
   /**
    * Ring NAME the operation targets; the server resolves and pins the program
-   * id at prepare. Omitted or "default" = the default public pool. For spends
-   * the named ring is the source of funds.
+   * id at prepare. Omitted or "default" = the default public pool. For
+   * ring-bound spends and `ring_exit` the named ring is the source of funds;
+   * for ring shields and `ring_entry` it is the destination — the other side
+   * of a ring move is always the default pool.
    */
   ring?: string;
   clientNonce: string;

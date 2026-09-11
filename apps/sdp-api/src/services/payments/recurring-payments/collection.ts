@@ -42,11 +42,11 @@ import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import {
   createTransferSignedSubmissionStore,
-  isDefiniteSubmissionError,
   type TransferSignedSubmissionStore,
 } from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { emitRecurringPaymentFailed } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
@@ -186,7 +186,6 @@ function matchesRecurringTransferInstruction(input: {
   const { instruction } = input;
   if (
     instruction.programId !== subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS ||
-    !instruction.accounts ||
     instruction.accounts.length !== 10 ||
     !instruction.data
   ) {

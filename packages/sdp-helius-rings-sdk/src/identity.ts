@@ -12,6 +12,7 @@ import type {
 import { address } from "@solana/kit";
 import {
   canonicalShieldedIdentity,
+  publishedHalves,
   type ShieldedMaterial,
   type ShieldedMaterialSource,
 } from "./material.js";
@@ -84,10 +85,14 @@ export function firstMismatch(
   owner: string
 ): RingsIdentityMismatch | undefined {
   if (record.owner !== owner) return "owner";
-  if (!sameBytes(record.nullifierPublicKey, material.nullifierKey.publicKey())) {
+
+  // Read off the address rather than the keys: it carries both published halves,
+  // and the seed-rooted source never exposes a bare key pair.
+  const derived = publishedHalves(material.shieldedAddress);
+  if (!sameBytes(record.nullifierPublicKey, derived.nullifierPublicKey)) {
     return "nullifier_key";
   }
-  if (!sameBytes(record.viewingPublicKey, material.viewingKey.publicKey().toBytes())) {
+  if (!sameBytes(record.viewingPublicKey, derived.viewingPublicKey)) {
     return "viewing_key";
   }
   return undefined;

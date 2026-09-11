@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
+import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -47,6 +48,7 @@ const originalEnv = {
   byok: env.PRIVY_BYOK_ENABLED,
   appId: env.PRIVY_APP_ID,
   appSecret: env.PRIVY_APP_SECRET,
+  encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
 };
 
 async function seedFixture(): Promise<void> {
@@ -166,6 +168,7 @@ describe("Connection-owned wallet control plane", () => {
     env.PRIVY_BYOK_ENABLED = originalEnv.byok;
     env.PRIVY_APP_ID = originalEnv.appId;
     env.PRIVY_APP_SECRET = originalEnv.appSecret;
+    env.CUSTODY_ENCRYPTION_KEY = originalEnv.encryptionKey;
     await clearKVStores(env);
   });
 
@@ -238,6 +241,104 @@ describe("Connection-owned wallet control plane", () => {
         .bind(CONNECTION_ID)
         .first()
     ).toEqual({ default_custody_wallet_id: body.data.wallet.id });
+  });
+
+  it("persists a wallet when its Connection moves to a replacement Credential during Provider creation", async () => {
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
+    const secretStore = createCredentialSecretStore(env, "encrypted_db");
+    const predecessorSecret = await secretStore.write({
+      orgId: ORGANIZATION_ID,
+      provider: "privy",
+      providerCredentialId: CREDENTIAL_ID,
+      payload: {
+        appId: env.PRIVY_APP_ID as string,
+        appSecret: env.PRIVY_APP_SECRET as string,
+      },
+    });
+    await getDb(env).execute(
+      `UPDATE provider_credentials
+       SET source = 'stored', storage_backend = 'encrypted_db',
+           encrypted_secret_payload = ?, credential_version = 1
+       WHERE id = ?`,
+      [predecessorSecret.encryptedSecretPayload, CREDENTIAL_ID]
+    );
+
+    let markProviderCreationStarted!: () => void;
+    const providerCreationStarted = new Promise<void>((resolve) => {
+      markProviderCreationStarted = resolve;
+    });
+    let releaseProviderCreation!: () => void;
+    const providerCreationReleased = new Promise<void>((resolve) => {
+      releaseProviderCreation = resolve;
+    });
+    provisionPrivyWalletMock.mockImplementationOnce(async () => {
+      markProviderCreationStarted();
+      await providerCreationReleased;
+      return {
+        walletId: "rotated_credential",
+        address: "Vote111111111111111111111111111111111111111",
+      };
+    });
+
+    const creation = request("", "POST", { connectionId: CONNECTION_ID });
+    await providerCreationStarted;
+    const rotatedCredentialId = "pcred_connection_wallets_rotated";
+    const replacementSecret = await secretStore.write({
+      orgId: ORGANIZATION_ID,
+      provider: "privy",
+      providerCredentialId: rotatedCredentialId,
+      payload: {
+        appId: env.PRIVY_APP_ID as string,
+        appSecret: env.PRIVY_APP_SECRET as string,
+      },
+    });
+    try {
+      await getDb(env).transaction(async (tx) => {
+        await tx.execute(
+          `INSERT INTO provider_credentials (
+             id, organization_id, project_id, provider, label, scope, source,
+             storage_backend, encrypted_secret_payload, status, credential_version,
+             rotated_from_provider_credential_id, created_by
+           ) VALUES (?, ?, ?, 'privy', 'Rotated Privy', 'project', 'stored',
+                     'encrypted_db', ?, 'active', 2, ?, ?)`,
+          [
+            rotatedCredentialId,
+            ORGANIZATION_ID,
+            PROJECT_ID,
+            replacementSecret.encryptedSecretPayload,
+            CREDENTIAL_ID,
+            USER_ID,
+          ]
+        );
+        await tx.execute(
+          `UPDATE custody_connections
+           SET provider_credential_id = ?, updated_at = sdp_iso_now()
+           WHERE id = ?`,
+          [rotatedCredentialId, CONNECTION_ID]
+        );
+        await tx.execute(
+          `UPDATE provider_credentials
+           SET status = 'retired', secret_retention_expires_at = '2099-01-01T00:00:00.000Z',
+               updated_at = sdp_iso_now()
+           WHERE id = ?`,
+          [CREDENTIAL_ID]
+        );
+      });
+    } finally {
+      releaseProviderCreation();
+    }
+
+    const response = await creation;
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      data: {
+        wallet: {
+          custodyConnectionId: CONNECTION_ID,
+          walletId: "privy_rotated_credential",
+        },
+      },
+    });
   });
 
   it("rejects Connection wallet creation before Provider access when entitlement is revoked", async () => {

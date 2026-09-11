@@ -19,7 +19,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -29,6 +29,24 @@ import { shortenAddress } from "../wallet-identity";
 import { saveIssuanceDraft } from "./actions";
 import { type AuthorityKey, buildDraftPayload, type DraftState } from "./draft-model";
 import styles from "./issuance-draft-form.module.css";
+import { settlementBlockedMessageKey } from "./token-controls-model";
+
+/**
+ * The DvP settlement warning for a control this form offers, if the program
+ * refuses it.
+ *
+ * The form drives its controls from booleans on the draft rather than from
+ * capability entries, so the setting key is named here and the deny list stays
+ * the one place that decides. Only the extensions this step actually offers are
+ * looked up; the rest are unreachable from here.
+ */
+function settlementWarning(
+  t: ReturnType<typeof useTranslations>,
+  key: "interestBearing" | "transferFee"
+): string | undefined {
+  const messageKey = settlementBlockedMessageKey(key);
+  return messageKey ? t(messageKey) : undefined;
+}
 
 // The five-step draft flow. Saving persists a draft; it never deploys a token.
 
@@ -85,7 +103,7 @@ export function IssuanceDraftForm({
   const [draft, setDraft] = useState<DraftState>(() => ({
     ...INITIAL_DRAFT,
     authorities: Object.fromEntries(
-      Object.keys(authorityCopy).map((key) => [key, wallets[0]?.walletId ?? ""])
+      Object.keys(authorityCopy).map((key) => [key, wallets[0]?.id ?? ""])
     ) as Record<AuthorityKey, string>,
   }));
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -206,11 +224,15 @@ function CreateSurface(props: CreateSurfaceProps) {
             })}
             steps={STEP_KEYS.map((key) => t(`DashboardIssuance.draftForm.${key}`))}
           />
+          <h2 id="issuance-step-heading" className="mt-5 text-xl font-medium text-primary">
+            {t(`DashboardIssuance.draftForm.${STEP_KEYS[step]}`)}
+          </h2>
         </div>
         <div className={styles.wizardScrollRegion}>
           <div className={styles.focusGrid}>
             <form
               id="issuance-draft-step"
+              aria-labelledby="issuance-step-heading"
               className={styles.stepStage}
               onSubmit={(event) => {
                 event.preventDefault();
@@ -243,7 +265,7 @@ function CreateSurface(props: CreateSurfaceProps) {
                 disabled={
                   step === 3 &&
                   !permissionKeys(props.draft).every((key) =>
-                    props.wallets.some((wallet) => wallet.walletId === props.draft.authorities[key])
+                    props.wallets.some((wallet) => wallet.id === props.draft.authorities[key])
                   )
                 }
               >
@@ -584,6 +606,7 @@ function ControlsStep({
               <ControlRow
                 title={t("DashboardIssuance.draftForm.interest")}
                 description={t("DashboardIssuance.draftForm.interestDescription")}
+                warning={settlementWarning(t, "interestBearing")}
                 checked={draft.interestBearing}
                 onChange={(value) => updateDraft("interestBearing", value)}
                 Icon={Eye}
@@ -591,6 +614,7 @@ function ControlsStep({
               <ControlRow
                 title={t("DashboardIssuance.draftForm.fee")}
                 description={t("DashboardIssuance.draftForm.feeDescription")}
+                warning={settlementWarning(t, "transferFee")}
                 checked={draft.transferFee}
                 onChange={(value) => updateDraft("transferFee", value)}
                 Icon={Gauge}
@@ -606,6 +630,7 @@ function ControlsStep({
 function ControlRow({
   title,
   description,
+  warning,
   checked,
   onChange,
   Icon,
@@ -613,6 +638,12 @@ function ControlRow({
 }: {
   title: string;
   description: string;
+  /**
+   * Shown under the description, whether or not the control is on. Extensions
+   * are fixed at mint, so a warning that waited for the toggle would arrive
+   * after the decision it exists to inform.
+   */
+  warning?: string;
   checked: boolean;
   onChange: (value: boolean) => void;
   Icon: typeof Shield;
@@ -633,6 +664,7 @@ function ControlRow({
       <span className={styles.controlCopy}>
         <strong>{title}</strong>
         <span>{description}</span>
+        {warning ? <span className={styles.controlWarning}>{warning}</span> : null}
       </span>
       <span className={cx(styles.toggle, checked && styles.toggleOn)}>
         <span />
@@ -653,12 +685,18 @@ function PermissionsStep({
   walletsError: string | null;
 }) {
   const t = useTranslations();
+  const router = useRouter();
+  useEffect(() => {
+    if (wallets.length || walletsError) return;
+    // Wallet setup opens separately so returning never loses the current draft.
+    const refreshWallets = () => router.refresh();
+    window.addEventListener("focus", refreshWallets);
+    return () => window.removeEventListener("focus", refreshWallets);
+  }, [router, wallets.length, walletsError]);
+
   return (
     <div className={styles.permissionsStack}>
       {walletsError ? <p role="alert">{walletsError}</p> : null}
-      {!wallets.length && !walletsError ? (
-        <p>{t("DashboardIssuance.draftForm.noWallets")}</p>
-      ) : null}
       {permissionKeys(draft).map((key) => (
         <Field key={key} label={t(authorityCopy[key])} required>
           <select
@@ -674,7 +712,7 @@ function PermissionsStep({
               {t("DashboardIssuance.draftForm.selectWallet")}
             </option>
             {wallets.map((wallet) => (
-              <option key={wallet.walletId} value={wallet.walletId}>
+              <option key={wallet.id} value={wallet.id}>
                 {wallet.label || t("DashboardIssuance.draftForm.wallet")} ·{" "}
                 {shortenAddress(wallet.publicKey)}
               </option>
@@ -682,6 +720,21 @@ function PermissionsStep({
           </select>
         </Field>
       ))}
+      {!wallets.length && !walletsError ? (
+        <p className="text-sm text-secondary">
+          {t("DashboardIssuance.draftForm.noWallets")}{" "}
+          <a
+            href="/dashboard/wallets"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t("DashboardIssuance.draftForm.viewWalletsNewTab")}
+            className="inline-flex items-center gap-1 text-primary underline underline-offset-4"
+          >
+            {t("DashboardIssuance.draftForm.viewWallets")}
+            <ExternalLink size={14} aria-hidden />
+          </a>
+        </p>
+      ) : null}
     </div>
   );
 }

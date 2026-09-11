@@ -221,6 +221,7 @@ interface ConnectionCredentialRow {
 
 interface LockedConnectionWalletCreationRow {
   provider_credential_id: string;
+  provider_credential_scope_key: string;
   status: string;
   last_check_status: string | null;
   provider_account_fingerprint: string | null;
@@ -229,7 +230,6 @@ interface LockedConnectionWalletCreationRow {
 
 interface LockedCredentialWalletCreationRow {
   status: string;
-  credential_version: number;
 }
 
 interface CreatedConnectionWalletRow {
@@ -404,6 +404,43 @@ export class CustodyRuntimeTargets {
       includeAllProviders: true,
     });
     return wallets.find((wallet) => wallet.id === params.custodyWalletId) ?? null;
+  }
+
+  /**
+   * Every active custody wallet holding an on-chain address, oldest first —
+   * an indexed read (`idx_custody_wallets_public_key`) over both ownership
+   * paths with the same active/org/project filters as {@link listWallets}.
+   * Multiple records can hold one address, so callers pick.
+   */
+  async findOperationalWalletIdsByAddress(params: {
+    organizationId: string;
+    projectId: string;
+    publicKey: string;
+  }): Promise<string[]> {
+    const rows = await this.db.queryMany<{ id: string }>(
+      `SELECT w.id
+         FROM custody_wallets w
+         LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+         LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+        WHERE w.public_key = ?
+          AND w.status = 'active'
+          AND (
+            (cfg.id IS NOT NULL AND cfg.organization_id = ? AND cfg.status = 'active'
+               AND (cfg.project_id = ? OR cfg.project_id IS NULL))
+            OR
+            (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
+               AND conn.status = 'active')
+          )
+        ORDER BY w.created_at ASC`,
+      [
+        params.publicKey,
+        params.organizationId,
+        params.projectId,
+        params.organizationId,
+        params.projectId,
+      ]
+    );
+    return rows.map((row) => row.id);
   }
 
   async findOwnedWalletForMutation(params: {
@@ -978,7 +1015,7 @@ export class CustodyRuntimeTargets {
       }
 
       const connection = await tx.queryOne<LockedConnectionWalletCreationRow>(
-        `SELECT provider_credential_id, status, last_check_status,
+        `SELECT provider_credential_id, provider_credential_scope_key, status, last_check_status,
                 provider_account_fingerprint, default_custody_wallet_id
          FROM custody_connections
          WHERE id = ? AND organization_id = ? AND project_id = ?
@@ -989,23 +1026,33 @@ export class CustodyRuntimeTargets {
         throw conflict("Custody Connection changed during wallet creation");
       }
 
+      // A Privy wallet belongs to the Provider account, not one Credential
+      // version. Rotation and rollback may change the pointer while the
+      // Provider request is in flight, so re-lock the current scoped
+      // Credential and rely on the unchanged account fingerprint above.
       const currentCredential = await tx.queryOne<LockedCredentialWalletCreationRow>(
-        `SELECT status, credential_version
+        `SELECT status
          FROM provider_credentials
          WHERE id = ?
            AND organization_id = ?
-           AND project_id = ?
+           AND provider = ?
+           AND scope_key = ?
+           AND (project_id IS NULL OR project_id = ?)
          FOR UPDATE`,
-        [credential.provider_credential_id, target.organizationId, target.projectId]
+        [
+          connection.provider_credential_id,
+          target.organizationId,
+          target.provider,
+          connection.provider_credential_scope_key,
+          target.projectId,
+        ]
       );
       if (
         connection.status !== "active" ||
         connection.last_check_status !== "success" ||
         connection.provider_account_fingerprint !== credential.provider_account_fingerprint ||
         connection.default_custody_wallet_id === null ||
-        connection.provider_credential_id !== credential.provider_credential_id ||
-        currentCredential?.status !== "active" ||
-        currentCredential.credential_version !== credential.credential_version
+        currentCredential?.status !== "active"
       ) {
         throw conflict("Custody Connection changed during wallet creation");
       }

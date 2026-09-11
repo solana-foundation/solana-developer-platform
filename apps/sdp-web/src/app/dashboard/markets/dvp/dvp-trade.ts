@@ -6,59 +6,107 @@
  * 2^53. Comparisons go through BigInt, never Number.
  */
 
-import type { DvpTradeKind, DvpTradeStatus } from "@sdp/types";
+import {
+  DVP_TRADE_SIDES,
+  type DvpLegOutcome,
+  type DvpTradeSide,
+  type DvpTradeStatus,
+} from "@sdp/types";
 
-export { DVP_TRADE_STATUSES, type DvpTradeKind, type DvpTradeStatus } from "@sdp/types";
+export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
 
 /**
- * Whether the reader is a party to a trade somebody ELSE created.
+ * The caller's standing on a trade, derived per caller by the API.
  *
- * Distinct from `isDvpAgentTrade`, and the distinction is the whole of the
- * party view: an agent trade viewed by its author has no leg of theirs, while
- * the same trade viewed by a named party has exactly one — and only the second
- * of those may fund it, and neither may be offered the other's actions.
+ * Display copy only, never a term of the trade: 0 custodied sides is an agent
+ * trade (the terms were set for two other parties), 1 is principal, 2 is
+ * bilateral. Never re-derived client-side — trust the wire.
  */
-export function isDvpPartyView(trade: { yourSide?: "a" | "b" }): boolean {
-  return trade.yourSide === "a" || trade.yourSide === "b";
+export type DvpTradeKind = "principal" | "agent" | "bilateral";
+
+/**
+ * The caller's custody wallet behind a party address, as the API resolves it.
+ * `name` is the wallet's display name, or null when none was set.
+ */
+export interface DvpCallerWallet {
+  id: string;
+  name: string | null;
 }
 
-/**
- * Whether this organization holds a leg of the trade.
- *
- * Derived from the side rather than the kind, so a row written before
- * `tradeKind` existed still answers correctly: those are all principal and all
- * carry a side.
- */
-export function isDvpAgentTrade(trade: {
-  tradeKind?: DvpTradeKind;
-  sdpSide: "a" | "b" | null;
-}): boolean {
-  return trade.tradeKind === "agent" || trade.sdpSide === null;
+/** One side of a trade as the API resolves it for the caller. */
+export interface DvpPartyRef {
+  address: string;
+  /**
+   * The creator's registered counterparty this party is, or null for an
+   * external address. Never populated on a party read of another org's trade.
+   */
+  counterparty: { id: string; label: string } | null;
+  /**
+   * The caller's custody wallet holding this address, or null. Truthy = the
+   * caller custodies this party; the id is the wallet page's identifier.
+   */
+  wallet: DvpCallerWallet | null;
 }
 
-/**
- * The leg this organization delivers, or null when it delivers neither.
- *
- * The one place the dashboard is allowed to read `sdpSide`. A bare
- * `trade.sdpSide === "a"` answers `false` for BOTH "SDP holds leg B" and "SDP
- * holds no leg", and every surface that made that comparison then went on to
- * present leg B as ours and offer to fund it.
- */
-export function sdpLegSideOf(trade: {
-  tradeKind?: DvpTradeKind;
-  sdpSide: "a" | "b" | null;
-}): "a" | "b" | null {
-  return isDvpAgentTrade(trade) ? null : trade.sdpSide;
+export interface DvpTradeLeg {
+  /** The mint's decimals, or null when unknown. Never guessed. */
+  decimals: number | null;
+  /** The mint's symbol, or null when it carries no metadata. */
+  symbol: string | null;
+  /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
+  imageUrl: string | null;
+  party: DvpPartyRef;
+  mint: string;
+  tokenProgram: string;
+  amount: string;
+  /** The address a counterparty pays into. The whole of their integration. */
+  escrow: string;
+  settlementDestination: string;
+  funding: DvpLegFunding | null;
+  /** What moved this leg into escrow: the receipt, else the claim, else null. */
+  fundingSignature: string | null;
+  outcome: DvpLegOutcome;
 }
 
-/**
- * Statuses where the trade is over and its escrows no longer exist on chain.
- *
- * Worth a named set rather than a check at each call site, because the escrow
- * addresses stay in the record after the accounts are closed and a surface that
- * keeps presenting them as payable is inviting somebody to send tokens into a
- * closed account, where they are simply gone.
- */
+export interface DvpTrade {
+  id: string;
+  status: DvpTradeStatus;
+  kind: DvpTradeKind;
+  swapDvp: string;
+  settlementAuthority: string;
+  legs: { a: DvpTradeLeg; b: DvpTradeLeg };
+  nonce: string;
+  expiryTimestamp: string;
+  earliestSettlementTimestamp: string | null;
+  refString: string | null;
+  createSignature: string | null;
+  closeSignature: string | null;
+  /**
+   * Whether the settlement authority can pay for a close, read live.
+   *
+   * Null when it could not be determined, which is not the same as "not ready"
+   * — an unreadable balance must not accuse a funded authority of being empty.
+   */
+  settlementReadiness: {
+    address: string;
+    balance: string;
+    required: string;
+    funded: boolean;
+  } | null;
+  observedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /**
+   * Set only when the caller is a PARTY to a trade somebody else created.
+   *
+   * Absent on every trade this organization created. The API derives it from
+   * the same custody lookup that sets each leg's `wallet`; `wallet`
+   * itself stays the source for per-leg rendering.
+   */
+  yourSide?: DvpTradeSide;
+}
+
+/** Statuses where the trade is over and its escrows no longer exist on chain. */
 const CLOSED_STATUSES: ReadonlySet<DvpTradeStatus> = new Set([
   "settled",
   "cancelled",
@@ -81,80 +129,25 @@ export interface DvpLegFunding {
   frozen: boolean;
 }
 
-export interface DvpTradeLeg {
-  /** The mint's decimals, or null when unknown. Never guessed. */
-  decimals: number | null;
-  /** The mint's symbol, or null when it carries no metadata. */
-  symbol: string | null;
-  party: string;
-  mint: string;
-  tokenProgram: string;
-  amount: string;
-  /** The address a counterparty pays into. The whole of their integration. */
-  escrow: string;
-  settlementDestination: string;
-  funding: DvpLegFunding | null;
+/**
+ * Whether the reader holds a leg of a trade somebody ELSE created.
+ *
+ * The API answers this with `yourSide` on party reads. Distinct from a
+ * principal trade this org created itself: both hold a leg, only the latter
+ * is the settlement authority.
+ */
+export function isDvpPartyView(trade: { yourSide?: DvpTradeSide }): boolean {
+  return trade.yourSide === "a" || trade.yourSide === "b";
 }
 
-export interface DvpTrade {
-  /** The custody wallet this organization's leg is funded from. */
-  sdpWallet: { address: string; label: string | null } | null;
-  /**
-   * Whether the settlement authority can pay for a close, read live.
-   *
-   * Null when it could not be determined, which is not the same as "not ready"
-   * — an unreadable balance must not accuse a funded authority of being empty.
-   */
-  settlementReadiness: {
-    address: string;
-    balance: string;
-    required: string;
-    funded: boolean;
-  } | null;
-  /** The transaction that closed the trade, when it has been closed. */
-  closeSignature: string | null;
-  /** What moved SDP's leg into escrow. */
-  fundingSignature: string | null;
-  id: string;
-  status: DvpTradeStatus;
-  swapDvp: string;
-  settlementAuthority: string;
-  legs: { a: DvpTradeLeg; b: DvpTradeLeg };
-  /**
-   * Whether this organization is a party to the trade or only set it up.
-   *
-   * Absent on trades recorded before the kind existed, which are all principal.
-   */
-  tradeKind?: DvpTradeKind;
-  /**
-   * Set only when the reader is a PARTY to a trade somebody else created.
-   *
-   * The three questions this page answers are different for them: they hold a
-   * leg (so "you hold neither" is false), they are not the settlement authority
-   * (so settling and cancelling are not theirs to offer), and the leg they can
-   * act on is this one rather than `sdpSide`, which describes the author.
-   *
-   * Absent on every trade this organization created, whichever kind it is.
-   */
-  yourSide?: "a" | "b";
-  /**
-   * Which leg this organization delivers, or null when it delivers neither.
-   *
-   * Nullable because an agent trade has no SDP leg, and the API sends null for
-   * one. This said `"a" | "b"` while the wire could carry null, so every
-   * `sdpSide === "a"` in the dashboard silently took its else branch on an agent
-   * trade and presented leg B as ours — the same defect `sdpLegOf` is guarded
-   * against on the API side. Read it through `sdpLegSideOf`, never directly.
-   */
-  sdpSide: "a" | "b" | null;
-  nonce: string;
-  expiryTimestamp: string;
-  earliestSettlementTimestamp: string | null;
-  refString: string | null;
-  createSignature: string | null;
-  observedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
+/**
+ * The sides of a trade the CALLER holds a custody wallet for, A first.
+ *
+ * The one place the dashboard is allowed to read `party.wallet` into a
+ * side list: fund actions render per custodied side, bilateral included.
+ */
+export function custodiedSidesOf(trade: Pick<DvpTrade, "legs">): DvpTradeSide[] {
+  return DVP_TRADE_SIDES.filter((side) => trade.legs[side].party.wallet !== null);
 }
 
 /** Statuses a trade can still be settled or cancelled from. */

@@ -13,12 +13,12 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
-import {
-  createTransferSignedSubmissionStore,
-  isDefiniteSubmissionError,
-  submitSignedPaymentTransaction,
-} from "@/services/payments/signed-submission";
+import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import {
+  isDefiniteSubmissionError,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
 import { type AppContext, type getFeePayment, getPaymentsRepository } from "../../context";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
@@ -220,7 +220,7 @@ export async function executeChunk(params: {
   await beginApprovedWalletOperationEffect(c);
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
   try {
-    await submitSignedPaymentTransaction({
+    await submitSponsoredTransaction({
       feePayment: params.feePayment,
       rpc: resolved.rpc,
       transaction: txBytes,

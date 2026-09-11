@@ -30,9 +30,9 @@ set -euo pipefail
 #
 # Prerequisites: solana CLI 4.x, curl, jq, shasum.
 
-RELEASE_TAG="v0.1.0-alpha.2"
+RELEASE_TAG="v0.1.0-alpha.6"
 RING_SO_URL="https://github.com/helius-labs/zolana/releases/download/${RELEASE_TAG}/custom-ring-program-${RELEASE_TAG}.so"
-RING_SO_SHA256="041b94f53ff0ee291473b3cf407b7c8b535d87f2beb7a18c48e2034aa2235d81"
+RING_SO_SHA256="a2a9e85c9677b26f9ee8bf60151dca5ce76b3984e00ac16dc8bd159acc591fae"
 DEPLOY_BALANCE_SOL="1.4"   # ~1.23 SOL programdata rent + fees, with headroom
 BRINGUP_FUND_SOL="0.05"    # rents config, ring-auth, reader record, lookup table
 
@@ -59,11 +59,62 @@ below() { awk -v a="$1" -v b="$2" 'BEGIN { exit (a < b) ? 0 : 1 }'; }
 # ── 1. The custody wallet that will own the ring ────────────────────────────
 step "custody wallet"
 CUSTODY_CACHE="$WORK_DIR/custody-wallet"
+
+# Asks SDP whether it still knows a wallet, printing its provider wallet id.
+# Empty output means SDP answered and has no active wallet at that address.
+#
+# Returns non-zero when SDP could not answer at all. That case must stay
+# separate from an empty answer: piping an error body through jq also yields
+# nothing, so a rejected key would otherwise read as "the wallet is gone" and
+# send you looking for the wrong problem.
+sdp_wallet_id_for() {
+  [ -n "${SDP_API_KEY:-}" ] || return 0
+  local response http_code body
+  response="$(curl -sS -w '\n%{http_code}' "$SDP_API_URL/v1/wallets" \
+    -H "Authorization: Bearer $SDP_API_KEY")" || {
+    echo "could not reach SDP at $SDP_API_URL" >&2
+    return 1
+  }
+  http_code="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [ "$http_code" != "200" ]; then
+    echo "SDP rejected the wallet lookup (HTTP $http_code): $body" >&2
+    echo "check SDP_API_KEY: it needs custody:admin and must not be wallet-scoped" >&2
+    return 1
+  fi
+  jq -r --arg address "$1" \
+    '.data.wallets[]? | select(.publicKey == $address and .status == "active") | .walletId' \
+    <<<"$body"
+}
+
 if [ -n "${CUSTODY_WALLET_ADDRESS:-}" ]; then
   CUSTODY_ADDRESS="$CUSTODY_WALLET_ADDRESS"
   echo "reusing custody wallet $CUSTODY_ADDRESS"
 elif [ -s "$CUSTODY_CACHE" ]; then
-  CUSTODY_ADDRESS="$(cat "$CUSTODY_CACHE")"
+  # The cache records a decision, not a fact: SDP's own record of the wallet
+  # can be gone (a reset project, a wiped local database) while this file still
+  # names it. Re-running then skipped wallet creation AND reported success,
+  # leaving bring-up to fail later with "the ring's config authority is not a
+  # key this project's custody can sign with". Verified here instead, where the
+  # cause is still visible.
+  CUSTODY_ADDRESS="$(head -n 1 "$CUSTODY_CACHE")"
+  # A lookup SDP could not answer already explained itself; stop rather than
+  # mistake it for a missing wallet.
+  CUSTODY_WALLET_ID="$(sdp_wallet_id_for "$CUSTODY_ADDRESS")" || exit 1
+  if [ -z "$CUSTODY_WALLET_ID" ] && [ -n "${SDP_API_KEY:-}" ]; then
+    echo "cached custody wallet $CUSTODY_ADDRESS is not a wallet this SDP project holds" >&2
+    echo "" >&2
+    echo "The ring's on-chain upgrade authority is that address, so bring-up can only" >&2
+    echo "complete once SDP can sign as it. Deleting the cache does not help: a new" >&2
+    echo "wallet cannot take an authority the old one still holds." >&2
+    echo "" >&2
+    echo "  cache:    $CUSTODY_CACHE" >&2
+    echo "  provider: $(sed -n '2p' "$CUSTODY_CACHE" 2>/dev/null || echo 'not recorded by an older run')" >&2
+    echo "" >&2
+    echo "Re-register that wallet with the project, or point at another with" >&2
+    echo "CUSTODY_WALLET_ADDRESS=<address> if the ring has never been brought up." >&2
+    exit 1
+  fi
   echo "reusing custody wallet from previous run: $CUSTODY_ADDRESS"
 else
   [ -n "${SDP_API_KEY:-}" ] || { echo "SDP_API_KEY is required (or set CUSTODY_WALLET_ADDRESS)" >&2; exit 1; }
@@ -79,10 +130,16 @@ else
     exit 1
   fi
   CUSTODY_ADDRESS="$(jq -er '.data.wallet.publicKey' <<<"$body")"
+  CUSTODY_WALLET_ID="$(jq -r '.data.wallet.walletId // empty' <<<"$body")"
   echo "created custody wallet ring-authority-$RING_LABEL: $CUSTODY_ADDRESS"
 fi
-# Persist for re-runs: the ring must keep one authority across resumes.
-printf '%s\n' "$CUSTODY_ADDRESS" > "$CUSTODY_CACHE"
+# Persist for re-runs: the ring must keep one authority across resumes. The
+# provider wallet id goes on line two, because recovering a lost SDP record
+# from the address alone means paging the provider's whole wallet list.
+{
+  printf '%s\n' "$CUSTODY_ADDRESS"
+  [ -n "${CUSTODY_WALLET_ID:-}" ] && printf '%s\n' "$CUSTODY_WALLET_ID"
+} > "$CUSTODY_CACHE"
 
 # ── 2. The ring program binary, hash-pinned to the release ──────────────────
 step "ring program binary ($RELEASE_TAG)"

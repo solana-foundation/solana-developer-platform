@@ -1,6 +1,7 @@
 import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import { checkedTransactionSize } from "@heliuslabs/zolana/interface";
+import { fetchUserRecord, resolvedAddressFromRecord } from "@heliuslabs/zolana/wallet";
 import {
   type BuildOperationInput,
   type BuildOperationResult,
@@ -25,11 +26,21 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
 } from "@solana-program/compute-budget";
 import { withZolanaErrorBridgeSync } from "./error-bridge.js";
-import { buildRingTransferTx, buildRingWithdrawalTx } from "./flows/ring-spend.js";
+import { buildMerge } from "./flows/merge.js";
+import {
+  buildRingEntryTx,
+  buildRingExitTx,
+  buildRingTransferTx,
+  buildRingWithdrawalTx,
+} from "./flows/ring-spend.js";
 import { buildShieldTransaction } from "./flows/shield.js";
 import { buildTransfer, buildWithdrawal, type SpendDeps } from "./flows/spend.js";
 import { spendKeys } from "./keys.js";
-import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";
+import {
+  assertProvisionedIdentity,
+  canonicalShieldedIdentity,
+  type ShieldedMaterialSource,
+} from "./material.js";
 import { hydrateWallet } from "./wallet.js";
 
 /**
@@ -93,17 +104,36 @@ export async function buildRingsOperation(
         );
       }
 
-      if (operation.opType !== "withdraw" && operation.opType !== "transfer_registered") {
+      const isRingMove = operation.opType === "ring_exit" || operation.opType === "ring_entry";
+      if (
+        operation.opType !== "withdraw" &&
+        operation.opType !== "transfer_registered" &&
+        operation.opType !== "merge" &&
+        !isRingMove
+      ) {
         throw new HeliusRingsError(
           "invalid_input",
           `unsupported Rings operation type: ${operation.opType}`
         );
       }
 
+      // Ring-bound notes are consolidated by an instruction the protocol
+      // reserves a tag for but ships no builder for, so this is refused rather
+      // than routed. Unreachable through the route schema, which has no `ring`
+      // on the merge arm at all.
+      if (operation.opType === "merge" && operation.ringProgramId) {
+        throw new HeliusRingsError(
+          "invalid_input",
+          "ring-bound notes cannot be merged; merge the default ring's notes instead"
+        );
+      }
+
       // A pinned ring routes to the SDK's one-call ring builders after wallet
       // hydration. They need the ring's lookup table; its absence fails here,
-      // before the wallet read it could never use.
-      const ring = operation.ringProgramId ? requireRing(input) : null;
+      // before the wallet read it could never use. A ring move demands the
+      // pair unconditionally — the ring is the operation's whole meaning, so a
+      // missing pin must be this config_error, never a default-pool build.
+      const ring = isRingMove || operation.ringProgramId ? requireRing(input) : null;
 
       // Copies of the material's keys, so they carry their own lifetime inside
       // the material's scope.
@@ -124,32 +154,17 @@ export async function buildRingsOperation(
         });
 
         if (ring) {
-          return await buildRingSpend(deps, input, { ring, mint, wallet, keys, owner });
+          return await buildRingSpend(deps, input, {
+            ring,
+            mint,
+            wallet,
+            keys,
+            owner,
+            self: material.shieldedAddress,
+          });
         }
 
-        const spend: SpendDeps = { client: deps.client, wallet, keys, owner };
-        const asset = {
-          mint,
-          amountRaw: requireAmount(input),
-          ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
-        };
-
-        // The two spends differ only in how the recipient is named: a shielded
-        // address the recipient's own material has to yield, or a public one.
-        const built =
-          operation.opType === "transfer_registered"
-            ? await buildTransfer(spend, {
-                ...asset,
-                recipient: await liftRecipientShieldedAddress(deps, input),
-              })
-            : await buildWithdrawal(spend, { ...asset, recipient: requireRecipient(input) });
-
-        const lifetime = await deps.client.getLatestBlockhash();
-        return finish(
-          assemble(owner, built.instructions ?? [], lifetime),
-          built.inputNotes,
-          lifetime
-        );
+        return await buildDefaultSpend(deps, input, { mint, wallet, keys, owner });
       } finally {
         keys.destroy();
       }
@@ -184,6 +199,8 @@ async function buildRingSpend(
     wallet: HydratedWallet;
     keys: WalletKeys;
     owner: ReturnType<typeof address>;
+    /** The wallet's own shielded address; a ring exit's only allowed recipient. */
+    self: ShieldedAddress;
   }>
 ): Promise<BuildOperationResult> {
   const ringSpend = {
@@ -215,8 +232,66 @@ async function buildRingSpend(
 
   const tx = recipient.value
     ? await buildRingTransferTx(ringSpend, { ...ringInput, recipient: recipient.value })
-    : await buildRingWithdrawalTx(ringSpend, { ...ringInput, recipient: requireRecipient(input) });
+    : input.operation.opType === "ring_exit"
+      ? await buildRingExitTx(ringSpend, { ...ringInput, recipient: context.self })
+      : input.operation.opType === "ring_entry"
+        ? await buildRingEntryTx(ringSpend, ringInput)
+        : await buildRingWithdrawalTx(ringSpend, {
+            ...ringInput,
+            recipient: requireRecipient(input),
+          });
   return finish(tx, [], floor.value);
+}
+
+/**
+ * A default-pool spend after wallet hydration: merge consolidates the wallet's
+ * own notes; transfer and withdrawal differ only in how the recipient is named
+ * — a shielded address the recipient's own material has to yield, or a public
+ * one.
+ */
+async function buildDefaultSpend(
+  deps: BuildDeps,
+  input: BuildOperationInput,
+  context: Readonly<{
+    mint: string;
+    wallet: HydratedWallet;
+    keys: WalletKeys;
+    owner: ReturnType<typeof address>;
+  }>
+): Promise<BuildOperationResult> {
+  const { mint, wallet, keys, owner } = context;
+
+  if (input.operation.opType === "merge") {
+    // The merge builder assembles and blockhashes its own transaction, so this
+    // read only floors the recorded expiry — the shield branch's contract.
+    const floor = await deps.client.getLatestBlockhash();
+    const merged = await buildMerge(
+      { client: deps.client, wallet, keys, owner },
+      {
+        mint,
+        ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
+      }
+    );
+    return finish(merged.transaction, merged.inputNotes, floor);
+  }
+
+  const spend: SpendDeps = { client: deps.client, wallet, keys, owner };
+  const asset = {
+    mint,
+    amountRaw: requireAmount(input),
+    ...(input.pinnedInputs ? { pinnedInputs: input.pinnedInputs } : {}),
+  };
+
+  const built =
+    input.operation.opType === "transfer_registered"
+      ? await buildTransfer(spend, {
+          ...asset,
+          recipient: await liftRecipientShieldedAddress(deps, input),
+        })
+      : await buildWithdrawal(spend, { ...asset, recipient: requireRecipient(input) });
+
+  const lifetime = await deps.client.getLatestBlockhash();
+  return finish(assemble(owner, built.instructions ?? [], lifetime), built.inputNotes, lifetime);
 }
 
 /**
@@ -236,18 +311,31 @@ async function liftRecipientShieldedAddress(
     );
   }
   const recipient = input.recipient;
-  return deps.material.withMaterial(
-    {
-      organizationId: deps.organizationId,
-      projectId: deps.projectId,
-      walletId: recipient.walletId,
-      owner: recipient.owner,
-    },
-    async (recipientMaterial) => {
-      assertProvisionedIdentity(recipientMaterial, recipient.expectedShieldedAddress);
-      return recipientMaterial.shieldedAddress;
-    }
-  );
+
+  // Read the recipient off the registry rather than deriving it. Every half of a
+  // recipient's identity is public and already published on chain, so a sender
+  // needs none of their key material — which is what makes a recipient in another
+  // project, or another tenant's custody entirely, resolvable at all.
+  const record = await fetchUserRecord({ rpc: deps.client, owner: address(recipient.owner) });
+  if (!record) {
+    throw new HeliusRingsError(
+      "conflict",
+      `the Rings recipient ${recipient.owner} has no published user record; provision the recipient wallet first`
+    );
+  }
+
+  const resolved = resolvedAddressFromRecord(address(recipient.owner), record);
+  const published = canonicalShieldedIdentity(resolved.address);
+  if (published !== recipient.expectedShieldedAddress) {
+    // The registry moved under a persisted recipient: either it was re-keyed, or
+    // the caller named an identity this owner never published.
+    throw new HeliusRingsError(
+      "conflict",
+      `the Rings recipient ${recipient.owner} now publishes a different shielded identity; re-read the recipient wallet before transferring to it`
+    );
+  }
+
+  return resolved.address;
 }
 
 /** Fee payer, blockhash, instructions — what the low-level rail leaves to us. */

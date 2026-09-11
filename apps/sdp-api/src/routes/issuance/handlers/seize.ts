@@ -1,10 +1,16 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
@@ -18,9 +24,19 @@ import {
 } from "../helpers";
 import type { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
-import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
-import { buildIdempotencyMetadata } from "./idempotency";
 import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveAuthoritySigner,
+  resolveAuthorityWallet,
+  resolveDirectIssuanceReplay,
+  resolvePermanentDelegateAuthority,
+} from "./authority-resolution";
+import { buildIdempotencyMetadata } from "./idempotency";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
+import { toPublicTokenTransaction } from "./public-response";
+import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -54,19 +70,23 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     isOnControlList,
   });
 
-  const permanentDelegateRaw =
-    body.seize.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
+  if (
+    body.seize.delegateAuthority !== undefined &&
+    body.seize.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { signer, custodyWalletId } = await resolveAuthoritySigner({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.seize.source, "source");
@@ -93,6 +113,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "seize",
     params: {
       source: body.seize.source,
@@ -117,11 +138,12 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       amount: body.seize.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "prepare",
+      custodyWalletId,
     },
   });
 
   return success(c, {
-    transaction: tx,
+    transaction: toPublicTokenTransaction(tx),
     preparedTransaction: {
       serialized: prepared.serializedTx,
       blockhash: prepared.blockhash,
@@ -148,6 +170,39 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "seize",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "seize",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:admin"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const transaction = await recoverSettledTransactionReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      action: "seize",
+    });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved seize execution is incomplete and requires manual reconciliation");
+    }
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
+  }
+
   assertTokenAllowsOperation(token, "seize");
   assertTokenIsDeployed(token);
 
@@ -160,35 +215,46 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     isOnControlList,
   });
 
-  const permanentDelegateRaw =
-    body.seize.delegateAuthority ??
-    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
+  if (
+    body.seize.delegateAuthority !== undefined &&
+    body.seize.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { custodyWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.seize.source, "source");
   const destination = assertValidAddress(body.seize.destination, "destination");
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "seize",
-    mode: "execute",
-    params: body,
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
+
+  const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "seize",
     params: {
       source: body.seize.source,
@@ -210,9 +276,20 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       transaction: tx,
       action: "seize",
     });
-    return success(c, { transaction });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict("Approved seize execution is incomplete and requires manual reconciliation");
+    }
+    return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "seize",
@@ -225,11 +302,13 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       amount: body.seize.amount,
       delegateAuthority: permanentDelegateRaw,
       mode: "execute",
+      custodyWalletId,
     },
   });
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.forceTransfer({
       mint: mintAddress,
       source,
@@ -265,7 +344,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
       slot: result.slot.toString(),
     });
 
-    return success(c, { transaction: updatedTx });
+    return success(c, { transaction: toPublicTokenTransaction(updatedTx) });
   } catch (error) {
     if (!onChainEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {
@@ -280,3 +359,100 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     throw error;
   }
 };
+
+export async function extractSeizePolicyCandidate(
+  c: ValidatedBodyContext<typeof seizeSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "seize",
+      source: body.seize.source,
+      destination: body.seize.destination,
+      amount: body.seize.amount,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: "seize",
+        idempotencyKey,
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:admin"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(idempotencyKey, {
+            tokenId,
+            operation: "seize",
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  assertTokenAllowsOperation(token, "seize");
+  assertTokenIsDeployed(token);
+
+  parsePositiveTokenAmount(body.seize.amount, token.decimals);
+
+  const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
+  assertDestinationAllowedByControlList({
+    token,
+    destination: body.seize.destination,
+    isOnControlList,
+  });
+
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  if (!permanentDelegateRaw) {
+    throw badRequest("Permanent delegate is not configured for this token");
+  }
+  if (
+    body.seize.delegateAuthority !== undefined &&
+    body.seize.delegateAuthority !== permanentDelegateRaw
+  ) {
+    throw badRequest("Provided delegate authority does not match the on-chain authority");
+  }
+
+  const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    currentAuthority: permanentDelegateRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId,
+      walletId: providerWalletId,
+      operationType: "issuance_seize_execute",
+      amount: body.seize.amount,
+      destination: body.seize.destination,
+    }),
+  };
+}

@@ -23,7 +23,11 @@ const THEIR_ESCROW = "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU";
 
 function leg(escrow: string, overrides: Partial<DvpInboundLeg> = {}): DvpInboundLeg {
   return {
-    party: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
+    party: {
+      address: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
+      counterparty: null,
+      wallet: null,
+    },
     mint: "BgW9X4dThuRTWCAz9kkq51Xrth6TcwfwKmxzvLH3VeBK",
     amount: "250000000",
     decimals: 6,
@@ -41,7 +45,16 @@ function trade(overrides: Partial<DvpInboundTrade> = {}): DvpInboundTrade {
     status: "created",
     swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
     yourSide: "b",
-    legs: { a: leg(THEIR_ESCROW, { symbol: "ATD" }), b: leg(YOUR_ESCROW) },
+    legs: {
+      a: leg(THEIR_ESCROW, { symbol: "ATD" }),
+      b: leg(YOUR_ESCROW, {
+        party: {
+          address: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
+          counterparty: null,
+          wallet: { id: "cwlt_dvp_inbound", name: null },
+        },
+      }),
+    },
     expiryTimestamp: "1900000000",
     createdAt: "2026-09-07T00:00:00.000Z",
     ...overrides,

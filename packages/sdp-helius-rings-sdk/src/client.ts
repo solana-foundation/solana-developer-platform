@@ -15,6 +15,11 @@ export interface RingsClientConfig {
    * indexer response reveals which notes an identity owns.
    */
   readonly allowInsecureHttp?: boolean;
+  /**
+   * Carries the indexer and prover legs; the client's own Solana RPC leg
+   * builds its transport internally and cannot take one (upstream gap).
+   */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -29,5 +34,6 @@ export function createRingsClient(config: RingsClientConfig): Promise<ZolanaClie
     proverUrl: config.proverUrl,
     tree: tree === undefined ? undefined : withConfiguredAddressErrorBridge(() => address(tree)),
     allowInsecureHttp: config.allowInsecureHttp ?? false,
+    ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
   });
 }

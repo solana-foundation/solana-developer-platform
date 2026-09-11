@@ -110,6 +110,14 @@ const earnStrategySchema = z
         "must also be `active` and the organization entitled to the provider — so branch on " +
         "it rather than assuming a listed strategy takes deposits.",
     }),
+    feeSponsored: z.boolean().openapi({
+      description:
+        "Whether SDP's treasury vault flow would use its configured paymaster for a movement on " +
+        "this strategy from your environment: the same gate execution applies, derived per " +
+        "request. Read it for fee copy instead of the deposit preview's flag: providers with " +
+        "no quote-derived floor never need a preview. Always `false` when not `fundable`. A " +
+        "swap-funded deposit is wallet-pays regardless.",
+    }),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })
@@ -602,7 +610,7 @@ const earnExternalWalletDepositSwapSplitSchema = z
   .openapi({
     description:
       "Answered instead of a built transaction when the composed swap + deposit cannot fit " +
-      "one Solana packet (1,232 bytes) even on a compact route. Nothing was persisted.",
+      "one Solana packet (1,232 bytes) even on a compact route. No submit-capable build or movement was persisted; SDP retained only a recovery advisory.",
   });
 
 export const earnExternalWalletDepositTransactionResponse = successResponseSchema(
@@ -677,9 +685,24 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
   }),
   label: z.string().openapi({ example: "Allez USDC" }),
-  ownerAddresses: z.array(earnOwnerAddressSchema).openapi({
-    description: "The exact project-scoped owners contributing to this strategy total.",
-  }),
+  ownerAddresses: z
+    .array(earnOwnerAddressSchema)
+    .optional()
+    .openapi({
+      description:
+        "The exact project-scoped owners contributing to this strategy total. Present by default; " +
+        "absent when the request passed `includeOwnerAddresses=false`. This list is the project's " +
+        "end-user address book, so keys that only need totals should opt out.",
+    }),
+  positions: z
+    .array(earnExternalWalletPositionSchema)
+    .optional()
+    .openapi({
+      description:
+        "Complete live positions contributing to this strategy total. Present only when the " +
+        "request passes `includePositions=true`; use this single drill-down instead of one " +
+        "live request per owner.",
+    }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
   totalsByToken: z.array(earnExternalWalletTokenTotalSchema),

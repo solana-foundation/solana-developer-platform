@@ -34,16 +34,29 @@ export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
 export const DVP_TRADE_SIDES = ["a", "b"] as const;
 export type DvpTradeSide = (typeof DVP_TRADE_SIDES)[number];
 
-/**
- * Whether SDP is a party to the trade or only set it up.
- *
- * `principal` is the original shape and the default: SDP holds one leg in a
- * custody wallet and the counterparty is an arbitrary address.
- *
- * `agent` is the execution-desk shape — one party sets the terms and two other
- * parties do the swaps. The program always allowed it (`CreateDvp`'s only
- * signer is the payer), so this is SDP catching up to the program rather than
- * anything new on chain.
- */
-export const DVP_TRADE_KINDS = ["principal", "agent"] as const;
-export type DvpTradeKind = (typeof DVP_TRADE_KINDS)[number];
+/** The server-derived state of one DvP leg. */
+export const DVP_LEG_OUTCOMES = [
+  /** No tokens have been observed in escrow. */
+  "awaiting",
+  /** Escrow holds less than the trade requires. */
+  "partial",
+  /** Escrow holds exactly the required amount. */
+  "funded",
+  /** Escrow holds more than the trade requires. */
+  "overfunded",
+  /** The escrow token account is frozen. */
+  "frozen",
+  /** A previously observed deposit has been reclaimed. */
+  "reclaimed",
+  /** The open trade expired before settlement. */
+  "expired",
+  /** Settlement delivered this leg to its destination. */
+  "delivered",
+  /** Cancellation or rejection refunded this leg. */
+  "refunded",
+  /** A post-close deposit remains available for recovery. */
+  "recoverable",
+  /** The trade closed without a recoverable balance or known outcome. */
+  "closed",
+] as const;
+export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];

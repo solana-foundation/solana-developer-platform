@@ -98,6 +98,19 @@ balance with a live one.
   integration guide is derived from the strategy catalogue and persists
   nothing.
 
+- **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
+  model EARN-027). `registerPublicEarnPaths` decides what partners see, and
+  the public/preview split is a PUBLICATION boundary only: every `/v1/earn`
+  route accepts every auth mode at runtime, and both surfaces are the same
+  Hono router under the same `/v1/*` tracing and rate-limit middleware. So
+  moving a route into the public document changes the partner-facing scope
+  without changing any enforcement, which is why it needs a human gate. The
+  pinned operation list in `../../openapi/spec.test.ts` ("publishes the
+  caller-signed money routes") is that gate: growing it requires a security
+  sign-off named in the PR (who reviewed, and the threat-model row the route
+  lands under), and the threat model's revisit trigger fires. Never widen the
+  list just to make the test pass.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
@@ -579,7 +592,8 @@ organization's own custody wallets.
   external-wallet build answers the SPLIT contract —
   `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
   unsigned swap-only transaction the owner signs and broadcasts itself
-  (persisting nothing), followed by an ordinary unswapped build for
+  (persisting no consumable build, but an orphan-detection ADVISORY, see the
+  external-wallet section), followed by an ordinary unswapped build for
   `followUp.amount`. Jupiter routes MAINNET only: on devnet the mints are
   pinned per cluster but Jupiter answers "not tradable", surfaced as a 400.
 - `POST /vault-deposit-previews` — the deposit QUOTE: what the vault's own
@@ -597,10 +611,15 @@ organization's own custody wallets.
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
   The response also carries `feeSponsored` — sponsorship INTENT
   (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
-  gate `resolveVaultSponsorship` applies at execution) — which the dashboard
-  uses for honest fee copy on the confirm step; a swap-funded deposit is
-  always wallet-pays and the client owns that override. The withdrawal
-  preview carries the same field.
+  gate `resolveVaultSponsorship` applies at execution). The withdrawal preview
+  carries the same field. **The dashboard does NOT read it from here**: a
+  preview is only fetched for providers with a quote-derived floor, so a flag
+  that travels only with a quote is unreadable for Kamino, and the confirm
+  note claimed wallet-pays on every sponsored Kamino deposit. The dashboard's
+  fee copy reads `feeSponsored` on the STRATEGY row (`mapToEarnStrategy`,
+  derived per request like `fundable`, `false` when not fundable) for
+  deposits and on the VAULT POSITION (`listEarnVaultPositions`) for exits; a
+  swap-funded deposit is always wallet-pays and the client owns that override.
   POST because the parameters are a body, like the custodial
   withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
   money-in gates.
@@ -764,6 +783,74 @@ detail reads. The job additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
 
+**The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
+threat model EARN-006). A chain read failure used to `return` cleanly, so the
+batch went unjudged while `sdp_cron_run` recorded `ok`: the only trace was an
+error log line, with no alertable event name and no backlog signal anywhere
+that money had stopped settling. Now a completed tick emits
+`sdp_api_earn_vault_reconciliation_tick` (the
+`sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
+counts plus the backlog gauges read AFTER the tick, and any failure (a status
+read, a block-height read, or a per-movement error) marks the tick
+error-level and THROWS so `runWithCronRunEvent` records `status: "error"`.
+Per-movement errors count too, deliberately: reads can answer perfectly while
+the write side is down (pool exhaustion, a send-side RPC outage), and an ok
+tick over a batch where nothing settled is the same silence. The sponsorship
+reconciler takes the identical posture, emitting its tick and then throwing
+when any item failed. Both runners absorb the throw: the managed job's
+`collect` records the failure without starving later ticks, and
+`NodeBackgroundRunner.run` attaches its own catch. Do not "helpfully" swallow
+it.
+
+Three details that look like bugs and are not:
+
+- **The block-height read is gated on rows that can CONSUME a height**: a null
+  RPC status on a row not already `confirmed`. A `confirmed` row whose
+  signature aged out of RPC history short-circuits to `unchanged` before the
+  height is read, and is a permanent member of the claim set, so gating on the
+  RPC answer alone spent a discarded call every minute and let its failure fail
+  a tick that had done its whole job.
+- **The backlog is dimensioned for the same reason.** Those parked `confirmed`
+  rows never leave the queue, so a total-only age latches and pages forever;
+  `backlog_blockhash_bound` / `oldest_blockhash_bound_age_seconds` are the
+  actionable subset, and the withdrawal split keeps the exit path visible on
+  its own axis (ADR 0002).
+- **"Completed tick" is the honest qualifier.** A rejection from the claim or
+  backlog QUERY skips the event, exactly as the sponsorship reconciler skips
+  its tick when its own candidate read fails. The run is still loud
+  (`sdp_cron_run` error, non-zero exit). Do not synthesize a fallback tick: it
+  could only carry a null backlog (invisible to a threshold rule) or a zero,
+  which reads as a drained queue and would CLEAR a firing alert mid-incident.
+  Alert on the ABSENCE of the tick instead.
+
+Pinned by the "sweep telemetry" describe in
+`../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
+`runWithCronRunEvent` test composes the real wrapper.
+
+**Expiring a `submitted` movement takes TWO unknown-signature observations**
+(PRO-1904, migration 0092). The evidence bar differs by status because the
+statuses carry different facts:
+
+- `requested` is unbroadcast. Past its blockhash it cannot land, so one null
+  status past the window expires it on that tick (the pre-existing rule).
+- `confirmed` demonstrably landed. A null status is RPC history forgetting, so
+  it is never expired (PRO-1716).
+- `submitted` was broadcast and MAY have landed. RPC history is not complete
+  (the `confirmed` rule exists for exactly that reason), so one null answer is
+  evidence, not proof, and a false `failed` is terminal with the shares still
+  in the vault. The first null observation past the window writes
+  `unknown_signature_observed_at` and returns `unchanged`; only a LATER tick
+  that sees the signature unknown again fails the row. A tick that finds the
+  signature in between advances it normally and the mark becomes inert.
+
+The mark is written only by the sweep (the interactive read-through passes no
+block height and can neither park nor expire), only on a `submitted` row, and
+only once (COALESCE), so a burst of ticks cannot count as two observations. An
+unavailable block-height read is not an observation either: the row is left for
+the next tick (ADR 0002 exit safety). Cost: a genuinely dead submitted
+movement fails one tick later than before. Pinned by the "expiring a SUBMITTED
+movement" describe in the same test file.
+
 ### Vault withdrawals — the exit half (PRO-1702)
 
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
@@ -853,6 +940,40 @@ Each direction is BUILD then SUBMIT (`handlers/external-wallet.ts`,
   answer carries `feePayer` through `followUp` and compiles the standalone
   swap with the same payer. This is the CALLER's wallet co-signing, not Kora:
   SDP-side sponsorship for caller-signed movements stays PRO-1744.
+- **The split answer records an ADVISORY, never a movement** (PRO-1864, threat
+  model EARN-026). The standalone swap is the one transaction this flow hands
+  out that SDP never sees again, so the service's split branch writes an
+  `earn_split_swap_advisories` row (owner, strategy, the swap floor in ATOMS
+  with the mint's decimals, the swap's last valid block height, and the
+  owner's deposit-token balance read at build time as a baseline) before
+  answering. The insert and the baseline read are FAIL-CLOSED: money in may
+  refuse, and a blind advisory could only ever page on any wallet that held
+  the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
+  judges each open advisory on both runners (every minute in-process, at the
+  Managed Reconciliation Cadence in the Cloud Run Job): an in-flight deposit or
+  an unconsumed follow-up BUILD inside a 30-minute window is the partner still
+  working; once the swap's blockhash is dead and a 30-minute grace has run, the
+  intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
+  deposit into this vault for exactly the floor (which is how `followUp.amount`
+  is sized) resolves it as `deposit_observed` whatever else the wallet holds.
+  Otherwise the owner's balance is read with the SAME call as the baseline and
+  is the ground truth: a rise of at least the floor with no other covering
+  same-mint deposit is reported as `sdp_api_earn_split_swap_orphaned` (warn,
+  `escalated` after an hour) on every visit; a rise WITH a covering deposit into
+  a different vault is conflicting evidence and stays open under
+  `sdp_api_earn_split_swap_ambiguous`, never cleared and never paged as an
+  orphan: SDP never sees the swap's signature, so this state is undecidable by
+  machine, and paging it would page every legitimate wallet with other inflows.
+  An hour on it escalates under that same event (`escalated: true`, with
+  `covering_deposit_ids`), the hook for a NON-PAGING alert that puts a human on
+  it; the human's answer is the `acknowledged` resolution. The paging orphan
+  signal stays reserved for what the detector can prove. Once the rise
+  is gone a covering deposit resolves it (one movement discharges at most one
+  advisory, UNIQUE `resolving_movement_id`; a `failed` one never does), no rise
+  is `unfunded`, and a partial rise stays open. It ALERTS and never acts: the funds are
+  the owner's, and only the partner can move them. Detection writes nothing
+  but back to the advisory table. Every amount it compares is atoms to atoms;
+  the decimal `swap_min_out_amount` exists for display only.
 - `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
   `{transactionId, signedTransaction}` plus a REQUIRED `Idempotency-Key`
   (body `requestId` rejected). The submit proves the bytes are a transaction
@@ -916,6 +1037,17 @@ ownership collapse to one answer), and none of them is reachable through
 owner-signed row can never satisfy
 (`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
 three).
+
+`GET /external-wallet/positions/summary` is the one read on this surface that
+is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresses`
+is the project's entire end-user address book (threat model EARN-028): any
+`earn:read` key becomes PII-bearing by calling it. `?includeOwnerAddresses=false`
+omits the list (omitted, never emptied, so "not requested" cannot read as "no
+owners") and keeps `walletCount`. Interactive surfaces can pass
+`includePositions=true` to receive each strategy's already hydrated positions
+in that same request; it requires owner addresses and replaces the
+dashboard's old N-per-owner read fanout. Partner docs steer analytics keys to
+the address-free opt-out shape and detailed surfaces to the explicit opt-in.
 
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
@@ -1009,8 +1141,12 @@ whose second test exhausts both counters and asserts the payout still lands.
 
 Every earn money write also lands a hash-chained `audit_logs` event: action
 `deposit`/`withdraw`, resourceType `earn_movement`, resourceId the movement id,
-actor identical to the movement's `created_by`/`initiated_by_key_id` (passed
-explicitly, so the two records cannot disagree). Helpers live in
+actor matching the movement's `created_by`/`initiated_by_key_id`. The actor is
+sourced by direction: withdrawals read it off the movement row (post-effect,
+the row exists); deposits are admitted before any row exists, so their intent
+carries the request's own auth, the same values the service writes into the
+row. Passed explicitly in both cases so `log()` never falls back to a context
+naming someone else. Helpers live in
 `handlers/movement-audit.ts`; the five seams are the two custody vault routes,
 the two external-wallet submits, and the program withdrawal.
 
@@ -1116,6 +1252,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   (`src/cron/earn-metrics-refresh.ts`) runs every 5 minutes and is UPDATE-only,
   so it can never admit a row. Cadence and failure behaviour:
   `packages/sdp-earn/README.md` → "Catalogue data".
+- **Provider-reported figures are diffed, never trusted silently** (PRO-1867,
+  EARN-010). Both passes read the stored shelf first and emit
+  `sdp_api_earn_catalogue_figure_anomaly` for an APY/TVL move past
+  `EARN_FIGURE_BOUNDS`, and `sdp_api_earn_catalogue_shelf_disappeared` when a
+  lane that held rows reliably lists none (`services/earn/catalogue-anomaly.ts`).
+  Events only: the check never blocks a write, and a failed figures read costs
+  the pass its diff, not its write. Do not "fix" an anomaly by clamping the
+  write; the alert exists so a human looks at the provider.
 - Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
   `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** Ground is the

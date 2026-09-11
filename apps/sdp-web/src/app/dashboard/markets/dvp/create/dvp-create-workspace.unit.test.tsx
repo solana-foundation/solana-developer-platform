@@ -9,6 +9,7 @@
  * not about layout.
  */
 
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -17,6 +18,8 @@ import type { DvpCreateContext } from "./dvp-create.data";
 import { DvpCreateWorkspace } from "./dvp-create-workspace";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 
 const context: DvpCreateContext = {
   error: null,
@@ -28,12 +31,21 @@ const context: DvpCreateContext = {
       balances: [],
     },
   ],
+  counterpartyAccounts: [
+    {
+      counterpartyAccountId: "cpa_1",
+      name: "Acme OTC",
+      label: "Settlement wallet",
+      address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
+    },
+  ],
   tokens: [
     {
       mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
       label: "TBOND",
+      name: "Test Bond",
       decimals: 6,
-      tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
     },
   ],
 };
@@ -49,31 +61,61 @@ function renderForm(
   );
 }
 
-/**
- * Walks the wizard to a stage, filling only what the previous stages require.
- *
- * Continue is disabled until a stage is complete, so navigating IS the
- * assertion that each stage can be satisfied on its own — which is most of
- * what staging bought.
- */
-const COUNTERPARTY = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
-function advanceTo(stage: "parties" | "legs" | "terms" | "review") {
-  const next = () => fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-  next(); // role -> parties (the first wallet is preselected)
-  if (stage === "parties") return;
-
-  fireEvent.change(screen.getByLabelText(/counterparty address/i), {
-    target: { value: COUNTERPARTY },
+/** Opens a party combobox by its label and types into its search box. */
+function searchParty(trigger: RegExp, query: string) {
+  fireEvent.click(screen.getByRole("button", { name: trigger }));
+  fireEvent.change(screen.getByPlaceholderText(/paste a Solana address/i), {
+    target: { value: query },
   });
-  next(); // parties -> legs
-  if (stage === "legs") return;
+}
 
+/** Fills the seller slot by picking the registered counterparty. */
+function fillPartyA() {
+  fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
+  fireEvent.click(screen.getByText("Acme OTC"));
+}
+
+/**
+ * Fills the cash payer slot by pasting an address and picking the option it
+ * surfaces. The last match is the open popover's option — a pasted address
+ * already selected in the other slot shows the same text in its trigger.
+ */
+function fillPartyB(address: string = PARTY_B) {
+  searchParty(/paying the cash/i, address);
+  const options = screen.getAllByText("Use this address");
+  fireEvent.click(options[options.length - 1]);
+}
+
+/** Picks the issued token in the asset slot, which starts unselected. */
+function fillAssetMint() {
+  fireEvent.click(screen.getByRole("button", { name: /^asset/i }));
+  fireEvent.click(screen.getByText("TBOND"));
+}
+
+/** Picks the first stablecoin in the cash slot, which also starts unselected. */
+function fillCashMint() {
+  fireEvent.click(screen.getByRole("button", { name: /^cash/i }));
+  fireEvent.click(screen.getByText("USDC"));
+}
+
+/** Fills both legs' amounts, the last input the legs step gates on. */
+function fillAmounts() {
   fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10" } });
   fireEvent.change(screen.getByLabelText(/cash amount/i), { target: { value: "25" } });
-  next(); // legs -> terms
-  if (stage === "terms") return;
+}
 
-  next(); // terms -> review
+/**
+ * Fills the one configuring step and continues to review. Continue is disabled
+ * until the step is complete, so navigating IS the assertion that the step can
+ * be satisfied.
+ */
+function advanceToReview() {
+  fillPartyA();
+  fillPartyB();
+  fillAssetMint();
+  fillCashMint();
+  fillAmounts();
+  fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 }
 
 afterEach(cleanup);
@@ -81,51 +123,70 @@ afterEach(cleanup);
 describe("DvpCreateWorkspace", () => {
   // Continue gates each stage, so an empty form cannot even reach the review
   // stage where Create lives.
-  it("cannot leave the parties stage without a counterparty", () => {
+  it("cannot leave the parties stage until both slots are filled", () => {
     renderForm();
-    advanceTo("parties");
 
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
+  // One combobox per slot: registered counterparties are options — custody
+  // wallets deliberately are not, a wallet is not a counterparty — and a
+  // pasted base58 address surfaces as an option of its own.
+  it("offers counterparties and pasted addresses, never custody wallets", () => {
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /paying the cash/i }));
+
+    expect(screen.getByText("Acme OTC")).toBeTruthy();
+    expect(screen.queryByText("Treasury")).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(/paste a Solana address/i), {
+      target: { value: PARTY_B },
+    });
+    expect(screen.getByText("Use this address")).toBeTruthy();
+  });
+
   it("reaches review once every stage is answered, and only then offers Create", () => {
     renderForm();
-    advanceTo("review");
+    advanceToReview();
 
     expect(screen.getByRole("button", { name: /create trade/i })).toBeTruthy();
   });
 
-  // The whole point of the conversion: the amount the chain receives is shown
-  // before it is sent, so a three-orders-of-magnitude mistake is visible.
-  it("discloses the base units a typed amount resolves to", () => {
+  // The scale is enforced at the keystroke: a digit the mint cannot represent
+  // never lands in the field, so no correction hint is ever needed.
+  it("blocks typing more decimal places than the mint supports", () => {
     renderForm();
-    advanceTo("legs");
+    fillAssetMint();
+    const input = screen.getByLabelText(/asset amount/i) as HTMLInputElement;
 
-    fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10.5" } });
+    fireEvent.change(input, { target: { value: "1.999999" } });
+    fireEvent.change(input, { target: { value: "1.9999999" } });
 
-    expect(screen.getByText(/10500000/)).toBeTruthy();
+    expect(input.value).toBe("1.999999");
   });
 
-  // Truncating would move a different amount than the one on screen, so the
-  // form has to say so rather than rounding.
-  it("refuses an amount finer than the mint allows, and says why", () => {
+  // A malformed paste never becomes an option, so the slot cannot hold an
+  // invalid address at all — refusal happens before selection, not after.
+  it("offers no address option for a paste that is not a Solana address", () => {
     renderForm();
-    advanceTo("legs");
 
-    fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "1.9999999" } });
+    searchParty(/paying the cash/i, "nope");
 
-    expect(screen.getByText(/More decimal places than/i)).toBeTruthy();
+    expect(screen.queryByText("Use this address")).toBeNull();
   });
 
-  it("flags a counterparty that is not a Solana address", () => {
+  // The program refuses one address on both sides, and the parties step is the
+  // cheap place to say so rather than a provider-call round trip.
+  it("refuses to proceed when both slots resolve to the same address", () => {
     renderForm();
-    advanceTo("parties");
 
-    fireEvent.change(screen.getByLabelText(/counterparty address/i), {
-      target: { value: "nope" },
-    });
+    searchParty(/delivering the asset/i, PARTY_B);
+    fireEvent.click(screen.getByText("Use this address"));
+    fillPartyB(PARTY_B);
 
-    expect(screen.getByText(/does not look like a Solana address/i)).toBeTruthy();
+    expect(screen.getByText(/Both sides are the same address/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
   // The program is devnet-only, so filling in the whole form on another
@@ -140,18 +201,6 @@ describe("DvpCreateWorkspace", () => {
     renderForm();
 
     expect(screen.queryByText(/deployed on devnet only/i)).toBeNull();
-  });
-
-  // Both sides are on screen at once, because choosing one reverses the
-  // direction of everything else on the form.
-  // Beside the legs, not on the role stage: the labels name the two tokens, so
-  // they belong where those tokens are on screen.
-  it("offers both sides of the trade as a choice", () => {
-    renderForm();
-    advanceTo("legs");
-
-    expect(screen.getByText(/you deliver the asset/i)).toBeTruthy();
-    expect(screen.getByText(/you deliver the cash/i)).toBeTruthy();
   });
 
   // A failed token load must not read as "you have no tokens", and the form
@@ -170,53 +219,5 @@ describe("DvpCreateWorkspace", () => {
     const { container } = renderForm();
 
     expect(container.textContent).not.toContain("decimals)");
-  });
-
-  /**
-   * Flipping the direction changes which leg you fund, and the two cards were
-   * written for one direction only: the cash card stayed captioned as the
-   * counterparty's even when you were the one funding it. The moving balance
-   * was the only signal, and a balance is a hint, not a label.
-   */
-  describe("which leg is whose", () => {
-    it("marks the asset leg as yours by default", () => {
-      const { container } = renderForm();
-      advanceTo("legs");
-
-      expect(container.textContent).toContain("You deliver");
-      expect(container.textContent).toContain("They deliver");
-    });
-
-    // The leg you act on should be the one you reach first, by eye and by tab.
-    // The side is chosen two stages earlier, so this walks back to change it
-    // and forward again — which also proves Back keeps what was entered.
-    // The side chooser now sits on this same stage, so flipping it and seeing
-    // the cards reorder happens in one place.
-    it("puts your own leg first, whichever side you are on", () => {
-      const { container } = renderForm();
-      advanceTo("legs");
-      const order = () =>
-        Array.from(container.querySelectorAll("label")).map((node) => node.textContent ?? "");
-
-      expect(order().findIndex((text) => /asset you are trading/i.test(text))).toBeLessThan(
-        order().findIndex((text) => /paid in/i.test(text))
-      );
-
-      fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
-
-      expect(order().findIndex((text) => /paid in/i.test(text))).toBeLessThan(
-        order().findIndex((text) => /asset you are trading/i.test(text))
-      );
-    });
-
-    it("does not tell you the other side pays the cash when you do", () => {
-      const { container } = renderForm();
-      advanceTo("legs");
-
-      fireEvent.click(screen.getByLabelText(/you deliver the cash/i));
-
-      expect(container.textContent).toContain("What you pay with");
-      expect(container.textContent).not.toContain("What the other side pays with");
-    });
   });
 });

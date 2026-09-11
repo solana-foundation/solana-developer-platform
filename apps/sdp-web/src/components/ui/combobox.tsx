@@ -66,6 +66,14 @@ interface ComboboxProps {
   validationError?: string;
   onEnterSelect?: (value: string) => void;
   footer?: (close: () => void) => ReactNode;
+  /**
+   * Derives an extra option from the search text, for values that are typed or
+   * pasted rather than picked (an address, a mint). Called with the trimmed
+   * query; a returned option is appended to the filtered list unless an
+   * existing option already carries its value. Return null for queries the
+   * caller cannot turn into an option.
+   */
+  queryOption?: (query: string) => ComboboxOption | null;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Accessible combobox behavior is clearer when keyboard, filtering, and selection state remain co-located.
@@ -89,6 +97,7 @@ export function Combobox({
   validationError,
   onEnterSelect,
   footer,
+  queryOption,
 }: ComboboxProps) {
   const t = useTranslations();
   const resolvedPlaceholder = placeholder ?? t("Shared.SharedComponents.selectAnOption");
@@ -105,13 +114,23 @@ export function Combobox({
   );
 
   const filtered = useMemo(() => {
-    if (!searchable) return options;
-    const needle = query.trim().toLowerCase();
-    if (!needle) return options;
-    return options.filter((option) =>
-      `${option.label} ${option.description ?? ""}`.toLowerCase().includes(needle)
-    );
-  }, [options, query, searchable]);
+    const trimmed = query.trim();
+    const needle = trimmed.toLowerCase();
+    const base =
+      !searchable || !needle
+        ? options
+        : options.filter((option) =>
+            `${option.label} ${option.description ?? ""}`.toLowerCase().includes(needle)
+          );
+    if (!queryOption || !trimmed) {
+      return base;
+    }
+    const extra = queryOption(trimmed);
+    if (extra === null || base.some((option) => option.value === extra.value)) {
+      return base;
+    }
+    return [...base, extra];
+  }, [options, query, searchable, queryOption]);
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
@@ -172,7 +191,9 @@ export function Combobox({
       <span className="min-w-0 flex-1 text-left">
         {selected ? (
           <span className="flex min-w-0 items-center gap-2">
-            {selected.icon ? <span className="shrink-0">{selected.icon}</span> : null}
+            {selected.icon ? (
+              <span className="flex shrink-0 items-center">{selected.icon}</span>
+            ) : null}
             <span className="truncate text-primary">{selected.label}</span>
             {selected.badge ? (
               <Badge variant={selected.badgeVariant} className="shrink-0">
@@ -184,7 +205,7 @@ export function Combobox({
             ) : null}
           </span>
         ) : (
-          <span className="text-tertiary">{resolvedPlaceholder}</span>
+          <span className="block truncate text-tertiary">{resolvedPlaceholder}</span>
         )}
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
