@@ -163,6 +163,7 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
   // renders their metadata.
   kamino: "Kamino",
+  jupiter: "Jupiter",
   aave_v3: "Aave V3",
   gustb: "Superstate USTB",
   guscc: "Superstate USCC",
@@ -183,6 +184,13 @@ export interface EarnStrategyRiskMetadata {
   riskTier?: string;
   frameworkUrl?: string;
   [key: string]: unknown;
+}
+
+export interface EarnStrategySlippagePolicy {
+  /** Live quote endpoint must be called before building this direction. */
+  quoteRequired: true;
+  /** Suggested starting tolerance; the customer may choose another accepted value. */
+  defaultToleranceBps: number;
 }
 
 export interface EarnStrategy {
@@ -212,6 +220,10 @@ export interface EarnStrategy {
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
+  /** Null when this provider's deposit builder needs no quote-derived floor. */
+  depositSlippage: EarnStrategySlippagePolicy | null;
+  /** Null when this provider's withdrawal builder needs no quote-derived floor. */
+  withdrawalSlippage: EarnStrategySlippagePolicy | null;
   /**
    * The cluster the strategy's INSTRUMENT actually lives on — not the cluster
    * of the environment that catalogued it, and the two can differ.
@@ -244,14 +256,27 @@ export interface EarnStrategy {
    * which is a larger set.
    *
    * `true` is necessary but NOT sufficient. It answers only the cluster
-   * question; a deposit additionally needs the provider to expose SDP a
-   * money-movement surface (a catalogue-only provider like Kamino answers 501
-   * on `POST /v1/earn/programs`) and your organization to be entitled to that
-   * provider. Those are deliberately not folded in here: this field describes
-   * the INSTRUMENT, and entitlement in particular is a property of the caller,
-   * not of a platform-global catalogue row.
+   * question; a deposit additionally needs the matching execution capability,
+   * an open environment, an active strategy, and organization entitlement.
+   * Those are deliberately not folded in here: this field describes the
+   * INSTRUMENT, and entitlement in particular is a property of the caller, not
+   * of a platform-global catalogue row.
    */
   fundable: boolean;
+  /**
+   * Whether SDP's treasury vault flow would pay the network fee (and any
+   * share-ATA rent) for a movement on this strategy from **the caller's
+   * environment**, derived per request and never stored, like `fundable`.
+   *
+   * This is the SAME gate execution applies (`resolveVaultSponsorship`), so it
+   * is the field a client reads for honest fee copy. It deliberately does not
+   * ride on the deposit quote: providers with no quote-derived floor (Kamino)
+   * never fetch a quote, and a flag that only travels with one is unreadable
+   * exactly for them. Always `false` when not `fundable`. A swap-funded deposit
+   * is wallet-pays regardless; the swap choice is the client's, so the client
+   * applies that override.
+   */
+  feeSponsored: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -270,6 +295,13 @@ export interface EarnVaultPosition {
   shareMint: string;
   createdAt: string;
   closedAt: string | null;
+  /**
+   * Whether SDP would pay the network fee for a withdrawal from this position:
+   * the execution gate (`resolveVaultSponsorship`) answered per request for the
+   * caller's environment, so the exit copy never depends on a quote the
+   * provider may not offer. See `EarnStrategy.feeSponsored`.
+   */
+  feeSponsored: boolean;
   /** Absent when the provider read failed; never coerce an unavailable value to zero. */
   shares?: string;
   /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
@@ -324,6 +356,19 @@ export interface EarnExternalWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
+  /**
+   * Exact project-scoped owners contributing to this strategy total. Present by
+   * default; ABSENT when the caller passed `includeOwnerAddresses=false`
+   * (PRO-1873). This is the end-user address book of the whole project, so an
+   * analytics consumer that only needs totals should opt out and never hold it.
+   */
+  ownerAddresses?: string[];
+  /**
+   * Complete live positions contributing to this strategy total. Present only
+   * when the caller passes `includePositions=true`; absent from totals-only
+   * responses so analytics consumers do not receive per-customer details.
+   */
+  positions?: EarnExternalWalletPosition[];
   walletCount: number;
   positionCount: number;
   totalsByToken: EarnExternalWalletTokenTotal[];
@@ -434,7 +479,7 @@ export interface EarnVaultDepositRecord {
   amount: string;
   failureReason: string | null;
   createdAt: string;
-  /** Set only once the sweep observed the transaction on chain. */
+  /** Set only once SDP observed the transaction on chain — the detail read's chain read-through or the reconciliation sweep. */
   confirmedAt: string | null;
 }
 
@@ -522,13 +567,22 @@ export interface EarnExternalWalletTransaction {
   transactionId: string;
   /**
    * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
-   * exactly these bytes (fee payer is the owner) and the partner returns the
+   * exactly these bytes — the fee payer is the owner, or the partner's
+   * `feePayer` when one was named on the build — and the partner returns the
    * signed encoding on the submit call; any other change is refused there.
    */
   transaction: string;
   /** Block height after which these exact bytes can no longer land. */
   lastValidBlockHeight: string;
   ownerAddress: string;
+  /**
+   * The partner fee payer compiled into the transaction, echoed from the
+   * build request. Present, the transaction requires this wallet's signature
+   * IN ADDITION to the owner's — co-sign server-side before submitting — and
+   * this wallet pays the network fee plus any account rent the transaction
+   * creates. Absent, the owner pays everything and signs alone.
+   */
+  feePayer?: string;
   provider: string;
   /** The vault's on-chain address — the instrument. */
   providerReference: string;
@@ -563,20 +617,24 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
  * swap-funded deposit could not fit in ONE Solana transaction (the packet
  * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
- * instructions). Nothing is persisted for this answer: SDP hands back an
- * unsigned SWAP-ONLY transaction for the owner to sign and broadcast itself,
- * plus the exact follow-up deposit to build once the swap lands. The follow-up
- * build then takes the ordinary single-transaction path.
+ * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
+ * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
+ * itself, plus the exact follow-up deposit to build once the swap lands. The
+ * follow-up build then takes the ordinary single-transaction path. SDP does
+ * record an advisory that the split was handed out, and flags owners whose
+ * swap landed without a follow-up deposit (PRO-1864); recovery stays the
+ * partner's duty.
  */
 export interface EarnExternalWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
   requiresSeparateSwap: true;
   swap: EarnDepositSwap & {
     /**
-     * Base64 wire bytes of the UNSIGNED swap transaction (fee payer is the
-     * owner). The owner signs and broadcasts it itself — it moves only the
-     * owner's own funds between the owner's own token accounts, so SDP
-     * records nothing for it.
+     * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
+     * the owner, or the original request's `feePayer` (which then co-signs
+     * this transaction too). The partner broadcasts it itself; it moves only
+     * the owner's own funds between the owner's own token accounts, so SDP
+     * records no movement for it, only the orphan-detection advisory.
      */
     transaction: string;
     /** Block height after which these exact bytes can no longer land. */
@@ -595,6 +653,12 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
      * carried none.
      */
     minSharesOut?: string;
+    /**
+     * The fee payer from the ORIGINAL request, carried through for the same
+     * reason as the floor: a follow-up build that dropped it would bill the
+     * customer's wallet. Absent when the original request named none.
+     */
+    feePayer?: string;
   };
 }
 
@@ -605,6 +669,8 @@ export interface EarnExternalWalletWithdrawalTransactionResponse {
     positionId: string;
     /** Shares encoded in the transaction, share units. */
     shares: string;
+    /** Minimum deposit-token amount encoded in the transaction, or null. */
+    minAmountOut: string | null;
   };
 }
 
@@ -702,7 +768,7 @@ export interface EarnExternalWalletEarnings {
   totalsByToken: EarnExternalWalletTokenEarnings[];
 }
 
-/** Response body of GET /v1/earn/external-wallet/earnings/:ownerAddress. */
+/** Response body of GET /v1/earn/external-wallet/earnings?ownerAddress=…. */
 export interface EarnExternalWalletEarningsResponse {
   earnings: EarnExternalWalletEarnings;
 }

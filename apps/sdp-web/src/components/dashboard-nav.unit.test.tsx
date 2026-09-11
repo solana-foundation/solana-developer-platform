@@ -1,3 +1,4 @@
+import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -28,11 +29,15 @@ const t = ((key: string) => key) as Translate;
 function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) {
   return {
     canReadApprovals: false,
+    custodyEnabled: true,
+    dvpEnabled: false,
     earnEnabled: false,
     heliusRingsEnabled: false,
+    issuanceEnabled: true,
     marketsEnabled: false,
     paymentsEnabled: true,
     pendingApprovalCount: null,
+    policiesEnabled: true,
     privateChannelsEnabled: false,
     ...overrides,
   };
@@ -52,9 +57,11 @@ function moreSheetMarkup(
       pathname="/dashboard"
       canReadApprovals={false}
       canManageOrgSettings={false}
+      dvpEnabled={false}
       earnEnabled={false}
       heliusRingsEnabled={false}
       marketsEnabled={false}
+      policiesEnabled
       onClose={() => {}}
       {...overrides}
     />
@@ -74,10 +81,12 @@ describe("Markets dashboard navigation", () => {
       {
         label: "Shared.dashboardShell.treasurySolutions",
         href: "/dashboard/markets/treasury-solutions",
+        icon: LandmarkIcon,
       },
       {
         label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/embedded-yield",
+        icon: PercentIcon,
       },
     ]);
   });
@@ -89,10 +98,39 @@ describe("Markets dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  it("hides provider-backed Markets when the Earn runtime is off", () => {
-    expect(
-      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false }))
-    ).toBeUndefined();
+  // Treasury Solutions left the Earn gate on main, so it is now listed for any
+  // org with the Markets flag. Markets therefore always has at least one child
+  // and can no longer be emptied by turning the sub-modules off.
+  it("still lists Treasury when every sub-module flag is off", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: false })
+    );
+
+    expect(markets?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/markets/treasury-solutions",
+    ]);
+  });
+
+  // DvP is the first Markets sub-module that is not Earn-backed, so the entry
+  // point can no longer depend on Earn specifically.
+  it("shows Markets for a DvP-only organization", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: true })
+    );
+
+    expect(markets).toBeDefined();
+    expect(markets?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/markets/treasury-solutions",
+      "/dashboard/markets/dvp",
+    ]);
+  });
+
+  it("omits DvP from the sub-nav when its own flag is off", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: true, dvpEnabled: false })
+    );
+
+    expect(markets?.children?.map((child) => child.href)).not.toContain("/dashboard/markets/dvp");
   });
 
   it("keeps Markets out of the mobile More sheet when the module flag is off", () => {
@@ -172,7 +210,13 @@ describe("Payments dashboard navigation", () => {
 
   it("shows the bottom-bar tab when the flag is on", () => {
     const markup = renderToStaticMarkup(
-      <DashboardBottomNav pathname="/dashboard" paymentsEnabled onOpenMore={() => {}} />
+      <DashboardBottomNav
+        pathname="/dashboard"
+        custodyEnabled
+        issuanceEnabled
+        paymentsEnabled
+        onOpenMore={() => {}}
+      />
     );
 
     expect(markup).toContain('href="/dashboard/payments"');
@@ -181,38 +225,160 @@ describe("Payments dashboard navigation", () => {
 
   it("keeps the bottom-bar tab out when the flag is off", () => {
     const markup = renderToStaticMarkup(
-      <DashboardBottomNav pathname="/dashboard" paymentsEnabled={false} onOpenMore={() => {}} />
+      <DashboardBottomNav
+        pathname="/dashboard"
+        custodyEnabled
+        issuanceEnabled
+        paymentsEnabled={false}
+        onOpenMore={() => {}}
+      />
     );
 
     expect(markup).not.toContain("/dashboard/payments");
   });
 });
 
+describe("Integrations dashboard navigation", () => {
+  const findIntegrationsItem = (options: ReturnType<typeof navOptions>) =>
+    findManageItem(options, "Shared.dashboardShell.integrations");
+
+  it("groups every enabled family under the Integrations submenu", () => {
+    const item = findIntegrationsItem(
+      navOptions({
+        custodyEnabled: true,
+        paymentsEnabled: true,
+        policiesEnabled: true,
+        privateChannelsEnabled: true,
+      })
+    );
+
+    expect(item?.subnavKey).toBe("integrations");
+    expect(item?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/integrations?tab=custody",
+      "/dashboard/integrations?tab=rpc",
+      "/dashboard/integrations?tab=ramps",
+      "/dashboard/integrations?tab=compliance",
+      "/dashboard/integrations?tab=privacy",
+    ]);
+    expect(item?.children?.every((child) => child.icon)).toBe(true);
+  });
+
+  it("keeps only RPC when every owning module is disabled", () => {
+    const item = findIntegrationsItem(
+      navOptions({
+        custodyEnabled: false,
+        paymentsEnabled: false,
+        policiesEnabled: false,
+        privateChannelsEnabled: false,
+      })
+    );
+
+    expect(item?.children?.map((child) => child.href)).toEqual(["/dashboard/integrations?tab=rpc"]);
+  });
+});
+
+describe("Custody dashboard navigation", () => {
+  it("hides the Wallets entry when the module is disabled", () => {
+    const options = { ...navOptions(), custodyEnabled: false };
+
+    expect(JSON.stringify(getNavSections(t, options))).not.toContain(
+      "Shared.dashboardShell.wallets"
+    );
+  });
+
+  it("keeps Wallets out of the mobile bottom bar when the module is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <DashboardBottomNav
+        pathname="/dashboard"
+        issuanceEnabled
+        paymentsEnabled
+        custodyEnabled={false}
+        onOpenMore={() => {}}
+      />
+    );
+
+    expect(markup).not.toContain("/dashboard/wallets");
+  });
+});
+
+describe("Issuance dashboard navigation", () => {
+  it("hides the Issuance entry when the module is disabled", () => {
+    const options = { ...navOptions(), issuanceEnabled: false };
+
+    expect(JSON.stringify(getNavSections(t, options))).not.toContain(
+      "Shared.dashboardShell.issuance"
+    );
+  });
+
+  it("keeps Issuance out of the mobile bottom bar when the module is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <DashboardBottomNav
+        pathname="/dashboard"
+        custodyEnabled
+        issuanceEnabled={false}
+        paymentsEnabled
+        onOpenMore={() => {}}
+      />
+    );
+
+    expect(markup).not.toContain("/dashboard/issuance");
+  });
+});
+
+describe("Policies dashboard navigation", () => {
+  it("hides Policies and Approvals while retaining API Keys when the module is disabled", () => {
+    const options = navOptions({ canReadApprovals: true, policiesEnabled: false });
+    const navigation = JSON.stringify(getNavSections(t, options));
+
+    expect(navigation).not.toContain("Shared.dashboardShell.policies");
+    expect(navigation).not.toContain("Shared.dashboardShell.approvals");
+    expect(navigation).toContain("Shared.dashboardShell.apiKeys");
+  });
+
+  it("keeps Policies and Approvals out of the mobile More sheet without hiding API Keys", () => {
+    const markup = moreSheetMarkup({
+      canReadApprovals: true,
+      policiesEnabled: false,
+    });
+
+    expect(markup).not.toContain("/dashboard/policies");
+    expect(markup).not.toContain("/dashboard/approvals");
+    expect(markup).toContain("/dashboard/api-keys");
+  });
+});
+
 describe("subnav open state", () => {
-  const closed = { payments: false, markets: false } as const;
+  const closed = { integrations: false, payments: false, markets: false } as const;
 
   it("opens a section when its top-level item is followed", () => {
     // Gui's ask: clicking Payments in the side nav expands the Payments
     // submenu rather than only navigating to it (HOO-1218).
-    expect(withSubnavOpen(closed, "payments")).toEqual({ payments: true, markets: false });
+    expect(withSubnavOpen(closed, "payments")).toEqual({
+      integrations: false,
+      payments: true,
+      markets: false,
+    });
   });
 
   it("never closes the section being navigated into", () => {
     // The whole reason this is not a toggle. A second click on the section you
     // are already inside would otherwise hide the pages you are looking at.
-    const open = { payments: true, markets: false };
+    const open = { integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments").payments).toBe(true);
   });
 
   it("returns the same object when the section is already open", () => {
     // Held in React state, so a click that decides nothing must not re-render
     // the whole shell.
-    const open = { payments: true, markets: false };
+    const open = { integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments")).toBe(open);
   });
 
   it("leaves other sections alone", () => {
-    expect(withSubnavOpen({ payments: false, markets: true }, "payments")).toEqual({
+    expect(
+      withSubnavOpen({ integrations: false, payments: false, markets: true }, "payments")
+    ).toEqual({
+      integrations: false,
       payments: true,
       markets: true,
     });
@@ -220,6 +386,8 @@ describe("subnav open state", () => {
 
   it("still flips both ways for the chevron", () => {
     expect(withSubnavToggled(closed, "markets").markets).toBe(true);
-    expect(withSubnavToggled({ payments: false, markets: true }, "markets").markets).toBe(false);
+    expect(
+      withSubnavToggled({ integrations: false, payments: false, markets: true }, "markets").markets
+    ).toBe(false);
   });
 });

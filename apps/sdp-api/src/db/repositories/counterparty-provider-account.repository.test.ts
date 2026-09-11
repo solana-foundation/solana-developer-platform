@@ -2,6 +2,7 @@ import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "v
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository";
@@ -37,13 +38,12 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Provider Accounts', 'provider-accounts', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     repository = createPostgresCounterpartyProviderAccountsRepository(db);
   });
 
@@ -93,6 +93,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(customer.fiat_currency).toBeNull();
     expect(customer.destination_country).toBeNull();
     expect(customer.payment_rail).toBeNull();
+    expect(customer.kind).toBe("customer_link");
     expect(external.id).toMatch(/^counterparty_provider_account_/);
     expect(external.id).not.toBe(customer.id);
     expect(external).toMatchObject({
@@ -102,6 +103,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       destination_country: "US",
       payment_rail: "ACH",
       provider_status: null,
+      kind: "payout_account",
       status: "active",
     });
     expect(
@@ -164,6 +166,162 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     );
     const afterCompletion = await repository.insertPendingExternalAccount(input);
     expect(afterCompletion.id).not.toBe(replacementReservation.id);
+  });
+
+  it("reads and updates provider resource accounts by kind", async () => {
+    const counterparty = await seedCounterparty("cpacc_resource_accounts");
+    const fundingWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_resource",
+      kind: "funding_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_resource_1",
+      metadata: {
+        onrampKey: "USD:USDC_SOLANA:dest",
+        request: {
+          currency: "USDC",
+          network: "SOLANA",
+          destinationWalletAddress: "dest",
+          fiatCurrency: "USD",
+        },
+      },
+    });
+    const merchantWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_resource",
+      kind: "merchant_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_resource_2",
+      metadata: {},
+    });
+
+    expect(
+      await repository.getAccountByKindAndCurrency({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        kind: "merchant_wallet",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: merchantWallet.id, kind: "merchant_wallet" });
+    expect(
+      await repository.getFundingWalletByOnrampKey({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        onrampKey: "USD:USDC_SOLANA:dest",
+      })
+    ).toMatchObject({ id: fundingWallet.id, kind: "funding_wallet" });
+
+    const updated = await repository.patchAccountMetadata({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: fundingWallet.id,
+      set: { ruleStatus: "ACTIVE" },
+      unset: [],
+    });
+    expect(updated?.metadata).toEqual({
+      onrampKey: "USD:USDC_SOLANA:dest",
+      ruleStatus: "ACTIVE",
+      request: {
+        fiatCurrency: "USD",
+        currency: "USDC",
+        network: "SOLANA",
+        destinationWalletAddress: "dest",
+      },
+    });
+
+    await expect(
+      repository.patchAccountMetadata({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: fundingWallet.id,
+        set: {},
+        unset: ["onrampKey"],
+      })
+    ).rejects.toThrow();
+    expect(
+      await repository.getFundingWalletByOnrampKey({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        onrampKey: "USD:USDC_SOLANA:dest",
+      })
+    ).toMatchObject({
+      id: fundingWallet.id,
+      metadata: { onrampKey: "USD:USDC_SOLANA:dest", ruleStatus: "ACTIVE" },
+    });
+  });
+
+  it("lists customer links but keeps them out of corridor reads", async () => {
+    const counterparty = await seedCounterparty("cpacc_kind_filters");
+    await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_kind_filter",
+    });
+
+    expect(
+      await repository.listProviderAccounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+      })
+    ).toEqual([expect.objectContaining({ kind: "customer_link", provider: "bvnk" })]);
+    expect(
+      await repository.getAccountByKindAndCurrency({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        kind: "payout_account",
+        fiatCurrency: "USD",
+      })
+    ).toBeNull();
+
+    const counterparties = createPostgresCounterpartiesRepository(getDb(env));
+    expect(
+      await counterparties.findActiveCounterpartyByProviderCustomerReference({
+        provider: "bvnk",
+        providerCustomerReference: "bvnk_customer_kind_filter",
+      })
+    ).toMatchObject({ id: counterparty.id });
+
+    // A second counterparty claiming the same reference is refused at write
+    // time by the 0080 unique index — the ambiguity the lookup used to fail
+    // closed on can no longer be created, and the original owner keeps
+    // resolving.
+    const duplicateCounterparty = await seedCounterparty("cpacc_kind_filter_duplicate");
+    await expect(
+      repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: duplicateCounterparty.id,
+        provider: "bvnk",
+        providerCustomerReference: "bvnk_customer_kind_filter",
+      })
+    ).rejects.toMatchObject({ code: "23505" });
+    expect(
+      await counterparties.findActiveCounterpartyByProviderCustomerReference({
+        provider: "bvnk",
+        providerCustomerReference: "bvnk_customer_kind_filter",
+      })
+    ).toMatchObject({ id: counterparty.id });
   });
 
   it("scopes external account lookup to the parent counterparty", async () => {
@@ -373,7 +531,11 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
       })
-    ).toEqual([usd, expect.objectContaining({ id: gbp.id, status: "archived" })]);
+    ).toEqual([
+      expect.objectContaining({ id: customer.id, kind: "customer_link" }),
+      usd,
+      expect.objectContaining({ id: gbp.id, status: "archived" }),
+    ]);
     expect(
       await repository.listProviderAccounts({
         organizationId: TEST_ORG.id,
@@ -382,7 +544,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         fiatCurrency: "USD",
         destinationCountry: "US",
       })
-    ).toEqual([usd]);
+    ).toEqual([expect.objectContaining({ id: customer.id, kind: "customer_link" }), usd]);
     expect(
       await repository.listProviderAccounts({
         organizationId: TEST_ORG.id,

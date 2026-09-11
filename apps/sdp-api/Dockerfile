@@ -21,10 +21,12 @@ COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-helius-rings/package.json ./packages/sdp-helius-rings/
 COPY packages/sdp-helius-rings-sdk/package.json ./packages/sdp-helius-rings-sdk/
+COPY packages/sdp-dvp/package.json ./packages/sdp-dvp/
 COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
+COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
@@ -32,6 +34,7 @@ COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
 COPY packages/sdp-spc-withdraw/package.json ./packages/sdp-spc-withdraw/
 COPY packages/sdp-kamino/package.json ./packages/sdp-kamino/
+COPY packages/sdp-jupiter-lend/package.json ./packages/sdp-jupiter-lend/
 COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/
 COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY packages/sdp-ondo/package.json ./packages/sdp-ondo/
@@ -49,10 +52,12 @@ COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-helius-rings ./packages/sdp-helius-rings
 COPY packages/sdp-helius-rings-sdk ./packages/sdp-helius-rings-sdk
+COPY packages/sdp-dvp ./packages/sdp-dvp
 COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
+COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
@@ -60,6 +65,7 @@ COPY packages/sdp-private-channels ./packages/sdp-private-channels
 COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
 COPY packages/sdp-spc-withdraw ./packages/sdp-spc-withdraw
 COPY packages/sdp-kamino ./packages/sdp-kamino
+COPY packages/sdp-jupiter-lend ./packages/sdp-jupiter-lend
 COPY packages/bigint-buffer ./packages/bigint-buffer
 COPY packages/sdp-veda ./packages/sdp-veda
 COPY packages/sdp-ondo ./packages/sdp-ondo

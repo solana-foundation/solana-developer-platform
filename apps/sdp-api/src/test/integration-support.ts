@@ -3,6 +3,7 @@
  * Keep this facade intentionally small and integration-test specific.
  */
 
+import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
@@ -13,12 +14,21 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { closeDatabasePools, getDb } from "@/db";
+import { createPostgresEarnRepository } from "@/db/repositories";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import app from "@/index";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import {
+  buildExternalWalletDepositTransaction,
+  buildExternalWalletWithdrawalTransaction,
+  submitExternalWalletDeposit,
+  submitExternalWalletWithdrawal,
+} from "@/services/earn/vault-external-wallet.service";
+import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
@@ -37,16 +47,21 @@ export type ApiTestCustodyWallet = CustodyWallet;
 
 export const apiTestSupport = {
   app,
+  buildExternalWalletDepositTransaction,
+  buildExternalWalletWithdrawalTransaction,
   closeAllRedisClients,
   closeDatabasePools,
   createFeePaymentAdapter,
   createKVStoreSet,
   createMosaicService,
   createOrgSigner,
+  createPostgresEarnRepository,
   createSigningService,
   createToken2022Service,
   createVaultDeadline,
+  depositIntoVault,
   CustodyConfigStore,
+  DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -56,6 +71,8 @@ export const apiTestSupport = {
   KoraClient,
   resolveEarnExecutionClient,
   seedTestDatabase,
+  submitExternalWalletDeposit,
+  submitExternalWalletWithdrawal,
   supportsVaultDirect,
   TOKEN_PROGRAM_ADDRESS,
   SponsorshipBudgetRepository,
@@ -65,4 +82,5 @@ export const apiTestSupport = {
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
   trackPendingTransfers,
+  withdrawFromVault,
 };

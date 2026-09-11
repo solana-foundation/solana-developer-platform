@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getSignatureStatuses = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
@@ -18,8 +21,13 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent,
+}));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
+const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
 const { reconcileEarnVaultMovementReadThrough } = await import(
   "../earn/vault-movement-reconciliation.service"
 );
@@ -32,27 +40,30 @@ const WALLET = "cwlt_vault_reconcile";
 beforeEach(async () => {
   await seedTestDatabase(env);
   vi.clearAllMocks();
-  await getDb(env).batch([
-    getDb(env)
+  const db = getDb(env);
+  await db.batch([
+    db
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
       .bind(ORG, "Vault Reconcile", "vault-reconcile", "enterprise", "active"),
-    getDb(env)
+    db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "vault-reconcile@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Vault Reconcile', 'vault-reconcile', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
-    getDb(env)
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  await db.batch([
+    db
       .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, status)
          VALUES ('cfg_vault_reconcile', ?, ?, 'privy', 'test', 'active')`
       )
       .bind(ORG, PROJECT),
-    getDb(env)
+    db
       .prepare(
         `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, status)
@@ -119,6 +130,57 @@ async function ledgerRow(movementId: string) {
   return createPostgresEarnMovementsRepository(getDb(env)).getMovementById({
     movementId,
     organizationId: ORG,
+  });
+}
+
+/**
+ * An external-wallet (caller-signed) deposit movement: the other signer shape
+ * that rides this service, via the detail read's read-through. Same ledger
+ * table, `owner_address` instead of a custody wallet, and a consumed build row.
+ */
+async function seedExternalWalletMovement() {
+  const repository = createPostgresEarnMovementsRepository(getDb(env));
+  const transactionId = `earn_ewt_${crypto.randomUUID()}`;
+  await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+    id: transactionId,
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    direction: "deposit",
+    ownerAddress: "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
+    vaultAddress: `vault_${crypto.randomUUID()}`,
+    tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    shareMint: "So11111111111111111111111111111111111111112",
+    label: "USDC Vault",
+    denomination: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    amountRequested: "1",
+    createsShareAccount: false,
+    unsignedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
+    lastValidBlockHeight: "100",
+  });
+  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
+    organizationId: ORG,
+    transactionId,
+  });
+  if (!built) throw new Error("external-wallet build row did not persist");
+  return repository.createSignedExternalWalletDepositIntent({
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    vaultAddress: built.vault_address,
+    ownerAddress: built.owner_address,
+    shareMint: built.share_mint,
+    tokenMint: built.token_mint,
+    label: built.label,
+    requestedAmount: built.amount_requested,
+    signature: `sig_${crypto.randomUUID()}`,
+    signedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
+    lastValidBlockHeight: "100",
+    requestId: crypto.randomUUID(),
+    idempotencyFingerprint: crypto.randomUUID(),
+    externalWalletTransactionId: built.id,
   });
 }
 
@@ -215,6 +277,43 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
       vi.useRealTimers();
     }
   });
+
+  it("advances an external-wallet (caller-signed) movement the same way", async () => {
+    // The embedded-yield detail read adopted this read-through; an
+    // owner-signed row is the same vault_direct ledger shape with a signature
+    // recorded at submit, so nothing here may depend on a custody wallet.
+    const seeded = await seedExternalWalletMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "finalized",
+      owner_address: seeded.movement.owner_address,
+    });
+    expect(movement.settled_at).not.toBeNull();
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "finalized" });
+  });
+
+  it("short-circuits a terminal movement without touching the RPC", async () => {
+    const seeded = await seedExternalWalletMovement();
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    await repository.advanceVaultMovement({
+      movementId: seeded.movement.id,
+      organizationId: ORG,
+      toStatus: "failed",
+      failureReason: "test setup",
+    });
+    const terminal = await ledgerRow(seeded.movement.id);
+    if (!terminal) throw new Error("terminal movement did not persist");
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, terminal);
+
+    expect(movement.status).toBe("failed");
+    expect(getSignatureStatuses).not.toHaveBeenCalled();
+  });
 });
 
 describe("reconcileEarnVaultMovements", () => {
@@ -260,6 +359,74 @@ describe("reconcileEarnVaultMovements", () => {
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
       status: "failed",
       failure_reason: "Transaction blockhash expired before confirmation",
+    });
+  });
+
+  describe("expiring a SUBMITTED movement takes two unknown-signature observations (PRO-1904)", () => {
+    async function seedSubmitted(lastValidBlockHeight = "100") {
+      const seeded = await seedMovement(lastValidBlockHeight);
+      await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+        movementId: seeded.movement.id,
+        organizationId: ORG,
+        toStatus: "submitted",
+      });
+      return seeded;
+    }
+
+    it("parks the row on the first observation and expires it on the second", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+
+      await reconcileEarnVaultMovements(env);
+
+      // One null answer past the window is evidence, not proof: the row stays
+      // submitted, remembers the observation, and is not rebroadcast (the
+      // blockhash is gone) nor failed.
+      const parked = await ledgerRow(seeded.movement.id);
+      expect(parked).toMatchObject({ status: "submitted", failure_reason: null });
+      expect(parked?.unknown_signature_observed_at).toEqual(expect.any(String));
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+
+      await reconcileEarnVaultMovements(env);
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "failed",
+        failure_reason: "Transaction blockhash expired before confirmation",
+      });
+    });
+
+    it("never fails a submitted movement whose signature was unknown once and then lands", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
+
+      // RPC history catches up: the transaction had landed all along.
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+      ]);
+      await reconcileEarnVaultMovements(env);
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+        amount_settled: "1",
+      });
+    });
+
+    it("leaves a parked row alone when the corroborating height read is unavailable", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      await reconcileEarnVaultMovements(env);
+
+      // Exit safety (ADR 0002): an unavailable read is not a second observation.
+      getBlockHeight.mockRejectedValue(new Error("rpc down"));
+      await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
     });
   });
 
@@ -342,11 +509,13 @@ describe("reconcileEarnVaultMovements", () => {
     // RPC forgetting it — never grounds to expire it on the blockhash rule, which
     // only ever applied to a transaction that never made it on chain.
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockResolvedValue(100_000n);
     await reconcileEarnVaultMovements(env);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "confirmed" });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    // No stubbed height here on purpose: such a row can never consume one, so
+    // a stub would mask the gate that keeps its failure off the tick.
+    expect(getBlockHeight).not.toHaveBeenCalled();
   });
 
   it("fails a finalized-then-errored signature without regressing a settled row", async () => {
@@ -373,5 +542,299 @@ describe("reconcileEarnVaultMovements", () => {
       status: "finalized",
       failure_reason: null,
     });
+  });
+});
+
+/**
+ * Sweep telemetry (PRO-1863, threat model EARN-006).
+ *
+ * The failure this pins: a chain read failure used to return cleanly, so the
+ * per-tick `sdp_cron_run` event read ok while nothing settled and no backlog
+ * signal existed anywhere.
+ */
+describe("reconcileEarnVaultMovements: sweep telemetry", () => {
+  function tickPayload(): Record<string, unknown> | undefined {
+    const call = logEvent.mock.calls.find(
+      ([, payload]) => payload?.event === "sdp_api_earn_vault_reconciliation_tick"
+    );
+    return call?.[1];
+  }
+
+  function tickLevel(): string | undefined {
+    const call = logEvent.mock.calls.find(
+      ([, payload]) => payload?.event === "sdp_api_earn_vault_reconciliation_tick"
+    );
+    return call?.[0];
+  }
+
+  it("emits an info tick with the batch outcome and an empty backlog", async () => {
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    expect(tickLevel()).toBe("info");
+    expect(tickPayload()).toMatchObject({
+      claimed: 1,
+      settled: 1,
+      failed: 0,
+      status_read_failures: 0,
+      block_height_read_failures: 0,
+      backlog: 0,
+      oldest_unsettled_age_seconds: null,
+      batch_saturated: false,
+    });
+  });
+
+  it("reports the backlog and the age of the oldest unsettled movement", async () => {
+    // `confirmed` is not settled (PRO-1716), so both rows stay in the queue and
+    // the tick has to say so: this is the number the backlog alert watches.
+    await seedMovement();
+    await seedMovement();
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => ({
+        slot: 1n,
+        confirmations: 1n,
+        err: null,
+        confirmationStatus: "confirmed",
+      }))
+    );
+
+    await reconcileEarnVaultMovements(env);
+
+    const payload = tickPayload();
+    expect(payload).toMatchObject({ claimed: 2, confirmed: 2, settled: 0, backlog: 2 });
+    expect(payload?.oldest_unsettled_age_seconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it("fails the tick loudly when the chain status read is unavailable", async () => {
+    // The EARN-006 case: an RPC outage must not read as an ok tick while every
+    // claimed movement goes unjudged.
+    const seeded = await seedMovement();
+    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 status-read/);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({
+      claimed: 1,
+      settled: 0,
+      status_read_failures: 1,
+      unchanged: 1,
+      backlog: 1,
+    });
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+        environment: "sandbox",
+        rows: 1,
+      })
+    );
+    // The movement is untouched and stays claimable by the next tick.
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "requested" });
+  });
+
+  it("fails the tick when the block height needed for recovery is unavailable", async () => {
+    // Without a height the sweep can neither rebroadcast nor expire an unknown
+    // signature, so it did none of its recovery duty this tick.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 block-height/);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({ block_height_read_failures: 1, backlog: 1 });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does not read the block height when every unknown signature is already confirmed", async () => {
+    // The read is gated on rows that can CONSUME a height. A parked confirmed
+    // row (signature aged out of RPC history) is a permanent member of the
+    // claim set, so counting its unneeded read failure would page forever for
+    // a tick that did its whole job.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+    logEvent.mockClear();
+
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).resolves.toBeUndefined();
+
+    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(tickLevel()).toBe("info");
+    expect(tickPayload()).toMatchObject({
+      block_height_read_failures: 0,
+      unchanged: 1,
+      backlog: 1,
+      backlog_blockhash_bound: 0,
+      backlog_confirmed: 1,
+    });
+    // The parked row cannot pin the actionable age gauge.
+    expect(tickPayload()?.oldest_blockhash_bound_age_seconds).toBeNull();
+    expect(tickPayload()?.oldest_unsettled_age_seconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it("still fails the tick when a blockhash-bound row in the same batch needs the height", async () => {
+    // Guards against over-narrowing: one parked confirmed row must not buy
+    // immunity for a requested row that genuinely needs recovery.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+    await seedMovement();
+    logEvent.mockClear();
+
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => null)
+    );
+    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 block-height/);
+
+    expect(getBlockHeight).toHaveBeenCalled();
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({ block_height_read_failures: 1 });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails the tick when the writes fail even though both chain reads answered", async () => {
+    // Reads fine, write side down (pool exhaustion, or a send-side RPC
+    // outage): counting only read failures reported this as an ok tick, which
+    // is the exact EARN-006 shape the job exists to close.
+    await seedMovement();
+    getSignatureStatuses.mockResolvedValue([null]);
+    getBlockHeight.mockResolvedValue(99n);
+    broadcastVaultTransaction.mockRejectedValue(new Error("node is behind"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/per-movement failures/);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({ movement_errors: 1, settled: 0 });
+  });
+
+  it("reports the exit path on its own axis (ADR 0002)", async () => {
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    expect(tickPayload()).toMatchObject({ backlog: 1, backlog_withdrawals: 1 });
+    expect(tickPayload()?.oldest_withdrawal_age_seconds).toBeGreaterThanOrEqual(0);
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "confirmed" });
+  });
+
+  it("keeps the diagnosable cause on the chain-read failure event", async () => {
+    await seedMovement();
+    getSignatureStatuses.mockRejectedValue(new Error("429 rate limited by provider"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+        error_message: "429 rate limited by provider",
+      })
+    );
+  });
+
+  it("reports exactly the rows the next claim would take, across every status", async () => {
+    // The repository comment promises the backlog predicate and the claim
+    // predicate stay in lockstep. Assert it against the claim ITSELF, with one
+    // row in every reachable status so a predicate that drops or adds a status
+    // fails here instead of drifting silently into production. Comparing the
+    // id SETS (not just the counts) also catches a compensating drift that
+    // swaps one status for another.
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    const requested = await seedMovement();
+    const submitted = await seedMovement();
+    const confirmed = await seedMovement();
+    const failed = await seedMovement();
+    const finalized = await seedMovement();
+    const observedAt = new Date(0).toISOString();
+
+    await ledger.advanceVaultMovement({
+      movementId: submitted.movement.id,
+      organizationId: ORG,
+      toStatus: "submitted",
+    });
+    await ledger.advanceVaultMovement({
+      movementId: confirmed.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: observedAt,
+    });
+    await ledger.advanceVaultMovement({
+      movementId: failed.movement.id,
+      organizationId: ORG,
+      toStatus: "failed",
+      failureReason: "test setup",
+    });
+    await ledger.advanceVaultMovement({
+      movementId: finalized.movement.id,
+      organizationId: ORG,
+      toStatus: "finalized",
+      confirmedAt: observedAt,
+      settledAt: observedAt,
+    });
+
+    const stats = await ledger.getUnsettledVaultMovementStats();
+    const claimable = await ledger.claimUnsettledVaultMovements(256);
+
+    // Unsettled: requested, submitted, confirmed. Terminal: failed, finalized.
+    expect(new Set(claimable.map((row) => row.id))).toEqual(
+      new Set([requested.movement.id, submitted.movement.id, confirmed.movement.id])
+    );
+    expect(stats.backlog).toBe(claimable.length);
+    expect(stats.backlogBlockhashBound).toBe(2);
+    expect(stats.backlogConfirmed).toBe(1);
+    // Deposits here, so the exit axis stays empty and cannot be a false positive.
+    expect(stats.backlogWithdrawals).toBe(0);
+    expect(stats.oldestWithdrawalCreatedAt).toBeNull();
+    expect(stats.oldestBlockhashBoundCreatedAt).not.toBeNull();
+  });
+
+  it("counts a withdrawal on the exit axis of the backlog", async () => {
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    await seedWithdrawal();
+
+    const stats = await ledger.getUnsettledVaultMovementStats();
+
+    expect(stats.backlogWithdrawals).toBe(1);
+    expect(stats.oldestWithdrawalCreatedAt).not.toBeNull();
+  });
+
+  it("makes the cron run itself report error, not ok (EARN-006 end to end)", async () => {
+    // The literal acceptance criterion, composed with the REAL wrapper both
+    // runners use: before this, the read failure returned cleanly and the tick
+    // event said `ok` while nothing settled.
+    await seedMovement();
+    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(
+      runWithCronRunEvent("sdp-api-reconcile-earn-vault-movements", () =>
+        reconcileEarnVaultMovements(env)
+      )
+    ).rejects.toThrow(/Earn vault reconciliation failed/);
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({ event: CRON_RUN_EVENT, status: "error" })
+    );
+    expect(logEvent).not.toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({ event: CRON_RUN_EVENT, status: "ok" })
+    );
   });
 });

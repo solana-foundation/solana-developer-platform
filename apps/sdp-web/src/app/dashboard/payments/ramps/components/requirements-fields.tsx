@@ -10,7 +10,7 @@ import {
   type RequirementField,
   requirementFieldName,
 } from "@sdp/types/ramp-requirements";
-import { CheckIcon, Loader2Icon, MapPinIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,6 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
 import { cn } from "@/lib/utils";
-import type { PayoutAccountSelection } from "../hooks/use-counterparty-requirements";
 import { applyRequirementMask, requirementFieldError } from "../schema";
 
 /**
@@ -109,37 +108,29 @@ function requirementGroupCopy(
 }
 
 /**
- * Renders reusable payout accounts and the explicit new-account choice.
+ * Renders every saved payout account as an explicit choice — nothing is
+ * preselected. Picking a row routes the payout to that account; picking the
+ * selected row again clears the choice so the new-account form re-enables.
  *
- * @param accounts - Active payout accounts for the selected destination.
- * @param selection - Current payout account choice.
- * @param onSelectionChange - Callback for selecting an account or new-account collection.
- * @param title - Translated chooser title.
- * @param description - Translated chooser description.
- * @param addNewLabel - Translated new-account label.
- * @returns The payout account chooser card.
+ * @param accounts - Active saved accounts across all destination countries.
+ * @param selectedProviderAccountId - The explicitly picked account, if any.
+ * @param onSelect - Callback with the picked account, or null when cleared.
+ * @param title - Translated card title.
+ * @param description - Translated card description.
+ * @returns The saved payout account picker card.
  */
-function PayoutAccountChooser({
+function PayoutAccountsCard({
   accounts,
-  selection,
-  onSelectionChange,
+  selectedProviderAccountId,
+  onSelect,
   title,
   description,
-  addNewLabel,
-  newAccountFields,
-  values,
-  onFieldChange,
 }: {
   accounts: PayoutRequirementAccount[];
-  selection: PayoutAccountSelection;
-  onSelectionChange: (selection: PayoutAccountSelection) => void;
+  selectedProviderAccountId: string | null;
+  onSelect: (account: PayoutRequirementAccount | null) => void;
   title: string;
   description: string;
-  addNewLabel: string;
-  /** Collection fields rendered in place once the new-account choice is active. */
-  newAccountFields: RequirementField[];
-  values: CollectedFieldData;
-  onFieldChange: (key: string, value: string) => void;
 }) {
   return (
     <Card>
@@ -149,7 +140,7 @@ function PayoutAccountChooser({
       </CardHeader>
       <CardContent className="space-y-3">
         {accounts.map((account) => {
-          const isSelected = selection.kind === "existing" && selection.id === account.id;
+          const isSelected = account.id === selectedProviderAccountId;
           const flag = regionFlagEmoji(account.destinationCountry);
           return (
             <button
@@ -162,7 +153,7 @@ function PayoutAccountChooser({
                   ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)]"
                   : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)]"
               )}
-              onClick={() => onSelectionChange({ kind: "existing", id: account.id })}
+              onClick={() => onSelect(isSelected ? null : account)}
             >
               {flag !== null ? (
                 <span className="shrink-0 text-xl" aria-hidden="true">
@@ -184,42 +175,6 @@ function PayoutAccountChooser({
             </button>
           );
         })}
-        <button
-          type="button"
-          aria-pressed={selection.kind === "new"}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            selection.kind === "new"
-              ? "border-[var(--input-border-focus)] bg-[var(--input-bg-hover)] text-primary"
-              : "border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] text-secondary hover:border-[var(--input-border-hover)] hover:bg-[var(--input-bg-hover)] hover:text-primary"
-          )}
-          onClick={() => onSelectionChange({ kind: "new" })}
-        >
-          <PlusIcon className="size-5 shrink-0" aria-hidden="true" />
-          <span>{addNewLabel}</span>
-          {selection.kind === "new" ? <CheckIcon className="ml-auto size-5" /> : null}
-        </button>
-        {selection.kind === "new" && newAccountFields.length > 0 ? (
-          <div className="space-y-4 rounded-lg border border-border-default p-4">
-            {newAccountFields.map((field) =>
-              field.kind === "address" ? (
-                <AddressRequirementField
-                  key={field.key}
-                  field={field}
-                  values={values}
-                  onChange={onFieldChange}
-                />
-              ) : (
-                <RequirementFieldInput
-                  key={field.key}
-                  field={field}
-                  value={values[field.key] === undefined ? "" : values[field.key]}
-                  onChange={(value) => onFieldChange(field.key, value)}
-                />
-              )
-            )}
-          </div>
-        ) : null}
       </CardContent>
     </Card>
   );
@@ -235,18 +190,13 @@ type RequirementsFieldsProps = {
   fields: RequirementField[];
   values: CollectedFieldData;
   onChange: (key: string, value: string) => void;
-} & (
-  | {
-      existingPayoutAccounts?: undefined;
-      payoutAccountSelection?: undefined;
-      onPayoutAccountSelectionChange?: undefined;
-    }
-  | {
-      existingPayoutAccounts: PayoutRequirementAccount[];
-      payoutAccountSelection: PayoutAccountSelection;
-      onPayoutAccountSelectionChange: (selection: PayoutAccountSelection) => void;
-    }
-);
+  /** Saved payout accounts the user can pick instead of collecting new details; offramp only. */
+  payoutAccountPicker?: {
+    accounts: PayoutRequirementAccount[];
+    selectedProviderAccountId: string | null;
+    onSelect: (account: PayoutRequirementAccount | null) => void;
+  };
+};
 
 /**
  * Partitions the flat field list into consecutive runs sharing a section,
@@ -602,9 +552,7 @@ function AddressRequirementField({
  * @param fields - Fields currently required by the provider and local selections.
  * @param values - Collected values keyed by requirement field.
  * @param onChange - Callback for updating a collected value.
- * @param existingPayoutAccounts - Active corridor accounts available for reuse.
- * @param payoutAccountSelection - Current reusable-account or new-account choice.
- * @param onPayoutAccountSelectionChange - Callback for changing the payout account choice.
+ * @param payoutAccountPicker - Saved-account choices; a picked account greys out the collection form.
  * @returns The requirement field group.
  */
 export function RequirementsFields({
@@ -612,76 +560,70 @@ export function RequirementsFields({
   fields,
   values,
   onChange,
-  existingPayoutAccounts,
-  payoutAccountSelection,
-  onPayoutAccountSelectionChange,
+  payoutAccountPicker,
 }: RequirementsFieldsProps) {
   const t = useTranslations();
   const providerCopy = provider === null ? undefined : REQUIREMENT_GROUP_COPY[provider];
-  const chooserVisible = existingPayoutAccounts !== undefined && existingPayoutAccounts.length > 0;
-  const addingNewAccount = chooserVisible && payoutAccountSelection.kind === "new";
-  const topLevelFields = addingNewAccount
-    ? fields.filter((field) => field.key === "destinationCountry")
-    : fields;
-  const newAccountFields = addingNewAccount
-    ? fields.filter((field) => field.key !== "destinationCountry")
-    : [];
+  const pickerVisible =
+    payoutAccountPicker !== undefined && payoutAccountPicker.accounts.length > 0;
+  const accountPicked = pickerVisible && payoutAccountPicker.selectedProviderAccountId !== null;
   return (
     <div className="space-y-6">
-      {requirementFieldRuns(topLevelFields).map((run) => {
-        const first = run.fields[0];
-        if (first.kind === "address") {
-          return (
-            <AddressRequirementField
-              key={first.key}
-              field={first}
-              values={values}
-              onChange={onChange}
-            />
-          );
-        }
-        const inputs = run.fields.map((field) => {
-          const current = values[field.key];
-          return (
-            <RequirementFieldInput
-              key={field.key}
-              field={field}
-              value={current === undefined ? "" : current}
-              onChange={(value) => onChange(field.key, value)}
-            />
-          );
-        });
-        if (run.group === null || providerCopy === undefined) {
-          return (
-            <div key={first.key} className="space-y-6">
-              {inputs}
-            </div>
-          );
-        }
-        const copy = requirementGroupCopy(providerCopy, run.group);
-        return (
-          <Card key={first.key}>
-            <CardHeader>
-              <CardTitle>{t(copy.title)}</CardTitle>
-              <CardDescription>{t(copy.description)}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">{inputs}</CardContent>
-          </Card>
-        );
-      })}
-      {chooserVisible ? (
-        <PayoutAccountChooser
-          accounts={existingPayoutAccounts}
-          selection={payoutAccountSelection}
-          onSelectionChange={onPayoutAccountSelectionChange}
-          title={t("DashboardPayments.ramps.useExistingAccount")}
-          description={t("DashboardPayments.ramps.useExistingAccountDescription")}
-          addNewLabel={t("DashboardPayments.ramps.addNewAccount")}
-          newAccountFields={newAccountFields}
-          values={values}
-          onFieldChange={onChange}
+      {pickerVisible ? (
+        <PayoutAccountsCard
+          accounts={payoutAccountPicker.accounts}
+          selectedProviderAccountId={payoutAccountPicker.selectedProviderAccountId}
+          onSelect={payoutAccountPicker.onSelect}
+          title={t("DashboardPayments.ramps.payoutAccountsTitle")}
+          description={t("DashboardPayments.ramps.payoutAccountsDescription")}
         />
       ) : null}
+      <fieldset
+        disabled={accountPicked}
+        className={cn("min-w-0 space-y-6", accountPicked && "opacity-50")}
+      >
+        {requirementFieldRuns(fields).map((run) => {
+          const first = run.fields[0];
+          if (first.kind === "address") {
+            return (
+              <AddressRequirementField
+                key={first.key}
+                field={first}
+                values={values}
+                onChange={onChange}
+              />
+            );
+          }
+          const inputs = run.fields.map((field) => {
+            const current = values[field.key];
+            return (
+              <RequirementFieldInput
+                key={field.key}
+                field={field}
+                value={current === undefined ? "" : current}
+                onChange={(value) => onChange(field.key, value)}
+              />
+            );
+          });
+          if (run.group === null || providerCopy === undefined) {
+            return (
+              <div key={first.key} className="space-y-6">
+                {inputs}
+              </div>
+            );
+          }
+          const copy = requirementGroupCopy(providerCopy, run.group);
+          return (
+            <Card key={first.key}>
+              <CardHeader>
+                <CardTitle>{t(copy.title)}</CardTitle>
+                <CardDescription>{t(copy.description)}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">{inputs}</CardContent>
+            </Card>
+          );
+        })}
+      </fieldset>
     </div>
   );
 }

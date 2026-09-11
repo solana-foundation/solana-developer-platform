@@ -29,7 +29,7 @@ export interface ActionExecutionInput {
   label: string;
   method: HttpMethod;
   path: string;
-  body?: unknown;
+  body?: Record<string, unknown>;
 }
 
 export interface ActionExecutionResult {
@@ -40,9 +40,13 @@ export interface ActionExecutionResult {
 }
 
 export interface RunActionOptions {
+  /** Authority-matching candidates. One is automatic; several require confirmation. */
+  signerWallets?: PaymentsDashboardWallet[];
   requiresConfirmation?: boolean;
   confirmationTitle?: string;
   confirmationDescription?: string;
+  confirmationWarning?: string;
+  confirmationDetails?: Array<{ label: string; value: string }>;
   confirmButtonLabel?: string;
   submitToast?: string;
   successToast?: string;
@@ -51,6 +55,8 @@ export interface RunActionOptions {
 
 export interface ActionConfirmationState {
   input: ActionExecutionInput;
+  signerWallets?: PaymentsDashboardWallet[];
+  signingCustodyWalletId?: string;
   options: Required<
     Pick<
       RunActionOptions,
@@ -61,7 +67,7 @@ export interface ActionConfirmationState {
       | "successToast"
     >
   > &
-    Pick<RunActionOptions, "onSuccess">;
+    Pick<RunActionOptions, "onSuccess" | "confirmationDetails" | "confirmationWarning">;
 }
 
 export interface TokenManagementWorkspaceProps {
@@ -151,6 +157,7 @@ export interface AuthorityFormState {
 export interface FreezeFormState {
   accountAddress: string;
   reason: string;
+  signingWalletId: string;
 }
 
 export interface AllowlistFormState {
@@ -194,6 +201,7 @@ export interface PermissionRow {
   value: string | null;
   authorityRole: AuthorityFormState["role"];
   editDisabledReason?: string | null;
+  removalDisabledReason?: string | null;
   controlStatus?: PermissionControlStatus;
 }
 

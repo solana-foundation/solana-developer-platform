@@ -8,9 +8,21 @@ import { TEST_ORG, TEST_USER } from "./organizations";
 export const TEST_PROJECT = {
   id: "prj_test123456789",
   organizationId: TEST_ORG.id,
-  name: "Test Project",
-  slug: "test-project",
+  name: "Default Sandbox Project",
+  slug: "default-sandbox",
   environment: "sandbox" as const,
+  status: "active" as const,
+  createdBy: TEST_USER.id,
+  createdAt: "2024-01-01T00:00:00.000Z",
+  updatedAt: "2024-01-01T00:00:00.000Z",
+};
+
+export const TEST_PRODUCTION_PROJECT = {
+  id: "prj_test123456789_production",
+  organizationId: TEST_ORG.id,
+  name: "Default Production Project",
+  slug: "default-production",
+  environment: "production" as const,
   status: "active" as const,
   createdBy: TEST_USER.id,
   createdAt: "2024-01-01T00:00:00.000Z",
@@ -36,12 +48,14 @@ export const TEST_PROJECT_CACHED_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
   rotationDeadline: null,
+  organizationStatus: "active",
 };
 
 export const TEST_TOKEN: Token = {
   id: "tok_test123456789",
   projectId: TEST_PROJECT.id,
   organizationId: TEST_ORG.id,
+  signingCustodyWalletId: null,
   signingWalletId: null,
   mintAddress: null,
   mintAuthority: null,
@@ -91,6 +105,7 @@ export const TEST_TOKEN_TRANSACTION: TokenTransaction = {
   id: "ttx_test123456789",
   tokenId: TEST_ACTIVE_TOKEN.id,
   organizationId: TEST_ORG.id,
+  custodyWalletId: null,
   type: "mint",
   status: "pending",
   idempotencyKey: null,

@@ -23,10 +23,10 @@ type DashboardPageConfig = {
   titlePosition?: "left" | "center";
   headerTabs?: DashboardHeaderTabsConfig;
   routeTabs?: DashboardRouteTabsConfig;
-  headerVariant?: "default" | "markets";
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
+  hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
     label: string;
@@ -36,12 +36,11 @@ type DashboardPageConfig = {
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
-  hideTitle?: boolean;
+  titleVisibility: "visible" | "desktop-only" | "screen-reader-only";
   title: string;
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  alignTitleWithTabs?: boolean;
   // Notifications ship with the asset-profiles feature (its only producer today).
   showNotifications?: boolean;
 };
@@ -104,10 +103,12 @@ export function CenteredDashboardTopBar({
   leadingContent,
   title,
   trailingContent,
+  hideTitleOnMobile = false,
 }: {
   leadingContent: ReactNode;
   title: string;
   trailingContent: ReactNode;
+  hideTitleOnMobile?: boolean;
 }) {
   return (
     <div
@@ -115,7 +116,12 @@ export function CenteredDashboardTopBar({
       data-dashboard-centered-topbar
     >
       <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
-      <div className="col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+      <div
+        className={cn(
+          "col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1",
+          hideTitleOnMobile && "max-xl:sr-only"
+        )}
+      >
         <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {title}
         </h1>
@@ -171,16 +177,16 @@ export function StandardDashboardTopBar({
 export function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
-  hideTitle,
+  titleVisibility,
   title,
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  alignTitleWithTabs = hasHeaderTabs,
   showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
-    !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
+    titleVisibility !== "screen-reader-only" &&
+    (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
   const trailingContent = (
     <>
       <LanguagePicker />
@@ -192,6 +198,7 @@ export function DashboardTopBar({
     return (
       <CenteredDashboardTopBar
         title={title}
+        hideTitleOnMobile={titleVisibility === "desktop-only"}
         leadingContent={
           <>
             <SidebarToggle
@@ -208,9 +215,9 @@ export function DashboardTopBar({
 
   return (
     <StandardDashboardTopBar
-      hideTitle={hideTitle}
+      hideTitle={titleVisibility === "screen-reader-only"}
       title={title}
-      alignTitleWithTabs={alignTitleWithTabs}
+      alignTitleWithTabs={hasHeaderTabs}
       leadingContent={
         <>
           <SidebarToggle
@@ -398,7 +405,8 @@ function getCounterpartyRoutePageConfig(
 
 function getMarketsRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  dvpEnabled: boolean
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/markets") {
     return {
@@ -407,14 +415,40 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  // Create is a detail/action route, so it keeps a centred title and a way back
+  // to the list — the only orientation such a route has.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) {
+    return {
+      title: t("DashboardMarkets.dvp.createTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
+  // A trade detail page keeps its own centred title beside a back action: it is
+  // the only orientation a detail route has, unlike a top-level list where the
+  // title would just repeat the active sidebar item.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return {
+      title: t("DashboardMarkets.dvp.detailTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
-      titlePosition: "left",
-      headerVariant: "markets",
       routeTabs: {
         ariaLabel: t("Shared.dashboardShell.markets"),
         tabs: [
@@ -426,6 +460,14 @@ function getMarketsRoutePageConfig(
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
             label: t("Shared.dashboardShell.earnProgram"),
           },
+          ...(dvpEnabled
+            ? [
+                {
+                  href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+                  label: t("DashboardMarkets.dvp.navLabel"),
+                },
+              ]
+            : []),
         ],
       },
       contentWidthClass: "max-w-none",
@@ -561,12 +603,15 @@ function getIssuanceRoutePageConfig(
   // on → the create flow's centered title + capped column; off → the legacy
   // left-aligned, full-width layout, untouched.
   if (assetProfilesEnabled) {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.assetManagement"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-7xl",
-    });
+    return {
+      ...actionPageConfig({
+        title: t("Shared.dashboardShell.assetManagement"),
+        backHref: "/dashboard/issuance",
+        backLabel: t("Shared.dashboardShell.backToOverview"),
+        contentWidthClass: "max-w-7xl",
+      }),
+      hideTitleOnMobile: true,
+    };
   }
   return {
     title: t("Shared.dashboardShell.issuance"),
@@ -597,19 +642,6 @@ function getIntegrationsPageConfig(
     // second max-width inside the centered default and stranding gutters.
     return {
       title: t("Shared.dashboardShell.integrations"),
-      // The family axis rides the header tabs like policies; the catalog keeps
-      // status and search as its own secondary filters.
-      headerTabs: {
-        tabs: [
-          { id: "all", label: t("Shared.integrations.filterAllFamilies") },
-          { id: "custody", label: t("Shared.integrations.custodyTitle") },
-          { id: "rpc", label: t("Shared.integrations.rpcTitle") },
-          { id: "ramps", label: t("Shared.integrations.rampsTitle") },
-          { id: "compliance", label: t("Shared.integrations.complianceTitle") },
-          { id: "privacy", label: t("Shared.integrations.privacyTitle") },
-        ],
-        hideOnMobile: false,
-      },
       contentWidthClass: "max-w-7xl",
     };
   }
@@ -671,7 +703,16 @@ export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  custodyEnabled = true,
+  _paymentsEnabled = true,
+  _policiesEnabled = true,
+  /**
+   * Gates the DvP tab. The sidebar already hides DvP behind this flag, and a
+   * header tab that stays visible when the sidebar entry is gone points at a
+   * workspace the flag exists to keep out of reach.
+   */
+  dvpEnabled = false
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -705,11 +746,13 @@ export function getDashboardPageConfig(
     return {
       title: t("Shared.dashboardShell.policies"),
       headerTabs: {
-        tabs: [
-          { id: "all", label: t("DashboardPolicies.all") },
-          { id: "wallets", label: t("DashboardPolicies.wallets") },
-          { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
-        ],
+        tabs: custodyEnabled
+          ? [
+              { id: "all", label: t("DashboardPolicies.all") },
+              { id: "wallets", label: t("DashboardPolicies.wallets") },
+              { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
+            ]
+          : [{ id: "api_keys", label: t("DashboardPolicies.apiKeys") }],
         hideOnMobile: false,
       },
       contentWidthClass: "max-w-none",
@@ -728,7 +771,7 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t, dvpEnabled);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
   }
@@ -801,7 +844,11 @@ export function getDashboardPageConfig(
   if (integrationsConfig) {
     return integrationsConfig;
   }
-  if (pathname.startsWith("/dashboard/settings")) {
+  if (pathname === "/dashboard/helius-rings") {
+    return { title: t("Shared.dashboardShell.heliusRings") };
+  }
+  // Members only redirects into Settings, so its loading frame carries the Settings title.
+  if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
     // the members table and the RPC form are label/value rows, and letting them span

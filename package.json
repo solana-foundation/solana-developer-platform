@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.70.0",
+  "version": "0.75.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -23,7 +23,7 @@
       "brace-expansion": "5.0.9",
       "bigint-buffer": "workspace:*",
       "esbuild": "0.28.1",
-      "fast-uri": "3.1.5",
+      "fast-uri": "3.1.7",
       "js-yaml": "4.3.0",
       "postcss>nanoid": "3.3.18",
       "postcss": "^8.5.22",
@@ -35,7 +35,6 @@
       "ws": "8.21.0"
     },
     "patchedDependencies": {
-      "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch",
       "next-themes@0.4.6": "patches/next-themes@0.4.6.patch",
       "brace-expansion@5.0.9": "patches/brace-expansion@5.0.9.patch"
     },
@@ -54,6 +53,7 @@
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
     "dev:docs": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-docs --env-mode=loose",
     "dev:docs:bare": "turbo run dev --filter=sdp-docs",
+    "dev:example:embedded-yield": "pnpm -C examples/embedded-yield-bank dev",
     "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api --env-mode=loose",
     "dev:api:local": "scripts/doppler/run-with-config.sh turbo run dev:local --filter=@sdp/api --env-mode=loose",
     "build": "turbo run build",
@@ -97,14 +97,15 @@
     "kora:surfpool:down": "scripts/kora-surfpool/down.sh",
     "kora:surfpool:run": "scripts/kora-surfpool/run.sh",
     "kora:surfpool:e2e:issuance": "scripts/kora-surfpool/e2e-issuance.sh",
+    "jupiter-lend:surfpool:e2e": "scripts/kora-surfpool/e2e-jupiter-lend.sh",
     "kora:surfpool:integration": "scripts/kora-surfpool/integration.sh",
     "kora:surfpool:test": "scripts/kora-surfpool/test.sh",
     "kora:devnet:check": "infra/kora/cloud-run/check.sh",
     "kora:devnet:test": "TEST_DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-${TEST_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.7",
-    "turbo": "2.10.9",
+    "@biomejs/biome": "2.5.11",
+    "turbo": "2.10.12",
     "typescript": "6.0.3",
     "yaml": "2.9.0"
   },

@@ -35,7 +35,13 @@ export function TokenSignerSelect({
   const hasReason = Boolean(signerUnavailableReason);
   const hasNoWallets = !hasReason && signerWallets.length === 0;
   const isUnavailable = hasReason || signerWallets.length === 0;
-  const isLocked = !isUnavailable && signerWallets.length === 1;
+  const selectedWallet =
+    signerWallets.find((wallet) => wallet.id === signerWalletId) ??
+    (!signerWalletId && signerWallets.length === 1 ? signerWallets[0] : null);
+  // A disappeared explicit choice must stay editable, not display a replacement.
+  const isLocked = !isUnavailable && signerWallets.length === 1 && selectedWallet !== null;
+  const hasDuplicateAddress =
+    new Set(signerWallets.map((wallet) => wallet.publicKey)).size < signerWallets.length;
   // Red only signals a genuine problem: an explicit unavailable reason, or no
   // wallets in a context that requires a signer. An empty list where the signer
   // is optional (draft creation) is expected, so it stays neutral.
@@ -51,20 +57,16 @@ export function TokenSignerSelect({
         ? t("DashboardIssuance.signer.defaultSignerHint")
         : t("DashboardIssuance.signer.noneAvailable")
       : availableMessage;
-  const selectedWallet =
-    signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
-
   return (
     <div className="space-y-2">
       <span className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
         {label ?? t("DashboardIssuance.signer.label")}
       </span>
       {isLocked && selectedWallet ? (
-        // Locked signer: a read-only display, so leaving for the wallet page costs
-        // nothing and the link navigates in place.
+        // Keep the operation open while inspecting its signing wallet.
         <WalletIdentityBadge
-          variant="card"
-          walletLink="same-tab"
+          variant="row"
+          walletLink="new-tab"
           identity={toWalletIdentity(selectedWallet, null, {
             unresolvedAs: "custom",
             unlabeled: t("DashboardIssuance.wallet.unlabeled"),
@@ -72,31 +74,33 @@ export function TokenSignerSelect({
         />
       ) : (
         <Select
-          value={signerWalletId}
+          value={selectedWallet?.id ?? ""}
           disabled={isUnavailable}
           placeholder={t("DashboardIssuance.signer.select")}
           onValueChange={(value) => onSignerWalletIdChange(value === null ? "" : value)}
         >
           {signerWallets.map((wallet) => (
-            <SelectItem key={wallet.id} value={wallet.walletId}>
-              {getSignerWalletOptionLabel(wallet, t)}
+            <SelectItem key={wallet.id} value={wallet.id}>
+              {getSignerWalletOptionLabel(wallet, t, hasDuplicateAddress)}
             </SelectItem>
           ))}
         </Select>
       )}
-      <p
-        className={[
-          "text-sm leading-5",
-          isError ? "text-destructive-strong" : "text-secondary",
-        ].join(" ")}
-      >
-        {message}
-      </p>
+      {message && (!isLocked || isError || helperText !== undefined) ? (
+        <p
+          className={[
+            "text-sm leading-5",
+            isError ? "text-destructive-strong" : "text-secondary",
+          ].join(" ")}
+        >
+          {message}
+        </p>
+      ) : null}
       {showSelectionSummary && !isUnavailable && selectedWallet && !isLocked ? (
         // Summary of a live selection — the surrounding form holds unsaved state,
         // so inspecting the wallet opens beside it rather than replacing it.
         <WalletIdentityBadge
-          variant="card"
+          variant="row"
           walletLink="new-tab"
           identity={toWalletIdentity(selectedWallet, null, {
             unresolvedAs: "custom",

@@ -15,7 +15,10 @@ import {
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
 } from "@/db/repositories";
+import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { createHeliusRingsService } from "@/services/helius-rings";
+import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {
   InMemoryRingsGateway,
   type InMemoryRingsGatewayOptions,
@@ -23,6 +26,7 @@ import {
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { unsignedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   pollRingsIndexing,
@@ -31,6 +35,8 @@ import {
 } from "./poll-rings-indexing";
 
 const TEST_PROJECT_ID = "prj_hr_job_test";
+const TEST_CONNECTION_ID = "hrconn_hr_job_test";
+const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
 const allowPolicy = async () =>
@@ -80,6 +86,13 @@ function ringsGateway(
  */
 const NO_HEIGHT = async () => null;
 
+/**
+ * The chain has no record of the signature. Every escalation below is about
+ * bytes that are genuinely lost, not merely unindexed, so the passes that can
+ * give up are told so explicitly rather than left to reach a real RPC.
+ */
+const CHAIN_HAS_NOTHING = async () => "absent" as const;
+
 let walletId: string;
 let jobEnv: typeof env;
 
@@ -97,7 +110,11 @@ function serviceWith(gateway: InMemoryRingsGateway) {
 describe("pollRingsIndexing", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    jobEnv = { ...env, HELIUS_RINGS_ENABLED: "true" };
+    jobEnv = {
+      ...env,
+      HELIUS_RINGS_ENABLED: "true",
+      CUSTODY_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+    };
     const db = getDb(env);
 
     await db
@@ -112,13 +129,55 @@ describe("pollRingsIndexing", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+
+    const credentialId = "pcred_hr_job_test";
+    const stored = await createCredentialSecretStore(jobEnv, "encrypted_db").write({
+      orgId: TEST_ORG.id,
+      provider: "helius_rings",
+      providerCredentialId: credentialId,
+      payload: {
+        solanaRpcUrl: "https://solana-rpc.mock.invalid",
+        indexerUrl: "https://indexer.mock.invalid",
+        proverUrl: "https://prover.mock.invalid",
+      },
+    });
+    const credential = await new ProviderCredentialStore(db).insertCredential({
+      id: credentialId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "helius_rings",
+      label: "Job test",
+      scope: "project",
+      source: "stored",
+      stored,
+      displayMetadata: {},
+      version: 1,
+      rotatedFromId: null,
+      idempotencyKey: TEST_CONNECTION_ID,
+      idempotencyFingerprint: TEST_CONNECTION_ID,
+      createdBy: TEST_USER.id,
+    });
+    await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+      credentialId,
+    ]);
+    await new HeliusRingsConnectionStore(db).insert({
+      id: TEST_CONNECTION_ID,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      name: "Job test",
+      providerCredentialId: credentialId,
+      providerCredentialScopeKey: credential.scope_key,
+      allowInsecureHttp: false,
+      displayMetadata: {},
+      makeDefault: true,
+      createdBy: TEST_USER.id,
+    });
 
     const wallets = createHeliusRingsWalletRepository(env);
     const wallet = await wallets.createWallet({
@@ -213,6 +272,7 @@ describe("pollRingsIndexing", () => {
       createService: () => serviceWith(gateway),
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
       readBlockHeight: NO_HEIGHT,
+      readSignatureStatus: CHAIN_HAS_NOTHING,
     });
 
     const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -225,6 +285,36 @@ describe("pollRingsIndexing", () => {
     expect(row?.state).toBe("failed");
     expect(row?.failure_code).toBe("manual_reconciliation_required");
     expect(row?.retryable).toBe(false);
+  });
+
+  it("keeps an operation past the budget while the chain vouches for it", async () => {
+    const gateway = ringsGateway({ indexingDelayMs: 60 * 60 * 1000 });
+    const operation = await serviceWith(gateway).prepareOperation(
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-timeout-landed",
+      },
+      { apiKeyId: null, actor: null, custodyWalletId: null }
+    );
+    expect(operation.state).toBe("indexing");
+
+    await pollRingsIndexing(jobEnv, {
+      createService: () => serviceWith(gateway),
+      now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
+      readBlockHeight: NO_HEIGHT,
+      readSignatureStatus: async () => "landed",
+    });
+
+    const row = await createHeliusRingsOperationRepository(env).getOperationById({
+      ...tenant,
+      id: operation.id,
+    });
+    // The budget measures the indexer's patience, not the payment's fate. An
+    // outage must not turn a settled transaction into operator work.
+    expect(row?.state).toBe("indexing");
+    expect(row?.failure_code).toBeNull();
   });
 
   it("sweeps a broadcast stranded in submitted into reconciliation", async () => {
@@ -299,6 +389,7 @@ describe("pollRingsIndexing", () => {
       await pollRingsIndexing(jobEnv, {
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
+        readSignatureStatus: CHAIN_HAS_NOTHING,
       });
 
       const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -317,6 +408,7 @@ describe("pollRingsIndexing", () => {
       await pollRingsIndexing(jobEnv, {
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
+        readSignatureStatus: CHAIN_HAS_NOTHING,
       });
 
       const row = await createHeliusRingsOperationRepository(env).getOperationById({
@@ -327,6 +419,48 @@ describe("pollRingsIndexing", () => {
       // owner who asked to shield one amount would have moved two.
       expect(row?.failure_code).toBe("manual_reconciliation_required");
       expect(row?.retryable).toBe(false);
+    });
+
+    /**
+     * A devnet Photon stuck thousands of slots behind the chain declared
+     * finalized shields lost: the pass read the indexer's silence as absence
+     * and wrote a non-retryable failure over a payment that had settled. A
+     * shield reaches it early regardless, because its recorded height is only
+     * a floor.
+     */
+    it("spares a shield the chain confirms, however far behind Photon is", async () => {
+      const id = await strand("shield", "job-strand-landed");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+        readSignatureStatus: async () => "landed",
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      expect(row?.state).toBe("indexing");
+      expect(row?.failure_code).toBeNull();
+    });
+
+    it("waits rather than escalating when the chain cannot be asked", async () => {
+      const id = await strand("withdraw", "job-strand-unaskable");
+
+      await pollRingsIndexing(jobEnv, {
+        createService: () => serviceWith(stalled()),
+        readBlockHeight: async () => "5000",
+        readSignatureStatus: async () => null,
+      });
+
+      const row = await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id,
+      });
+      // An RPC that could not answer is not an RPC reporting absence.
+      expect(row?.state).toBe("indexing");
+      expect(row?.failure_code).toBeNull();
     });
 
     it("completes a signed failure once Photon holds it", async () => {
@@ -575,5 +709,24 @@ describe("pollRingsIndexing", () => {
       // Not knowing the height is a reason to wait, not a reason to escalate.
       expect(row?.state).toBe("indexing");
     });
+  });
+
+  it("never hands a tenant connection's RPC to its chain reads", async () => {
+    // The fixture seeds an active default connection, which an earlier
+    // implementation resolved globally and handed to both readers. The
+    // judgments those reads back — expiry escalation, manual reconciliation —
+    // must come from the platform endpoint, so the reader input carries no
+    // tenant URL even while a resolvable connection exists.
+    const seen: Array<Record<string, unknown>> = [];
+    await pollRingsIndexing(jobEnv, {
+      createService: () => serviceWith(ringsGateway({})),
+      readBlockHeight: async (input) => {
+        seen.push({ ...input });
+        return null;
+      },
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual({ env: jobEnv });
   });
 });

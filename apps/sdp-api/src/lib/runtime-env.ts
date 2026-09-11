@@ -42,6 +42,33 @@ export function isSelfHostedDeployment(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): b
  * remains responsible for required values; feature-specific readers handle
  * their optional values where they are consumed.
  */
+/**
+ * Ephemeral per-PR environments mount the same dev secrets but must land on
+ * their own database and Redis keyspace. EPHEMERAL_DB_NAME and
+ * EPHEMERAL_REDIS_DB rewrite the secret-provided URLs in place so every
+ * downstream reader (API, worker, cron) sees the per-PR endpoints.
+ */
+export function applyEphemeralOverrides(env: NodeJS.ProcessEnv): void {
+  const dbName = env.EPHEMERAL_DB_NAME?.trim();
+  if (dbName && env.DATABASE_URL) {
+    const url = new URL(env.DATABASE_URL);
+    url.pathname = `/${dbName}`;
+    env.DATABASE_URL = url.toString();
+  }
+  const redisDb = env.EPHEMERAL_REDIS_DB?.trim();
+  if (redisDb && env.REDIS_URL) {
+    const url = new URL(env.REDIS_URL);
+    url.pathname = `/${redisDb}`;
+    env.REDIS_URL = url.toString();
+  }
+}
+
+let ephemeralOverridesApplied = false;
+
 export function getProcessEnv(): Env {
+  if (!ephemeralOverridesApplied) {
+    applyEphemeralOverrides(process.env);
+    ephemeralOverridesApplied = true;
+  }
   return process.env as unknown as Env;
 }

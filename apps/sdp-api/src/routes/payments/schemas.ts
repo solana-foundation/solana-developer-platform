@@ -8,6 +8,7 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PAYMENT_TRANSFER_STATUSES,
   type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
@@ -20,12 +21,13 @@ import { getI64Encoder, getU64Encoder } from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
-// Per-field schema for any payments input that expects a base58 Solana address
-// (destination, referenceAddress, allowlist entries). Trim whitespace in a
-// preprocess and require both the 32–44 length window and `isAddress` to pass.
-// Validating here returns 400 BAD_REQUEST with an actionable per-field message
-// instead of letting `assertValidAddress` throw a plain Error downstream (500).
-function solanaAddressSchema(fieldName: string) {
+// Per-field schema for any input that expects a base58 Solana address
+// (destination, referenceAddress, allowlist entries, ring program ids). Trim
+// whitespace in a preprocess and require both the 32–44 length window and
+// `isAddress` to pass. Validating here returns 400 BAD_REQUEST with an
+// actionable per-field message instead of letting `assertValidAddress` throw a
+// plain Error downstream (500).
+export function solanaAddressSchema(fieldName: string) {
   return z.preprocess(
     (value) => (typeof value === "string" ? value.trim() : value),
     z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
@@ -484,12 +486,8 @@ export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object
 
 const rampProviderSchema = z.enum(RAMP_PROVIDERS);
 export const rampDirectionSchema = z.enum(["onramp", "offramp"]);
-const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
-const offrampCryptoRailSchema = z.enum(OFFRAMP_CRYPTO_RAILS);
-
-export const rampCurrencyCodeSchema = z
-  .string()
-  .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid ramp currency code" });
+export const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
+export const offrampCryptoRailSchema = z.enum(OFFRAMP_CRYPTO_RAILS);
 export const rampFiatCurrencySchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
   z.enum(RAMP_FIAT_CURRENCIES)
@@ -524,18 +522,7 @@ export const createTransferSchema = z.strictObject({
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 
-export const transferStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "finalized",
-  "failed",
-  "awaiting_payment",
-  "settling",
-  "completed",
-  "canceled",
-  "expired",
-]);
+export const transferStatusSchema = z.enum(PAYMENT_TRANSFER_STATUSES);
 
 const transferFilterTimestampSchema = z
   .string()
@@ -640,13 +627,13 @@ export const listTransferBatchesQuerySchema = z.strictObject({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const estimateOnrampSchema = z.object({
+export const estimateOnrampSchema = z.strictObject({
   assetRail: onrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
 });
 
-export const estimateOfframpSchema = z.object({
+export const estimateOfframpSchema = z.strictObject({
   assetRail: offrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,
   cryptoAmount: paymentAmountSchema,
@@ -661,11 +648,11 @@ export const rampsMemoSchema = z
     message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
   });
 
-export const createOnrampQuoteSchema = z.object({
+export const createOnrampQuoteSchema = z.strictObject({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
-  destinationWallet: z.string().min(1),
-  cryptoToken: rampCurrencyCodeSchema,
+  destinationCustodyWalletId: z.string().min(1),
+  assetRail: onrampCryptoRailSchema,
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
   rampsMemo: rampsMemoSchema.optional(),
@@ -675,6 +662,8 @@ export const createOnrampQuoteSchema = z.object({
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
+export const rampDestinationCountrySchema = z.enum(COUNTRY_CODES);
+
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
@@ -682,17 +671,19 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("onramp"),
-      cryptoToken: rampCurrencyCodeSchema,
-      destinationWallet: z.string().min(1),
+      assetRail: onrampCryptoRailSchema,
+      destinationCustodyWalletId: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
     z.object({
       provider: z.literal("bvnk"),
       direction: z.literal("offramp"),
-      cryptoToken: rampCurrencyCodeSchema,
+      assetRail: offrampCryptoRailSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
     }),
   ]),
   z.discriminatedUnion("direction", [
@@ -704,7 +695,7 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("lightspark"),
       direction: z.literal("offramp"),
-      cryptoToken: rampCurrencyCodeSchema,
+      assetRail: offrampCryptoRailSchema,
       fiatCurrency: rampFiatCurrencySchema,
       collectedData: collectedDataSchema,
       providerAccountId: z.string().min(1).optional(),
@@ -715,14 +706,14 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     z.object({
       provider: z.literal("mural"),
       direction: z.literal("onramp"),
-      cryptoToken: rampCurrencyCodeSchema,
-      destinationWallet: z.string().min(1),
+      assetRail: onrampCryptoRailSchema,
+      destinationCustodyWalletId: z.string().min(1),
       fiatCurrency: rampFiatCurrencySchema,
     }),
     z.object({
       provider: z.literal("mural"),
       direction: z.literal("offramp"),
-      cryptoToken: rampCurrencyCodeSchema,
+      assetRail: offrampCryptoRailSchema,
       fiatCurrency: rampFiatCurrencySchema,
     }),
   ]),
@@ -731,21 +722,21 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
 
 const offrampQuoteBaseShape = {
   counterpartyId: z.string().min(1),
-  sourceWallet: z.string().min(1),
-  cryptoToken: rampCurrencyCodeSchema,
+  sourceCustodyWalletId: z.string().min(1),
+  assetRail: offrampCryptoRailSchema,
   cryptoAmount: paymentAmountSchema,
   rampsMemo: rampsMemoSchema.optional(),
 };
 
 export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
-  z.object({
+  z.strictObject({
     provider: z.literal("lightspark"),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema,
-    destinationCountry: z.enum(COUNTRY_CODES),
+    destinationCountry: rampDestinationCountrySchema,
     providerAccountId: z.string().min(1).optional(),
   }),
-  z.object({
+  z.strictObject({
     provider: z.enum(["moonpay", "bvnk", "moneygram", "mural", "coinbase", "stripe"]),
     ...offrampQuoteBaseShape,
     fiatCurrency: rampFiatCurrencySchema.optional(),
@@ -803,8 +794,8 @@ const simulateBvnkSandboxPayinPayloadSchema = z.object({
   counterpartyId: z.string().min(1),
   amount: z.number().positive(),
   fiatCurrency: rampFiatCurrencySchema,
-  cryptoToken: z.string().min(1),
-  destinationWallet: z.string().min(1),
+  assetRail: onrampCryptoRailSchema,
+  destinationCustodyWalletId: z.string().min(1),
 });
 
 const simulateMuralSandboxPayinPayloadSchema = z.object({

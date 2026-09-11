@@ -1,4 +1,9 @@
 import { Pool, type QueryResult, types } from "pg";
+import {
+  currentDatabaseIdentity,
+  type DatabaseIdentity,
+  databaseIdentityConfigStatement,
+} from "@/db/identity";
 import { getLogger } from "@/runtime/logger";
 
 types.setTypeParser(20, (value) => Number.parseInt(value, 10));
@@ -44,8 +49,19 @@ export interface DatabaseClient extends DatabaseExecutor {
     lockKey: string,
     callback: (tx: DatabaseExecutor) => Promise<T>,
     afterCommit: (result: T) => Promise<void>,
-    afterRollback?: (result: T) => Promise<void>
+    afterRollback?: (result: T) => Promise<void>,
+    options?: { wait?: boolean }
   ): Promise<T>;
+}
+
+export class SessionLockUnavailableError extends Error {
+  readonly lockKey: string;
+
+  constructor(lockKey: string) {
+    super(`session lock is already held: ${lockKey}`);
+    this.name = "SessionLockUnavailableError";
+    this.lockKey = lockKey;
+  }
 }
 
 interface QueryArgs {
@@ -263,8 +279,63 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
     lockKey: string,
     callback: (tx: DatabaseExecutor) => Promise<T>,
     afterCommit: (result: T) => Promise<void>,
-    afterRollback?: (result: T) => Promise<void>
+    afterRollback?: (result: T) => Promise<void>,
+    options?: { wait?: boolean }
   ): Promise<T>;
+}
+
+/**
+ * Open a transaction stamped with the ambient database identity
+ * (src/db/identity.ts) in a single round trip. The GUCs are `SET LOCAL`, so
+ * COMMIT/ROLLBACK clears them and pooled connection reuse can never leak an
+ * identity across callers. A missing or `none` identity opens a bare
+ * transaction — row-level security then denies by default.
+ */
+async function beginWithDatabaseIdentity(
+  client: Queryable,
+  identity: DatabaseIdentity | undefined
+): Promise<void> {
+  if (!identity || identity.kind === "none") {
+    await client.query({ text: "BEGIN" });
+    return;
+  }
+  await client.query({ text: `BEGIN; ${databaseIdentityConfigStatement(identity).text}` });
+}
+
+/**
+ * Queryable for statements issued outside an explicit transaction. When an
+ * identity is present, the statement runs in its own short transaction so the
+ * transaction-local identity GUCs cover it; without one, the statement goes
+ * straight to the pool and RLS fails closed.
+ */
+class IdentityStampingPoolQueryable implements Queryable {
+  constructor(private readonly pool: Pool) {}
+
+  async query(args: QueryArgs): Promise<QueryResult> {
+    const identity = currentDatabaseIdentity();
+    if (!identity || identity.kind === "none") {
+      return this.pool.query(args);
+    }
+
+    const client = await this.pool.connect();
+    let releaseError: Error | undefined;
+    try {
+      await beginWithDatabaseIdentity(client, identity);
+      const result = await client.query(args);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        releaseError =
+          rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
+      throw error;
+    } finally {
+      client.release(releaseError);
+    }
+  }
 }
 
 class PooledPostgresClient extends BasePostgresClient {
@@ -275,7 +346,7 @@ class PooledPostgresClient extends BasePostgresClient {
       connectionString,
       ...NODE_POOL_OPTIONS,
     });
-    super(pool);
+    super(new IdentityStampingPoolQueryable(pool));
     this.pool = pool;
 
     // Idle pool errors are EventEmitter errors; without a listener Node treats
@@ -290,7 +361,7 @@ class PooledPostgresClient extends BasePostgresClient {
     let releaseError: Error | undefined;
 
     try {
-      await client.query("BEGIN");
+      await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
       const executor = new PostgresExecutor(client);
       const result = await callback(executor);
       await client.query("COMMIT");
@@ -312,7 +383,8 @@ class PooledPostgresClient extends BasePostgresClient {
     lockKey: string,
     callback: (tx: DatabaseExecutor) => Promise<T>,
     afterCommit: (result: T) => Promise<void>,
-    afterRollback?: (result: T) => Promise<void>
+    afterRollback?: (result: T) => Promise<void>,
+    options?: { wait?: boolean }
   ): Promise<T> {
     const client = await this.pool.connect();
     let releaseError: Error | undefined;
@@ -320,17 +392,32 @@ class PooledPostgresClient extends BasePostgresClient {
     let lockHeld = false;
     let callbackCompleted = false;
     let callbackResult: T | undefined;
+    const wait = options?.wait ?? true;
 
     try {
-      await client.query({
-        // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
-        text: "SELECT pg_advisory_lock(hashtext($1))",
-        values: [lockKey],
-      });
+      if (wait) {
+        await client.query({
+          // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+          text: "SELECT pg_advisory_lock(hashtext($1))",
+          values: [lockKey],
+        });
+      } else {
+        const lockResult = await client.query({
+          // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+          text: "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired",
+          values: [lockKey],
+        });
+        if (lockResult.rows[0]?.acquired !== true) {
+          throw new SessionLockUnavailableError(lockKey);
+        }
+      }
       lockHeld = true;
 
-      await client.query("BEGIN");
+      // Marked open before the combined BEGIN + identity stamp: if the stamp
+      // half fails, the connection may hold an aborted transaction, and a
+      // defensive ROLLBACK on an idle connection is only a warning.
       transactionOpen = true;
+      await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
       const executor = new PostgresExecutor(client);
       const result = await callback(executor);
       callbackResult = result;

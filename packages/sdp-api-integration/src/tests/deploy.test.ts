@@ -12,12 +12,14 @@ import {
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -27,6 +29,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("deploys a basic Token-2022 mint", { timeout: 60000 }, async () => {
@@ -38,6 +41,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       body: JSON.stringify({
         name: "Devnet Test Token",
         symbol: "DEVTEST",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         isMintable: true,
         isFreezable: true,
@@ -51,6 +55,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     expect(deployRes.status).toBe(200);
@@ -75,13 +81,16 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       body: JSON.stringify({
         name: "Transfer Fee Token",
         symbol: "TFEE",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
-        extensions: {
-          transferFee: {
-            basisPoints: 100,
-            maxFee: "1000000000",
-            transferFeeConfigAuthority: custodyAddress,
-            withdrawWithheldAuthority: custodyAddress,
+        overrides: {
+          extensions: {
+            transferFee: {
+              basisPoints: 100,
+              maxFee: "1000000000",
+              transferFeeConfigAuthority: custodyAddress,
+              withdrawWithheldAuthority: custodyAddress,
+            },
           },
         },
       }),
@@ -93,6 +102,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     expect(deployRes.status).toBe(200);
@@ -111,6 +122,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       body: JSON.stringify({
         name: "Prepare Deploy Token",
         symbol: "PREP",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 9,
       }),
     });
@@ -145,6 +157,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       body: JSON.stringify({
         name: "Already Deployed",
         symbol: "DONE",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 9,
       }),
     });
@@ -154,10 +167,14 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     const secondDeployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     expect(secondDeployRes.status).toBe(400);

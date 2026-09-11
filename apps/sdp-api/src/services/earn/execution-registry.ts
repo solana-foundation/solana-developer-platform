@@ -6,6 +6,10 @@ import type {
   EarnVaultProvider,
   EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
+import {
+  assertJupiterLendNotPortfolioProvider,
+  JupiterLendVaultDirectClient,
+} from "@sdp/jupiter-lend";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
@@ -194,6 +198,11 @@ export function resolveEarnExecutionClient(
     const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
     assertNotPortfolioProvider(client);
     return instrumentVendorPort("kamino", client);
+  }
+  if (provider === "jupiter_lend") {
+    const client = new JupiterLendVaultDirectClient(provenRpcUrl, runOperation);
+    assertJupiterLendNotPortfolioProvider(client);
+    return instrumentVendorPort("jupiter_lend", client);
   }
   if (provider === "veda") {
     const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);

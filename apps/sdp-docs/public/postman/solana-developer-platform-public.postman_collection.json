@@ -428,7 +428,7 @@
           }
         },
         {
-          "name": "Check signer via memo transaction",
+          "name": "Check signer via simulated memo transaction",
           "request": {
             "method": "POST",
             "header": [
@@ -439,7 +439,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/signer-check",
-            "description": "Submits a server-authored memo transaction using the wallet selected by an authenticated API key or dashboard session. The wallet is the only readonly signer, Kora pays the fee, and the request cannot supply memo text.",
+            "description": "Signs a server-authored memo message with the wallet selected by an authenticated API key or dashboard session, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"walletId\": \"privy_wallet_123\"\n}",
@@ -574,15 +574,6 @@
                 }
               }
             }
-          }
-        },
-        {
-          "name": "Archive project",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}",
-            "description": "Archives a project and prevents future writes."
           }
         },
         {
@@ -731,7 +722,7 @@
             "description": "Creates a token record that can later be deployed to Solana.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
+              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -755,7 +746,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/transactions",
-            "description": "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when walletId is omitted. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types."
+            "description": "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when no wallet selector is supplied. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined."
           }
         },
         {
@@ -764,7 +755,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}",
-            "description": "Gets token details."
+            "description": "Gets token details with optional read-only authority lookups for wallet selection."
           }
         },
         {
@@ -782,7 +773,7 @@
             "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -831,9 +822,24 @@
           "name": "Deploy token",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy",
-            "description": "Deploys the token to Solana using custody signing."
+            "description": "Deploys the token to Solana using custody signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"feePayment\": \"sponsored\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           }
         },
         {
@@ -893,7 +899,7 @@
             "description": "Builds an unsigned mint transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -917,7 +923,7 @@
             "description": "Mints tokens using custody signing and submission.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -941,7 +947,7 @@
             "description": "Builds an unsigned burn transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -965,7 +971,7 @@
             "description": "Burns tokens using custody signing and submission.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -989,7 +995,7 @@
             "description": "Builds an unsigned force transfer transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1013,7 +1019,7 @@
             "description": "Forces a transfer using permanent delegate authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1037,7 +1043,7 @@
             "description": "Builds an unsigned force burn transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1061,7 +1067,7 @@
             "description": "Burns tokens using permanent delegate authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1085,7 +1091,7 @@
             "description": "Builds an unsigned authority update transaction for client-side signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1109,7 +1115,7 @@
             "description": "Updates token authorities using custody signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1133,7 +1139,7 @@
             "description": "Pauses transfers for a token using the pause authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1157,7 +1163,7 @@
             "description": "Resumes transfers for a token using the pause authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1181,7 +1187,7 @@
             "description": "Freezes a token account to prevent transfers.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"reason\": \"Compliance hold\",\n  \"signingWalletId\": \"privy_abcd1234\"\n}",
+              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"reason\": \"Compliance hold\",\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1205,7 +1211,7 @@
             "description": "Unfreezes a token account so it can be used again.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_abcd1234\"\n}",
+              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1247,7 +1253,7 @@
             "description": "Adds an allowlist entry for a token.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1972,7 +1978,7 @@
             "description": "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationWallet\": \"privy_wallet_123\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2086,7 +2092,7 @@
             "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
+              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2152,12 +2158,54 @@
       "name": "Earn",
       "item": [
         {
+          "name": "List yield strategies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/strategies",
+            "description": "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL descending). By default the list answers the environment's own cluster — the shelf the caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf (those rows stay `fundable: false`). Catalogued is not the same as fundable: branch on `fundable` and `status` rather than assuming a listed strategy takes deposits."
+          }
+        },
+        {
+          "name": "Get one yield strategy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/earn/strategies/{{strategyId}}",
+            "description": "Returns one catalogue row by id, whatever its cluster; `fundable` still answers whether the instrument exists on the caller's own cluster."
+          }
+        },
+        {
+          "name": "Preview a direct vault deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/vault-deposit-previews",
+            "description": "Quotes how many shares a direct vault deposit would mint from the provider's live accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no idempotency key, and 501 when the provider cannot quote deposits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"amount\": \"25\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Get external-wallet position totals",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/earn/external-wallet/positions/summary",
-            "description": "Returns a complete live aggregate across the active partner project's end-user wallets, grouped by strategy and token. The service pages every stored claim before hydration. A total is omitted when any contributing live value is unavailable, never reported as zero or partial."
+            "description": "Returns a complete live aggregate across the active partner project's end-user wallets, grouped by strategy and token. The service pages every stored claim before hydration. Pass `includePositions=true` when a UI needs the already hydrated per-customer positions; this avoids a separate paid chain read for every owner. A total is omitted when any contributing live value is unavailable, never reported as zero or partial."
           }
         },
         {
@@ -2165,8 +2213,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/external-wallet/positions/{{ownerAddress}}",
-            "description": "Returns one strict keyset page of live positions for an end-user wallet in the active partner project. A wallet outside that scope answers 404. Live fields are absent when provider hydration is unavailable, never replaced with zero."
+            "url": "{{baseUrl}}/v1/earn/external-wallet/positions",
+            "description": "Returns one strict keyset page of live positions for an end-user wallet in the active partner project. `ownerAddress` is required — the same query addressing every per-owner read on this surface uses. A wallet outside the project's scope answers 404. Live fields are absent when provider hydration is unavailable, never replaced with zero."
           }
         },
         {
@@ -2184,7 +2232,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/earn/external-wallet/movements/{{movementId}}",
-            "description": "Polls one recorded movement to a terminal state — the read that settles a submit whose outcome the caller never learned. The reconciliation sweep drives every movement terminal within about ninety seconds; keep polling until `finalized` or `failed`."
+            "description": "Polls one recorded movement to a terminal state — the read that settles a submit whose outcome the caller never learned. Each poll observes the movement's exact signature on chain and advances the recorded status immediately, so state lands as fast as the network decides it; if the chain read is unavailable the last durable status is served and a background reconciler (about every minute) remains the recovery path. Keep polling until `finalized` or `failed` — those are the only terminal states."
           }
         },
         {
@@ -2192,8 +2240,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/external-wallet/earnings/{{ownerAddress}}",
-            "description": "Returns live balance and total earned per deposit token: `earned` is live value minus finalized SDP deposits, stated only when exact. When it cannot be stated — live value unavailable, movements still settling, or a finalized withdrawal on a held position — the figure is absent with a named reason, never zero. Figures cover currently held positions: a fully exited position's history drops out (it stays on the movements list). Live value reads the owner's whole vault balance, so shares acquired outside SDP inflate it."
+            "url": "{{baseUrl}}/v1/earn/external-wallet/earnings",
+            "description": "Returns live balance and total earned per deposit token for the required `ownerAddress`: `earned` is live value minus finalized SDP deposits, stated only when exact. When it cannot be stated — live value unavailable, movements still settling, or a finalized withdrawal on a held position — the figure is absent with a named reason, never zero. Figures cover currently held positions: a fully exited position's history drops out (it stays on the movements list). Live value reads the owner's whole vault balance, so shares acquired outside SDP inflate it."
           }
         },
         {
@@ -2208,10 +2256,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposit-transactions",
-            "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The owner is the fee payer and only required signer; the transaction expires with its blockhash, and nothing moves until the signed bytes are submitted.",
+            "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. By default the owner is the fee payer and only required signer; pass `feePayer` to pay the network fee (and any first-deposit account rent) from your own wallet instead — the transaction then also requires that wallet's signature, added server-side before submit. The transaction expires with its blockhash, and nothing moves until the signed bytes are submitted.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2232,10 +2280,34 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposits",
-            "description": "Verifies the signed bytes are exactly the built transaction with the owner's genuine signature, records the movement, then broadcasts. Requires the Idempotency-Key header: a retry with the same key resolves the original movement (`replayed: true`), and each built transaction is consumable exactly once.",
+            "description": "Verifies the signed bytes are exactly the built transaction and that every required signature is genuine — the owner's, and the fee payer's when the build named one — records the movement, then broadcasts. Requires the Idempotency-Key header: a retry with the same key resolves the original movement (`replayed: true`), and each built transaction is consumable exactly once.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_example\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOAAQABAvSV602SJ67iQCUGLwHzVtPnlMbZqL79wnV/nb+Mi9SJBUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAtzZHAtZXhhbXBsZQA=\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Preview an external-wallet exit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-previews",
+            "description": "Quotes what redeeming the shares would pay right now, from the vault's live accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency key, and it takes the exit's own gates: a delisted strategy or a provider disabled for new deposits stays quotable. POST because the parameters are a body; 501 when the provider cannot quote exits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2259,7 +2331,7 @@
             "description": "Builds one unsigned exit transaction for an external-wallet position. Takes no surfacing, entitlement, availability, or catalogue gate (ADR 0002 exit safety), so the exit works while the provider is disabled for new deposits.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
+              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\",\n  \"minAmountOut\": \"24.9\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

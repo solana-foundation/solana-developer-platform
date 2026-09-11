@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -80,21 +81,12 @@ describe("rpc-relay.service", () => {
       .bind(TEST_USER_ID)
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
-       VALUES (?, ?, 'RPC Service Project', 'rpc-service-project', 'sandbox', NULL, 'active', ?)
-       ON CONFLICT(id) DO UPDATE SET
-         organization_id = excluded.organization_id,
-         name = excluded.name,
-         slug = excluded.slug,
-         environment = excluded.environment,
-         settings = excluded.settings,
-         status = excluded.status,
-         created_by = excluded.created_by`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG_ID, TEST_USER_ID)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG_ID,
+      createdBy: TEST_USER_ID,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     rpcEnv.SOLANA_RPC_URL = undefined;
     rpcEnv.SOLANA_RPC_DEFAULT_PROVIDER = undefined;
@@ -224,20 +216,21 @@ describe("rpc-relay.service", () => {
     expect(second.selectionMode).toBe("round_robin_default");
   });
 
-  it("rejects invalid deployment mode values", async () => {
+  it("ignores SDP_DEPLOYMENT_MODE and resolves managed providers regardless of its value", async () => {
     rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
     rpcEnv.SDP_DEPLOYMENT_MODE = "selfhosted";
 
-    await expect(
-      resolveRpcTarget({
-        env: appEnv,
-        kv,
-        db,
-        organizationId: TEST_ORG_ID,
-        authProjectId: null,
-        requestedProjectId: null,
-      })
-    ).rejects.toThrow('Invalid SDP_DEPLOYMENT_MODE: "selfhosted"');
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      kv,
+      db,
+      organizationId: TEST_ORG_ID,
+      authProjectId: null,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("triton");
+    expect(target.selectionMode).toBe("round_robin_default");
   });
 
   it("resolves validationcloud, substitutes the path-segment key, and redacts it in the label", async () => {

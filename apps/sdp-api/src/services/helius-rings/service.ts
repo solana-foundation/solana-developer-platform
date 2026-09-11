@@ -7,36 +7,50 @@ import type {
   PrivateOperation,
   PrivateOperationInput,
   PrivateWallet,
+  ProjectRing,
   ReadIdentityResult,
   RuntimeHealth,
+  SyncPhotonInput,
   SyncPhotonResult,
   TransitionGuard,
   VerifyIndexedResult,
 } from "@sdp/helius-rings";
 import {
+  DEFAULT_RING_NAME,
   HeliusRingsError,
   type HeliusRingsErrorCode,
+  isRingsIdentityMismatch,
   nextState,
+  OP_TYPES,
+  RING_NAME_PATTERN,
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
+import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createPolicyRepository,
+  createPostgresHeliusRingsOperationRepository,
+  createPostgresHeliusRingsWalletRepository,
   type HeliusRingsAssetRepository,
   type HeliusRingsEventRepository,
   type HeliusRingsHealthRepository,
   type HeliusRingsOperationRepository,
   type HeliusRingsOperationRow,
+  type HeliusRingsProjectRingRepository,
+  type HeliusRingsProjectRingRow,
   type HeliusRingsWalletRepository,
+  type HeliusRingsWalletRow,
   mapHeliusRingsEventRow,
   mapHeliusRingsHealthRows,
+  mapHeliusRingsProjectRingRow,
   mapHeliusRingsWalletRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
@@ -45,9 +59,11 @@ import { getLogger } from "@/runtime/logger";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
+import { resolveDefaultRingsConnectionId, resolveRingsConnection } from "./connection-resolver";
 import {
   type RingsOuterTransactionPolicyInput,
-  resolveRingsGateway,
+  resolvePersistedRingsGateway,
+  UnconfiguredRingsGateway,
   validateRingsOuterTransaction,
 } from "./gateway";
 import { buildRingsWalletOperationInput } from "./policy-envelope";
@@ -77,11 +93,15 @@ export interface HeliusRingsActor {
 
 export interface HeliusRingsServiceDependencies {
   gateway?: RingsGatewayPort;
+  resolveGateway?: (connectionId?: string) => Promise<RingsGatewayPort>;
+  resolveConnectionId?: () => Promise<string>;
+  resolveRpcUrl?: (connectionId?: string) => Promise<string | undefined>;
   wallets?: HeliusRingsWalletRepository;
   operations?: HeliusRingsOperationRepository;
   events?: HeliusRingsEventRepository;
   health?: HeliusRingsHealthRepository;
   assets?: HeliusRingsAssetRepository;
+  projectRings?: HeliusRingsProjectRingRepository;
   enforcePolicy?: typeof enforceWalletOperationPolicy;
   /** Test seam; production always uses the SDK-backed local wrapper. */
   validateOuterTransaction?: typeof validateRingsOuterTransaction;
@@ -114,15 +134,25 @@ export interface WalletIdentityResult extends ReadIdentityResult {
 }
 
 /** Op types that consume notes, and so can duplicate a payment. */
-const SPEND_OP_TYPES = new Set<string>(["transfer_registered", "withdraw", "merge"]);
+const SPEND_OP_TYPES = new Set<string>([
+  "transfer_registered",
+  "withdraw",
+  "merge",
+  "ring_exit",
+  "ring_entry",
+]);
+
+/** The two ring moves: value crossing between a custom ring and the default pool. */
+const RING_MOVE_OP_TYPES = new Set<string>(["ring_exit", "ring_entry"]);
+
+/**
+ * Why a paused wallet is not read. Says what to do about it, because the state
+ * is terminal until an operator acts: nothing about a mismatch resolves itself.
+ */
+const QUARANTINED_WALLET_MESSAGE =
+  "this rings wallet is paused because its material no longer derives the identity it was provisioned with; restore its original owner, organization, and project to derive that identity again, or re-key the wallet to abandon what it holds and start clean";
 
 function assertOperationEnabled(opType: PrivateOperationInput["opType"]): void {
-  if (opType === "merge") {
-    throw new HeliusRingsError(
-      "invalid_input",
-      "merge is temporarily disabled until fresh wallet sync can replay merged state safely"
-    );
-  }
   if (opType === "transfer_anonymous") {
     throw new HeliusRingsError("invalid_input", "anonymous transfer is not enabled in this build");
   }
@@ -171,12 +201,15 @@ export function createHeliusRingsService(
 }
 
 export class HeliusRingsService {
-  private readonly gateway: RingsGatewayPort;
+  private readonly resolveGateway: (connectionId?: string) => Promise<RingsGatewayPort>;
+  private readonly resolveConnectionId: () => Promise<string>;
+  private readonly resolveRpcUrl: (connectionId?: string) => Promise<string | undefined>;
   private readonly wallets: HeliusRingsWalletRepository;
   private readonly operations: HeliusRingsOperationRepository;
   private readonly events: HeliusRingsEventRepository;
   private readonly health: HeliusRingsHealthRepository;
   private readonly assets: HeliusRingsAssetRepository;
+  private readonly projectRings: HeliusRingsProjectRingRepository;
   private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly validateOuterTransaction: typeof validateRingsOuterTransaction;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
@@ -196,7 +229,51 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
-    this.gateway = dependencies.gateway ?? resolveRingsGateway(env, tenant);
+    this.projectRings = dependencies.projectRings ?? createHeliusRingsProjectRingRepository(env);
+    // The bring-up hook persists a ring's lookup table the moment it lands, so
+    // a crash before markActive resumes by adoption instead of renting twice.
+    // The repository must exist before the gateway that calls the hook.
+    const gatewayDependencies = {
+      recordRingLookupTable: async (ringProgramId: string, lookupTableAddress: string) => {
+        await this.projectRings.recordLookupTable({
+          organizationId: tenant.organizationId,
+          projectId: tenant.projectId,
+          ringProgramId,
+          lookupTableAddress,
+        });
+      },
+    };
+    this.resolveGateway = dependencies.resolveGateway
+      ? dependencies.resolveGateway
+      : dependencies.gateway
+        ? async () => dependencies.gateway as RingsGatewayPort
+        : async (connectionId) => {
+            if (connectionId !== undefined) {
+              return resolvePersistedRingsGateway(env, tenant, connectionId, gatewayDependencies);
+            }
+            try {
+              return await resolvePersistedRingsGateway(
+                env,
+                tenant,
+                undefined,
+                gatewayDependencies
+              );
+            } catch (error) {
+              if (error instanceof HeliusRingsError && error.code === "config_error") {
+                return new UnconfiguredRingsGateway();
+              }
+              throw error;
+            }
+          };
+    this.resolveConnectionId =
+      dependencies.resolveConnectionId ??
+      (async () => resolveDefaultRingsConnectionId({ env, ...tenant }));
+    this.resolveRpcUrl =
+      dependencies.resolveRpcUrl ??
+      (dependencies.gateway
+        ? async () => undefined
+        : async (connectionId) =>
+            (await resolveRingsConnection({ env, ...tenant, connectionId })).solanaRpcUrl);
     this.wallets = dependencies.wallets ?? createHeliusRingsWalletRepository(env);
     this.operations = dependencies.operations ?? createHeliusRingsOperationRepository(env);
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
@@ -249,10 +326,27 @@ export class HeliusRingsService {
       return mapHeliusRingsWalletRow(wallet);
     }
 
-    const provision = await this.gateway.provisionIdentity({
+    const provision = await (await this.resolveGateway()).provisionIdentity({
       walletId: wallet.id,
       sdpAddress: input.sdpAddress,
     });
+
+    if (provision.registrationSignatures.length === 0) {
+      // Nothing was registered, so the record already existed and matched. Either
+      // a retry after a crash past registration, or this custody wallet already
+      // backs a Rings identity somewhere else and this wallet just adopted it —
+      // the shielded keys derive from the owner key alone, so two wallets over
+      // one custody wallet converge by construction. Benign either way, and
+      // invisible without this line.
+      getLogger().warn(
+        {
+          walletId: wallet.id,
+          owner: input.sdpAddress,
+          shieldedAddress: provision.identity.shieldedAddress,
+        },
+        "rings wallet adopted an already-published shielded identity"
+      );
+    }
 
     const provisioned = await this.wallets.markProvisioned({
       ...this.tenant,
@@ -266,6 +360,255 @@ export class HeliusRingsService {
     return mapHeliusRingsWalletRow(provisioned ?? (await this.requireWallet(wallet.id)));
   }
 
+  /**
+   * Rotates a wallet's on-chain identity to the one its material derives now,
+   * trading whatever the published keys hold for a wallet that works again.
+   *
+   * Eligibility is the chain's answer, not this row's status: the record has to
+   * read `foreign`, meaning it exists and is not what this deployment derives.
+   * That covers both shapes the break takes — a wallet paused mid-life when sync
+   * stopped matching, and a wallet that never provisioned because the registry
+   * already held a record for its owner. A healthy wallet reads `ours` and is
+   * refused, which does not depend on a stored flag being up to date; a wallet
+   * still labelled `ready` can already be broken, because nothing re-checks the
+   * identity until the first sync quarantines it.
+   *
+   * The row is claimed before the transaction is sent. Ordering matters more
+   * than the guard itself here: once a rotation lands, no database check can
+   * undo it, so anything this service would refuse to adopt has to be refused
+   * while refusing still costs nothing. A rotation that lands but fails to
+   * persist is finished by `reconcileRotatedIdentity` on the next call rather
+   * than stranding the wallet.
+   *
+   * The confirmation is checked here rather than in the browser, because a
+   * dialog is a courtesy to the operator and not a control. The read position
+   * goes with the old identity: a cursor measures how far *that* identity was
+   * read, and keeping it would start the new one part-way through history.
+   *
+   * What is lost is lost: notes encrypted to the old keys stay on chain with
+   * nothing left that can open them.
+   */
+  async rekeyWalletIdentity(
+    walletId: string,
+    input: { confirmation: string; custodyOwner: string | null },
+    actor: HeliusRingsActor
+  ): Promise<PrivateWallet> {
+    const wallet = await this.requireWallet(walletId);
+    // A wallet that never provisioned has no owner of its own yet, so custody
+    // names the key the registry record hangs off.
+    const owner = wallet.owner_address ?? input.custodyOwner;
+    if (!owner) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        "custody controls no active wallet for this rings wallet's owner"
+      );
+    }
+    if (input.confirmation.trim() !== wallet.name.trim()) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        `re-keying discards whatever this wallet's published keys hold; confirm by sending its name, "${wallet.name}"`
+      );
+    }
+
+    const published = await (await this.resolveGateway()).readIdentity({
+      walletId: wallet.id,
+      owner,
+    });
+
+    if (published.status === "unregistered") {
+      throw new HeliusRingsError(
+        "conflict",
+        "no identity is published for this owner; provision the wallet instead of re-keying it"
+      );
+    }
+
+    if (published.status === "ours") {
+      return this.reconcileRotatedIdentity(wallet, published.derivedShieldedAddress, owner, actor);
+    }
+
+    // Claim the row before the chain is touched. Rotation cannot be taken back,
+    // so a status this service refuses to adopt has to be refused *first*: after
+    // the transaction lands, no database guard can undo it.
+    // Serialized per wallet, because exclusion has to outlive the claim: a
+    // rival claims *after* this one commits, so no guard on the row alone can
+    // stop it from sending a second irreversible transaction. The advisory
+    // lock is held across both the claim and the rotation, which is exactly
+    // what this helper exists for — the row is committed before the chain is
+    // touched, and the lock releases with the session, so a crash mid-rotation
+    // leaves no claim stuck behind.
+    //
+    // Waiters must not occupy pool connections while the winner rotates:
+    // `pg_advisory_lock` would hold a slot for every overlapping request, and
+    // the ten-connection pool then cannot check out the extra connection the
+    // winner needs to claim or adopt. A non-blocking lock refuses rivals
+    // immediately, the same conflict the row guard already uses.
+    const db = getDb(this.env);
+    const withRekeyLock = db.lockedTransactionWithPostCommit?.bind(db);
+    if (!withRekeyLock) {
+      throw new HeliusRingsError(
+        "config_error",
+        "this deployment cannot serialize a rings re-key, and re-keying unserialized risks a duplicate rotation"
+      );
+    }
+
+    let rekeyed: PrivateWallet | undefined;
+    try {
+      await withRekeyLock(
+        `rings-rekey:${wallet.id}`,
+        async (tx) => {
+          const txDb = asTransactionalClient(tx);
+          // An in-flight or signed-failed operation still belongs to the
+          // abandoned identity. If it later completes, advanceIndexedSlot would
+          // write that slot onto the new keys and skip their history. Refuse
+          // until it is reconciled or voided.
+          const blocking = await createPostgresHeliusRingsOperationRepository(
+            txDb
+          ).findBlockingOperation({
+            ...this.tenant,
+            walletId: wallet.id,
+            opTypes: [...OP_TYPES],
+          });
+          if (blocking) {
+            throw new HeliusRingsError(
+              "conflict",
+              `operation ${blocking.id} has not settled; reconcile or void it before re-keying this wallet`
+            );
+          }
+          // Guarded by the row as it was before the registry read, so a rival
+          // that slipped in while this one was reading the chain loses here
+          // rather than rotating a wallet whose state it never saw. The claim
+          // runs on the lock's executor so it does not check out a second
+          // pool connection while this session still holds the lock.
+          const claimed = await createPostgresHeliusRingsWalletRepository(txDb).claimWalletForRekey(
+            {
+              ...this.tenant,
+              id: wallet.id,
+              expectedUpdatedAt: wallet.updated_at,
+            }
+          );
+          if (!claimed) {
+            throw new HeliusRingsError(
+              "conflict",
+              "this rings wallet is no longer in a state that can be re-keyed; read it again and retry"
+            );
+          }
+          return claimed;
+        },
+        async () => {
+          const rotated = await (await this.resolveGateway()).rekeyIdentity({
+            walletId: wallet.id,
+            owner,
+          });
+
+          const adopted = await this.wallets.rekeyWallet({
+            ...this.tenant,
+            id: wallet.id,
+            shieldedAddress: rotated.identity.shieldedAddress,
+            ownerAddress: rotated.identity.owner,
+            materialTag: rotated.materialTag,
+          });
+
+          getLogger().warn(
+            {
+              walletId: wallet.id,
+              owner,
+              abandonedShieldedAddress: published.publishedShieldedAddress,
+              shieldedAddress: rotated.identity.shieldedAddress,
+              signatures: rotated.registrationSignatures,
+              apiKeyId: actor.apiKeyId,
+              actor: actor.actor,
+              adopted: Boolean(adopted),
+            },
+            "rings wallet re-keyed: whatever its previous keys held is unrecoverable"
+          );
+
+          if (!adopted) {
+            // The chain moved and the row did not. Reporting the stored identity
+            // as a success would hide that divergence behind a 200; say it
+            // instead, and point at the retry that reconciles it.
+            throw new HeliusRingsError(
+              "conflict",
+              "the re-key landed on chain but this wallet's stored identity was not updated; retry to adopt the published keys"
+            );
+          }
+
+          rekeyed = mapHeliusRingsWalletRow(adopted);
+        },
+        undefined,
+        { wait: false }
+      );
+    } catch (error) {
+      if (error instanceof SessionLockUnavailableError) {
+        throw new HeliusRingsError(
+          "conflict",
+          "this rings wallet is no longer in a state that can be re-keyed; read it again and retry"
+        );
+      }
+      throw error;
+    }
+
+    if (!rekeyed) {
+      throw new AppError("INTERNAL_ERROR", "rings re-key completed without adopting an identity");
+    }
+    return rekeyed;
+  }
+
+  /**
+   * Adopts an identity the chain already publishes, without rotating anything.
+   *
+   * This is the tail of a rotation that landed but whose persistence did not —
+   * a lost confirmation, a failed re-read, a dropped write. The registry is
+   * already correct, so re-sending would be a second irreversible write for no
+   * gain; the only thing missing is the row catching up. Without this the wallet
+   * is stranded: `readIdentity` answers `ours`, so the re-key path would refuse
+   * it, and provisioning returns early for anything but a pending wallet.
+   */
+  private async reconcileRotatedIdentity(
+    wallet: HeliusRingsWalletRow,
+    derivedShieldedAddress: string,
+    owner: string,
+    actor: HeliusRingsActor
+  ): Promise<PrivateWallet> {
+    const settled =
+      wallet.status === "ready" &&
+      wallet.owner_address === owner &&
+      wallet.shielded_address === derivedShieldedAddress;
+    if (settled) {
+      throw new HeliusRingsError(
+        "conflict",
+        "this rings wallet already derives its published identity; there is nothing to re-key"
+      );
+    }
+
+    const adopted = await this.wallets.rekeyWallet({
+      ...this.tenant,
+      id: wallet.id,
+      shieldedAddress: derivedShieldedAddress,
+      ownerAddress: owner,
+      materialTag: wallet.material_tag,
+    });
+    if (!adopted) {
+      throw new HeliusRingsError(
+        "conflict",
+        "this rings wallet is no longer in a state that can adopt its published identity; read it again and retry"
+      );
+    }
+
+    getLogger().warn(
+      {
+        walletId: wallet.id,
+        owner,
+        staleShieldedAddress: wallet.shielded_address,
+        shieldedAddress: derivedShieldedAddress,
+        apiKeyId: actor.apiKeyId,
+        actor: actor.actor,
+      },
+      "rings wallet adopted an already-published rotation: no new transaction was sent"
+    );
+
+    return mapHeliusRingsWalletRow(adopted);
+  }
+
   async readWalletIdentity(walletId: string, owner: string | null): Promise<WalletIdentityResult> {
     const wallet = await this.requireWallet(walletId);
     if (!owner) {
@@ -275,8 +618,176 @@ export class HeliusRingsService {
       );
     }
 
-    const identity = await this.gateway.readIdentity({ walletId: wallet.id, owner });
+    const identity = await (await this.resolveGateway()).readIdentity({
+      walletId: wallet.id,
+      owner,
+    });
     return { ...identity, recordedShieldedAddress: wallet.shielded_address };
+  }
+
+  /** The project's custom rings, oldest first. */
+  async listProjectRings(): Promise<ProjectRing[]> {
+    const rings = await this.projectRings.listByProject({ ...this.tenant });
+    return rings.map(mapHeliusRingsProjectRingRow);
+  }
+
+  /**
+   * Records one of the project's named custom rings and completes bring-up
+   * through the gateway. Idempotent: re-submitting the same name and id
+   * resumes a pending or failed bring-up, and an already-active ring returns
+   * as it stands. A different id under the same name replaces a ring that
+   * never went active (a mistyped id binds no notes) and is refused once
+   * active — re-pointing would strand every ring-bound note.
+   */
+  async createProjectRing(input: { name: string; ringProgramId: string }): Promise<ProjectRing> {
+    // The route schema enforces both too, but this service owns the invariant:
+    // a request that dodged the schema must not surface the DB CHECK as a 500.
+    if (!RING_NAME_PATTERN.test(input.name) || input.name === DEFAULT_RING_NAME) {
+      throw new HeliusRingsError(
+        "invalid_input",
+        'a ring name is a 1-32 character lowercase slug, and "default" names the default ring'
+      );
+    }
+
+    const reserved = await this.reserveOrRepointRing(input);
+    // An active row missing its table cannot exist under 0072's CHECK, but the
+    // guard is cheap: falling through lets provisioning backfill the table.
+    if (reserved.status === "active" && reserved.lookup_table_address) {
+      return mapHeliusRingsProjectRingRow(reserved);
+    }
+
+    try {
+      const provisioned = await (await this.resolveGateway()).provisionRing({
+        ringProgramId: reserved.ring_program_id,
+        lookupTableAddress: reserved.lookup_table_address,
+      });
+      const active = await this.projectRings.markActive({
+        ...this.tenant,
+        name: input.name,
+        ringProgramId: reserved.ring_program_id,
+        auditorPublicKey: provisioned.auditorPublicKeyHex,
+        lookupTableAddress: provisioned.lookupTableAddress,
+      });
+      if (!active) {
+        // A concurrent submission re-pointed the row under this bring-up (the
+        // guard matches on program id). The on-chain work is idempotent, so
+        // re-submitting the same id resumes it; a 500 would hide that.
+        throw new HeliusRingsError(
+          "conflict",
+          "the ring was re-pointed while bring-up ran; re-submit the intended program id"
+        );
+      }
+      return mapHeliusRingsProjectRingRow(active);
+    } catch (error) {
+      // Only a domain failure's fixed message is persisted; anything else could
+      // quote an endpoint, and this deployment's endpoints carry API keys.
+      const failure =
+        error instanceof HeliusRingsError
+          ? { code: error.code, message: error.message }
+          : { code: "gateway_unavailable", message: "ring bring-up failed" };
+      await this.projectRings.markFailed({
+        ...this.tenant,
+        name: input.name,
+        ringProgramId: reserved.ring_program_id,
+        failureCode: failure.code,
+        failureMessage: failure.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Reserves the (name, program id) pair, re-pointing a never-active row when
+   * the recorded id differs: a ring that never went active has no ring-bound
+   * notes, so a mistyped id is correctable. The repository refuses the
+   * re-point once the ring is active.
+   */
+  private async reserveOrRepointRing(input: {
+    name: string;
+    ringProgramId: string;
+  }): Promise<HeliusRingsProjectRingRow> {
+    const reserved = await this.projectRings.reserveRing({
+      ...this.tenant,
+      name: input.name,
+      ringProgramId: input.ringProgramId,
+    });
+    if (reserved === "program_in_use") {
+      throw programInUseError();
+    }
+    if (!reserved) {
+      throw new AppError("INTERNAL_ERROR", "ring reservation returned no row");
+    }
+    if (reserved.ring_program_id === input.ringProgramId) {
+      return reserved;
+    }
+
+    const repointed = await this.projectRings.repointRing({
+      ...this.tenant,
+      name: input.name,
+      ringProgramId: input.ringProgramId,
+    });
+    if (repointed === "program_in_use") {
+      throw programInUseError();
+    }
+    if (!repointed) {
+      throw new HeliusRingsError(
+        "conflict",
+        `ring "${input.name}" is active; re-pointing it would strand its ring-bound notes`
+      );
+    }
+    return repointed;
+  }
+
+  /**
+   * Resolves a ring name to the program id pinned on the operation; null = the
+   * default public ring. A named ring is refused until active — invalid_input
+   * when nothing under that name was ever recorded (the request names a ring
+   * the project does not have), config_error while bring-up is unfinished (an
+   * operator action makes the same request succeed).
+   */
+  private async resolveRing(ring: string | undefined): Promise<string | null> {
+    if (ring === undefined || ring === DEFAULT_RING_NAME) return null;
+    if (!RING_NAME_PATTERN.test(ring)) {
+      throw new HeliusRingsError("invalid_input", "the ring selector is not a valid ring name");
+    }
+    const row = await this.projectRings.getByName({ ...this.tenant, name: ring });
+    if (!row) {
+      // Safe to echo: the name passed the slug pattern above.
+      throw new HeliusRingsError(
+        "invalid_input",
+        `this project has no ring named "${ring}"; record it before targeting it`
+      );
+    }
+    if (row.status !== "active") {
+      throw new HeliusRingsError(
+        "config_error",
+        `ring "${ring}" is ${row.status}; complete ring bring-up before targeting it`
+      );
+    }
+    return row.ring_program_id;
+  }
+
+  /**
+   * The spend's pinned ring and its lookup table, the table re-read from the
+   * ring row at build time. This deliberately diverges from 0073's "never
+   * re-read the ring row" rule: that rule pins INTENT, and the intent stays
+   * the operation row's pinned ring_program_id. The table is transport — the
+   * ALT the compiled v0 transaction rides — and safe to read late because an
+   * active ring row is immutable: re-point is status-guarded and there is no
+   * delete path.
+   */
+  private async requireRing(
+    ringProgramId: string | null
+  ): Promise<{ programId: string; lookupTable: string } | null> {
+    if (ringProgramId === null) return null;
+    const ring = await this.projectRings.getByProgramId({ ...this.tenant, ringProgramId });
+    if (ring?.status !== "active" || !ring.lookup_table_address) {
+      throw new HeliusRingsError(
+        "config_error",
+        "the operation's ring has not completed bring-up; resume it before running ring operations"
+      );
+    }
+    return { programId: ringProgramId, lookupTable: ring.lookup_table_address };
   }
 
   /**
@@ -287,16 +798,35 @@ export class HeliusRingsService {
   async prepareOperation(
     input: PrivateOperationInput,
     context: PrepareOperationContext,
-    retryOfOperationId: string | null = null
+    retry: { ofOperationId: string; ringProgramId: string | null } | null = null,
+    ringsConnectionId?: string
   ): Promise<PrivateOperation> {
     assertOperationEnabled(input.opType);
     const wallet = await this.requireWallet(input.walletId);
+    // Refused here rather than at prove time: a paused wallet cannot decrypt
+    // its own notes, so every operation on one is already lost. Letting it
+    // reserve an intent spends an intent key and a row to reach an error that
+    // says less than this one does.
+    if (wallet.status === "paused") {
+      throw new HeliusRingsError("conflict", QUARANTINED_WALLET_MESSAGE);
+    }
     await this.assertAssetAllowed(input);
     await this.assertNoUnresolvedOperation(input);
-    const intentKey = computeIntentKey(input);
+    // A retry re-runs the pinned ring, never the selector: the approver and
+    // the failed attempt both saw a resolved id, and that is what re-runs.
+    const ringProgramId = retry ? retry.ringProgramId : await this.resolveRing(input.ring);
+    // Defense in depth behind the route schema's required custom ring: a ring
+    // move pinned to the default pool has no boundary to cross.
+    if (RING_MOVE_OP_TYPES.has(input.opType) && ringProgramId === null) {
+      throw new HeliusRingsError("invalid_input", "a ring move names a custom ring");
+    }
+    const intentKey = computeIntentKey(input, ringProgramId);
+    const selectedConnectionId =
+      ringsConnectionId === undefined ? await this.resolveConnectionId() : ringsConnectionId;
 
     const { operation, reserved } = await this.operations.reserveIntent({
       ...this.tenant,
+      ringsConnectionId: selectedConnectionId,
       walletId: wallet.id,
       opType: input.opType,
       intentKey,
@@ -306,7 +836,8 @@ export class HeliusRingsService {
       toAddr: input.to ?? null,
       zoneId: input.zoneId ?? null,
       transferMode: input.transferMode ?? null,
-      retryOfOperationId,
+      ringProgramId,
+      retryOfOperationId: retry?.ofOperationId ?? null,
       timelock: input.timelock
         ? { unlockAt: input.timelock.unlockAt, beneficiaryAddr: input.timelock.beneficiary }
         : null,
@@ -317,8 +848,8 @@ export class HeliusRingsService {
 
     await this.events.append({
       operationId: operation.id,
-      kind: retryOfOperationId ? "operation.retried" : "operation.created",
-      payload: retryOfOperationId ? { retryOfOperationId } : undefined,
+      kind: retry ? "operation.retried" : "operation.created",
+      payload: retry ? { retryOfOperationId: retry.ofOperationId } : undefined,
     });
     const preparing = await this.transition(operation.id, "draft", undefined);
     if (!preparing) return this.toPrivateOperation(await this.requireOperation(operation.id));
@@ -341,6 +872,7 @@ export class HeliusRingsService {
           operation: input,
           operationId: operation.id,
           intentKey,
+          ringProgramId,
         })
       );
     } catch (error) {
@@ -481,7 +1013,9 @@ export class HeliusRingsService {
       return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
     }
     try {
-      const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+      const indexed = await (
+        await this.resolveGateway(operation.rings_connection_id)
+      ).verifyIndexed(operation.outer_tx_signature);
       if (!indexed) return this.toPrivateOperation(operation);
       const completed = await this.transition(operation.id, "indexing", "indexed", {
         photonIndexedAt: indexed.indexedAt,
@@ -521,6 +1055,7 @@ export class HeliusRingsService {
       await this.submitOuterTransaction({
         env: this.env,
         signedTxBase64: operation.signed_transaction,
+        rpcUrl: await this.resolveRpcUrl(operation.rings_connection_id),
       });
     } catch (error) {
       await this.events.append({
@@ -576,7 +1111,9 @@ export class HeliusRingsService {
       );
     }
 
-    const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+    const indexed = await (await this.resolveGateway(operation.rings_connection_id)).verifyIndexed(
+      operation.outer_tx_signature
+    );
     if (indexed) {
       await this.settleReconciled(operation, indexed);
       throw new HeliusRingsError(
@@ -649,7 +1186,9 @@ export class HeliusRingsService {
       return this.toPrivateOperation(operation);
     }
 
-    const indexed = await this.gateway.verifyIndexed(operation.outer_tx_signature);
+    const indexed = await (await this.resolveGateway(operation.rings_connection_id)).verifyIndexed(
+      operation.outer_tx_signature
+    );
     if (!indexed) return this.toPrivateOperation(operation);
 
     return this.toPrivateOperation(await this.settleReconciled(operation, indexed));
@@ -735,7 +1274,15 @@ export class HeliusRingsService {
       clientNonce,
     };
 
-    return this.prepareOperation(input, context, failed.id);
+    return this.prepareOperation(
+      input,
+      context,
+      {
+        ofOperationId: failed.id,
+        ringProgramId: failed.ring_program_id ?? null,
+      },
+      failed.rings_connection_id
+    );
   }
 
   async getOperation(operationId: string): Promise<PrivateOperation> {
@@ -749,7 +1296,7 @@ export class HeliusRingsService {
    */
   async probeHealth(): Promise<RuntimeHealth> {
     try {
-      const health = await this.gateway.probeHealth();
+      const health = await (await this.resolveGateway()).probeHealth();
       await Promise.all(
         RUNTIME_HEALTH_COMPONENTS.map((component) =>
           this.health.recordHealth({
@@ -810,13 +1357,37 @@ export class HeliusRingsService {
       // the outer transaction is built for, and the key that must sign it.
       const owner = await this.requireOwner(current.wallet_id);
       const wallet = await this.requireWallet(current.wallet_id);
-      // Private transfers require the recipient wallet's ShieldedAddress; the
-      // SDK reloads its material transiently to lift it out.
-      const recipient =
+      // Three independent reads: the transfer recipient's ShieldedAddress (the
+      // SDK reloads its material transiently to lift it out), the spend's ring
+      // pair (a ring shield builds from the pinned id alone, keeping 0073's
+      // "never re-read the ring row" contract intact for it), and the asset
+      // registry. Settled together, then inspected in the old sequential order
+      // so which failure is recorded is unchanged.
+      const [recipientResult, ringResult, knownAssetsResult] = await Promise.allSettled([
         current.op_type === "transfer_registered"
-          ? await this.resolveTransferRecipient(current)
-          : undefined;
-      const built = await this.gateway.buildOperation({
+          ? this.resolveTransferRecipient(current)
+          : Promise.resolve(undefined),
+        current.op_type === "shield"
+          ? Promise.resolve(null)
+          : this.requireRing(current.ring_program_id),
+        this.knownAssets(),
+      ]);
+      if (recipientResult.status === "rejected") throw recipientResult.reason;
+      if (ringResult.status === "rejected") throw ringResult.reason;
+      if (knownAssetsResult.status === "rejected") throw knownAssetsResult.reason;
+      const recipient = recipientResult.value;
+      const ring = ringResult.value;
+      const gateway = await this.resolveGateway(current.rings_connection_id);
+
+      // Merging is gated on chain and registration cannot set it, so a wallet
+      // provisioned before merge shipped refuses every merge until this lands.
+      // It reads before it writes, so the second merge onward sends nothing.
+      // Ordered before the build because the build is what the flag refuses.
+      if (current.op_type === "merge") {
+        await gateway.ensureMergingEnabled({ walletId: current.wallet_id, owner });
+      }
+
+      const built = await gateway.buildOperation({
         operation: this.toPrivateOperation(current),
         owner,
         ...(wallet.shielded_address ? { expectedShieldedAddress: wallet.shielded_address } : {}),
@@ -827,8 +1398,9 @@ export class HeliusRingsService {
         // wallet. Selecting notes from a view older than that can pick one
         // already consumed, and the chain rejects the transaction it goes into.
         ...(wallet.last_indexed_slot ? { requireSlot: wallet.last_indexed_slot } : {}),
-        knownAssets: await this.knownAssets(),
+        knownAssets: knownAssetsResult.value,
         ...(recipient ? { recipient } : {}),
+        ...(ring ? { ring } : {}),
       });
 
       // Proving and building are one call: the SDK proves inside the builder, so
@@ -858,7 +1430,8 @@ export class HeliusRingsService {
           current,
           owner,
           wallet.shielded_address,
-          built.outerUnsignedTxBase64
+          built.outerUnsignedTxBase64,
+          ring
         )
       );
 
@@ -1203,6 +1776,7 @@ export class HeliusRingsService {
         row.failure_code && row.failure_message !== null && row.retryable !== null
           ? { code: row.failure_code, message: row.failure_message, retryable: row.retryable }
           : null,
+      ringProgramId: row.ring_program_id ?? null,
       input: {
         walletId: row.wallet_id,
         opType: row.op_type,
@@ -1241,10 +1815,13 @@ export class HeliusRingsService {
     if (!(wallet.owner_address && wallet.shielded_address)) {
       throw new HeliusRingsError("conflict", "this rings wallet has no provisioned identity yet");
     }
+    if (wallet.status === "paused") {
+      throw new HeliusRingsError("conflict", QUARANTINED_WALLET_MESSAGE);
+    }
 
     const allowlist = await this.assets.listActive();
 
-    const result = await this.gateway.syncPhoton({
+    const result = await this.readShieldedState({
       walletId: wallet.id,
       owner: wallet.owner_address,
       // Re-derived and compared inside the gateway. A wallet whose material no
@@ -1285,6 +1862,43 @@ export class HeliusRingsService {
     return result;
   }
 
+  /**
+   * The gateway read, with the one failure it can never recover from turned
+   * into a wallet state instead of a repeat.
+   *
+   * An identity mismatch is derived locally from fixed inputs, so it recurs
+   * identically on every read — and the dashboard syncs each wallet on load,
+   * which turns that into an error per wallet per visit forever. Pausing the
+   * wallet records the finding once and takes it out of the loop, leaving an
+   * operator a wallet to re-provision rather than a recurring failure.
+   */
+  private async readShieldedState(input: SyncPhotonInput): Promise<SyncPhotonResult> {
+    try {
+      return await (await this.resolveGateway()).syncPhoton(input);
+    } catch (error) {
+      if (!isRingsIdentityMismatch(error)) throw error;
+
+      // The mismatch is the finding worth surfacing, so the pause is
+      // best-effort: it is logged either way and the original error still
+      // reaches the caller. It is pinned to the identity this read was for,
+      // because a read that began before a re-key lands after it, and by then
+      // the mismatch describes keys the wallet has already abandoned —
+      // applying it would take the recovered wallet back out of service.
+      const paused = input.expectedShieldedAddress
+        ? await this.wallets.quarantineWallet({
+            ...this.tenant,
+            id: input.walletId,
+            expectedShieldedAddress: input.expectedShieldedAddress,
+          })
+        : null;
+      getLogger().warn(
+        { walletId: input.walletId, quarantined: Boolean(paused) },
+        "rings wallet paused: its material no longer derives its provisioned identity"
+      );
+      throw error;
+    }
+  }
+
   /** The operation with its event feed joined in, for the detail panel. */
   async getOperationWithEvents(operationId: string): Promise<PrivateOperation> {
     const row = await this.requireOperation(operationId);
@@ -1303,15 +1917,41 @@ function requiredOuterPolicyField(value: string | null): string {
   return value;
 }
 
+/** Like {@link requiredOuterPolicyField}, for the op types whose ring pair is mandatory. */
+function requiredOuterPolicyRing(ring: { programId: string; lookupTable: string } | null): {
+  programId: string;
+  lookupTable: string;
+} {
+  if (!ring) {
+    throw new HeliusRingsError(
+      "invalid_input",
+      "the persisted Rings operation is missing final-wire policy context"
+    );
+  }
+  return ring;
+}
+
+/** The 409 both ring-reservation paths raise on UNIQUE(project_id, ring_program_id). */
+function programInUseError(): HeliusRingsError {
+  return new HeliusRingsError(
+    "conflict",
+    "that ring program id is already registered under another of this project's rings"
+  );
+}
+
 function outerTransactionPolicyInput(
   operation: HeliusRingsOperationRow,
   owner: string,
   shieldedAddress: string | null,
-  outerUnsignedTxBase64: string
+  outerUnsignedTxBase64: string,
+  ring: { programId: string; lookupTable: string } | null
 ): RingsOuterTransactionPolicyInput {
   const mint = requiredOuterPolicyField(operation.asset_mint);
-  const amountRaw = requiredOuterPolicyField(operation.amount_raw);
-  const common = { mint, amountRaw };
+  // Only the value-moving arms carry an amount. A merge has none to carry: it
+  // consolidates the wallet's own notes, so demanding one here would refuse
+  // every merge over a column the row is right to leave NULL.
+  const common = () => ({ mint, amountRaw: requiredOuterPolicyField(operation.amount_raw) });
+  const ringSpend = ring ? { ring } : {};
 
   switch (operation.op_type) {
     case "shield":
@@ -1320,8 +1960,9 @@ function outerTransactionPolicyInput(
         owner,
         intent: {
           opType: "shield",
-          ...common,
+          ...common(),
           expectedShieldedAddress: requiredOuterPolicyField(shieldedAddress),
+          ...(operation.ring_program_id ? { ringProgramId: operation.ring_program_id } : {}),
         },
       };
     case "withdraw":
@@ -1330,8 +1971,9 @@ function outerTransactionPolicyInput(
         owner,
         intent: {
           opType: "withdraw",
-          ...common,
+          ...common(),
           to: requiredOuterPolicyField(operation.to_addr),
+          ...ringSpend,
         },
       };
     case "transfer_registered":
@@ -1340,7 +1982,27 @@ function outerTransactionPolicyInput(
         owner,
         intent: {
           opType: "transfer_registered",
-          ...common,
+          ...common(),
+          ...ringSpend,
+        },
+      };
+    case "merge":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: { opType: "merge", mint },
+      };
+    case "ring_exit":
+    case "ring_entry":
+      return {
+        outerUnsignedTxBase64,
+        owner,
+        intent: {
+          opType: operation.op_type,
+          ...common(),
+          // Never the optional spread: a ring move without its ring pair is
+          // missing the very thing the gate validates.
+          ring: requiredOuterPolicyRing(ring),
         },
       };
     default:
@@ -1438,7 +2100,10 @@ const GATEWAY_FAILURES: Record<HeliusRingsErrorCode, { code: FailureCode; retrya
  * input, client nonce). Field order is pinned here — object spread order is
  * not part of the contract.
  */
-export function computeIntentKey(input: PrivateOperationInput): string {
+export function computeIntentKey(
+  input: PrivateOperationInput,
+  ringProgramId: string | null
+): string {
   const canonical = JSON.stringify({
     walletId: input.walletId,
     opType: input.opType,
@@ -1447,6 +2112,14 @@ export function computeIntentKey(input: PrivateOperationInput): string {
     to: input.to ?? null,
     zoneId: input.zoneId ?? null,
     transferMode: input.transferMode ?? null,
+    // The resolved id joins the hash only when a ring is pinned — "same
+    // shield, different ring" must reserve a second operation. Omitted (not
+    // null) for the default pool so those keys stay byte-identical to rows
+    // reserved before rings existed, and a replay across the deploy boundary
+    // still deduplicates. The symbolic selector never joins the hash, and the
+    // field's position here is a persisted contract: moving it silently
+    // changes every custom-ring idempotency key.
+    ...(ringProgramId === null ? {} : { ringProgramId }),
     timelock: input.timelock
       ? { unlockAt: input.timelock.unlockAt, beneficiary: input.timelock.beneficiary }
       : null,

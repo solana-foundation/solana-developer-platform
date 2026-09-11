@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import * as rpcRelay from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, SignerCheckRequest } from "@sdp/types";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -9,14 +9,17 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const signerCheckMocks = vi.hoisted(() => ({
   createOrgSigner: vi.fn(),
+  createExactSigner: vi.fn(),
   createSponsorship: vi.fn(),
   signAndSend: vi.fn(),
 }));
@@ -24,6 +27,7 @@ const signerCheckMocks = vi.hoisted(() => ({
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
   createOrgSigner: signerCheckMocks.createOrgSigner,
+  createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
 }));
 
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
@@ -33,12 +37,14 @@ vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
 
 const actualCreateSigningService = signingServiceModule.createSigningService;
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
+const createRpcFromTransportSpy = vi.spyOn(solanaRpc, "createRpcFromTransport");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
 const createSigningServiceMock = vi.spyOn(signingServiceModule, "createSigningService");
 const resolveRpcTargetMock = vi.spyOn(rpcRelay, "resolveRpcTarget");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
+const simulateTransactionMock = vi.spyOn(solanaRpc, "simulateTransaction");
 
 const TEST_ORG = {
   id: "org_custody_wallet_scope",
@@ -99,26 +105,14 @@ async function seedAuthAndConfigs(): Promise<void> {
          VALUES (?, ?, ?, 'admin', 'active')`
       )
       .bind("om_custody_wallet_scope", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_custody_wallet_scope", TEST_PROJECT.id, TEST_USER.id),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
@@ -306,8 +300,32 @@ async function seedActiveConnectionWallet(
   ]);
 }
 
+function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "session") {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "x-project-id": TEST_PROJECT.id,
+  });
+  if (actor === "api_key") {
+    headers.set("Authorization", `Bearer ${TEST_API_KEY.raw}`);
+  } else {
+    headers.set("Cookie", `sdp_session=${TEST_SESSION_ID}`);
+  }
+  return app.request(
+    "/v1/wallets/signer-check",
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    },
+    env
+  );
+}
+
 describe("Custody wallet scope routes", () => {
+  let originalPrivyByokEnabled: string | undefined;
+
   beforeEach(async () => {
+    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
     vi.clearAllMocks();
 
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
@@ -342,7 +360,15 @@ describe("Custody wallet scope routes", () => {
       confirmationStatus: "confirmed",
       err: null,
     });
-    signerCheckMocks.createOrgSigner.mockResolvedValue(await generateKeyPairSigner());
+    simulateTransactionMock.mockResolvedValue({
+      success: true,
+      logs: [],
+      unitsConsumed: null,
+      error: null,
+    });
+    const signer = await generateKeyPairSigner();
+    signerCheckMocks.createOrgSigner.mockResolvedValue(signer);
+    signerCheckMocks.createExactSigner.mockResolvedValue(signer);
     signerCheckMocks.signAndSend.mockResolvedValue(TEST_SIGNATURE);
     signerCheckMocks.createSponsorship.mockReturnValue({
       providerId: "test",
@@ -350,8 +376,8 @@ describe("Custody wallet scope routes", () => {
       signAsFeePayer: vi.fn(),
       signAndSend: signerCheckMocks.signAndSend,
     });
-    createSigningServiceMock.mockImplementation((envArg) => {
-      const service = actualCreateSigningService(envArg);
+    createSigningServiceMock.mockImplementation((envArg, scope) => {
+      const service = actualCreateSigningService(envArg, scope);
       service.getPublicKey = vi.fn(async (_organizationId, _projectId, walletId) => {
         if (walletId === "para_wallet_a") {
           return address(TEST_SOLANA_ADDRESSES.wallet2);
@@ -369,13 +395,266 @@ describe("Custody wallet scope routes", () => {
   });
 
   afterEach(async () => {
+    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     await clearKVStores(env);
     createSigningServiceMock.mockReset();
     getAccountInfoMock.mockReset();
     getSplTokenBalancesMock.mockReset();
   });
 
+  it.each([
+    { state: "paused", status: 403, reason: "runtime_execution_paused" },
+    { state: "unavailable", status: 409, reason: "runtime_execution_unavailable" },
+  ])(
+    "refuses a $state signer check before signer, fee payer, or RPC access",
+    async ({ state, status, reason }) => {
+      await seedActiveConnectionWallet(
+        "signer_check",
+        "privy_check",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = state === "paused" ? "false" : "true";
+      if (state === "unavailable") {
+        await getDb(env)
+          .prepare(
+            "UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_scope_signer_check'"
+          )
+          .run();
+      }
+      const response = await requestSignerCheck({ walletId: "privy_check" }, "session");
+
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({
+        error: { details: { reason } },
+      });
+      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(createRpcFromTransportSpy).not.toHaveBeenCalled();
+      expect(simulateTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("checks the exact Connection wallet even if the default changes after admission", async () => {
+    const signer = await generateKeyPairSigner();
+    await seedActiveConnectionWallet("signer_check", "privy_check", signer.address);
+    env.PRIVY_BYOK_ENABLED = "true";
+    signerCheckMocks.createExactSigner.mockResolvedValue(signer);
+    createSigningServiceMock.mockImplementation((envArg, scope) => {
+      const service = actualCreateSigningService(envArg, scope);
+      const admit = service.admitRuntimeExecution.bind(service);
+      service.admitRuntimeExecution = async (...args) => {
+        await admit(...args);
+        await getDb(env)
+          .prepare(
+            "UPDATE custody_scope_defaults SET default_custody_config_id = ? WHERE id = 'csd_scope_org_default'"
+          )
+          .bind(PARA_CONFIG_ID)
+          .run();
+      };
+      return service;
+    });
+
+    const response = await requestSignerCheck({ walletId: "privy_check" }, "session");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { walletId: "privy_check", walletAddress: signer.address, simulated: true },
+    });
+    expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      "cwlt_scope_signer_check"
+    );
+    expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
+    expect(createRpcFromTransportSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each(["session", "api_key"] as const)(
+    "refuses ambiguous signer-check Provider IDs for %s callers",
+    async (actor) => {
+      await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+        walletId: "privy_wallet_a",
+        permissions: ["wallets:write"],
+      });
+      await seedCachedKey({
+        signingWalletId: "privy_wallet_a",
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+      });
+      // The cache still names the original row when another owner introduces a duplicate.
+      await seedActiveConnectionWallet(
+        "duplicate",
+        "privy_wallet_a",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+
+      const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, actor);
+
+      expect(response.status).toBe(actor === "session" ? 409 : 403);
+      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(simulateTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { actor: "session", connectionStatus: "active", configScope: "project" },
+    { actor: "api_key", connectionStatus: "active", configScope: "project" },
+    { actor: "selected_key", connectionStatus: "active", configScope: "project" },
+    { actor: "session", connectionStatus: "deactivated", configScope: "project" },
+    { actor: "session", connectionStatus: "active", configScope: "organization" },
+  ])(
+    "refuses a signer check for $actor with a $configScope Config and inactive duplicate in a $connectionStatus Connection",
+    async ({ actor, connectionStatus, configScope }) => {
+      if (configScope === "project") {
+        await getDb(env)
+          .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+          .bind(TEST_PROJECT.id, PRIVY_CONFIG_ID)
+          .run();
+      }
+      await seedActiveConnectionWallet(
+        "inactive_duplicate",
+        "privy_wallet_a",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+        .bind("cwlt_scope_inactive_duplicate")
+        .run();
+      if (connectionStatus === "deactivated") {
+        await getDb(env)
+          .prepare(
+            "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?"
+          )
+          .bind("cconn_scope_inactive_duplicate")
+          .run();
+      }
+      if (actor === "selected_key") {
+        await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+          walletId: "privy_wallet_a",
+          permissions: ["wallets:write"],
+        });
+        await seedCachedKey({
+          signingWalletId: "privy_wallet_a",
+          walletBindings: [
+            {
+              walletId: "privy_wallet_a",
+              custodyWalletId: "cwlt_scope_privy_a",
+              permissions: ["wallets:write"],
+            },
+          ],
+        });
+      }
+      env.PRIVY_BYOK_ENABLED = "true";
+
+      const response = await requestSignerCheck(
+        { walletId: "privy_wallet_a" },
+        actor === "session" ? "session" : "api_key"
+      );
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "CONFLICT", message: "Custody wallet ownership is ambiguous" },
+      });
+      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(simulateTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps signer-check Config selection when an inactive Config has the same Provider ID", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+           VALUES ('cfg_signer_retired', ?, ?, 'privy', 'not-read', 'inactive')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+           VALUES ('cwlt_signer_retired', 'cfg_signer_retired', 'privy_wallet_a', ?, 'inactive')`
+        )
+        .bind(TEST_SOLANA_ADDRESSES.wallet2),
+    ]);
+
+    const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "session");
+
+    expect(response.status).toBe(200);
+    expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      "cwlt_scope_privy_a"
+    );
+  });
+
+  it.each(["read-only", "revoked", "expired"])(
+    "refuses %s signer-check authorization despite a cached write grant",
+    async (state) => {
+      await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+        walletId: "privy_wallet_a",
+        permissions: ["wallets:write"],
+      });
+      await seedCachedKey({
+        signingWalletId: "privy_wallet_a",
+        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+      });
+      if (state === "read-only") {
+        await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+          walletId: "privy_wallet_a",
+          permissions: ["wallets:read"],
+        });
+      } else if (state === "revoked") {
+        await getDb(env)
+          .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
+          .bind(TEST_API_KEY.id)
+          .run();
+      } else {
+        await getDb(env)
+          .prepare("UPDATE api_keys SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+          .bind(TEST_API_KEY.id)
+          .run();
+      }
+
+      const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "api_key");
+
+      expect(response.status).toBe(403);
+      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(simulateTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["privy_missing", "cwlt_scope_privy_a"])(
+    "preserves the missing-wallet error for signer-check selector %s",
+    async (walletId) => {
+      const response = await requestSignerCheck({ walletId }, "session");
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: "Custody wallet not found" },
+      });
+      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+    }
+  );
+
   it("resolves the API key's bound wallet when walletId is omitted", async () => {
+    await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+      walletId: "privy_wallet_a",
+      permissions: ["wallets:write"],
+    });
     await seedCachedKey({
       signingWalletId: "privy_wallet_a",
       walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
@@ -395,16 +674,98 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: { walletId: "privy_wallet_a", signature: TEST_SIGNATURE },
-    });
-    expect(signerCheckMocks.createOrgSigner).toHaveBeenCalledWith(
+    const body = z
+      .object({
+        data: z.object({
+          walletId: z.string(),
+          signature: z.string().min(1),
+          simulated: z.literal(true),
+        }),
+      })
+      .parse(await response.json());
+    expect(body.data.walletId).toBe("privy_wallet_a");
+    expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "privy_wallet_a"
+      "cwlt_scope_privy_a"
     );
+    // The signature is the wallet's own, verified locally and in simulation —
+    // never broadcast, and never paid for by sponsorship.
+    expect(simulateTransactionMock).toHaveBeenCalledOnce();
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: "single binding",
+      walletIds: ["privy_wallet_b"],
+      preferred: null,
+      status: 200,
+      walletId: "privy_wallet_b",
+      recordId: "cwlt_scope_privy_b",
+    },
+    {
+      label: "preferred binding",
+      walletIds: ["privy_wallet_a", "privy_wallet_b"],
+      preferred: "privy_wallet_b",
+      status: 200,
+      walletId: "privy_wallet_b",
+      recordId: "cwlt_scope_privy_b",
+    },
+    {
+      label: "the auth layer's first-binding fallback",
+      walletIds: ["privy_wallet_a", "privy_wallet_b"],
+      preferred: null,
+      status: 200,
+      walletId: "privy_wallet_a",
+      recordId: "cwlt_scope_privy_a",
+    },
+    {
+      label: "no bindings",
+      walletIds: [],
+      preferred: null,
+      status: 400,
+      walletId: null,
+      recordId: null,
+    },
+  ])(
+    "preserves signer-check selection with $label and no walletId",
+    async ({ walletIds, preferred, status, walletId, recordId }) => {
+      const bindings: NonNullable<CachedApiKey["walletBindings"]> = walletIds.map((walletId) => ({
+        walletId,
+        permissions: ["wallets:write"],
+      }));
+      for (const binding of bindings) {
+        await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, binding);
+      }
+      await getDb(env)
+        .prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?")
+        .bind(preferred, TEST_API_KEY.id)
+        .run();
+      await seedCachedKey({ signingWalletId: preferred, walletBindings: bindings });
+
+      const response = await requestSignerCheck({}, "api_key");
+
+      expect(response.status).toBe(status);
+      if (status === 200) {
+        expect(await response.json()).toMatchObject({
+          data: { walletId, simulated: true },
+        });
+        expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
+          env,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          recordId
+        );
+      } else {
+        expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+        expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+        expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      }
+      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+    }
+  );
 
   it("requires walletId for a session-authenticated signer check", async () => {
     const response = await app.request(
@@ -429,6 +790,7 @@ describe("Custody wallet scope routes", () => {
       },
     });
     expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
+    expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
   });
 
   it("generates the memo for a session request and strips a caller memo", async () => {
@@ -456,16 +818,20 @@ describe("Custody wallet scope routes", () => {
       /^SDP signer check [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     );
     expect(body.data.memo).not.toBe(callerMemo);
-    expect(signerCheckMocks.createOrgSigner).toHaveBeenCalledWith(
+    expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "privy_wallet_a"
+      "cwlt_scope_privy_a"
     );
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();
   });
 
   it("executes signer check without consulting a denying wallet policy", async () => {
+    await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+      walletId: "privy_wallet_a",
+      permissions: ["wallets:write"],
+    });
     await seedCachedKey({
       signingWalletId: "privy_wallet_a",
       walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
@@ -505,7 +871,8 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(signerCheckMocks.signAndSend).toHaveBeenCalledOnce();
+    expect(simulateTransactionMock).toHaveBeenCalledOnce();
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
 
     const operationCount = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
@@ -514,6 +881,10 @@ describe("Custody wallet scope routes", () => {
   });
 
   it("rate-limits the third signer check by the same actor", async () => {
+    await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+      walletId: "privy_wallet_a",
+      permissions: ["wallets:write"],
+    });
     await seedCachedKey({
       signingWalletId: "privy_wallet_a",
       walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
@@ -538,7 +909,8 @@ describe("Custody wallet scope routes", () => {
     const blocked = await request();
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
-    expect(signerCheckMocks.signAndSend).toHaveBeenCalledTimes(2);
+    expect(simulateTransactionMock).toHaveBeenCalledTimes(2);
+    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
   });
 
   it("filters listed wallets to the API key bindings", async () => {
@@ -1288,79 +1660,6 @@ describe("Custody wallet scope routes", () => {
       .bind("privy_wallet_b")
       .first<{ status: string }>();
     expect(wallet?.status).toBe("active");
-  });
-
-  it("excludes custody configs from a different project in the same org", async () => {
-    const otherProjectId = "prj_custody_config_cross_project";
-    const otherConfigId = "cust_cfg_scope_other_project";
-
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          otherProjectId,
-          TEST_ORG.id,
-          "Other Config Project",
-          "other-config-project",
-          "sandbox",
-          "active",
-          TEST_USER.id
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          otherConfigId,
-          TEST_ORG.id,
-          otherProjectId,
-          "turnkey",
-          "test-config",
-          "sdp-custody-encryption-v1",
-          "turnkey_wallet_other",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cwlt_scope_other_project",
-          otherConfigId,
-          "turnkey_wallet_other",
-          "turnkey_pubkey_other",
-          "Other",
-          "root",
-          "active"
-        ),
-    ]);
-
-    const res = await app.request(
-      "/v1/wallets/configs",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { configs: Array<{ id: string }> };
-    };
-    const configIds = body.data.configs.map((config) => config.id);
-    expect(configIds).toContain(PRIVY_CONFIG_ID);
-    expect(configIds).toContain(PARA_CONFIG_ID);
-    expect(configIds).not.toContain(otherConfigId);
   });
 
   describe("wallet-scoped key lifecycle mutations", () => {

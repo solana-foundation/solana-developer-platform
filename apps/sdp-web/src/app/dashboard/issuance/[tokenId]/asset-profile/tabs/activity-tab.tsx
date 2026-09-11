@@ -9,15 +9,10 @@ import {
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select, SelectItem } from "@/components/ui/select";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
   TableBody,
@@ -38,6 +33,7 @@ import {
   auditActorTypeLabel,
   auditStatusBadgeClass,
 } from "../asset-audit-presentation";
+import { TokenTransactionsBrowser } from "../token-transactions-browser";
 
 const PAGE_SIZE = 50;
 // Sentinel select value for the "no filter" option (Select treats null/"" as the
@@ -67,59 +63,75 @@ function ActivityFilters({
   onActorTypeChange: (value: string | null) => void;
 }) {
   const spinner = busy ? <Loader2 className="size-3.5 animate-spin" /> : null;
+  const [expanded, setExpanded] = useState(false);
+  const filterCount = [action, status, actorType].filter(Boolean).length;
   return (
-    <CardAction className="flex flex-wrap items-center justify-end gap-2">
-      <div className="w-40">
-        <Select
-          ariaLabel={t("DashboardIssuance.activity.filterLabel")}
-          value={action ?? ALL}
-          disabled={busy}
-          trailing={spinner}
-          onValueChange={(value) => onActionChange(value === ALL ? null : value)}
-        >
-          <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAll")}</SelectItem>
-          {ASSET_AUDIT_ACTIONS.map((value) => (
-            <SelectItem key={value} value={value}>
-              {auditActionLabel(value)}
-            </SelectItem>
-          ))}
-        </Select>
+    <div>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="sm:hidden"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {t("DashboardIssuance.simplified.filters")}
+        {filterCount ? ` (${filterCount})` : ""}
+      </Button>
+      <div
+        className={`${expanded ? "flex" : "hidden"} mt-3 flex-wrap gap-2 sm:mt-0 sm:flex sm:justify-end`}
+      >
+        <div className="w-full sm:w-40">
+          <Select
+            ariaLabel={t("DashboardIssuance.activity.filterLabel")}
+            value={action ?? ALL}
+            disabled={busy}
+            trailing={spinner}
+            onValueChange={(value) => onActionChange(value === ALL ? null : value)}
+          >
+            <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAll")}</SelectItem>
+            {ASSET_AUDIT_ACTIONS.map((value) => (
+              <SelectItem key={value} value={value}>
+                {auditActionLabel(value)}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+        <div className="w-full sm:w-40">
+          <Select
+            ariaLabel={t("DashboardIssuance.activity.columnStatus")}
+            value={status ?? ALL}
+            disabled={busy}
+            trailing={spinner}
+            onValueChange={(value) => onStatusChange(value === ALL ? null : value)}
+          >
+            <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAllStatuses")}</SelectItem>
+            {ASSET_AUDIT_STATUSES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {value === "failure"
+                  ? t("DashboardIssuance.activity.statusFailure")
+                  : t("DashboardIssuance.activity.statusSuccess")}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+        <div className="w-full sm:w-40">
+          <Select
+            ariaLabel={t("DashboardIssuance.activity.columnActorType")}
+            value={actorType ?? ALL}
+            disabled={busy}
+            trailing={spinner}
+            onValueChange={(value) => onActorTypeChange(value === ALL ? null : value)}
+          >
+            <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAllTypes")}</SelectItem>
+            {ASSET_AUDIT_ACTOR_TYPES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {auditActorTypeLabel(value, t)}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
       </div>
-      <div className="w-40">
-        <Select
-          ariaLabel={t("DashboardIssuance.activity.columnStatus")}
-          value={status ?? ALL}
-          disabled={busy}
-          trailing={spinner}
-          onValueChange={(value) => onStatusChange(value === ALL ? null : value)}
-        >
-          <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAllStatuses")}</SelectItem>
-          {ASSET_AUDIT_STATUSES.map((value) => (
-            <SelectItem key={value} value={value}>
-              {value === "failure"
-                ? t("DashboardIssuance.activity.statusFailure")
-                : t("DashboardIssuance.activity.statusSuccess")}
-            </SelectItem>
-          ))}
-        </Select>
-      </div>
-      <div className="w-40">
-        <Select
-          ariaLabel={t("DashboardIssuance.activity.columnActorType")}
-          value={actorType ?? ALL}
-          disabled={busy}
-          trailing={spinner}
-          onValueChange={(value) => onActorTypeChange(value === ALL ? null : value)}
-        >
-          <SelectItem value={ALL}>{t("DashboardIssuance.activity.filterAllTypes")}</SelectItem>
-          {ASSET_AUDIT_ACTOR_TYPES.map((value) => (
-            <SelectItem key={value} value={value}>
-              {auditActorTypeLabel(value, t)}
-            </SelectItem>
-          ))}
-        </Select>
-      </div>
-    </CardAction>
+    </div>
   );
 }
 
@@ -140,11 +152,14 @@ function ActivityEventRow({
           <ActionIcon className="h-3.5 w-3.5 shrink-0" />
           {auditActionLabel(event.action)}
         </span>
+        <span className="mt-1 block text-xs text-tertiary sm:hidden">
+          {formatDateTime(event.createdAt, locale)}
+        </span>
       </TableCell>
-      <TableCell align="left" className="text-sm text-secondary">
+      <TableCell align="left" className="hidden text-sm text-secondary sm:table-cell">
         {event.actorLabel}
       </TableCell>
-      <TableCell align="left">
+      <TableCell align="left" className="hidden sm:table-cell">
         <span
           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${auditActorBadgeClass(
             event.actorType
@@ -164,7 +179,7 @@ function ActivityEventRow({
             : t("DashboardIssuance.activity.statusSuccess")}
         </span>
       </TableCell>
-      <TableCell align="right" numeric className="text-sm text-secondary">
+      <TableCell align="right" numeric className="hidden text-sm text-secondary sm:table-cell">
         {formatDateTime(event.createdAt, locale)}
       </TableCell>
     </TableRow>
@@ -196,11 +211,14 @@ function ActivityResults({
 }) {
   if (isInitialLoading) {
     return (
-      <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border-subtle bg-fill-subtle px-6 py-10">
-        <div className="flex items-center gap-3 text-sm text-secondary">
-          <Loader2 className="size-4 animate-spin" />
-          <span>{t("DashboardIssuance.activity.loading")}</span>
-        </div>
+      <div aria-busy="true" className="divide-y divide-border-subtle">
+        {["a", "b", "c", "d"].map((id) => (
+          <div key={id} className="flex justify-between gap-4 py-5">
+            <SkeletonBlock className="h-4 w-40" />
+            <SkeletonBlock className="h-4 w-24" />
+            <SkeletonBlock className="hidden h-4 w-24 sm:block" />
+          </div>
+        ))}
       </div>
     );
   }
@@ -225,10 +243,16 @@ function ActivityResults({
         <TableHeader>
           <TableRow>
             <TableHead align="left">{t("DashboardIssuance.activity.columnAction")}</TableHead>
-            <TableHead align="left">{t("DashboardIssuance.activity.columnActor")}</TableHead>
-            <TableHead align="left">{t("DashboardIssuance.activity.columnActorType")}</TableHead>
+            <TableHead align="left" className="hidden sm:table-cell">
+              {t("DashboardIssuance.activity.columnActor")}
+            </TableHead>
+            <TableHead align="left" className="hidden sm:table-cell">
+              {t("DashboardIssuance.activity.columnActorType")}
+            </TableHead>
             <TableHead align="left">{t("DashboardIssuance.activity.columnStatus")}</TableHead>
-            <TableHead align="right">{t("DashboardIssuance.activity.columnTime")}</TableHead>
+            <TableHead align="right" className="hidden sm:table-cell">
+              {t("DashboardIssuance.activity.columnTime")}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -248,7 +272,33 @@ function ActivityResults({
   );
 }
 
-export function ActivityTab({ tokenId }: { tokenId: string }) {
+export function ActivityTab({ tokenId, isDraft = false }: { tokenId: string; isDraft?: boolean }) {
+  const t = useTranslations();
+  const [view, setView] = useState(isDraft ? "changes" : "transactions");
+  return (
+    <div className="space-y-5">
+      {!isDraft ? (
+        <SegmentedControl
+          className="max-w-xs"
+          ariaLabel={t("DashboardIssuance.simplified.activityView")}
+          options={[
+            { value: "transactions", label: t("DashboardIssuance.transactions.title") },
+            { value: "changes", label: t("DashboardIssuance.simplified.changes") },
+          ]}
+          value={view}
+          onChange={setView}
+        />
+      ) : null}
+      {view === "transactions" && !isDraft ? (
+        <TokenTransactionsBrowser tokenId={tokenId} />
+      ) : (
+        <AuditActivity tokenId={tokenId} />
+      )}
+    </div>
+  );
+}
+
+function AuditActivity({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
   const locale = useLocale();
   const [action, setAction] = useState<string | null>(null);
@@ -299,10 +349,11 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
     : null;
 
   return (
-    <Card className="gap-4">
-      <CardHeader>
-        <CardTitle>{t("DashboardIssuance.activity.title")}</CardTitle>
-        <CardDescription>{t("DashboardIssuance.activity.description")}</CardDescription>
+    <section className="space-y-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <h3 className="hidden text-base font-medium text-primary sm:block">
+          {t("DashboardIssuance.activity.title")}
+        </h3>
         <ActivityFilters
           t={t}
           action={action}
@@ -322,21 +373,19 @@ export function ActivityTab({ tokenId }: { tokenId: string }) {
             setPage(1);
           }}
         />
-      </CardHeader>
-      <CardContent>
-        <ActivityResults
-          t={t}
-          locale={locale}
-          isInitialLoading={isInitialLoading}
-          isRefreshing={isRefreshing}
-          busy={busy}
-          errorMessage={errorMessage}
-          events={events}
-          total={total}
-          page={page}
-          onPageChange={setPage}
-        />
-      </CardContent>
-    </Card>
+      </div>
+      <ActivityResults
+        t={t}
+        locale={locale}
+        isInitialLoading={isInitialLoading}
+        isRefreshing={isRefreshing}
+        busy={busy}
+        errorMessage={errorMessage}
+        events={events}
+        total={total}
+        page={page}
+        onPageChange={setPage}
+      />
+    </section>
   );
 }

@@ -3,11 +3,14 @@ import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
+  type EarnMovementRow,
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -20,10 +23,19 @@ const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
     })),
   };
 });
+// The movement detail's chain read-through, mocked as identity: these tests
+// prove the ROUTE calls it for scoped rows and never for a 404, not the
+// service's own RPC behavior (that lives with the reconciler's suite).
+const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
+  vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
+);
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
+}));
+vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
+  reconcileEarnVaultMovementReadThrough,
 }));
 
 /**
@@ -35,9 +47,13 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
 
 const ORG = "org_external_activity";
 const PROJECT = "prj_external_activity";
-const SIBLING_PROJECT = "prj_external_activity_sibling";
 const USER = "usr_external_activity";
 const KEY = { id: "key_external_activity", raw: "sk_test_external_activity" };
+const PRODUCTION_KEY = {
+  id: "key_external_activity_production",
+  raw: "sk_live_external_activity",
+  prefix: "sk_live_act",
+};
 const OWNER_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const OWNER_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -70,20 +86,28 @@ async function seedScope() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "external-activity@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'External activity', 'external-activity', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Sibling', 'external-activity-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(SIBLING_PROJECT, ORG, USER),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PRODUCTION_KEY,
+    organizationId: ORG,
+    projectId: `${PROJECT}_production`,
+    createdBy: USER,
+    role: "api_developer",
+    permissions: ["earn:read"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: PRODUCTION_KEY.id,
+    projectId: `${PROJECT}_production`,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -195,6 +219,10 @@ function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${KEY.raw}` } }, env);
 }
 
+function getAsProduction(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${PRODUCTION_KEY.raw}` } }, env);
+}
+
 function liveValue(values: Record<string, string | undefined>) {
   readVaultPositions.mockImplementation(
     async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
@@ -222,6 +250,28 @@ beforeEach(async () => {
 });
 
 describe("external-wallet activity", () => {
+  it("404s another project's movement", async () => {
+    const positionId = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    const movementId = await seedMovement({
+      positionId,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "deposit",
+      status: "finalized",
+      amount: "1",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    expect((await getAsProduction(`/v1/earn/external-wallet/movements/${movementId}`)).status).toBe(
+      404
+    );
+  });
+
   it("lists one owner's movements newest first in ledger vocabulary, without wallets:read", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
@@ -357,7 +407,7 @@ describe("external-wallet activity", () => {
     expect((await get(`/v1/earn/external-wallet/movements${query}`)).status).toBe(400);
   });
 
-  it("scopes the list to the exact project and 404s a foreign organization's owner", async () => {
+  it("404s an owner claimed only by another organization", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -374,51 +424,25 @@ describe("external-wallet activity", () => {
       denomination: USDC,
       createdAt: "2026-08-27T00:00:00.000Z",
     });
-    // The same owner also moved money through a SIBLING project: a different
-    // integration surface, invisible here by the 0070 claim scope.
-    const siblingPosition = await seedPosition({
-      ownerAddress: OWNER_A,
-      vaultAddress: "vault-sibling",
-      tokenMint: USDC,
-      label: "Sibling vault",
-      projectId: SIBLING_PROJECT,
-    });
-    const siblingMovement = await seedMovement({
-      positionId: siblingPosition,
-      ownerAddress: OWNER_A,
-      vaultAddress: "vault-sibling",
-      direction: "deposit",
-      status: "finalized",
-      amount: "999",
-      denomination: USDC,
-      createdAt: "2026-08-30T00:00:00.000Z",
-      projectId: SIBLING_PROJECT,
-    });
-
     const body = (await (
       await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { movements: Array<{ providerReference: string }> } };
     expect(body.data.movements).toHaveLength(1);
     expect(body.data.movements[0]?.providerReference).toBe("vault-usdc");
 
-    // The sibling row is not addressable by id either.
-    expect((await get(`/v1/earn/external-wallet/movements/${siblingMovement}`)).status).toBe(404);
-
     // An owner only a foreign organization has claimed reads as never seen.
     const foreignOrg = "org_external_activity_foreign";
     const foreignProject = "prj_external_activity_foreign";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(foreignOrg, "Foreign", "external-activity-foreign", "enterprise", "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Foreign', 'external-activity-foreign', 'sandbox', 'active', ?)`
-        )
-        .bind(foreignProject, foreignOrg, USER),
-    ]);
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(foreignOrg, "Foreign", "external-activity-foreign", "enterprise", "active")
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: foreignOrg,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: foreignProject, production: `${foreignProject}_production` },
+    });
     await seedPosition({
       ownerAddress: OWNER_B,
       vaultAddress: "vault-foreign",
@@ -430,7 +454,9 @@ describe("external-wallet activity", () => {
     expect((await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_B}`)).status).toBe(
       404
     );
-    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_B}`)).status).toBe(404);
+    expect((await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_B}`)).status).toBe(
+      404
+    );
   });
 
   it("serves one movement by id and 404s a custody-signed row", async () => {
@@ -460,6 +486,13 @@ describe("external-wallet activity", () => {
       direction: "deposit",
       ownerAddress: OWNER_A,
     });
+    // The poll observes the chain through the shared read-through, exactly like
+    // the treasury detail reads (#1583).
+    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: movementId })
+    );
+    reconcileEarnVaultMovementReadThrough.mockClear();
 
     // A custody-signed vault movement is not an external-wallet movement, and a
     // guessed id answers exactly like a missing row.
@@ -517,6 +550,9 @@ describe("external-wallet activity", () => {
     expect((await get("/v1/earn/external-wallet/movements/earn_movement_missing")).status).toBe(
       404
     );
+    // Scope decides before the chain read: a guessed or foreign id must not be
+    // able to use RPC timing as an existence oracle.
+    expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
   });
 });
 
@@ -558,7 +594,7 @@ describe("external-wallet earnings", () => {
     }
     liveValue({ "vault-usdc-one": "66", "vault-usdc-two": "44.5", "vault-usdt": "9" });
 
-    const response = await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`);
+    const response = await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { earnings: Record<string, unknown> } };
     expect(body.data.earnings).toMatchObject({
@@ -604,7 +640,9 @@ describe("external-wallet earnings", () => {
     });
     readVaultPositions.mockRejectedValue(new Error("RPC unavailable"));
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: {
         earnings: {
           unavailablePositionCount: number;
@@ -652,7 +690,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc": "61" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
     const token = body.data.earnings.totalsByToken[0];
@@ -695,7 +735,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc": "58" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
     const token = body.data.earnings.totalsByToken[0];
@@ -760,7 +802,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc-open": "44" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: Record<string, unknown> };
     };
     expect(body.data.earnings).toMatchObject({
@@ -811,7 +855,9 @@ describe("external-wallet earnings", () => {
     });
     liveValue({ "vault-usdc": "66" });
 
-    const body = (await (await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).json()) as {
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
     expect(body.data.earnings.totalsByToken[0]).toMatchObject({
@@ -821,13 +867,15 @@ describe("external-wallet earnings", () => {
     });
   });
 
-  it.each(["?limit=1", "?page=2"])("rejects unknown earnings query %s", async (query) => {
+  it.each(["&limit=1", "&page=2"])("rejects unknown earnings query %s", async (query) => {
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
       tokenMint: USDC,
       label: "USDC vault",
     });
-    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_A}${query}`)).status).toBe(400);
+    expect(
+      (await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}${query}`)).status
+    ).toBe(400);
   });
 });

@@ -2,6 +2,10 @@ import { wellKnownMint } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  VEDA_DEPOSIT_ALLOWED_USER_ACCOUNT_INDEX,
+  VEDA_DEPOSIT_DISCRIMINATOR,
+} from "./allowed-user";
 import { toClusterConfig } from "./programs";
 import type { VedaRuntime } from "./types";
 
@@ -30,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   },
   validateDeployment: vi.fn(),
   readMintDecimals: vi.fn(),
+  accountExists: vi.fn(),
+  minimumBalanceForRentExemption: vi.fn(),
 }));
 
 vi.mock("@vedatech/svm-sdk", () => ({
@@ -48,6 +54,10 @@ vi.mock("@vedatech/svm-sdk", () => ({
   },
 }));
 vi.mock("./mint", () => ({ readMintDecimals: mocks.readMintDecimals }));
+vi.mock("./accounts", () => ({
+  accountExists: mocks.accountExists,
+  minimumBalanceForRentExemption: mocks.minimumBalanceForRentExemption,
+}));
 // The RPC client is only handed to the (mocked) SDK; keep it inert.
 vi.mock("./rpc", () => ({ createVedaRpc: vi.fn(() => ({})) }));
 
@@ -96,6 +106,7 @@ function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
     protectedInstructionGroups: [],
   });
   mocks.readMintDecimals.mockResolvedValue(6);
+  mocks.accountExists.mockResolvedValue(true);
 }
 
 beforeEach(() => {
@@ -224,6 +235,206 @@ describe("buildVedaDepositPlan owns the deposit gate", () => {
     await expect(buildVedaDepositPlan(runtime, config, input)).rejects.toMatchObject({
       code: "VAULT_UNREADABLE",
     });
+  });
+});
+
+describe("rent attribution and share-account truth", () => {
+  const input = { vault: VAULT, owner: OWNER, amount: "1.5", minSharesOut: "1.4" };
+  const SPONSOR = address("SysvarRecentB1ockHashes11111111111111111111");
+  const SHARE_ATA = address("SysvarRent111111111111111111111111111111111");
+  const VAULT_ATA = address("SysvarC1ock11111111111111111111111111111111");
+  const VAULT_HOLDER = address("Stake11111111111111111111111111111111111111");
+  const ATA_PROGRAM = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+  const SYSTEM = address("11111111111111111111111111111111");
+  const TOKEN_2022 = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+  /** The SDK's own ATA-create shape: funding payer at account index 0. */
+  const ataCreate = (payer: unknown, ata: unknown, wallet: unknown, mint: string) => ({
+    programAddress: ATA_PROGRAM,
+    accounts: [
+      { address: payer, role: 3 },
+      { address: ata, role: 1 },
+      { address: wallet, role: 0 },
+      { address: address(mint), role: 0 },
+      { address: SYSTEM, role: 0 },
+      { address: TOKEN_2022, role: 0 },
+    ],
+    data: new Uint8Array([1]),
+  });
+  const depositInstruction = {
+    programAddress: config.vaultProgramAddress,
+    accounts: [],
+    data: new Uint8Array([7]),
+  };
+
+  function primeDepositWithCreates(): void {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.buildDeposit.mockResolvedValue({
+      instructions: [
+        ataCreate(OWNER, SHARE_ATA, OWNER, SHARE_MINT),
+        ataCreate(OWNER, VAULT_ATA, VAULT_HOLDER, USDC_DEVNET),
+        depositInstruction,
+      ],
+      requiredSignerAddresses: [OWNER],
+      protectedInstructionGroups: [],
+    });
+  }
+
+  /**
+   * THE SPONSORSHIP CONTRACT (PRO-1736). The SDK hardcodes the owner as every
+   * ATA create's funding payer; honoring `rentPayer` means those creates are
+   * re-funded, or a zero-SOL custody wallet fails its first deposit with the
+   * fee sponsored and the rent not — the smoky failure of 2026-09-02.
+   */
+  it("charges the sponsor for every ATA create, preserving order and count", async () => {
+    primeDepositWithCreates();
+    mocks.accountExists.mockResolvedValue(false);
+
+    const plan = await buildVedaDepositPlan(runtime, config, { ...input, rentPayer: SPONSOR });
+
+    expect(plan.instructions).toHaveLength(3);
+    expect(plan.instructions[0]?.accounts?.[0]).toEqual({ address: SPONSOR, role: 3 });
+    expect(plan.instructions[1]?.accounts?.[0]).toEqual({ address: SPONSOR, role: 3 });
+    // Everything that is not the funding payer survives verbatim.
+    expect(plan.instructions[0]?.accounts?.[1]).toEqual({ address: SHARE_ATA, role: 1 });
+    expect(plan.instructions[2]).toEqual(depositInstruction);
+    // A missing share account means THIS deposit pays its rent.
+    expect(plan.createsShareAccount).toBe(true);
+    expect(mocks.accountExists).toHaveBeenCalledWith(runtime.rpcUrl, SHARE_ATA);
+  });
+
+  it("reports createsShareAccount false when the share account already exists", async () => {
+    primeDepositWithCreates();
+    mocks.accountExists.mockResolvedValue(true);
+
+    const plan = await buildVedaDepositPlan(runtime, config, { ...input, rentPayer: SPONSOR });
+
+    expect(plan.createsShareAccount).toBe(false);
+  });
+
+  it("leaves the owner as the funding payer when no rentPayer is supplied", async () => {
+    primeDepositWithCreates();
+    mocks.accountExists.mockResolvedValue(false);
+
+    const plan = await buildVedaDepositPlan(runtime, config, input);
+
+    expect(plan.instructions[0]?.accounts?.[0]).toEqual({ address: OWNER, role: 3 });
+    expect(plan.instructions[1]?.accounts?.[0]).toEqual({ address: OWNER, role: 3 });
+    // Truth about rent is reported either way — the funder differs, not the fact.
+    expect(plan.createsShareAccount).toBe(true);
+  });
+
+  it("omits createsShareAccount when the plan creates no share account", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+
+    const plan = await buildVedaDepositPlan(runtime, config, input);
+
+    expect("createsShareAccount" in plan).toBe(false);
+    expect(mocks.accountExists).not.toHaveBeenCalled();
+  });
+
+  it("charges the sponsor for the exit's asset-account create too", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.buildWithdraw.mockResolvedValue({
+      instructions: [ataCreate(OWNER, VAULT_ATA, OWNER, USDC_DEVNET), depositInstruction],
+    });
+
+    const plan = await buildVedaWithdrawPlan(runtime, config, {
+      vault: VAULT,
+      owner: OWNER,
+      shares: "2.5",
+      minAmountOut: "2.49",
+      rentPayer: SPONSOR,
+    });
+
+    expect(plan.instructions[0]?.accounts?.[0]).toEqual({ address: SPONSOR, role: 3 });
+    // No share account is ever created on the way out, so nothing is claimed.
+    expect("createsShareAccount" in plan).toBe(false);
+    expect(mocks.accountExists).not.toHaveBeenCalled();
+  });
+});
+
+describe("a sponsored first deposit pre-funds the allowed-user rent", () => {
+  const input = { vault: VAULT, owner: OWNER, amount: "1.5", minSharesOut: "1.4" };
+  const SPONSOR = address("SysvarRecentB1ockHashes11111111111111111111");
+  const ALLOWED_USER = address("SysvarEpochSchedu1e111111111111111111111111");
+  const SYSTEM = "11111111111111111111111111111111";
+
+  /**
+   * A deposit instruction as the SDK actually emits it: the vault program,
+   * the real Anchor discriminator, allowed_user at its IDL-pinned index.
+   */
+  function vedaDeposit() {
+    const accounts = Array.from({ length: 20 }, (_, index) => ({
+      address: index === VEDA_DEPOSIT_ALLOWED_USER_ACCOUNT_INDEX ? ALLOWED_USER : OWNER,
+      role: index === 0 ? 3 : 1,
+    }));
+    return {
+      programAddress: config.vaultProgramAddress,
+      accounts,
+      data: new Uint8Array([...VEDA_DEPOSIT_DISCRIMINATOR, 1, 2, 3]),
+    };
+  }
+
+  function primeFirstDeposit(allowedUserExists: boolean): void {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.buildDeposit.mockResolvedValue({
+      instructions: [vedaDeposit()],
+      requiredSignerAddresses: [OWNER],
+      protectedInstructionGroups: [],
+    });
+    mocks.accountExists.mockImplementation(
+      async (_rpcUrl: string, account: unknown) =>
+        String(account) !== String(ALLOWED_USER) || allowedUserExists
+    );
+    mocks.minimumBalanceForRentExemption.mockResolvedValue(1_171_605n);
+  }
+
+  /**
+   * THE PROGRAM-RENT GAP (smoky 2026-09-02, second layer). The vault program
+   * creates the depositor's AllowedUser record inside the deposit instruction
+   * and charges the SIGNER — a payer the ATA swap cannot reach — so a
+   * sponsored plan must hand the owner exactly that rent first, or a zero-SOL
+   * custody wallet fails its first deposit with everything else sponsored.
+   */
+  it("prepends one System transfer of the account's live rent", async () => {
+    primeFirstDeposit(false);
+
+    const plan = await buildVedaDepositPlan(runtime, config, { ...input, rentPayer: SPONSOR });
+
+    expect(plan.instructions).toHaveLength(2);
+    const [prefund, deposit] = plan.instructions;
+    expect(String(prefund?.programAddress)).toBe(SYSTEM);
+    expect(prefund?.accounts?.[0]).toMatchObject({ address: SPONSOR, role: 3 });
+    expect(prefund?.accounts?.[1]).toMatchObject({ address: OWNER, role: 1 });
+    const data = prefund?.data as Uint8Array;
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    expect(view.getUint32(0, true)).toBe(2);
+    expect(view.getBigUint64(4, true)).toBe(1_171_605n);
+    // The deposit instruction itself survives verbatim, still after the prefund.
+    expect(deposit).toEqual(vedaDeposit());
+    // Sized from the chain the plan targets, never a hardcoded lamport figure.
+    expect(mocks.minimumBalanceForRentExemption).toHaveBeenCalledWith(runtime.rpcUrl, 57);
+  });
+
+  it("adds nothing when the allowed-user record already exists", async () => {
+    primeFirstDeposit(true);
+
+    const plan = await buildVedaDepositPlan(runtime, config, { ...input, rentPayer: SPONSOR });
+
+    expect(plan.instructions).toHaveLength(1);
+    expect(mocks.minimumBalanceForRentExemption).not.toHaveBeenCalled();
+  });
+
+  it("adds nothing without a sponsor: the owner funds its own record", async () => {
+    primeFirstDeposit(false);
+
+    const plan = await buildVedaDepositPlan(runtime, config, input);
+
+    expect(plan.instructions).toHaveLength(1);
+    // Unsponsored builds never even ask: the answer could not change the plan.
+    expect(mocks.accountExists).not.toHaveBeenCalledWith(runtime.rpcUrl, ALLOWED_USER);
+    expect(mocks.minimumBalanceForRentExemption).not.toHaveBeenCalled();
   });
 });
 

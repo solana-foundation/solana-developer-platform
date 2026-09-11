@@ -30,36 +30,19 @@ function counterparty(overrides?: Partial<Counterparty>): Counterparty {
 }
 
 describe("validateBvnkCounterparty", () => {
-  it("uses provider status after a BVNK customer exists", () => {
+  it("collects counterparty identity fields for a new BVNK customer", () => {
     const requirements = validateBvnkCounterparty(counterparty(), {
       direction: "onramp",
       ...ONRAMP_REQUIREMENTS_OPTIONS,
-      providerData: {
-        bvnk: {
-          customer: { customerReference: "cust_123", status: "VERIFIED" },
-        },
-      },
+      providerData: {},
     });
 
     expect(requirements).toEqual({
       provider: "bvnk",
       direction: "onramp",
-      status: "funding_account_provisioning",
+      status: "collect_counterparty",
+      fields: bvnkOnrampFields(),
     });
-  });
-
-  it("fails loudly at the unwired JIT seam for a new BVNK customer", () => {
-    const run = () =>
-      validateBvnkCounterparty(counterparty(), {
-        direction: "onramp",
-        ...ONRAMP_REQUIREMENTS_OPTIONS,
-        providerData: {},
-      });
-
-    expect(run).toThrowError(SdpPaymentsError);
-    expect(run).toThrowError(
-      "BVNK onramp requires identity fields that are no longer stored; JIT collection is not wired yet"
-    );
   });
 });
 

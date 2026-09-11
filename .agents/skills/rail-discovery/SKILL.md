@@ -13,7 +13,7 @@ Implement rail support in `packages/sdp-payments`; the codegen (`apps/sdp-api/sc
 1. **Upstream discovery API:** add `RAMP_RAIL_DUMPS.<id>` in `packages/sdp-payments/src/ramps/shared.ts`; `_discoverRails` writes raw responses; `distillRailSupport` reads and normalizes them.
 2. **No discovery API:** make `_discoverRails` a no-op and return an explicit, tested snapshot from `distillRailSupport`. Do not invent a network endpoint or dump.
 
-Both paths declare `<PROVIDER>_DECLARED_RAIL_SUPPORT` for entity types and country support not discovered in the snapshot. Reference Lightspark for one dump, BVNK for multiple endpoints, Mural for discovered country support, and Stripe for static support; all live under `packages/sdp-payments/src/ramps/providers/`.
+Both paths declare `<PROVIDER>_DECLARED_RAIL_SUPPORT` for entity types and country support not discovered in the snapshot. Reference the existing providers under `packages/sdp-payments/src/ramps/providers/` — single-dump, multi-endpoint, discovered-country-support, and static-support variants are all represented.
 
 ## The data flow
 
@@ -51,7 +51,7 @@ async _discoverRails({ env, fetchJson, writeDump }: Parameters<RampProvider["_di
 }
 ```
 
-Use the provider's most public/anonymous discovery endpoints where possible (see BVNK's anon `/api/currency/*?offset=0&max=1000` paging). `_discoverRails` is `@internal` — only the discovery script ever calls it.
+Use the provider's most public/anonymous discovery endpoints where possible (some upstreams expose anonymous paged catalog endpoints). `_discoverRails` is `@internal` — only the discovery script ever calls it.
 
 ## Step 3 — `distillRailSupport`
 
@@ -87,7 +87,7 @@ Mapping rules (helpers live in `shared.ts`):
 - **Fiat code → currency key** — validate with `isActiveIso4217CurrencyCode(code)`; codes that fail are dropped into `droppedCurrencyCodes`, not added to the snapshot. Uppercase ISO 4217 only.
 - **Country code** — validate with `isIso3166Alpha2CountryCode(code)`; failures go into `droppedCountryCodes`.
 - **Limits** — `{ min, max }` are major-unit decimal strings when the provider reports bounds; use `unreportedCurrencyLimit()` (`{ min: null, max: null }`) when it doesn't.
-- Only populate `countrySupport` on the snapshot if you're genuinely discovering it from the dump (Mural derives per-currency country lists this way). If your provider doesn't report country coverage, leave it `undefined` here and declare it instead (step 4).
+- Only populate `countrySupport` on the snapshot if you're genuinely discovering it from the dump (one existing provider derives per-currency country lists this way). If your provider doesn't report country coverage, leave it `undefined` here and declare it instead (step 4).
 
 ## Step 4 — declare what you don't discover
 

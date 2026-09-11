@@ -231,6 +231,20 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return row ? mapStrategyRow(row) : null;
     },
 
+    async listShareMintedStrategies(params) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_strategies
+             WHERE environment = ?
+               AND host_cluster = ?
+               AND share_mint IS NOT NULL
+             ORDER BY created_at ASC, id ASC`
+        )
+        .bind(params.environment, params.hostCluster)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapStrategyRow);
+    },
+
     async deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput) {
       // Only `active` rows are deleted. An operator `paused`/`deprecated` is a
       // deliberate human record, and it is load-bearing: upsertStrategy refuses
@@ -381,6 +395,36 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       );
     },
 
+    async listStrategyFigures(params) {
+      // Same jsonb_typeof guard as the ranking in listStrategies: the metadata
+      // bag is open, so a non-numeric tvlUsd reads as "no figure", not a 500.
+      const result = await db
+        .prepare(
+          `SELECT provider_reference, host_cluster, status, current_apy, environment,
+                  CASE WHEN jsonb_typeof(risk_metadata->'tvlUsd') = 'number'
+                       THEN (risk_metadata->>'tvlUsd')::numeric END AS tvl_usd
+             FROM earn_strategies
+            WHERE provider = ? AND environment = ?
+            ORDER BY provider_reference ASC`
+        )
+        .bind(params.provider, params.environment)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map((row) => {
+        const environment = row.environment as SdpEnvironment;
+        const tvl = row.tvl_usd === null || row.tvl_usd === undefined ? null : Number(row.tvl_usd);
+        return {
+          provider_reference: row.provider_reference as string,
+          // NULL host_cluster reads as the environment's own cluster, the
+          // mapStrategyRow rule.
+          host_cluster:
+            (row.host_cluster as SolanaCluster | null) ?? CLUSTER_BY_SDP_ENVIRONMENT[environment],
+          status: row.status as EarnStrategyStatus,
+          current_apy: row.current_apy as string | null,
+          tvl_usd: tvl !== null && Number.isFinite(tvl) ? tvl : null,
+        };
+      });
+    },
+
     async getProviderWalletById(params) {
       const row = await db
         .prepare(
@@ -395,8 +439,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async listProviderWallets(
       input: ListEarnProviderWalletsInput
     ): Promise<ListEarnProviderWalletsResult> {
-      const conditions = ["organization_id = ?", "environment = ?"];
-      const bindings: unknown[] = [input.organizationId, input.environment];
+      const conditions = ["organization_id = ?", "project_id = ?", "environment = ?"];
+      const bindings: unknown[] = [input.organizationId, input.projectId, input.environment];
 
       if (input.provider) {
         conditions.push("provider = ?");

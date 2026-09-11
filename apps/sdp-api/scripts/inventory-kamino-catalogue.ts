@@ -292,7 +292,9 @@ async function runFetch(): Promise<void> {
       tokenMint: vault.state.tokenMint,
       tokenSymbol: WELL_KNOWN_TOKEN_BY_MINT.get(vault.state.tokenMint)?.symbol ?? null,
       tvlUsd,
-      apy: metrics?.apy ?? null,
+      // The trailing 7d rate, which is what the shelf stores as `current_apy`
+      // (PRO-1922); the census must show the number the catalogue quotes.
+      apy: metrics?.apy7d ?? null,
       holders: metrics?.numberOfHolders ?? null,
       outcome: distilled.outcome,
       dropReason: distilled.outcome === "dropped" ? distilled.reason : null,

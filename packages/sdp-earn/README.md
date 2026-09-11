@@ -1,27 +1,27 @@
 # @sdp/earn — Earn provider integrations
 
-`@sdp/earn` is the provider-integration layer for SDP Earn (the dashboard's
-Markets → Earn module): curated stablecoin yield for org treasuries, fronted by
-vault-infrastructure providers. **Ground is the first live provider**; the
-architecture is deliberately multi-provider — every Ground-specific detail
-lives behind a provider-neutral seam so that adding infra provider #2 (or new
-curators, or new vaults) is a contained, checklist-driven change.
+`@sdp/earn` is the provider-integration layer for SDP Embedded Yield: curated
+stablecoin yield for organization treasuries and partner-owned end-user wallet
+experiences, fronted by vault-infrastructure providers. The architecture is
+deliberately multi-provider: provider-specific details live behind capability
+seams so adding a provider, curator, or vault stays checklist-driven.
 
 Two provider SHAPES now live here, and the difference decides which seams a new
 integration touches:
 
-| | **Custodial portfolio** (Ground) | **Catalogue-only** (Kamino) |
+| | **Custodial portfolio** (Ground) | **Vault-direct** (Kamino, Veda) |
 |---|---|---|
 | Money model | SDP provisions an omnibus wallet; the provider spreads funds across sources | Non-custodial — the customer's own wallet deposits into an on-chain vault |
-| Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | `EarnVaultProvider` + `EarnLiveMetricsProvider` |
+| Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | Catalogue client in `@sdp/earn`; execution client implements `EarnVaultDirectProvider` in its own package |
 | `/v1/earn/programs` | the whole flow | **501** by capability detection |
-| Credential | `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY` | none — public data API |
-| Clusters | catalogued per environment's own cluster | production → mainnet (REST); non-production → **devnet, read on-chain** |
-| Dashboard | the deposit wizard | not shown — API surface only |
+| Credential | `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY` | none today; public API or on-chain state |
+| Clusters | catalogued per environment's own cluster | deployment registry per cluster; Kamino has devnet and mainnet, Veda is devnet-only until a production vault is approved |
+| Dashboard | treasury program flow | treasury vault flow plus the API-key integration guide for external wallets |
 
-A catalogue-only provider is a complete integration, not a partial one: there is
-no wallet to provision, so `supportsPortfolioWallets` returning false is the
-answer, not a TODO. See CLAUDE.md → "Two provider shapes".
+A vault-direct provider is a complete integration without a portfolio wallet:
+`supportsPortfolioWallets` returning false is the answer, not a TODO. Its
+execution capability is discovered independently through
+`EarnVaultDirectProvider`. See CLAUDE.md → "Two provider shapes".
 
 The Clusters row above describes each provider's OWN catalogue sources. Since
 PRO-1742 every non-production environment additionally carries a browse-only
@@ -259,7 +259,7 @@ lifecycle-only in SDP's signing registry today and would need adapter work.
 
 ## Vault-direct money paths: who signs decides the surface
 
-A `vault_direct` provider (Kamino) custodies nothing: the vault is a program
+A `vault_direct` provider (Kamino or Veda) custodies nothing: the vault is a program
 account, and money moves only when a signed transaction lands on chain. SDP
 ships TWO signers over one runtime, and the signer decides which routes serve
 the flow:
@@ -270,7 +270,7 @@ the flow:
 | Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (build), then `/external-wallet/deposits` (submit) |
 | Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-transactions`, then `/external-wallet/withdrawals` |
 | Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
-| Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions/:ownerAddress`, `/positions/summary`, `/earnings/:ownerAddress` |
+| Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…` |
 | Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
 | Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
 
@@ -290,8 +290,9 @@ The external-wallet flow in one pass (PRO-1722):
    and returns `{transactionId, transaction}`. Nothing has moved; an unsigned
    build expires with its blockhash (about a minute).
 2. **Sign.** The customer's wallet signs those exact bytes in the partner's
-   UI. The owner is the fee payer and the only required signer; it also pays
-   any share-account rent (Kora sponsorship for this surface is PRO-1744).
+   UI. By default the owner is the fee payer and only required signer. To
+   sponsor fees and share-account rent, pass the partner wallet's `feePayer`
+   on the build and co-sign the same bytes with both wallets before submit.
 3. **Submit.** The backend returns `{transactionId, signedTransaction}` with a
    required `Idempotency-Key`. SDP proves the message is byte-for-byte the one
    it built, verifies the owner's signature, records the movement, THEN
@@ -351,9 +352,15 @@ packages/sdp-earn/src/
                                    drift, not data.
   providers/stub.ts                StubEarnClient — every method NOT_IMPLEMENTED;
                                    a new provider starts as a ~10-line subclass.
-  providers/ground/client.ts       The live Ground integration (catalogue
-                                   mapping + full portfolio capability).
-  providers/{veda,upshift,perena}/ Registered scaffolds awaiting integrations.
+  providers/ground/client.ts       Ground catalogue mapping + full portfolio
+                                   capability.
+  providers/veda/                  Live devnet Veda catalogue from on-chain
+                                   state; execution lives in @sdp/veda.
+  providers/{upshift,perena}/      Registered scaffolds awaiting integrations.
+
+packages/sdp-{kamino,veda}/        Provider SDK adapters implementing the
+                                   vault-direct plan, quote, withdrawal, and
+                                   sponsored-program capabilities.
 
 apps/sdp-api/src/
   routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
@@ -379,7 +386,10 @@ apps/sdp-api/src/
                                    signer shape, PRO-1722) and
                                    earn_external_wallet_transactions (the
                                    built-unsigned-transaction store its submit
-                                   step verifies against).
+                                   step verifies against); 0091 adds
+                                   earn_split_swap_advisories (PRO-1864, the
+                                   orphan-detection record for split swaps:
+                                   advisory state, never a movement).
                                    The mechanism-split tables above take no
                                    reads and no writes any more; a later
                                    migration drops them.
@@ -486,6 +496,27 @@ refresh is update-only.
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
+
+### Orphaned split-swap detection (`services/jobs/detect-orphaned-earn-split-swaps.ts`)
+
+- **What it does:** judges every open `earn_split_swap_advisories` row (written
+  when an external-wallet swap-funded deposit had to split) against the chain:
+  a confirmed/finalized follow-up deposit resolves it, an in-flight deposit or
+  recent follow-up build is the partner still working, and past the swap's
+  blockhash plus a 30-minute grace the owner's deposit-token balance is read
+  with the same call as the build-time baseline. A rise of at least the swap's
+  floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
+  it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
+- **When it runs:** on both schedulers, unconditionally (no earn flag gate: an
+  advisory written before an incident flag flip must keep being watched), under
+  the system database identity like every sweep. In-process the crontab is every
+  minute (`EARN_SPLIT_SWAPS_CRON`); the managed Cloud Run Job invokes it at the
+  deployment-provided Managed Reconciliation Cadence (three minutes in
+  production), which is what bounds alert latency there.
+- **Failure behaviour:** a chain read failure emits its own error event, marks
+  the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
+  cron run reads error; the job's own query failing emits no tick at all.
+- **Cadence:** `EARN_SPLIT_SWAPS_CRON` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue are deleted, scoped to the
   cluster sub-shelf the responding lane is the truth for. Operator-paused or
@@ -495,14 +526,38 @@ refresh is update-only.
   production skip), so orphaned mirror rows never outlive their truth source;
   fundable own shelves keep the absolute empty-keep-set refusal.
 
+### Figure anomaly check (`services/earn/catalogue-anomaly.ts`)
+
+Both passes take provider-reported APY and TVL at face value; this is the
+one check between a provider's number and the comparison table (PRO-1867,
+threat model EARN-010).
+
+- **What it does:** before either pass writes, it reads the stored figures for
+  the (provider, environment) it is about to write (`listStrategyFigures`,
+  the sync scoped to its lane's cluster sub-shelf) and diffs the incoming
+  figures against them. Every APY or TVL move past a bound, or an APY above
+  the absolute ceiling, is one `sdp_api_earn_catalogue_figure_anomaly` warn
+  event; a lane that held rows and reliably received an empty catalogue is
+  one `sdp_api_earn_catalogue_shelf_disappeared` error event, whether or not
+  the lane then delists. New rows are exempt from the diff, never from the
+  ceiling. A missing or unparseable figure on either side is skipped, not
+  guessed.
+- **What it never does:** block or alter a write. The write paths' own
+  invariants (update-only refresh, gated admission, the empty-keep-set
+  refusal) are untouched, and a failure reading the stored figures costs the
+  pass its diff, not its write.
+- **Bounds** live in `EARN_FIGURE_BOUNDS` (3x ratio with an absolute floor
+  for both metrics, 100% APY ceiling) and are starting points, pinned by a
+  test so a change is a deliberate diff. The Grafana rules
+  (`sdp-infra/kora/alert-rules/sdp-earn-catalogue-*.json`) key on the event
+  names, not the numbers.
+
 ## Invariants (do not break)
 
-1. **Money out beats money off.** The deposit-side operations (`POST /programs`
-   and `PUT /programs/:programId`) gate on full provider *availability*
-   (entitlement + enablement +
-   credentials). Withdrawal and live-read paths gate only on *configured
-   credentials*, and the withdrawal-ledger list takes no provider gate at all
-   — disabling a provider must never trap funds or hide their history.
+1. **Money out beats money off.** Money-in gates on environment, strategy,
+   surfacing, entitlement, and provider capability/configuration. Exit and
+   existing-position reads omit the money-in gates; history reads take no
+   provider gate. Disabling a provider must never trap funds or hide history.
 2. **Fail closed on drift.** Provider ids from the DB are open strings; all
    dispatch goes through `resolveEarnProviderClient`, which throws on unknown
    ids rather than guessing.
@@ -527,9 +582,10 @@ walk with the Ground integration as the worked example:
 2. Subclass `StubEarnClient` in `providers/<id>/client.ts`; register it in
    `EARN_PROVIDER_CLIENTS`; add the package.json subpath export (a
    registry-consistency test fails if you forget).
-3. Add the credential pair to env plumbing (`env.d.ts`, `turbo.json`,
-   `scripts/secret-keys.mjs` — a drift test fails if you forget) and a
-   one-line `keyPairCredentialDefinition` availability entry.
+3. Choose availability explicitly. A credentialed provider adds its key pair
+   to `env.d.ts`, `turbo.json`, `scripts/secret-keys.mjs`, and managed secret
+   projection. A public/on-chain provider joins the deliberate keyless set and
+   adds no placeholder secret.
 4. Implement capabilities method-by-method (`listStrategies` first — the sync
    cron picks it up automatically). If the provider is portfolio-based,
    implement `EarnPortfolioWalletProvider`; the program routes light up via the
@@ -539,10 +595,11 @@ walk with the Ground integration as the worked example:
 6. If SDP executes for the provider (vault-direct): the executing client in
    its own package (`packages/sdp-<id>`), the per-cluster deployment registry
    in `@sdp/types`, both API registry entries, and the three Kora sponsorship
-   allowlists (playbook §4d and step 9, including the sdp-infra pair).
+   allowlists. Also test owner-paid and caller-provided `feePayer` builds, and
+   publish every quote the provider requires in OpenAPI (playbook §4d).
 
-Curators and vault/category changes require **no code at all** — they are
-catalogue data (see the playbook).
+Curators and vaults are catalogue data. New closed category values require one
+shared type-registry update; see the playbook for each exact change shape.
 
 ## Testing
 

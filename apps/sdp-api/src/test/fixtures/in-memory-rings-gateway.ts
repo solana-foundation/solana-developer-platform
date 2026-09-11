@@ -1,10 +1,15 @@
 import type {
   BuildOperationInput,
   BuildOperationResult,
+  EnsureMergingEnabledInput,
+  EnsureMergingEnabledResult,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
+  ProvisionRingInput,
+  ProvisionRingResult,
   ReadIdentityInput,
   ReadIdentityResult,
+  RekeyIdentityInput,
   RingsGatewayPort,
   RuntimeHealth,
   SyncPhotonInput,
@@ -33,10 +38,18 @@ export interface InMemoryRingsGatewayOptions {
   buildUnsignedTx?: (input: BuildOperationInput) => string;
   /** Reported as the signed bytes' expiry, for the expiry sweep. */
   blockHeight?: number;
+  /** Override for tests that need ring bring-up to fail. */
+  provisionRing?: (input: ProvisionRingInput) => Promise<ProvisionRingResult>;
 }
 
 /** Op types that consume notes, and so have inputs worth pinning. */
-const SPENDS = new Set<string>(["transfer_registered", "withdraw", "merge"]);
+const SPENDS = new Set<string>([
+  "transfer_registered",
+  "withdraw",
+  "merge",
+  "ring_exit",
+  "ring_entry",
+]);
 
 const ALL_GREEN: RuntimeHealth = {
   rpc: "green",
@@ -65,8 +78,13 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
   private readonly indexingDelayMs: number;
   private readonly buildUnsignedTx?: (input: BuildOperationInput) => string;
   private readonly blockHeight: number;
+  private readonly provisionRingOverride?: (
+    input: ProvisionRingInput
+  ) => Promise<ProvisionRingResult>;
   private readonly syncCounters = new Map<string, number>();
   private readonly submittedAt = new Map<string, number>();
+  /** Public so a test can assert the on-chain merge gate was cleared first. */
+  readonly mergingEnabledCalls: EnsureMergingEnabledInput[] = [];
 
   constructor(options: InMemoryRingsGatewayOptions = {}) {
     this.now = options.now ?? (() => new Date().toISOString());
@@ -74,6 +92,7 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     this.indexingDelayMs = options.indexingDelayMs ?? 0;
     this.buildUnsignedTx = options.buildUnsignedTx;
     this.blockHeight = options.blockHeight ?? 1_000;
+    this.provisionRingOverride = options.provisionRing;
   }
 
   async probeHealth(): Promise<RuntimeHealth> {
@@ -88,9 +107,52 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
         owner: input.sdpAddress,
       },
       registrationSignatures: [`sig:${hashHex(`${seed}:register`, 8)}`],
-      mergingEnabled: true,
       materialTag: "simulated",
     };
+  }
+
+  async provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult> {
+    if (this.provisionRingOverride) {
+      return this.provisionRingOverride(input);
+    }
+    return {
+      // 65-byte uncompressed SEC1 shape: 0x04 then two deterministic 32-byte halves.
+      auditorPublicKeyHex: `04${hashHex(`auditor:${input.ringProgramId}`, 64)}`,
+      // Adopts a recorded table like real bring-up; otherwise a deterministic
+      // base58-shaped address (hex with 0, the one invalid char, swapped out).
+      lookupTableAddress:
+        input.lookupTableAddress ??
+        `Lt${hashHex(`lookup:${input.ringProgramId}`, 20).replaceAll("0", "z")}`,
+    };
+  }
+
+  /**
+   * Lands on the same identity `readIdentity` derives, which is what a real
+   * rotation does: the record moves off whatever stale keys it published and
+   * onto the ones this wallet's material derives now.
+   */
+  async rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult> {
+    const seed = `${input.walletId}:${input.owner}`;
+    return {
+      identity: {
+        shieldedAddress: `rings1${hashHex(`${seed}:address`, 16)}`,
+        owner: input.owner,
+      },
+      registrationSignatures: [`sig:${hashHex(`${seed}:rekey`, 8)}`],
+      materialTag: "simulated",
+    };
+  }
+
+  /**
+   * Records the call so tests can assert a merge clears the on-chain gate
+   * before building. Answers "already on" because the interesting case here is
+   * the ordering, not the transaction.
+   */
+  async ensureMergingEnabled(
+    input: EnsureMergingEnabledInput
+  ): Promise<EnsureMergingEnabledResult> {
+    this.mergingEnabledCalls.push(input);
+    return { signature: null };
   }
 
   async readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult> {
@@ -113,7 +175,16 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
     const amountRaw = String(1_000_000_000 * next);
 
     return {
-      balances: [{ mint: NATIVE_MINT, amountRaw, decimals: 9, symbol: "SOL" }],
+      balances: [
+        {
+          mint: NATIVE_MINT,
+          amountRaw,
+          decimals: 9,
+          symbol: "SOL",
+          ringProgramId: null,
+          noteCount: 1,
+        },
+      ],
       history: [
         {
           signature: `sig:${hashHex(`${input.walletId}:${next}`, 8)}`,
@@ -153,10 +224,13 @@ export class InMemoryRingsGateway implements RingsGatewayPort {
       requiredSigners: [input.owner],
       lastValidBlockHeight: String(this.blockHeight),
       // Honours pinned inputs, so a test can assert that a rebuild spends what
-      // the first build committed to rather than choosing again.
-      inputNotes: SPENDS.has(input.operation.opType)
-        ? (input.pinnedInputs ?? [`note:${hashHex(`${seed}:note`, 16)}`])
-        : [],
+      // the first build committed to rather than choosing again. Ring-bound
+      // spends mirror the real SDK: the one-call builders re-select notes on
+      // every build, so nothing is pinned and nothing comes back.
+      inputNotes:
+        SPENDS.has(input.operation.opType) && !input.operation.ringProgramId
+          ? (input.pinnedInputs ?? [`note:${hashHex(`${seed}:note`, 16)}`])
+          : [],
       proof: {
         source: "simulated",
         ref: new SecretRef(hashHex(`${seed}:proof`, 32)),

@@ -25,6 +25,10 @@ import {
 } from "@/services/credential-secret-store";
 import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
 import {
+  assertCredentialCreationSettled,
+  recoverCredentialCreation,
+} from "@/services/provider-credential-creation";
+import {
   decideInstallation,
   type InstallationConflictReason,
   installationFactsFromConnection,
@@ -88,7 +92,7 @@ type TransactionResult =
   | { kind: "committed"; result: ProviderCredentialSubmissionResult }
   | { kind: "replay"; result: ProviderCredentialSubmissionResult };
 
-type CompensationOutcome = "not_required" | "succeeded" | "failed" | "deferred";
+type CompensationOutcome = "not_required" | "deferred";
 
 type SubmissionAuditBase = {
   organizationId: string;
@@ -122,6 +126,7 @@ interface PersistedSubmission extends PreparedSubmission {
   connectionId: string;
   secretStore?: CredentialSecretStore;
   stored: StoredCredentialSecret;
+  existingSecretRef?: string;
 }
 
 class SetupConflict extends Error {
@@ -385,14 +390,25 @@ async function persistPreparedSubmission(
   try {
     let secretStore: CredentialSecretStore | undefined;
     let stored: StoredCredentialSecret;
+    let existingSecretRef: string | undefined;
     if (prepared.credentialSource === "stored") {
       secretStore = await createSubmissionSecretStore(prepared, providerCredentialId, connectionId);
-      stored = await writeSubmissionSecret(
-        prepared,
-        providerCredentialId,
-        connectionId,
-        secretStore
-      );
+      if (
+        secretStore.storageBackend === "gcp_secret_manager" &&
+        prepared.preflightPlan.kind === "replacement"
+      ) {
+        existingSecretRef =
+          (await prepared.store.findGcpContainerRef(
+            prepared.organizationId,
+            prepared.preflightPlan.currentCredential.id
+          )) ?? undefined;
+      }
+      stored =
+        secretStore.storageBackend === "gcp_secret_manager"
+          ? existingSecretRef
+            ? { storageBackend: "gcp_secret_manager", secretRef: existingSecretRef }
+            : credentialSecretStore.prepareGcpCredentialSecret(prepared.c.env, providerCredentialId)
+          : await writeSubmissionSecret(prepared, providerCredentialId, connectionId, secretStore);
     } else {
       stored = { storageBackend: "runtime_env" };
     }
@@ -403,6 +419,7 @@ async function persistPreparedSubmission(
       connectionId,
       ...(secretStore ? { secretStore } : {}),
       stored,
+      existingSecretRef,
     });
 
     if (transaction.kind === "committed") {
@@ -483,7 +500,8 @@ async function writeSubmissionSecret(
   context: SubmissionContext,
   providerCredentialId: string,
   connectionId: string,
-  secretStore: CredentialSecretStore
+  secretStore: CredentialSecretStore,
+  existingSecretRef?: string
 ): Promise<StoredCredentialSecret> {
   const fields = requireStoredFields(context.input);
   try {
@@ -491,6 +509,7 @@ async function writeSubmissionSecret(
       orgId: context.organizationId,
       provider: context.input.provider,
       providerCredentialId,
+      existingSecretRef,
       payload: {
         appId: fields.appId,
         appSecret: fields.appSecret,
@@ -522,28 +541,69 @@ async function writeSubmissionSecret(
 }
 
 async function commitSubmission(submission: PersistedSubmission): Promise<TransactionResult> {
-  let transactionResult: TransactionResult;
+  let transactionResult: TransactionResult | { kind: "reserved" };
   try {
-    transactionResult = await runSubmissionTransaction(submission);
+    transactionResult = await runSubmissionTransaction(
+      submission,
+      submission.stored.storageBackend === "gcp_secret_manager" ? "reserve" : "commit"
+    );
   } catch (error) {
     return recoverTransactionFailure(submission, error);
   }
 
-  if (transactionResult.kind === "replay" && submission.secretStore) {
-    await compensateSecretWrite(
-      submission.c,
-      submission.secretStore,
-      submission.stored,
-      submission.providerCredentialId
-    );
+  if (transactionResult.kind === "reserved") {
+    let stored: StoredCredentialSecret | undefined;
+    try {
+      if (!submission.secretStore) throw internalError();
+      stored = await writeSubmissionSecret(
+        submission,
+        submission.providerCredentialId,
+        submission.connectionId,
+        submission.secretStore,
+        submission.existingSecretRef
+      );
+      if (!stored.secretRef || !stored.secretVersionRef) throw internalError();
+      const finalized = await runSubmissionTransaction({ ...submission, stored }, "finalize");
+      if (finalized.kind === "reserved") throw internalError();
+      return finalized;
+    } catch (error) {
+      const recovered = await recoverCredentialCreation(
+        submission.c,
+        submission.organizationId,
+        submission.providerCredentialId,
+        stored
+      );
+      if (recovered.kind === "adopted") {
+        return {
+          kind: "committed",
+          result: await resolveReplay(submission, recovered.credential, submission.fingerprint),
+        };
+      }
+      if (recovered.kind === "unknown") {
+        throw new SubmissionOutcomeUnknown(
+          providerUnavailable("Credential creation outcome is temporarily unknown")
+        );
+      }
+      if (error instanceof SubmissionOutcomeUnknown) throw error.responseError;
+      if (error instanceof SetupConflict) throw setupConflictResponse(error);
+      if (error instanceof AppError) throw error;
+      await auditFailure(submission.c, submission.audit, submission.auditBase, {
+        reason: "database_failure",
+        resourceId: submission.providerCredentialId,
+        storageBackend: "gcp_secret_manager",
+        compensationOutcome: "deferred",
+      });
+      throw internalError();
+    }
   }
 
   return transactionResult;
 }
 
 async function runSubmissionTransaction(
-  submission: PersistedSubmission
-): Promise<TransactionResult> {
+  submission: PersistedSubmission,
+  phase: "reserve" | "finalize" | "commit"
+): Promise<TransactionResult | { kind: "reserved" }> {
   return submission.db.transaction(async (tx) => {
     const txStore = new ProviderCredentialStore(tx);
     if (!(await txStore.lockProject(submission.organizationId, submission.projectId))) {
@@ -554,7 +614,14 @@ async function runSubmissionTransaction(
       submission.organizationId,
       submission.idempotencyKey
     );
-    if (concurrentReplay) {
+    if (
+      concurrentReplay &&
+      !(
+        phase === "finalize" &&
+        concurrentReplay.id === submission.providerCredentialId &&
+        concurrentReplay.status === "creating"
+      )
+    ) {
       return {
         kind: "replay",
         result: await resolveReplay(
@@ -565,43 +632,66 @@ async function runSubmissionTransaction(
       };
     }
 
-    const lockedPlan = await classifySetup({ ...submission, store: txStore }, true);
+    const lockedPlan = await classifySetup(
+      { ...submission, store: txStore },
+      true,
+      phase === "finalize" ? submission.providerCredentialId : undefined
+    );
     assertSameSetupPlan(submission.preflightPlan, lockedPlan);
 
     if (submission.credentialSource === "runtime" && lockedPlan.kind === "replacement") {
       throw new SetupConflict(undefined, lockedPlan.connection.id);
     }
-    const fields =
-      submission.credentialSource === "stored" ? requireStoredFields(submission.input) : null;
-    const version =
-      lockedPlan.kind === "replacement" ? lockedPlan.currentCredential.credential_version + 1 : 1;
-    const rotatedFromId =
-      lockedPlan.kind === "replacement" ? lockedPlan.currentCredential.id : null;
-    const displayMetadata: Record<string, string> =
-      fields && fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {};
-
-    const providerCredential = await txStore.insertCredential({
-      id: submission.providerCredentialId,
-      organizationId: submission.organizationId,
-      projectId: submission.projectId,
-      provider: "privy",
-      label: fields?.credentialLabel ?? RUNTIME_CREDENTIAL_LABEL,
-      scope: "project",
-      source: submission.credentialSource,
-      stored: submission.stored,
-      displayMetadata,
-      version,
-      rotatedFromId,
-      idempotencyKey: submission.idempotencyKey,
-      idempotencyFingerprint: submission.fingerprint,
-      createdBy: submission.userId,
-    });
+    const providerCredential =
+      phase === "finalize"
+        ? await txStore.finalizeCredentialCreation({
+            organizationId: submission.organizationId,
+            credentialId: submission.providerCredentialId,
+            secretRef: submission.stored.secretRef ?? "",
+            secretVersionRef: submission.stored.secretVersionRef ?? "",
+          })
+        : await insertSubmissionCredential(txStore, submission, lockedPlan, phase === "reserve");
+    if (!providerCredential)
+      throw conflict("Credential creation was cancelled; start a new attempt");
+    if (phase === "reserve") return { kind: "reserved" };
     await persistConnection(txStore, submission, lockedPlan, providerCredential);
 
     return {
       kind: "committed",
       result: mapSubmissionResult(providerCredential, submission.connectionId),
     };
+  });
+}
+
+async function insertSubmissionCredential(
+  store: ProviderCredentialStore,
+  submission: PersistedSubmission,
+  plan: SetupPlan,
+  creating: boolean
+): Promise<ProviderCredentialRow> {
+  const fields =
+    submission.credentialSource === "stored" ? requireStoredFields(submission.input) : null;
+  return store.insertCredential({
+    id: submission.providerCredentialId,
+    organizationId: submission.organizationId,
+    projectId: submission.projectId,
+    provider: "privy",
+    label: fields?.credentialLabel ?? RUNTIME_CREDENTIAL_LABEL,
+    scope: "project",
+    source: submission.credentialSource,
+    stored: submission.stored,
+    displayMetadata:
+      fields && fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {},
+    version:
+      plan.kind === "replacement"
+        ? await store.nextCredentialVersion(submission.organizationId, plan.currentCredential.id)
+        : 1,
+    rotatedFromId: plan.kind === "replacement" ? plan.currentCredential.id : null,
+    idempotencyKey: submission.idempotencyKey,
+    idempotencyFingerprint: submission.fingerprint,
+    createdBy: submission.userId,
+    status: creating ? "creating" : "pending",
+    ownsGcpContainer: creating && !submission.existingSecretRef,
   });
 }
 
@@ -657,7 +747,7 @@ async function recoverTransactionFailure(
       }
     }
 
-    const compensationOutcome = await compensateSubmissionSecret(submission);
+    const compensationOutcome = "not_required";
     return {
       kind: "replay",
       result: await resolveReplayWithAudit(
@@ -673,11 +763,11 @@ async function recoverTransactionFailure(
   }
 
   if (reconciliation.kind === "unknown") {
-    reportManualSecretCleanupRequired(submission);
     throw new SubmissionOutcomeUnknown(internalError());
   }
 
-  const compensationOutcome = await compensateSubmissionSecret(submission);
+  // This transaction precedes every GCP write; local ciphertext needs no external undo.
+  const compensationOutcome = "not_required";
 
   if (error instanceof SetupConflict) {
     await auditFailure(submission.c, submission.audit, submission.auditBase, {
@@ -749,35 +839,6 @@ async function reconcileTransactionOutcome(
   }
 }
 
-function reportManualSecretCleanupRequired(submission: PersistedSubmission): void {
-  if (submission.stored.storageBackend !== "gcp_secret_manager") {
-    return;
-  }
-
-  logOrphanRisk({
-    providerCredentialId: submission.providerCredentialId,
-    storageBackend: submission.stored.storageBackend,
-    providerResourceVersion: submission.stored.secretVersionRef
-      ? parseProviderResourceVersion(submission.stored.secretVersionRef)
-      : undefined,
-    requestId: submission.c.get("requestId"),
-    reason: "secret_cleanup_failed",
-  });
-}
-
-async function compensateSubmissionSecret(
-  submission: PersistedSubmission
-): Promise<CompensationOutcome> {
-  return submission.secretStore
-    ? compensateSecretWrite(
-        submission.c,
-        submission.secretStore,
-        submission.stored,
-        submission.providerCredentialId
-      )
-    : "not_required";
-}
-
 async function buildProviderCredentialSubmissionFingerprint(params: {
   organizationId: string;
   projectId: string;
@@ -818,6 +879,7 @@ async function resolveReplay(
   fingerprint: string
 ): Promise<ProviderCredentialSubmissionResult> {
   await resolveIdempotencyReplay(async () => replay, fingerprint);
+  assertCredentialCreationSettled(replay);
   const connectionIds = await context.store.findConnectionIdsForCredentialLineage(
     context.organizationId,
     context.projectId,
@@ -844,7 +906,11 @@ async function resolveReplayWithAudit(
   try {
     return await resolveReplay(context, replay, fingerprint);
   } catch (error) {
-    if (error instanceof AppError && error.code === "CONFLICT") {
+    if (
+      error instanceof AppError &&
+      error.code === "CONFLICT" &&
+      replay.idempotency_fingerprint !== fingerprint
+    ) {
       await auditFailure(context.c, context.audit, context.auditBase, {
         reason: "idempotency_key_reused",
         resourceId: failure?.failureResourceId,
@@ -890,8 +956,19 @@ async function classifySetup(
     SubmissionContext,
     "store" | "organizationId" | "projectId" | "replacementConnectionId"
   >,
-  lock = false
+  lock = false,
+  creatingCredentialId?: string
 ): Promise<SetupPlan> {
+  const creating = await context.store.findCreatingSubmission(
+    context.organizationId,
+    context.projectId
+  );
+  if (creating && creating.id !== creatingCredentialId) {
+    throw new SetupConflict(
+      "unfinished_installation_exists",
+      context.replacementConnectionId ?? undefined
+    );
+  }
   if (!context.replacementConnectionId) {
     const connections = await context.store.listProjectConnections(
       context.organizationId,
@@ -911,7 +988,7 @@ async function classifySetup(
     context.organizationId,
     context.projectId,
     context.replacementConnectionId,
-    { lock }
+    { lock, excludedCreatingCredentialId: creatingCredentialId }
   );
   if (!connection) {
     throw notFound("Custody Connection");
@@ -988,39 +1065,6 @@ export function mapProviderCredential(row: ProviderCredentialRow): SafeProviderC
     createdAt: row.created_at,
     displayMetadata: appIdSuffix ? { appIdSuffix } : {},
   };
-}
-
-async function compensateSecretWrite(
-  c: Context<{ Bindings: Env }>,
-  store: CredentialSecretStore,
-  stored: StoredCredentialSecret,
-  providerCredentialId: string
-): Promise<CompensationOutcome> {
-  if (stored.storageBackend !== "gcp_secret_manager" || !stored.secretVersionRef) {
-    return "not_required";
-  }
-
-  try {
-    await store.destroyVersion({ secretVersionRef: stored.secretVersionRef });
-    return "succeeded";
-  } catch {
-    logOrphanRisk({
-      providerCredentialId,
-      storageBackend: stored.storageBackend,
-      providerResourceVersion: parseProviderResourceVersion(stored.secretVersionRef),
-      requestId: c.get("requestId"),
-      reason: "secret_cleanup_failed",
-    });
-    return "failed";
-  }
-}
-
-function parseProviderResourceVersion(secretVersionRef: string): number | undefined {
-  const value = secretVersionRef.split("/").at(-1);
-  if (!value || !/^[1-9][0-9]*$/.test(value)) {
-    return undefined;
-  }
-  return Number(value);
 }
 
 function logOrphanRisk(params: {

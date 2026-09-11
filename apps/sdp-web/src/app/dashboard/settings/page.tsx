@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { MembersSection } from "./members-section";
@@ -36,6 +37,9 @@ export default async function SettingsPage({
 
   return (
     <div className="w-full flex flex-col gap-6">
+      {dashboardAccess.capabilities.canManageApiKeys ? (
+        <DashboardQuickStart variant="settings" />
+      ) : null}
       {/* canManageOrgSettings resolves to org:write, which is what inviting a
           member requires. */}
       {dashboardAccess.capabilities.canManageOrgSettings ? (

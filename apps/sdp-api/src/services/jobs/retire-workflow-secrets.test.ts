@@ -10,12 +10,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createAssetWorkflowsRepository } from "@/db/repositories";
 import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import { destroyActionSecret } from "@/services/workflows/action-secret";
+import { destroyActionSecret, queuePendingActionSecret } from "@/services/workflows/action-secret";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { retireOrphanedActionSecrets } from "./retire-workflow-secrets";
 
 const secretStore = vi.hoisted(() => ({
@@ -179,6 +181,16 @@ describe("orphaned workflow secret retirement", () => {
     expect(new Date(queued[0]?.next_attempt_at ?? 0).getTime()).toBeGreaterThan(sweptAt.getTime());
   });
 
+  it("does not infer destruction from a FAILED_PRECONDITION error", async () => {
+    secretStore.destroyVersion.mockRejectedValue(new Error("FAILED_PRECONDITION"));
+    await destroyActionSecret(env, storedSecret(), { orgId: "org_1", workflowId: "wf_1" });
+
+    const result = await retireOrphanedActionSecrets(env, new Date(Date.now() + 1_000));
+
+    expect(result).toEqual({ retired: 0, failed: 1 });
+    expect(await queuedRetirements()).toHaveLength(1);
+  });
+
   // Backoff has to actually hold the row back, or the sweep is a busy loop.
   it("leaves a not-yet-due row alone", async () => {
     secretStore.destroyVersion.mockRejectedValue(new Error("permission denied"));
@@ -245,6 +257,108 @@ describe("orphaned workflow secret retirement", () => {
 
   // Backends that store the ciphertext inline have no external version to destroy; it
   // goes away with the row, so there is nothing to queue.
+  it("queues a provisional action-secret obligation with a grace period, not immediately due", async () => {
+    await queuePendingActionSecret(env, {
+      orgId: "org-1",
+      workflowId: "wf-1",
+      stored: storedSecret(),
+    });
+
+    const rows = await queuedRetirements();
+    expect(rows).toHaveLength(1);
+    expect(Date.parse(rows[0].next_attempt_at)).toBeGreaterThan(Date.now() + 5 * 60 * 1000);
+  });
+
+  it("refuses to commit a workflow whose credential obligation was claimed by the sweeper", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES ('org-wfr', 'Retire Test', 'retire-test', 'individual', 'active')"
+      )
+      .run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr-wfr', 'retire-test@example.com', 1, 'active')"
+      )
+      .run();
+    await seedDefaultProjects(db, {
+      organizationId: "org-wfr",
+      createdBy: "usr-wfr",
+      members: [],
+      ids: { sandbox: "prj-wfr", production: "prj-wfr-production" },
+    });
+    await db
+      .prepare(
+        `INSERT INTO issued_tokens (id, organization_id, project_id, name, symbol, created_by)
+         VALUES ('tok-wfr', 'org-wfr', 'prj-wfr', 'Retire Test Token', 'RTT', 'usr-wfr')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .run();
+    await queuePendingActionSecret(env, {
+      orgId: "org-wfr",
+      workflowId: "wf-claimed",
+      stored: storedSecret(),
+    });
+    await getDb(env)
+      .prepare(
+        "UPDATE workflow_action_secret_retirements SET attempt_count = 1 WHERE secret_version_ref = ?"
+      )
+      .bind(VERSION_REF)
+      .run();
+
+    const repo = createAssetWorkflowsRepository(env);
+    await expect(
+      repo.createWorkflow({
+        id: "wf_claimed_test",
+        organizationId: "org-wfr",
+        projectId: "prj-wfr",
+        tokenId: "tok-wfr",
+        triggerType: "kyc_approved",
+        actionType: "send_webhook",
+        definition: {
+          condition: null,
+          action: { type: "send_webhook", params: { url: "https://example.test" } },
+          retryPolicy: { maxAttempts: 5, retryAfterMinutes: 5 },
+          actionSecret: storedSecret(),
+        },
+        version: 1,
+        reviewMode: "manual",
+        enabled: true,
+        createdBy: "usr-wfr",
+        clearRetirementFor: storedSecret(),
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+
+    const workflows = await getDb(env)
+      .prepare("SELECT id FROM asset_workflows WHERE id = ?")
+      .bind("wf_claimed_test")
+      .first();
+    expect(workflows).toBeNull();
+    const rows = await queuedRetirements();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("clears a reserved row whose predicted version was never written", async () => {
+    secretStore.destroyVersion.mockRejectedValueOnce(
+      new CredentialSecretStoreError(
+        "GCP Secret Manager request failed: NOT_FOUND",
+        "UPSTREAM_ERROR"
+      )
+    );
+    await getDb(env)
+      .prepare(
+        `INSERT INTO workflow_action_secret_retirements
+           (id, organization_id, workflow_id, storage_backend, secret_ref, secret_version_ref, last_error, next_attempt_at)
+         VALUES ('wsr_reserved', 'org-1', NULL, 'gcp_secret_manager', NULL, ?, 'reserved for a write that has not happened yet', ?)`
+      )
+      .bind(VERSION_REF, new Date(Date.now() - 1000).toISOString())
+      .run();
+
+    await retireOrphanedActionSecrets(env);
+
+    expect(await queuedRetirements()).toHaveLength(0);
+  });
+
   it("ignores a non-GCP backend", async () => {
     await destroyActionSecret(
       env,

@@ -1,6 +1,11 @@
 -- Seed data for local development
 -- Run with: pnpm db:seed:local
 
+-- Seeding crosses tenant boundaries; forced row-level security (migration
+-- 0063) also binds non-superuser table owners, so declare the privileged
+-- session identity explicitly.
+SET app.tenant_isolation_identity = 'system';
+
 -- Add some allowlist entries for testing
 INSERT INTO allowlist (id, type, value, tier, notes) VALUES
     ('al_001', 'domain', 'solana.org', 'enterprise', 'Solana Foundation'),
@@ -22,7 +27,7 @@ INSERT INTO organization_members (id, organization_id, user_id, role, status) VA
 
 -- Create a test project (api_keys.project_id is a required reference)
 INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES
-    ('prj_test123456789', 'org_test123456789', 'Test Project', 'test-project', 'sandbox', 'active', 'usr_test123456789');
+    ('prj_test123456789', 'org_test123456789', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_test123456789');
 
 -- Create a test API key
 -- key_hash is derived from the documented dev key via Postgres' built-in sha256(),

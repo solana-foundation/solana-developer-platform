@@ -171,7 +171,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
-| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; locally it is usually entitlement (§5), and production stays `environment_unavailable` until PRO-1703 lands (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`, @sdp/types) |
+| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; production Kamino remains `environment_unavailable` in the provider-scoped deposit-environment map |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
@@ -273,6 +273,17 @@ page it links is fetchable as raw markdown):
   404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` there and
   sandbox rows render no rate. Computing one would mean blending devnet Klend
   reserve rates (an SDK-sized job) for a number that is ≈0 anyway.
+- **The shelf quotes the TRAILING 7d rate, never the spot rate.** The metrics
+  row carries both: `apy` is the instantaneous blended rate and tracks Klend
+  reserve utilization minute to minute, `apy7d` is the trailing week. On
+  2026-09-10 the Main Market USDC reserve hit ~97% utilization and `apy` read
+  18-23% on six USDC vaults whose `apy7d` sat at 3-7%, which fired the
+  PRO-1867 anomaly alert 15 times on a number that was true for the hour and
+  useless as a yield quote. So `currentApy` is `apy7d` at both call sites
+  (`distillKaminoVault` and `listStrategyMetrics`), the spot figure rides along
+  as `riskMetadata.spotApy` for a future "current" column, and a missing
+  `apy7d` is "no rate", not a fallback to `apy` (PRO-1922). Kamino's own vault
+  page headline is a trailing figure too; do not quote hotter than the provider.
 - **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
   everything ever created — 173 vaults, of which ~90 stablecoin ones are dust or
   literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)
@@ -375,8 +386,9 @@ three gates enforce its answer, none of which may re-derive the comparison:
    thing that can drift toward permissive.
 
 Note `fundable` answers the cluster question ALONE. `true` does not promise a
-deposit will succeed — a catalogue-only provider still answers 501, and the org
-still needs entitlement. See the field's doc comment in `@sdp/types`.
+deposit will succeed: the matching execution capability, money-in environment,
+active strategy, and organization entitlement must still pass. See the field's
+doc comment in `@sdp/types`.
 
 `status` cannot express this: it is the operator's stop switch, and reusing it
 would misstate the reason AND collide with the repository's refusal to overwrite

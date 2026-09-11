@@ -30,10 +30,10 @@ Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` 
 | stablecoin/fiat_backed | stablecoin | req | req | req | — | — | — | — | — |
 | stablecoin/crypto_backed | stablecoin | req | req | req | — | — | — | — | — |
 | stablecoin/generic | stablecoin | req | req | req | — | — | — | — | — |
-| tokenized_security/generic | tokenized-security | req | req | req | — | — | rec | — | — |
-| tokenized_security/equity | tokenized-security | req | req | req | — | — | rec | — | — |
-| tokenized_security/debt | tokenized-security | req | req | req | — | — | rec | — | — |
-| tokenized_security/fund | tokenized-security | req | req | req | — | — | rec | — | — |
+| tokenized_security/generic | tokenized-security | req | req | req | — | — | opt | — | — |
+| tokenized_security/equity | tokenized-security | req | req | req | — | — | opt | — | — |
+| tokenized_security/debt | tokenized-security | req | req | req | — | — | opt | — | — |
+| tokenized_security/fund | tokenized-security | req | req | req | — | — | opt | — | — |
 
 ## Unsupported gaps
 

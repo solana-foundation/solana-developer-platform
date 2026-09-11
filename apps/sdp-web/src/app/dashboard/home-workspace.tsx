@@ -3,7 +3,7 @@
 import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
 import { ArrowLeftRight, Coins, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { TokenMark } from "@/components/token-mark";
@@ -21,6 +21,13 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { readApiErrorMessage } from "@/lib/api-error";
+import {
+  isQuickStartDismissed,
+  quickStartKey,
+  readQuickStart,
+  subscribeQuickStart,
+} from "@/lib/dashboard-quick-start";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -28,8 +35,11 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "./activity-format-utils";
 import { buildHomeBalanceBreakdown, countHeldTokens } from "./home-balance-breakdown";
 import { resolveHomeHeroState } from "./home-first-run";
-import type { HomeActivityExplorerRef, HomeActivityRow } from "./home-page.data";
-import { HomeQuickActions } from "./home-quick-actions";
+import {
+  filterHomeActivityRowsByFlags,
+  type HomeActivityExplorerRef,
+  type HomeActivityRow,
+} from "./home-page.data";
 import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
@@ -487,19 +497,17 @@ function BalanceHero({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {canManageApiKeys ? (
+            {canManageApiKeys && walletCount > 0 ? (
               <CreateApiKeyModal
                 triggerLabel={t("Shared.SharedComponents.createApiKey")}
                 triggerVariant="secondary"
               />
             ) : null}
             {canManageCustody ? (
-              // Secondary, not primary. An organization with balances has already
-              // created its wallets; leading this screen with "Create Wallet" gave
-              // a setup action top billing over the numbers the page exists to
-              // show. It stays reachable, it just stops competing with them.
-              <Button asChild variant="secondary">
-                <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
+              <Button asChild variant={walletCount === 0 ? "default" : "secondary"}>
+                <Link href="/dashboard/wallets/setup">
+                  {t("Shared.homeWorkspace.createWallet")}
+                </Link>
               </Button>
             ) : null}
           </div>
@@ -538,37 +546,6 @@ function BalanceHero({
   );
 }
 
-/**
- * What to do when there is nothing yet.
- *
- * The populated layout rendered four zeroes and a hint under each, which reads as a
- * broken dashboard rather than a new one. A first run gets one instruction and the
- * action next to it instead.
- */
-function FirstRunPanel({ canCreateWallet }: { canCreateWallet: boolean }) {
-  const t = useTranslations();
-  return (
-    <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
-      <CardContent className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 px-6 py-8">
-        <div className="min-w-0 max-w-xl space-y-2">
-          <h2 className="text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary">
-            {t("Shared.homeWorkspace.firstRunTitle")}
-          </h2>
-          <p className="text-sm text-tertiary">{t("Shared.homeWorkspace.firstRunBody")}</p>
-        </div>
-        {canCreateWallet ? (
-          <Button
-            asChild
-            className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
-          >
-            <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
-          </Button>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 export function HomeWorkspace({
   totalBalance,
   totalBalanceError,
@@ -580,7 +557,18 @@ export function HomeWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
-  const { dashboardAccess } = useDashboardWorkspace();
+  const { dashboardAccess, flags, dashboardCacheScope, initialQuickStartStep, sdpEnvironment } =
+    useDashboardWorkspace();
+  const progressKey = quickStartKey(dashboardCacheScope);
+  const quickStartFinished = useSyncExternalStore(
+    subscribeQuickStart,
+    () =>
+      isQuickStartDismissed(progressKey) ||
+      readQuickStart(progressKey, initialQuickStartStep) === "done",
+    () => initialQuickStartStep === "done"
+  );
+  const custodyEnabled = flags.custody;
+  const issuanceEnabled = flags.issuance;
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
     () => fetchHomeActivity(),
@@ -595,9 +583,8 @@ export function HomeWorkspace({
   );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
-  // Not `wallets.length === 0`: onboarding provisions a wallet before it completes,
-  // so a freshly onboarded organization already has one and fell through to the
-  // populated hero holding nothing.
+  // Not `wallets.length === 0`: organizations may already have one provisioned
+  // wallet and still need an explicit next step rather than an empty balance hero.
   // `totalBalanceError` is set only when the aggregate request itself failed
   // on an organization that has wallets. That is the only failure the response
   // exposes today: the API converts per-wallet read failures into zero rows on
@@ -610,26 +597,25 @@ export function HomeWorkspace({
     totalBalance,
     balancesUnavailable: totalBalanceError !== null,
   });
+  const balancePresentation =
+    heroState.kind === "populated"
+      ? { totalBalance, hasPricedValue: heroState.hasPricedValue }
+      : { totalBalance: 0, hasPricedValue: true };
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
       ? t("Shared.homeWorkspace.noTrackedBalances")
       : null;
   const todaysVolume = activitySnapshot?.todaysVolume ?? null;
-  const todaysVolumeError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
-      : t("Shared.homeWorkspace.activityUnavailable")
-    : (activitySnapshot?.activityError ?? null);
-  const activityRows = activitySnapshot?.activityRows ?? [];
+  const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
+    issuance: issuanceEnabled,
+  });
   const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
   const issuedTokensByMint = Object.fromEntries(
     issuedTokens.map((token) => [token.mintAddress, token])
   );
   const activityError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
-      : t("Shared.homeWorkspace.activityUnavailable")
+    ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityNotice = activitySnapshot?.activityNotice ?? null;
   const emptyActivityMessage = isWalletEmptyState
@@ -641,25 +627,24 @@ export function HomeWorkspace({
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
-        {heroState.kind === "first_run" ? (
-          <FirstRunPanel canCreateWallet={dashboardAccess.capabilities.canManageCustody} />
-        ) : heroState.kind === "provisioned_empty" ? (
-          <HomeQuickActions capabilities={dashboardAccess.capabilities} />
-        ) : (
+        {heroState.kind !== "populated" &&
+        sdpEnvironment === "sandbox" &&
+        !quickStartFinished &&
+        initialQuickStartStep === "api-key" &&
+        dashboardAccess.capabilities.canManageApiKeys ? null : (
           <BalanceHero
-            totalBalance={totalBalance}
+            {...balancePresentation}
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
-            hasPricedValue={heroState.hasPricedValue}
             todaysVolume={todaysVolume}
-            todaysVolumeError={todaysVolumeError}
+            todaysVolumeError={activityError}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
             issuedTokensByMint={issuedTokensByMint}
             locale={locale}
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
-            canManageCustody={dashboardAccess.capabilities.canManageCustody}
+            canManageCustody={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
           />
         )}
       </SectionEntry>
@@ -670,7 +655,7 @@ export function HomeWorkspace({
             <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 space-y-1">
                 <CardTitle>{t("Shared.homeWorkspace.recentTransactions")}</CardTitle>
-                {activityNotice ? (
+                {activityNotice && !activityError ? (
                   <CardDescription>{activityNotice}</CardDescription>
                 ) : (
                   <CardDescription>{t("Shared.homeWorkspace.activityDescription")}</CardDescription>

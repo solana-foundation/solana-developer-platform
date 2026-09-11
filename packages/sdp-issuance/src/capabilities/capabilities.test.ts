@@ -63,8 +63,10 @@ describe("advanced settings capability registry", () => {
     assert.ok(stablecoin.includes("freezeAccounts"));
     assert.ok(stablecoin.includes("permanentDelegate"));
 
-    // securities additionally recommend scaledUiAmount (in their template).
-    assert.ok(getRecommendedSettings("tokenized_security", "debt").includes("scaledUiAmount"));
+    // Securities pre-select only what their template forces. scaledUiAmount is
+    // NOT among them: a mint carrying it is rejected by the DvP settlement
+    // program, so pre-ticking it would issue unsettleable securities.
+    assert.ok(!getRecommendedSettings("tokenized_security", "debt").includes("scaledUiAmount"));
 
     // generic assets force nothing on.
     assert.deepEqual(getRecommendedSettings("generic", "generic"), []);
@@ -87,10 +89,12 @@ describe("advanced settings capability registry", () => {
     assert.equal(isSettingAllowed("stablecoin", "fiat_backed", "permanentDelegate"), true);
     assert.ok(getRecommendedSettings("stablecoin", "fiat_backed").includes("permanentDelegate"));
 
-    // scaledUiAmount is conditional in the security builder, so it stays
-    // recommended (deselectable), not locked.
+    // scaledUiAmount is conditional in the security builder, so it is never
+    // locked. It is "available" rather than "recommended" because DvP rejects a
+    // mint that carries it, and a default nobody chose should not decide that.
     const security = resolveAssetCapability("tokenized_security", "equity");
-    assert.equal(security?.settings.scaledUiAmount, "recommended");
+    assert.equal(security?.settings.scaledUiAmount, "available");
+    assert.equal(isSettingAllowed("tokenized_security", "equity", "scaledUiAmount"), true);
     assert.equal(security?.settings.permanentDelegate, "locked");
 
     // generic assets deploy as custom (nothing forced) — no locked settings.

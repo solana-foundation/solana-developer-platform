@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 /**
@@ -37,21 +38,13 @@ async function seedScope(): Promise<void> {
          VALUES (?, 'rpc-connection-constraints@example.com', 1, 'active')`
       )
       .bind(USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'RPC connection constraints', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, "rpc-connection-constraints", USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'RPC constraints other', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "rpc-constraints-other", USER_ID),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: OTHER_PROJECT_ID },
+  });
 }
 
 async function insertCredential(

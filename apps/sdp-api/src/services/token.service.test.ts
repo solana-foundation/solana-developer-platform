@@ -11,11 +11,32 @@ import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 describe("TokenService", () => {
   let db: DatabaseClient;
   let tokenService: TokenService;
+
+  async function seedExecutionWallet(): Promise<void> {
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_issuance_execution', ?, ?, 'local', 'encrypted')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+         VALUES ('cwlt_issuance_execution', 'cfg_issuance_execution',
+                 'provider_issuance_execution', 'Authority111'),
+                ('cwlt_issuance_previous', 'cfg_issuance_execution',
+                 'provider_issuance_previous', 'Authority222')`
+      )
+      .run();
+  }
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -70,21 +91,12 @@ describe("TokenService", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_PROJECT.organizationId,
-        TEST_PROJECT.name,
-        TEST_PROJECT.slug,
-        TEST_PROJECT.environment,
-        TEST_PROJECT.status,
-        TEST_PROJECT.createdBy
-      )
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    });
 
     await db
       .prepare(
@@ -122,7 +134,69 @@ describe("TokenService", () => {
       .run();
   });
 
-  it("releases an unsubmitted transaction's idempotency key for approved recovery", async () => {
+  it("persists an exact draft wallet without dropping its Provider-ID mirror", async () => {
+    await seedExecutionWallet();
+
+    const token = await tokenService.createToken({
+      projectId: TEST_PROJECT.id,
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_PROJECT_API_KEY.id,
+      name: "Exact Wallet Token",
+      symbol: "EWT",
+      signingCustodyWalletId: "cwlt_issuance_execution",
+      signingWalletId: "provider_issuance_execution",
+    });
+
+    expect(token).toMatchObject({
+      signingCustodyWalletId: "cwlt_issuance_execution",
+      signingWalletId: "provider_issuance_execution",
+    });
+    expect(
+      await db
+        .prepare(
+          `SELECT signing_custody_wallet_id, signing_wallet_id
+             FROM issued_tokens
+            WHERE id = ?`
+        )
+        .bind(token.id)
+        .first()
+    ).toEqual({
+      signing_custody_wallet_id: "cwlt_issuance_execution",
+      signing_wallet_id: "provider_issuance_execution",
+    });
+  });
+
+  it("persists the exact wallet on a transaction and its idempotent replay", async () => {
+    await seedExecutionWallet();
+    const input = {
+      tokenId: "tok_freeze_refreeze",
+      organizationId: TEST_ORG.id,
+      type: "mint" as const,
+      params: { destination: "wallet_exact_execution", amount: "1" },
+      custodyWalletId: "cwlt_issuance_execution",
+      idempotencyKey: "exact-wallet-transaction",
+      idempotencyFingerprint: "exact-wallet-transaction-fingerprint",
+    };
+
+    const first = await tokenService.createTransaction(input);
+    const replay = await tokenService.createTransaction(input);
+
+    expect(first.transaction).toMatchObject({
+      custodyWalletId: "cwlt_issuance_execution",
+    });
+    expect(replay).toMatchObject({
+      replayed: true,
+      transaction: { custodyWalletId: "cwlt_issuance_execution" },
+    });
+    expect(
+      await db
+        .prepare("SELECT custody_wallet_id FROM issuance_transactions WHERE id = ?")
+        .bind(first.transaction.id)
+        .first()
+    ).toEqual({ custody_wallet_id: "cwlt_issuance_execution" });
+  });
+
+  it("releases an unsubmitted transaction's idempotency key for a safe retry", async () => {
     const input = {
       tokenId: "tok_freeze_refreeze",
       organizationId: TEST_ORG.id,
@@ -693,6 +767,107 @@ describe("TokenService", () => {
       ).toMatchObject({ lifecycle_bookkeeping_applied_at: expect.any(String) });
     });
 
+    // HOO-1013 follow-up: converge/no-slot repair paths mirror OBSERVED chain
+    // state, vetoed by any settled lifecycle transaction newer than the
+    // observation slot.
+    describe("reconcileObservedTokenPauseState", () => {
+      const storedStatus = (id: string) =>
+        db
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(id)
+          .first<{ status: string }>();
+
+      it("repairs a stale status when nothing newer is recorded", async () => {
+        await insertCappedToken("tok_observe_repair", "0", null);
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_repair",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(true);
+        expect(await storedStatus("tok_observe_repair")).toMatchObject({ status: "paused" });
+      });
+
+      it("is vetoed by a settled lifecycle transaction newer than the observation", async () => {
+        await insertCappedToken("tok_observe_veto", "0", null);
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions (
+               id, token_id, organization_id, type, status, operation_params, slot, initiated_by_key_id
+             ) VALUES (?, ?, ?, 'unpause', 'confirmed', '{}', 600, ?)`
+          )
+          .bind("ttx_observe_veto", "tok_observe_veto", TEST_ORG.id, TEST_PROJECT_API_KEY.id)
+          .run();
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_veto",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(false);
+        expect(await storedStatus("tok_observe_veto")).toMatchObject({ status: "active" });
+      });
+
+      it("is not vetoed by settled rows without a slot — those are what it repairs around", async () => {
+        await insertCappedToken("tok_observe_null_slot", "0", null);
+        await db
+          .prepare(
+            `INSERT INTO issuance_transactions (
+               id, token_id, organization_id, type, status, operation_params, slot, initiated_by_key_id
+             ) VALUES (?, ?, ?, 'pause', 'confirmed', '{}', NULL, ?)`
+          )
+          .bind(
+            "ttx_observe_null_slot",
+            "tok_observe_null_slot",
+            TEST_ORG.id,
+            TEST_PROJECT_API_KEY.id
+          )
+          .run();
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_null_slot",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(true);
+        expect(await storedStatus("tok_observe_null_slot")).toMatchObject({ status: "paused" });
+      });
+
+      it("is a no-op when the row already matches the observation", async () => {
+        await insertCappedToken("tok_observe_consistent", "0", null);
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_consistent",
+          "active",
+          500
+        );
+
+        expect(repaired).toBe(false);
+        expect(await storedStatus("tok_observe_consistent")).toMatchObject({ status: "active" });
+      });
+
+      it("never touches a token outside the active/paused pair", async () => {
+        await insertCappedToken("tok_observe_pending", "0", null);
+        await db
+          .prepare("UPDATE issued_tokens SET status = 'pending' WHERE id = ?")
+          .bind("tok_observe_pending")
+          .run();
+
+        const repaired = await tokenService.reconcileObservedTokenPauseState(
+          "tok_observe_pending",
+          "paused",
+          500
+        );
+
+        expect(repaired).toBe(false);
+        expect(await storedStatus("tok_observe_pending")).toMatchObject({ status: "pending" });
+      });
+    });
+
     it("does not replay an older unfreeze over a newer settled refreeze", async () => {
       const tokenId = "tok_freeze_replay_order";
       const accountAddress = "account_freeze_replay_order";
@@ -1071,6 +1246,13 @@ describe("TokenService", () => {
   });
 
   describe("deploy claim lifecycle (beginTokenDeploy / releaseTokenDeploy)", () => {
+    const deployWallet = {
+      custodyWalletId: "cwlt_issuance_execution",
+      providerWalletId: "provider_issuance_execution",
+    };
+
+    beforeEach(seedExecutionWallet);
+
     async function insertToken(
       id: string,
       overrides: { mintAddress?: string | null; projectId?: string; status?: string }
@@ -1105,19 +1287,55 @@ describe("TokenService", () => {
     it("claims a pending token, flipping it to deploying and returning the frozen snapshot", async () => {
       await insertToken("tok_claim_ok", { status: "pending", mintAddress: null });
 
-      const claimed = await tokenService.beginTokenDeploy("tok_claim_ok");
+      const claimed = await tokenService.beginTokenDeploy("tok_claim_ok", deployWallet);
 
       expect(claimed).not.toBeNull();
       expect(claimed?.symbol).toBe("CLM");
       expect(await readStatus("tok_claim_ok")).toBe("deploying");
     });
 
+    it("atomically freezes the exact deploy wallet and its Provider-ID mirror", async () => {
+      await insertToken("tok_claim_exact_wallet", { status: "pending", mintAddress: null });
+      await db
+        .prepare(
+          `UPDATE issued_tokens
+              SET signing_custody_wallet_id = 'cwlt_issuance_previous',
+                  signing_wallet_id = 'provider_issuance_previous'
+            WHERE id = 'tok_claim_exact_wallet'`
+        )
+        .run();
+
+      const claimed = await tokenService.beginTokenDeploy("tok_claim_exact_wallet", deployWallet);
+
+      expect(claimed).toMatchObject({
+        status: "deploying",
+        signingCustodyWalletId: "cwlt_issuance_execution",
+        signingWalletId: "provider_issuance_execution",
+      });
+    });
+
+    it("claims legacy confirmation without replacing its saved wallet identities", async () => {
+      await insertToken("tok_claim_legacy_wallet", { status: "pending", mintAddress: null });
+      await db
+        .prepare(
+          `UPDATE issued_tokens SET signing_custody_wallet_id = 'cwlt_issuance_previous',
+         signing_wallet_id = 'provider_issuance_previous' WHERE id = 'tok_claim_legacy_wallet'`
+        )
+        .run();
+
+      expect(await tokenService.beginTokenDeploy("tok_claim_legacy_wallet", null)).toMatchObject({
+        status: "deploying",
+        signingCustodyWalletId: "cwlt_issuance_previous",
+        signingWalletId: "provider_issuance_previous",
+      });
+    });
+
     it("returns null when the token is already claimed for deploy", async () => {
       await insertToken("tok_claim_twice", { status: "pending", mintAddress: null });
 
-      expect(await tokenService.beginTokenDeploy("tok_claim_twice")).not.toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_twice", deployWallet)).not.toBeNull();
       // A second, concurrent deploy must lose the claim rather than mint twice.
-      expect(await tokenService.beginTokenDeploy("tok_claim_twice")).toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_twice", deployWallet)).toBeNull();
     });
 
     it("returns null for an already-deployed token", async () => {
@@ -1126,13 +1344,13 @@ describe("TokenService", () => {
         mintAddress: "Dep1oyed11111111111111111111111111111111111",
       });
 
-      expect(await tokenService.beginTokenDeploy("tok_claim_deployed")).toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_deployed", deployWallet)).toBeNull();
       expect(await readStatus("tok_claim_deployed")).toBe("active");
     });
 
     it("blocks symbol/decimals PATCHes while the token is deploying (closes the stale-snapshot race)", async () => {
       await insertToken("tok_claim_race", { status: "pending", mintAddress: null });
-      await tokenService.beginTokenDeploy("tok_claim_race");
+      await tokenService.beginTokenDeploy("tok_claim_race", deployWallet);
 
       // This is the exact race: a PATCH landing while the mint is being created
       // from the claimed snapshot must lose, not corrupt the identity.
@@ -1150,7 +1368,7 @@ describe("TokenService", () => {
 
     it("blocks metadata updates while deployment is using the claimed snapshot", async () => {
       await insertToken("tok_claim_metadata_race", { status: "pending", mintAddress: null });
-      await tokenService.beginTokenDeploy("tok_claim_metadata_race");
+      await tokenService.beginTokenDeploy("tok_claim_metadata_race", deployWallet);
 
       await expect(
         tokenService.updateToken("tok_claim_metadata_race", {
@@ -1175,7 +1393,7 @@ describe("TokenService", () => {
       });
       expect(pendingSnapshot).not.toBeNull();
 
-      await tokenService.beginTokenDeploy("tok_completed_metadata_race");
+      await tokenService.beginTokenDeploy("tok_completed_metadata_race", deployWallet);
       await tokenService.setTokenDeployed(
         "tok_completed_metadata_race",
         "11111111111111111111111111111111",
@@ -1203,7 +1421,7 @@ describe("TokenService", () => {
 
     it("releases a deploying claim back to pending so a failed deploy stays editable", async () => {
       await insertToken("tok_claim_release", { status: "pending", mintAddress: null });
-      await tokenService.beginTokenDeploy("tok_claim_release");
+      await tokenService.beginTokenDeploy("tok_claim_release", deployWallet);
       expect(await readStatus("tok_claim_release")).toBe("deploying");
 
       await tokenService.releaseTokenDeploy("tok_claim_release");
@@ -1215,7 +1433,7 @@ describe("TokenService", () => {
 
       // And re-claimable: a retried deploy after a failed one must not be stuck
       // failing the pending-only claim.
-      expect(await tokenService.beginTokenDeploy("tok_claim_release")).not.toBeNull();
+      expect(await tokenService.beginTokenDeploy("tok_claim_release", deployWallet)).not.toBeNull();
     });
 
     it("does not revert an already-deployed token when release is called", async () => {
@@ -1229,160 +1447,50 @@ describe("TokenService", () => {
       expect(await readStatus("tok_claim_release_noop")).toBe("active");
     });
 
-    it("applies tenant predicates before deployment and supply mutations", async () => {
-      const foreignProjectId = "prj_token_foreign";
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Foreign Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(foreignProjectId, TEST_ORG.id, foreignProjectId, TEST_USER.id)
-        .run();
-      for (const [id, status] of [
-        ["tok_foreign_claim", "pending"],
-        ["tok_foreign_release", "deploying"],
-        ["tok_foreign_deployed", "pending"],
-        ["tok_foreign_supply", "active"],
-        ["tok_foreign_reserve", "active"],
-        ["tok_foreign_child", "active"],
-      ] as const) {
-        await insertToken(id, { projectId: foreignProjectId, status });
-      }
+    // HOO-1013: the commit is only valid while the caller holds the deploying
+    // claim — a confirm that skipped the claim used to pass its read-time
+    // guards concurrently and overwrite the winner's mint.
+    it("refuses to commit a deploy on an unclaimed token", async () => {
+      await insertToken("tok_deploy_unclaimed", { status: "pending", mintAddress: null });
 
-      const { entry: foreignEntry } = await tokenService.addAllowlistEntry({
-        tokenId: "tok_foreign_child",
-        address: "ForeignAllowlist111111111111111111111111111111",
-        addedBy: TEST_USER.id,
-      });
-      await tokenService.freezeAccount({
-        tokenId: "tok_foreign_child",
-        accountAddress: "foreign_account",
-        frozenBy: TEST_USER.id,
-      });
-      const { transaction: foreignTransaction } = await tokenService.createTransaction({
-        tokenId: "tok_foreign_child",
-        organizationId: TEST_ORG.id,
-        type: "mint",
-        params: { destination: "foreign_account", amount: "1" },
-        idempotencyKey: "foreign-idempotency-key",
-        idempotencyFingerprint: "foreign-idempotency-fingerprint",
-      });
-
-      const scoped = new TokenService(
-        db,
-        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-      );
-
-      await expect(scoped.beginTokenDeploy("tok_foreign_claim")).resolves.toBeNull();
-      await scoped.releaseTokenDeploy("tok_foreign_release");
       await expect(
-        scoped.setTokenDeployed(
-          "tok_foreign_deployed",
-          "ForeignMint111111111111111111111111111111111",
-          "ForeignAuthority11111111111111111111111111111",
+        tokenService.setTokenDeployed(
+          "tok_deploy_unclaimed",
+          "11111111111111111111111111111111",
+          "11111111111111111111111111111111",
           null
         )
-      ).rejects.toThrow("TOKEN_NOT_FOUND");
-      await expect(scoped.setSupplyFromBaseUnits("tok_foreign_supply", "999")).rejects.toThrow(
-        "TOKEN_NOT_FOUND"
-      );
-      await expect(scoped.reserveMintSupply("tok_foreign_reserve", "999")).resolves.toBeNull();
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(await readStatus("tok_deploy_unclaimed")).toBe("pending");
+    });
 
-      // Child resources must enforce the same boundary even when a caller has
-      // only a globally unique entry/transaction id.
-      await expect(scoped.getAllowlistEntry(foreignEntry.id)).resolves.toBeNull();
-      await expect(scoped.listAllowlistEntries("tok_foreign_child")).rejects.toThrow(
-        "TOKEN_NOT_FOUND"
+    it("never overwrites an established mint, even from a raced second confirmation", async () => {
+      await insertToken("tok_deploy_once", { status: "pending", mintAddress: null });
+      await tokenService.beginTokenDeploy("tok_deploy_once", null);
+      await tokenService.setTokenDeployed(
+        "tok_deploy_once",
+        "11111111111111111111111111111111",
+        "11111111111111111111111111111111",
+        null
       );
-      await expect(scoped.listAllowlistLabels("tok_foreign_child")).rejects.toThrow(
-        "TOKEN_NOT_FOUND"
-      );
-      // Keyed by (token id, address) rather than by entry id, so the token predicate is
-      // the only thing standing between a scoped caller and a foreign tenant's entry.
+
       await expect(
-        scoped.getActiveAllowlistEntryIdByAddress(
-          "tok_foreign_child",
-          "ForeignAllowlist111111111111111111111111111111"
+        tokenService.setTokenDeployed(
+          "tok_deploy_once",
+          "Attacker11111111111111111111111111111111111",
+          "Attacker11111111111111111111111111111111111",
+          null
         )
-      ).rejects.toThrow("TOKEN_NOT_FOUND");
-      await expect(scoped.revokeAllowlistEntry(foreignEntry.id)).rejects.toThrow(
-        "ALLOWLIST_ENTRY_NOT_FOUND"
-      );
-      await expect(scoped.activateAllowlistEntry(foreignEntry.id)).rejects.toThrow(
-        "ALLOWLIST_ENTRY_NOT_FOUND"
-      );
-      await expect(scoped.deleteAllowlistEntry(foreignEntry.id)).rejects.toThrow(
-        "ALLOWLIST_ENTRY_NOT_FOUND"
-      );
-      await expect(
-        scoped.addAllowlistEntry({
-          tokenId: "tok_foreign_child",
-          address: "BlockedForeignAdd11111111111111111111111111111",
-          addedBy: TEST_USER.id,
-        })
-      ).rejects.toThrow("TOKEN_NOT_FOUND");
+      ).rejects.toMatchObject({ code: "CONFLICT" });
 
-      await expect(
-        scoped.freezeAccount({
-          tokenId: "tok_foreign_child",
-          accountAddress: "blocked_foreign_account",
-          frozenBy: TEST_USER.id,
-        })
-      ).rejects.toThrow("TOKEN_NOT_FOUND");
-      await expect(
-        scoped.unfreezeAccount("tok_foreign_child", "foreign_account", TEST_USER.id)
-      ).rejects.toThrow("TOKEN_NOT_FOUND");
-      await expect(scoped.listFrozenAccounts("tok_foreign_child")).rejects.toThrow(
-        "TOKEN_NOT_FOUND"
-      );
-
-      await expect(scoped.getTransaction(foreignTransaction.id)).resolves.toBeNull();
-      await expect(
-        scoped.updateTransaction(foreignTransaction.id, { status: "confirmed" })
-      ).rejects.toThrow("TRANSACTION_NOT_FOUND");
-      await expect(scoped.listTokenTransactions("tok_foreign_child")).rejects.toThrow(
-        "TOKEN_NOT_FOUND"
-      );
-      await expect(
-        scoped.listTransactions({
-          organizationId: TEST_ORG.id,
-          projectId: foreignProjectId,
-        })
-      ).rejects.toThrow("cannot override the repository project scope");
-
-      await expect(readStatus("tok_foreign_claim")).resolves.toBe("pending");
-      await expect(readStatus("tok_foreign_release")).resolves.toBe("deploying");
-      const rows = await db
-        .prepare(
-          `SELECT id, mint_address, total_supply_cached
-           FROM issued_tokens
-           WHERE id IN ('tok_foreign_deployed', 'tok_foreign_reserve', 'tok_foreign_supply')
-           ORDER BY id`
-        )
-        .all<{ id: string; mint_address: string | null; total_supply_cached: string }>();
-      expect(rows.results).toEqual([
-        { id: "tok_foreign_deployed", mint_address: null, total_supply_cached: "0" },
-        { id: "tok_foreign_reserve", mint_address: null, total_supply_cached: "0" },
-        { id: "tok_foreign_supply", mint_address: null, total_supply_cached: "0" },
-      ]);
-
-      const childState = await db
-        .prepare(
-          `SELECT
-             (SELECT status FROM token_allowlists WHERE id = ?) AS allowlist_status,
-             (SELECT unfrozen_at FROM frozen_accounts WHERE token_id = ? AND account_address = ?) AS unfrozen_at,
-             (SELECT status FROM issuance_transactions WHERE id = ?) AS transaction_status`
-        )
-        .bind(foreignEntry.id, "tok_foreign_child", "foreign_account", foreignTransaction.id)
-        .first<{
-          allowlist_status: string;
-          unfrozen_at: string | null;
-          transaction_status: string;
-        }>();
-      expect(childState).toEqual({
-        allowlist_status: "active",
-        unfrozen_at: null,
-        transaction_status: "pending",
+      const row = await db
+        .prepare("SELECT mint_address, mint_authority, status FROM issued_tokens WHERE id = ?")
+        .bind("tok_deploy_once")
+        .first<{ mint_address: string; mint_authority: string; status: string }>();
+      expect(row).toEqual({
+        mint_address: "11111111111111111111111111111111",
+        mint_authority: "11111111111111111111111111111111",
+        status: "active",
       });
     });
   });

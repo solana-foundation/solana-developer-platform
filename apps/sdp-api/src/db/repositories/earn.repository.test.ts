@@ -8,6 +8,11 @@ import {
 } from "@/services/earn-withdrawal-ledger.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   EarnProviderWalletRow,
@@ -27,7 +32,6 @@ import {
 } from "./earn-movements.repository";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
-const OTHER_PROJECT_ID = "prj_earn_repo_test_other";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const DESTINATION = "4Nd1mYzL3T2fLGV1kZQcQq5o5FQMYuu1v6oCTKW6PYt5";
 // Bulk catalogue syncs land many rows on one sdp_iso_now() value, so every
@@ -37,6 +41,7 @@ const SHARED_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
 describe("EarnRepository (postgres)", () => {
   let repo: EarnRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -70,15 +75,12 @@ describe("EarnRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     repo = createPostgresEarnRepository(db);
   });
@@ -225,6 +227,76 @@ describe("EarnRepository (postgres)", () => {
       const row = await repo.getStrategyById(seeded.id);
       expect(row?.status).toBe("paused");
       expect(row?.current_apy).toBe("0.0731");
+    });
+  });
+
+  /**
+   * The "before" the anomaly check (PRO-1867) diffs against: the whole stored
+   * shelf for one (provider, environment), every status and both clusters.
+   */
+  describe("listStrategyFigures", () => {
+    it("returns every row for the provider and environment with TVL lifted out of the metadata", async () => {
+      await seedStrategy({
+        providerReference: "a",
+        currentApy: "0.05",
+        riskMetadata: { tvlUsd: 1_500_000 },
+      });
+      await seedStrategy({
+        providerReference: "b",
+        currentApy: null,
+        riskMetadata: {},
+        status: "paused",
+      });
+      await seedStrategy({
+        providerReference: "m",
+        hostCluster: "mainnet-beta",
+        riskMetadata: { tvlUsd: 9e7 },
+      });
+      // Other provider and other environment: out of scope.
+      await seedStrategy({ provider: "kamino", providerReference: "a" });
+      await seedStrategy({
+        providerReference: "a",
+        environment: "production",
+        hostCluster: "mainnet-beta",
+      });
+
+      const figures = await repo.listStrategyFigures({ provider: "veda", environment: "sandbox" });
+
+      expect(figures).toEqual([
+        {
+          provider_reference: "a",
+          host_cluster: "devnet",
+          status: "active",
+          current_apy: "0.05",
+          tvl_usd: 1_500_000,
+        },
+        {
+          provider_reference: "b",
+          host_cluster: "devnet",
+          status: "paused",
+          current_apy: null,
+          tvl_usd: null,
+        },
+        {
+          provider_reference: "m",
+          host_cluster: "mainnet-beta",
+          status: "active",
+          current_apy: "0.052",
+          tvl_usd: 90_000_000,
+        },
+      ]);
+    });
+
+    it("reads a non-numeric tvlUsd as no figure and a NULL host_cluster as the environment's cluster", async () => {
+      const seeded = await seedStrategy({ riskMetadata: { tvlUsd: "12M" } });
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET host_cluster = NULL WHERE id = ?")
+        .bind(seeded.id)
+        .run();
+
+      const [figure] = await repo.listStrategyFigures({ provider: "veda", environment: "sandbox" });
+
+      expect(figure).toMatchObject({ tvl_usd: null, host_cluster: "devnet" });
     });
   });
 
@@ -866,13 +938,15 @@ describe("EarnRepository (postgres)", () => {
         )
         .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
         .run();
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Sibling Org Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(OTHER_ORG_PROJECT_ID, OTHER_ORG.id, OTHER_ORG_PROJECT_ID, TEST_USER.id)
-        .run();
+      await seedDefaultProjects(db, {
+        organizationId: OTHER_ORG.id,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: {
+          sandbox: OTHER_ORG_PROJECT_ID,
+          production: `${OTHER_ORG_PROJECT_ID}_production`,
+        },
+      });
     }
 
     function listPrograms(
@@ -880,6 +954,7 @@ describe("EarnRepository (postgres)", () => {
     ): Promise<ListEarnProviderWalletsResult> {
       return repo.listProviderWallets({
         organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
         environment: "sandbox",
         limit: 20,
         offset: 0,
@@ -1047,7 +1122,10 @@ describe("EarnRepository (postgres)", () => {
         await expect(listPrograms({ environment: "production" })).resolves.toMatchObject({
           total: 1,
         });
-        const theirs = await listPrograms({ organizationId: OTHER_ORG.id });
+        const theirs = await listPrograms({
+          organizationId: OTHER_ORG.id,
+          projectId: OTHER_ORG_PROJECT_ID,
+        });
         expect(theirs.rows.map((row) => row.id)).toEqual([sibling.id]);
       });
 
@@ -1108,14 +1186,17 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      // project_id is still provisioning context only — a program created from a
-      // sibling project joins the same org+environment collection.
-      await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        project_id: OTHER_PROJECT_ID,
-      });
+      const { total } = await listPrograms({ provider: "ground" });
+      expect(total).toBe(2);
+    });
 
-      const { total } = await listPrograms();
-      expect(total).toBe(4);
+    it("lists programs only for their project", async () => {
+      await seedProviderWallet();
+      await expectProjectScoped(
+        (projectId) => listPrograms({ projectId }),
+        { own: projects.sandbox, other: projects.production },
+        ({ total }) => total === 0
+      );
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {

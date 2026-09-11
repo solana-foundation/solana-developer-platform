@@ -5,9 +5,33 @@ import { formatCurrencyAmount } from "@/app/dashboard/payments/payments-overview
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import type { RingsWallet, RingsWalletSync } from "./helius-rings.data";
-import { formatAssetAmount } from "./helius-rings.utils";
+import type { ProjectRing, RingsWallet, RingsWalletSync } from "./helius-rings.data";
+import {
+  formatAssetAmount,
+  ringNameByProgramId,
+  shortenShieldedAddress,
+} from "./helius-rings.utils";
 import { useRingsBalance } from "./use-rings-balance";
+
+/**
+ * Adjacent-run grouping over the API's deterministic order (default bucket
+ * first, then rings ascending) — value never merges across rings, so each
+ * ring's notes read as their own block. No client-side re-sort.
+ */
+function groupByRing(
+  balances: RingsWalletSync["balances"]
+): Array<{ ring: string | null; balances: RingsWalletSync["balances"] }> {
+  const groups: Array<{ ring: string | null; balances: RingsWalletSync["balances"] }> = [];
+  for (const balance of balances) {
+    const current = groups[groups.length - 1];
+    if (current && current.ring === balance.ringProgramId) {
+      current.balances.push(balance);
+    } else {
+      groups.push({ ring: balance.ringProgramId, balances: [balance] });
+    }
+  }
+  return groups;
+}
 
 /**
  * Wallet header + full balance summary for the selected wallet. This is the
@@ -17,16 +41,21 @@ import { useRingsBalance } from "./use-rings-balance";
 export function WalletOverview({
   wallet,
   refreshTick,
+  projectRings,
 }: {
   wallet: RingsWallet;
   refreshTick?: number;
+  /** Names the per-ring balance groups; unknown ids fall back to the truncated program id. */
+  projectRings: ProjectRing[];
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { state, refresh } = useRingsBalance(
-    wallet.shieldedAddress === null ? null : wallet.id,
-    refreshTick
-  );
+  // Paused is suppressed alongside unprovisioned, as in the wallets table: the
+  // server refuses to read an identity it cannot derive, so asking only turns a
+  // known state into a generic read failure — and the refresh button would
+  // invite an operator to keep asking.
+  const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
+  const { state, refresh } = useRingsBalance(readable ? wallet.id : null, refreshTick);
 
   const reading = state.name === "loading";
   const refreshLabel = t(
@@ -41,7 +70,7 @@ export function WalletOverview({
           <Button
             variant="ghost"
             size="icon-xs"
-            disabled={reading || wallet.shieldedAddress === null}
+            disabled={reading || !readable}
             aria-label={refreshLabel}
             title={refreshLabel}
             onClick={refresh}
@@ -59,21 +88,31 @@ export function WalletOverview({
         <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
           {t("DashboardHeliusRings.overview.privateBalanceLabel")}
         </p>
-        {wallet.shieldedAddress === null ? (
+        {wallet.status === "paused" ? (
+          <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
+        ) : wallet.shieldedAddress === null ? (
           <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>
         ) : state.name === "loading" ? (
           <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>
         ) : state.name === "failed" ? (
           <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>
         ) : (
-          <Summary sync={state.sync} locale={locale} />
+          <Summary sync={state.sync} locale={locale} projectRings={projectRings} />
         )}
       </CardContent>
     </Card>
   );
 }
 
-function Summary({ sync, locale }: { sync: RingsWalletSync; locale: string }) {
+function Summary({
+  sync,
+  locale,
+  projectRings,
+}: {
+  sync: RingsWalletSync;
+  locale: string;
+  projectRings: readonly ProjectRing[];
+}) {
   const t = useTranslations();
 
   if (sync.balances.length === 0) {
@@ -84,6 +123,9 @@ function Summary({ sync, locale }: { sync: RingsWalletSync; locale: string }) {
     );
   }
 
+  const nameByProgramId = ringNameByProgramId(projectRings);
+  const groups = groupByRing(sync.balances);
+
   return (
     <div className="flex flex-col gap-2">
       {typeof sync.totalUsd === "number" ? (
@@ -91,23 +133,49 @@ function Summary({ sync, locale }: { sync: RingsWalletSync; locale: string }) {
           {formatCurrencyAmount(sync.totalUsd, locale)}
         </p>
       ) : null}
-      <ul className="flex flex-col gap-0.5">
-        {sync.balances.map((balance) => (
-          <li
-            key={balance.mint}
-            className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm"
-          >
-            <span className="tabular-nums text-primary">
-              {formatAssetAmount(balance.amountRaw, balance.mint)}
-            </span>
-            <span className="tabular-nums text-secondary">
-              {typeof balance.usdValue === "number"
-                ? formatCurrencyAmount(balance.usdValue, locale)
-                : t("DashboardHeliusRings.overview.unpriced")}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {groups.map((group) => (
+        <div key={group.ring ?? "default"} className="flex flex-col gap-0.5">
+          {groups.length > 1 ? (
+            <p className="text-xs text-tertiary">
+              {group.ring === null
+                ? t("DashboardHeliusRings.overview.defaultRing")
+                : (nameByProgramId.get(group.ring) ??
+                  t("DashboardHeliusRings.overview.customRing", {
+                    id: shortenShieldedAddress(group.ring),
+                  }))}
+            </p>
+          ) : null}
+          <ul className="flex flex-col gap-0.5">
+            {group.balances.map((balance) => (
+              <li
+                key={balance.mint}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm"
+              >
+                <span className="flex flex-wrap items-baseline gap-2">
+                  <span className="tabular-nums text-primary">
+                    {formatAssetAmount(balance.amountRaw, balance.mint)}
+                  </span>
+                  {/* Only when fragmented: a single note is the settled case
+                      and saying so on every row would be noise. This is what
+                      makes the composer's Merge tab legible. */}
+                  {balance.noteCount > 1 ? (
+                    <span className="text-xs text-tertiary">
+                      {t("DashboardHeliusRings.overview.noteCount", {
+                        count: balance.noteCount,
+                      })}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="tabular-nums text-secondary">
+                  {typeof balance.usdValue === "number"
+                    ? formatCurrencyAmount(balance.usdValue, locale)
+                    : t("DashboardHeliusRings.overview.unpriced")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

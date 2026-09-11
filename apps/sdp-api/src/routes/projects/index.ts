@@ -14,7 +14,7 @@ import {
   removeProjectMember,
   updateProjectMember,
 } from "./handlers/members";
-import { archiveProject, getProject, listProjects, updateProject } from "./handlers/projects";
+import { getProject, listProjects, updateProject } from "./handlers/projects";
 import { apiKeyProjectAccessMiddleware } from "./project-access";
 import { addMemberSchema, updateMemberSchema, updateProjectSchema } from "./schemas";
 
@@ -40,8 +40,6 @@ projects.patch(
   validateBody(updateProjectSchema),
   updateProject
 );
-projects.delete("/:projectId", requirePermissions("projects:admin"), archiveProject);
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Project Members
 // ═══════════════════════════════════════════════════════════════════════════

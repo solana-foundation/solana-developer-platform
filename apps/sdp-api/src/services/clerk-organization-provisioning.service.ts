@@ -1,5 +1,5 @@
+import type { OrganizationSettings } from "@sdp/types";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 import type { ClerkOrganization } from "./clerk-organizations.service";
 import {
@@ -82,12 +82,15 @@ export async function ensureClerkOrganizationMapping(params: {
     params.organization.name?.trim() || params.organization.slug?.trim() || "Organization";
   const slug = await ensureUniqueSlug(params.db, params.organization.slug || name);
   const organizationId = `org_${crypto.randomUUID()}`;
-  const providerState = isSelfHostedDeployment(params.env)
-    ? { tier: "enterprise" as const, providerOverrides: undefined }
-    : parseClerkOrganizationTierMetadata(params.organization);
-  const settings = providerState.providerOverrides
-    ? JSON.stringify({ providerOverrides: providerState.providerOverrides })
-    : null;
+  const providerState = parseClerkOrganizationTierMetadata(params.organization);
+
+  const initialSettings: OrganizationSettings = {
+    ...(providerState.providerOverrides
+      ? { providerOverrides: providerState.providerOverrides }
+      : {}),
+    ...(providerState.enableProductionProject ? { enableProductionProject: true } : {}),
+  };
+  const settings = Object.keys(initialSettings).length > 0 ? JSON.stringify(initialSettings) : null;
 
   // Persist Clerk-derived access state with the mapping so provisioning cannot
   // commit an organization that depends on a later repair update succeeding.
@@ -149,12 +152,10 @@ export async function syncClerkOrganization(params: {
       .bind(name, slug, mapping.organizationId),
   ]);
 
-  if (!isSelfHostedDeployment(params.env)) {
-    await syncProviderAccessFromClerk(params.db, {
-      organizationId: mapping.organizationId,
-      clerkOrganization: params.organization,
-    });
-  }
+  await syncProviderAccessFromClerk(params.db, {
+    organizationId: mapping.organizationId,
+    clerkOrganization: params.organization,
+  });
 
   return { organizationId: mapping.organizationId, slug };
 }

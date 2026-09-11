@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
+  createGuardedFetch,
   EgressBlockedError,
   guardedFetch,
   guardedLookup,
@@ -160,6 +161,146 @@ describe("guardedFetch", () => {
   it("refuses a plaintext endpoint outright", async () => {
     await expect(
       guardedFetch("http://example.com/", { method: "POST", headers: {}, body: "{}" })
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
+  it("refuses a blocked IPv4 literal, which never reaches DNS", async () => {
+    // Node skips the lookup hook entirely when the host is written as an
+    // address, so the literal has to be classified before the socket opens.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ result: "reached" }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      await expect(
+        guardedFetch(`https://127.0.0.1:${port}/`, {
+          method: "POST",
+          headers: {},
+          body: "{}",
+        })
+      ).rejects.toBeInstanceOf(EgressBlockedError);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("refuses a blocked IPv6 literal", async () => {
+    await expect(
+      guardedFetch("https://[::1]:1/", { method: "POST", headers: {}, body: "{}" })
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
+  it("refuses a redirect that lands on a blocked literal", async () => {
+    const inner = createServer((_req, res) => {
+      res.writeHead(200);
+      res.end("reached");
+    });
+    await new Promise<void>((resolve) => inner.listen(0, "127.0.0.1", resolve));
+    const innerPort = (inner.address() as AddressInfo).port;
+
+    const outer = createServer((_req, res) => {
+      res.writeHead(307, { Location: `https://127.0.0.1:${innerPort}/` });
+      res.end();
+    });
+    await new Promise<void>((resolve) => outer.listen(0, "127.0.0.1", resolve));
+    const outerPort = (outer.address() as AddressInfo).port;
+
+    try {
+      // The first hop is operator-approved the way the Private Channels
+      // sandbox is; the Location it answers with is not, and faces the full
+      // check.
+      await expect(
+        guardedFetch(`http://127.0.0.1:${outerPort}/`, {
+          method: "POST",
+          headers: {},
+          body: "{}",
+          maxRedirects: 1,
+          approvedInsecureDestination: true,
+        })
+      ).rejects.toBeInstanceOf(EgressBlockedError);
+    } finally {
+      await new Promise<void>((resolve) => outer.close(() => resolve()));
+      await new Promise<void>((resolve) => inner.close(() => resolve()));
+    }
+  });
+
+  it("keeps the address check on an approved-plaintext destination", async () => {
+    // approvedPlaintextDestination relaxes only the protocol; the host still
+    // faces the full check, unlike approvedInsecureDestination.
+    const server = createServer((_req, res) => {
+      res.writeHead(200);
+      res.end("reached");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      await expect(
+        guardedFetch(`http://127.0.0.1:${port}/`, {
+          method: "POST",
+          headers: {},
+          body: "{}",
+          approvedPlaintextDestination: true,
+        })
+      ).rejects.toBeInstanceOf(EgressBlockedError);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("still dials an operator-approved loopback literal", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ result: "reached" }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      const response = await guardedFetch(`http://127.0.0.1:${port}/`, {
+        method: "POST",
+        headers: {},
+        body: "{}",
+        approvedInsecureDestination: true,
+      });
+      expect(response.status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe("createGuardedFetch", () => {
+  const fetchImpl = createGuardedFetch();
+
+  it("refuses a Request input rather than partially honoring it", async () => {
+    await expect(fetchImpl(new Request("https://example.com/"))).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("refuses a non-string body rather than silently dropping it", async () => {
+    await expect(
+      fetchImpl("https://example.com/", { method: "POST", body: new Uint8Array(4) })
+    ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("keeps the guard's plaintext refusal behind the fetch signature", async () => {
+    await expect(
+      fetchImpl("http://example.com/", { method: "POST", body: "{}" })
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
+  it("normalizes a URL input and Headers before the guard runs", async () => {
+    // A loopback name clears the protocol gate and fails on the address, which
+    // proves the URL object and Headers were accepted and the guard still ran.
+    await expect(
+      fetchImpl(new URL("https://localhost:1/"), {
+        method: "POST",
+        headers: new Headers({ "content-type": "application/json" }),
+        body: "{}",
+      })
     ).rejects.toBeInstanceOf(EgressBlockedError);
   });
 });

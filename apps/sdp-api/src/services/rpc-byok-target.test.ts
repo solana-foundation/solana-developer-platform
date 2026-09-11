@@ -187,6 +187,31 @@ describe("assertReachableTenantEndpoint", () => {
     expect(() => assertReachableTenantEndpoint("https://[2606:4700::1111]/rpc")).not.toThrow();
   });
 
+  it("refuses every range the connect-time guard refuses", () => {
+    // Write-time and connect-time classification must agree, or a row can
+    // exist that every relay call then rejects — or worse, the reverse.
+    for (const host of [
+      "https://100.64.0.1/rpc",
+      "https://198.18.0.1/rpc",
+      "https://192.0.0.170/rpc",
+      "https://224.0.0.1/rpc",
+      "https://255.255.255.255/rpc",
+      "https://0.1.2.3/rpc",
+      "https://[ff02::1]/rpc",
+    ]) {
+      expect(() => assertReachableTenantEndpoint(host)).toThrow(/not reachable/i);
+    }
+  });
+
+  it("refuses credentials embedded in the URL", () => {
+    expect(() => assertReachableTenantEndpoint("https://user:pass@rpc.example.com/")).toThrow(
+      /credential/i
+    );
+    expect(() => assertReachableTenantEndpoint("https://token@rpc.example.com/")).toThrow(
+      /credential/i
+    );
+  });
+
   it("refuses plaintext http", () => {
     expect(() => assertReachableTenantEndpoint("http://rpc.example.com")).toThrow(/https/i);
   });

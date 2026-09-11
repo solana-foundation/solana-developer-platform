@@ -4,6 +4,10 @@ import {
   providerNotConfigured,
 } from "@sdp/earn";
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
+import {
+  assertJupiterLendNotPortfolioProvider,
+  JupiterLendVaultDirectClient,
+} from "@sdp/jupiter-lend";
 import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
 import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
@@ -47,6 +51,8 @@ function runVaultOperation<T>(
 
 const kamino = new KaminoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertNotPortfolioProvider(kamino);
+const jupiterLend = new JupiterLendVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+assertJupiterLendNotPortfolioProvider(jupiterLend);
 
 const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertVedaNotPortfolioProvider(veda);
@@ -71,6 +77,7 @@ assertOndoNotPortfolioProvider(ondo);
 export const EARN_PROVIDER_CLIENTS = {
   ...CATALOGUE_PROVIDER_CLIENTS,
   kamino,
+  jupiter_lend: jupiterLend,
   veda,
   ondo,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;

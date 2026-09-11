@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -11,7 +11,8 @@ type ValueMovingFamily =
   | "payments"
   | "ramps"
   | "custody"
-  | "earn";
+  | "earn"
+  | "dvp";
 
 interface OrderedBoundary {
   file: string;
@@ -98,7 +99,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/authority",',
-      before: "policyGate({ extract: extractUpdateAuthorityPolicyCandidate })",
+      before: "extract: extractUpdateAuthorityPolicyCandidate",
       after: "executeUpdateAuthority",
     },
     replay: [
@@ -106,6 +107,66 @@ const contracts: ValueMovingContract[] = [
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
         evidence: "without poisoning the idempotency slot",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/seize.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/seize",',
+      before: "policyGate({ extract: extractSeizePolicyCandidate })",
+      after: "executeSeize",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays seize without resolving the current permanent delegate",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/force-burn.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/force-burn",',
+      before: "policyGate({ extract: extractForceBurnPolicyCandidate })",
+      after: "executeForceBurn",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays force-burn without resolving the current permanent delegate",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/burn.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/burn",',
+      before: "policyGate({ extract: extractBurnPolicyCandidate })",
+      after: "executeBurn",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays burn before runtime checks and rejects a different exact wallet",
       },
     ],
   },
@@ -156,6 +217,32 @@ const contracts: ValueMovingContract[] = [
         mode: "provider_signature_window",
         file: "apps/sdp-api/src/routes/webhooks/ramps/stripe.test.ts",
         evidence: "rejects a correctly signed but stale webhook",
+      },
+    ],
+  },
+  {
+    /** DvP settle and cancel resolve tenant-scoped signing authority in the handler. */
+    family: "dvp",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
+      evidence: "const settlement = await readDvpSettlementWallet(c.env, {",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
+      section: "const closeTrade =",
+      before: "await assertFreshApiKeyCustodyWalletAccess(",
+      after: "const result = await closeDvpTrade(",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/services/dvp/settle.test.ts",
+        evidence: "refuses to settle a trade that is already closed",
+      },
+      {
+        mode: "fresh_blockhash_per_attempt",
+        file: "apps/sdp-api/src/services/dvp/settle.test.ts",
+        evidence: "fetches a fresh blockhash for every attempt",
       },
     ],
   },
@@ -248,7 +335,9 @@ const contracts: ValueMovingContract[] = [
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
-  "apps/sdp-api/src/routes/custody/handlers/signer-check.ts": ["signAndSend"],
+  // The custody signer check is deliberately absent: it partially signs and
+  // SIMULATES its memo transaction — verified locally, never broadcast — so it
+  // has no signAndSend sink and cannot spend sponsorship.
   "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
     // Sponsored signing adds the fee-payer signature without broadcasting, so
     // the final signature can still be recorded before bytes reach the network.
@@ -256,8 +345,11 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
+  // DvP create, fund, settle/cancel and payments share the owned sponsorship
+  // submission sink, which signs and persists before broadcasting; fund and
+  // settle only partially sign as authorities and are not sinks of their own.
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
-  "apps/sdp-api/src/services/payments/signed-submission.ts": ["prepareOwnedSubmission"],
+  "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
@@ -277,6 +369,10 @@ const valueMovingSourceRoots = [
   // missing here, which is why the inventory below did not notice a whole
   // money-moving surface — the omission the `earn` contract above now pins.
   "apps/sdp-api/src/services/earn",
+  // DvP settles and cancels sign from the project's settlement-authority
+  // custody wallet, so it is a money-moving sink like the ones above.
+  "apps/sdp-api/src/services/dvp",
+  "apps/sdp-api/src/services/sponsorship-submission.ts",
   "packages/sdp-issuance/src",
   "packages/sdp-solana/src",
 ];
@@ -286,6 +382,11 @@ function readSource(relativePath: string): string {
 }
 
 function sourceFiles(directory: string): string[] {
+  // A root may name a single module: the owned sponsorship submission helper
+  // lives beside the sponsorship services rather than in a directory of its own.
+  if (statSync(directory).isFile()) {
+    return [directory];
+  }
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
@@ -335,12 +436,18 @@ describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
     // `earn` appears twice: money-in (vault deposits) and money-out (vault
     // withdrawals) are separately gated routes, and each carries its own
-    // authorization boundary and replay evidence.
+    // authorization boundary and replay evidence. `issuance` appears four
+    // times for the same reason: authority updates, seize, force-burn, and
+    // burn are separately gated execute routes.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "dvp",
       "earn",
       "earn",
+      "issuance",
+      "issuance",
+      "issuance",
       "issuance",
       "payments",
       "ramps",

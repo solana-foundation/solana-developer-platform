@@ -19,7 +19,7 @@ describe("GET external-wallet positions proxy", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.external_wallet_positions.list",
-      path: "/v1/earn/external-wallet/positions/wallet%2Faddress?limit=100&before=abc_123",
+      path: "/v1/earn/external-wallet/positions?ownerAddress=wallet%2Faddress&limit=100&before=abc_123",
     });
   });
 

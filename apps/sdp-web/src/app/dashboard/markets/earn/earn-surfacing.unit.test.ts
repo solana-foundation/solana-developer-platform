@@ -12,8 +12,11 @@ const strategy: EarnStrategy = {
   apyType: "variable",
   liquidityTerm: "instant",
   status: "active",
+  depositSlippage: null,
+  withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
+  feeSponsored: false,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
@@ -60,5 +63,21 @@ describe("earnVaultDepositAvailability", () => {
         kamino: { entitled: true, configured: true, enabled: true },
       })
     ).toBe("cluster_unavailable");
+  });
+
+  it("offers Jupiter Lend on production while its mirrored sandbox row stays browse-only", () => {
+    const jupiter = {
+      ...strategy,
+      provider: "jupiter_lend",
+      hostCluster: "mainnet-beta" as const,
+    };
+    const access = {
+      jupiter_lend: { entitled: true, configured: true, enabled: true },
+    };
+
+    expect(earnVaultDepositAvailability(jupiter, "production", access)).toBe("available");
+    expect(earnVaultDepositAvailability({ ...jupiter, fundable: false }, "sandbox", access)).toBe(
+      "cluster_unavailable"
+    );
   });
 });

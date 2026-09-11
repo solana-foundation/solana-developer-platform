@@ -16,7 +16,6 @@ jobs:
   deploy:
     name: Build and deploy
     if: github.repository == 'solana-foundation/solana-developer-platform'
-    continue-on-error: true
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: solana-developer-platform-stg
@@ -103,3 +102,11 @@ jobs:
             cat "${describe_err}" >&2
             exit 1
           fi
+
+  smoke:
+    name: Post-deploy stage smoke
+    needs: deploy
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/sdp-stage-smoke.yml

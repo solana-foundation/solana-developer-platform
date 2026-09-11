@@ -26,6 +26,8 @@ export const OP_TYPES = [
   "timelock_create",
   "timelock_settle",
   "zone_create",
+  "ring_exit",
+  "ring_entry",
 ] as const;
 
 export const FAILURE_CODES = [
@@ -55,6 +57,18 @@ export const RUNTIME_HEALTH_COMPONENTS = ["rpc", "prover", "photon"] as const;
 export const RUNTIME_HEALTH_STATUSES = ["green", "amber", "red"] as const;
 
 export const WALLET_STATUSES = ["pending", "ready", "paused"] as const;
+
+/** Bring-up is resumable: `failed` is retryable by re-submitting the same ring program id. */
+export const RING_STATUSES = ["pending", "active", "failed"] as const;
+
+/**
+ * Shape of a ring's operator-chosen name: a 1-32 char lowercase slug, because
+ * it appears in request bodies and logs. Mirrored by migration 0072's CHECK.
+ */
+export const RING_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
+
+/** Reserved: operations name the default public pool with it, so no ring may claim it. */
+export const DEFAULT_RING_NAME = "default";
 
 export const ZONE_KINDS = ["treasury", "public"] as const;
 

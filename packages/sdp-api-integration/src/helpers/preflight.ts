@@ -2,8 +2,9 @@ import { apiTestSupport } from "@sdp/api/test-support";
 import { probeGatewayHealth } from "@sdp/private-channels";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+import { privateChannelProbeTransport } from "./private-channels";
 
-const { KoraClient } = apiTestSupport;
+const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraClient } = apiTestSupport;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -45,24 +46,54 @@ async function runPreflight(): Promise<void> {
   // existing Kora/on-chain shards keep working unchanged.
   const requested = getRequestedSuites();
   const koraInScope = requested ? requested.has("kora") : !!env.KORA_RPC_URL;
+  // DvP needs a cluster, custody signer, and Kora sponsorship. Private Channels
+  // remains independent because the DvP lane never calls its gateway.
+  const dvpInScope = requested === null ? false : requested.has("dvp");
   const spcInScope = requested
     ? requested.has("spc")
     : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
 
-  if (!koraInScope && !spcInScope) {
+  if (!koraInScope && !spcInScope && !dvpInScope) {
+    // biome-ignore lint/security/noSecrets: environment variable names in a help message, not a secret.
+    const suites = "SDP_INTEGRATION_SUITE=kora|spc|dvp";
     throw new Error(
-      "Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with SDP_INTEGRATION_SUITE=kora|spc."
+      `Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with ${suites}.`
     );
   }
 
   // Each scope validates only its own dependencies: an SPC-only run must not
   // require Kora, or the Private Channels suites are unreachable without standing
   // up a Kora harness they never call.
-  if (koraInScope) {
+  if (koraInScope || dvpInScope) {
     await preflightKoraSuite();
   }
   if (spcInScope) {
     await preflightSpcSuite();
+  }
+  if (dvpInScope) {
+    await preflightDvpSuite();
+  }
+}
+
+/**
+ * What a DvP run actually needs: a cluster, Kora sponsorship, and a custody
+ * signer to be the organization's side of a trade.
+ *
+ * Deliberately short. Everything else DvP touches — the settlement authority,
+ * the escrows, the policy rows — is created by the code under test, and a
+ * pre-flight that provisioned them would be checking its own fixture rather
+ * than the product.
+ */
+async function preflightDvpSuite(): Promise<void> {
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
+  const missing: string[] = [];
+  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (integrationCustodyProvider === "local" && !env.CUSTODY_PRIVATE_KEY) {
+    missing.push("CUSTODY_PRIVATE_KEY");
+  }
+  if (missing.length > 0) {
+    throw new Error(`Integration preflight (dvp): missing ${missing.join(", ")}.`);
   }
 }
 
@@ -89,7 +120,7 @@ async function preflightSpcSuite(): Promise<void> {
 
   // Fail with "the gateway is down" rather than letting each test time out.
   const health = await withLabel("PrivateChannels.probeGatewayHealth", () =>
-    probeGatewayHealth(gatewayUrl)
+    probeGatewayHealth(gatewayUrl, privateChannelProbeTransport)
   );
   if (health.status === "unreachable") {
     throw new Error(
@@ -194,14 +225,19 @@ async function preflightKoraSuite(): Promise<void> {
 }
 
 function getRequiredKoraAllowedPrograms(): readonly string[] {
-  if (isKoraSurfpoolShim()) {
-    return REQUIRED_SURFPOOL_ALLOWED_PROGRAMS;
-  }
-
-  return REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS;
+  const requested = getRequestedSuites();
+  const dvpRequired = requested === null ? false : requested.has("dvp");
+  const base = isKoraSurfpoolShim()
+    ? REQUIRED_SURFPOOL_ALLOWED_PROGRAMS
+    : REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS;
+  return dvpRequired ? [...base, DVP_SWAP_PROGRAM_PROGRAM_ADDRESS] : base;
 }
 
 function getKoraPreflightScopeLabel(): string {
+  const requested = getRequestedSuites();
+  if (requested === null ? false : requested.has("dvp")) {
+    return "DvP";
+  }
   if (isKoraSurfpoolShim()) {
     return "Surfpool-backed SDP";
   }

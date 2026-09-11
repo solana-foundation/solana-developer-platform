@@ -10,9 +10,15 @@ import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
+  type SignerSelectionState,
 } from "../token-management-workspace.utils";
 import { updateAssetProfileAction } from "./actions";
-import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mapping";
+import {
+  areDraftsEquivalent,
+  type DraftAuthorityWallet,
+  normalizeDraftWalletAssignments,
+  profileToDraftState,
+} from "./asset-profile-mapping";
 
 /**
  * Edit-in-place form state for the asset management workspace: one draft
@@ -23,9 +29,13 @@ import { areDraftsEquivalent, profileToDraftState } from "./asset-profile-mappin
 export function useAssetProfileForm({
   token,
   assetProfile: initialAssetProfile,
+  metadataSignerSelection,
+  draftWallets,
 }: {
   token: Token;
   assetProfile: AssetProfile;
+  metadataSignerSelection: SignerSelectionState;
+  draftWallets: readonly DraftAuthorityWallet[];
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -38,8 +48,17 @@ export function useAssetProfileForm({
     }
   }, [initialAssetProfile, assetProfile.updatedAt]);
 
-  const baseline = useMemo(() => profileToDraftState(assetProfile, token), [assetProfile, token]);
-  const [draft, setDraft] = useState<DraftState>(baseline);
+  const storedBaseline = useMemo(
+    () => profileToDraftState(assetProfile, token),
+    [assetProfile, token]
+  );
+  const [storedDraft, setDraft] = useState<DraftState>(storedBaseline);
+  const baseline = token.mintAddress
+    ? storedBaseline
+    : normalizeDraftWalletAssignments(storedBaseline, draftWallets);
+  const draft = token.mintAddress
+    ? storedDraft
+    : normalizeDraftWalletAssignments(storedDraft, draftWallets);
   const [baselineKey, setBaselineKey] = useState(assetProfile.updatedAt);
   // Re-hydrate the form when the underlying profile changes (post-save or after
   // a router.refresh picked up someone else's update) — but never mid-edit.
@@ -53,6 +72,16 @@ export function useAssetProfileForm({
 
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [selectedMetadataSignerWalletId, setMetadataSignerWalletId] = useState("");
+  const metadataSignerWalletId =
+    selectedMetadataSignerWalletId || metadataSignerSelection.defaultWalletId;
+  const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
+  const metadataSignerUnavailableReason = requiresMetadataSigner
+    ? (metadataSignerSelection.unavailableReason ??
+      (metadataSignerSelection.wallets.some((wallet) => wallet.id === metadataSignerWalletId)
+        ? null
+        : t("DashboardIssuance.signer.select")))
+    : null;
 
   const updateDraft = (patch: Partial<DraftState>) => {
     if (saving) {
@@ -66,6 +95,19 @@ export function useAssetProfileForm({
   const supplyLocked = isSupplyLockedOnChain(token);
 
   const errors = getAssetDetailsErrors(draft, t);
+  if (
+    !token.mintAddress &&
+    draft.authorityWalletIds &&
+    Object.values(draft.authorityWalletIds).some(
+      (id) => !draftWallets.some((wallet) => wallet.id === id)
+    )
+  ) {
+    errors.authorityWalletIds = t("DashboardIssuance.signer.select");
+  }
+  if (token.mintAddress) {
+    // A deployed token's historical deployment wallet is read-only here.
+    delete errors.signingWalletId;
+  }
   if (!draft.name.trim()) {
     errors.name = t("DashboardIssuance.errors.assetNameRequired");
   }
@@ -82,7 +124,7 @@ export function useAssetProfileForm({
       symbol: token.symbol,
     });
   }
-  const errorCount = Object.keys(errors).length;
+  const errorCount = Object.keys(errors).length + (metadataSignerUnavailableReason ? 1 : 0);
 
   const discard = () => {
     setDraft(baseline);
@@ -91,12 +133,12 @@ export function useAssetProfileForm({
 
   const save = async () => {
     if (!dirty || saving) {
-      return;
+      return false;
     }
     if (errorCount > 0) {
       setShowErrors(true);
       toast.error(t("DashboardIssuance.assetProfileForm.fixHighlightedFields"));
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -107,6 +149,7 @@ export function useAssetProfileForm({
         profileId: assetProfile.id,
         rebuiltMetadata: buildIssuanceMetadata(draft),
         tokenPatch: {
+          signingCustodyWalletId: requiresMetadataSigner ? metadataSignerWalletId : undefined,
           name: draft.name.trim(),
           description: draft.description.trim() || null,
           uri: draft.metadataUri.trim() || null,
@@ -117,6 +160,7 @@ export function useAssetProfileForm({
             ? {}
             : {
                 symbol: draft.symbol.trim(),
+                ...(draft.signingWalletId ? { signingCustodyWalletId: draft.signingWalletId } : {}),
                 decimals: Number(draft.decimals),
                 requiresAllowlist: draft.accessControl === "allowlist",
               }),
@@ -128,7 +172,7 @@ export function useAssetProfileForm({
 
       if (result.state === "error") {
         toast.error(result.message);
-        return;
+        return false;
       }
 
       toast.success(result.message);
@@ -144,6 +188,7 @@ export function useAssetProfileForm({
         );
       }
       router.refresh();
+      return true;
     } finally {
       setSaving(false);
     }
@@ -174,6 +219,9 @@ export function useAssetProfileForm({
     discard,
     assetProfile,
     supplyLocked,
+    metadataSignerWalletId,
+    setMetadataSignerWalletId,
+    requiresMetadataSigner,
   };
 }
 
@@ -183,6 +231,7 @@ export function useAssetProfileForm({
 // carry the token's own value.
 function draftTokenPatch(draft: DraftState): Partial<Token> {
   return {
+    signingCustodyWalletId: draft.signingWalletId || null,
     name: draft.name.trim(),
     symbol: draft.symbol.trim(),
     decimals: Number(draft.decimals),

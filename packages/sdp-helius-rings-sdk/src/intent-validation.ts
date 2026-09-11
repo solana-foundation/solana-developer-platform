@@ -3,6 +3,7 @@ import {
   type PreparedTransfer,
   type ProofOutputUtxo,
   SENDER_SLOT_COUNT,
+  type WithdrawalTarget,
 } from "@heliuslabs/zolana/transaction";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import type { Address } from "@solana/kit";
@@ -22,8 +23,15 @@ export type PreparedSpendIntent =
   | Readonly<{
       kind: "withdraw";
       owner: Address;
-      recipient: Address;
+      asset: Address;
       amount: bigint;
+      /**
+       * The public target the builder resolved. Its shape decides which
+       * settlement the prepared transfer must carry — a SOL recipient, or the
+       * vault plus recipient token account of an SPL withdrawal — so binding
+       * the target binds every account the settlement reaches.
+       */
+      target: WithdrawalTarget;
     }>;
 
 function matchesIdentity(output: ProofOutputUtxo, expected: ShieldedAddress): boolean {
@@ -35,8 +43,8 @@ function matchesIdentity(output: ProofOutputUtxo, expected: ShieldedAddress): bo
 
 function isPlainOutput(output: ProofOutputUtxo): boolean {
   return (
-    output.zoneProgramId === undefined &&
-    output.zoneDataHash === undefined &&
+    output.ringProgramId === undefined &&
+    output.ringDataHash === undefined &&
     output.dataHash === undefined &&
     output.data.isEmpty()
   );
@@ -98,14 +106,30 @@ function matchesWithdrawal(
   intent: Extract<PreparedSpendIntent, { kind: "withdraw" }>
 ): boolean {
   const settlement = prepared.interfaceTransfers[0];
+  if (
+    prepared.outputs.length !== SENDER_SLOT_COUNT ||
+    !hasExpectedSenderSlots(prepared, intent.asset) ||
+    prepared.interfaceTransfers.length !== 1 ||
+    settlement === undefined ||
+    settlement.isDeposit !== false ||
+    settlement.amount !== intent.amount
+  ) {
+    return false;
+  }
+
+  if (intent.target.kind === "sol") {
+    return settlement.kind === "sol" && settlement.userSolAccount === intent.target.recipient;
+  }
+
+  // The bump is part of the proof's public input, so a target whose bump
+  // disagrees with the vault it names would prove against a different account
+  // than the instruction reaches.
   return (
-    prepared.outputs.length === SENDER_SLOT_COUNT &&
-    hasExpectedSenderSlots(prepared, SOL) &&
-    prepared.interfaceTransfers.length === 1 &&
-    settlement?.kind === "sol" &&
-    settlement.isDeposit === false &&
-    settlement.userSolAccount === intent.recipient &&
-    settlement.amount === intent.amount
+    settlement.kind === "spl" &&
+    settlement.mint === intent.asset &&
+    settlement.tokenAccount === intent.target.recipientTokenAccount &&
+    settlement.splTokenInterface === intent.target.splTokenInterface &&
+    settlement.splInterfaceBump === intent.target.splInterfaceBump
   );
 }
 

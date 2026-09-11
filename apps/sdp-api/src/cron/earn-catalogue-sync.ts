@@ -48,6 +48,11 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
+import {
+  reportFigureAnomalies,
+  reportShelfDisappearance,
+  type StoredStrategyFigures,
+} from "@/services/earn/catalogue-anomaly";
 import type { Env } from "@/types/env";
 
 export const EARN_CATALOGUE_SYNC_MONITOR = "sdp-api-sync-earn-catalogue";
@@ -413,6 +418,12 @@ async function writeCatalogueLane(
   const listedProviderReferences: string[] = [...(lane.keepWithoutUpsert ?? [])];
   let upsertFailed = false;
 
+  // Figure anomaly check (PRO-1867) BEFORE the writes: the stored rows are the
+  // "before". Scoped to the lane's sub-shelf, since that is the set this
+  // lane's snapshots are the truth for. Read-only and never fatal: a failed
+  // read costs this pass its diff, not its write.
+  await reportLaneAnomalies(repo, client, lane, listedProviderReferences.length, logContext);
+
   for (const snapshot of lane.snapshots) {
     listedProviderReferences.push(snapshot.providerReference);
 
@@ -463,6 +474,67 @@ async function writeCatalogueLane(
     upsertFailed,
     logContext,
   });
+}
+
+/**
+ * Diff the lane's incoming snapshots against the stored sub-shelf and report
+ * out-of-bounds APY/TVL moves plus a shelf that reliably went empty (PRO-1867,
+ * threat model EARN-010). Emits events only; the write decisions below do not
+ * read its outcome. `keptWithoutUpsertCount` is the collided mirror references:
+ * they are still listed by the source, so a lane whose only survivors are
+ * those has not lost its shelf.
+ */
+async function reportLaneAnomalies(
+  repo: EarnRepository,
+  client: EarnVaultProvider,
+  lane: CatalogueLane,
+  keptWithoutUpsertCount: number,
+  logContext: Record<string, unknown>
+): Promise<void> {
+  let stored: StoredStrategyFigures[];
+  try {
+    const rows = await repo.listStrategyFigures({
+      provider: client.provider,
+      environment: lane.environment,
+    });
+    stored = rows
+      .filter((row) => lane.delistScope === undefined || row.host_cluster === lane.delistScope)
+      .map((row) => ({
+        providerReference: row.provider_reference,
+        hostCluster: row.host_cluster,
+        currentApy: row.current_apy,
+        tvlUsd: row.tvl_usd,
+      }));
+  } catch (err) {
+    getLogger().warn(
+      { ...logContext, error: err instanceof Error ? err.message : String(err) },
+      "syncEarnCatalogue: skipped figure anomaly check, stored figures unreadable"
+    );
+    return;
+  }
+
+  reportFigureAnomalies({
+    source: "catalogue_sync",
+    provider: client.provider,
+    environment: lane.environment,
+    stored,
+    incoming: lane.snapshots.map((snapshot) => ({
+      providerReference: snapshot.providerReference,
+      currentApy: snapshot.currentApy ?? null,
+      tvlUsd: snapshot.riskMetadata?.tvlUsd,
+      hostCluster: snapshot.hostCluster,
+    })),
+  });
+
+  if (stored.length > 0 && lane.snapshots.length === 0 && keptWithoutUpsertCount === 0) {
+    reportShelfDisappearance({
+      provider: client.provider,
+      environment: lane.environment,
+      delistScope: lane.delistScope ?? "environment",
+      previousCount: stored.length,
+      willDelist: lane.allowEmptyKeepSet === true,
+    });
+  }
 }
 
 /**

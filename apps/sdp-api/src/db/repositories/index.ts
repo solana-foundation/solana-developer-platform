@@ -44,18 +44,32 @@ export { createPostgresCounterpartyAccountsRepository } from "./counterparty-acc
 export type {
   ArchiveExternalAccountInput,
   CompleteExternalAccountInput,
+  CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
+  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
+  InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  PatchAccountMetadataInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
+export type {
+  DvpTradeInsert,
+  DvpTradeRepository,
+  DvpTradeRow,
+  DvpTradeScope,
+  DvpTradeSide,
+  DvpTradeStatus,
+} from "./dvp-trade.repository";
+export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 export type {
   DeleteUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
@@ -98,14 +112,6 @@ export type {
 export { mapHeliusRingsHealthRows } from "./helius-rings-health.repository";
 export { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
 export type {
-  CreateHeliusRingsKeyRefInput,
-  HeliusRingsKeyRefRepository,
-  HeliusRingsKeyRefRepositoryContext,
-  HeliusRingsKeyRefRow,
-} from "./helius-rings-key-ref.repository";
-export { generateHeliusRingsKeyRefId } from "./helius-rings-key-ref.repository";
-export { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
-export type {
   FailHeliusRingsOperationInput,
   HeliusRingsOperationRepository,
   HeliusRingsOperationRepositoryContext,
@@ -128,6 +134,20 @@ export {
   mapHeliusRingsOperationSummaryRow,
 } from "./helius-rings-operation.repository";
 export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
+export type {
+  HeliusRingsProjectRingRepository,
+  HeliusRingsProjectRingRow,
+  HeliusRingsRingKey,
+  MarkHeliusRingsProjectRingActiveInput,
+  MarkHeliusRingsProjectRingFailedInput,
+  RecordHeliusRingsLookupTableInput,
+  ReserveHeliusRingsProjectRingInput,
+} from "./helius-rings-project-ring.repository";
+export {
+  generateHeliusRingsProjectRingId,
+  mapHeliusRingsProjectRingRow,
+} from "./helius-rings-project-ring.repository";
+export { createPostgresHeliusRingsProjectRingRepository } from "./helius-rings-project-ring.repository.postgres";
 export type {
   CreateHeliusRingsWalletInput,
   HeliusRingsProjectScope,
@@ -302,6 +322,7 @@ export type {
   WalletOperationRow,
   WalletPolicyEvaluationAuditRow,
 } from "./policy.repository";
+export { WalletOperationIdempotencyConflictError } from "./policy.repository";
 export { createPostgresPolicyRepository } from "./policy.repository.postgres";
 export type {
   CreatePrivateChannelInput,
@@ -434,12 +455,13 @@ export {
   createAssetWorkflowsRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createDvpTradeRepository,
   createEarnRepository,
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
-  createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
+  createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
   createKycWalletsRepository,

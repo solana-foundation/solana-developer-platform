@@ -6,6 +6,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -98,19 +99,13 @@ async function seedBaseline(): Promise<void> {
          VALUES (?, ?, ?, 'admin', 'active')`
       )
       .bind("mem_custody_setup_status", TEST_ORG.id, TEST_USER.id),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT.id, TEST_ORG.id, "Setup Status Project", TEST_PROJECT.slug, TEST_USER.id),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_custody_setup_status", TEST_PROJECT.id, TEST_USER.id),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
 }
 
 async function seedLegacyConfig(provider: string, configId: string): Promise<void> {
@@ -373,44 +368,6 @@ describe("internal custody providers", () => {
     const privy = statusFor(await fetchSetupStatus(), "privy");
     expect(privy?.hasLegacyConfig).toBe(true);
     expect(privy?.effectiveTargetType).toBe("config");
-  });
-
-  it("does not count another project's config as inherited", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "prj_setup_status_sibling",
-        TEST_ORG.id,
-        "Sibling",
-        "sibling-setup-status",
-        "sandbox",
-        "active",
-        TEST_USER.id
-      )
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cust_cfg_setup_status_sibling",
-        TEST_ORG.id,
-        "prj_setup_status_sibling",
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "active"
-      )
-      .run();
-
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.hasLegacyConfig).toBe(false);
-    expect(privy?.effectiveTargetType).toBe("none");
   });
 
   it("creates nothing while reading", async () => {

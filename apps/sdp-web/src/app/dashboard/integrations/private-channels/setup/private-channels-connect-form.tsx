@@ -1,11 +1,11 @@
 "use client";
 
-import {
-  type ConnectionProbeResult,
-  privateChannelInstanceInputSchema,
-  SANDBOX_DEFAULTS,
-} from "@sdp/private-channels";
-import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
+import { privateChannelInstanceInputSchema, SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import type {
+  PrivateChannelInstance,
+  PrivateChannelInstanceInput,
+  PrivateChannelProbeResult,
+} from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
@@ -154,7 +154,10 @@ export function PrivateChannelsConnectForm({
       toast.error(result.message);
       return;
     }
-    updateState({ formError: t("DashboardPrivateChannels.instance.connectionRequestFailed") });
+    // `server` carries the API's own message (RPC resolution, principal
+    // provisioning, feature gate). Surface it like runUpdate does — the generic
+    // fallback named a connection test that never ran and hid the real failure.
+    updateState({ formError: result.message });
   };
 
   const runTest = () => {
@@ -173,7 +176,9 @@ export function PrivateChannelsConnectForm({
         return;
       }
       if (result.kind === "request-error") {
-        toast.error(t("DashboardPrivateChannels.instance.connectionRequestFailed"));
+        // The request never produced a probe verdict, so there are no per-check
+        // badges to show — but the reason still belongs on screen.
+        toast.error(result.message);
         return;
       }
       if (result.probe.ok) {
@@ -378,7 +383,7 @@ export function PrivateChannelsConnectForm({
 
 type Translate = ReturnType<typeof useTranslations>;
 
-function probeFailureMessage(t: Translate, probe: ConnectionProbeResult): string {
+function probeFailureMessage(t: Translate, probe: PrivateChannelProbeResult): string {
   return isProjectRpcProbeFailure(probe)
     ? t("DashboardPrivateChannels.instance.projectRpcTestFailed")
     : t("DashboardPrivateChannels.instance.connectionTestFailed");

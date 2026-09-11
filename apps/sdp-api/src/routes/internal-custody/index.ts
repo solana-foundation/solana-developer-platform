@@ -1,14 +1,32 @@
+import { CUSTODY_CONNECTION_FAILURE_CODES } from "@sdp/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestParams } from "@/lib/errors";
+import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
+import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
-import { getProviderCredentialInstallation } from "@/services/provider-credential-installation.service";
+import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
+import {
+  getProviderAvailability,
+  isCustodyProviderEntitled,
+} from "@/services/provider-availability.service";
+import {
+  deactivateCustodyConnection,
+  getProviderCredentialInstallation,
+} from "@/services/provider-credential-installation.service";
+import {
+  completeRotationCandidate,
+  deactivateProviderCredential,
+  getProviderCredentialLifecycle,
+  rollbackProviderCredential,
+  rotateProviderCredential,
+} from "@/services/provider-credential-lifecycle.service";
 import { getProviderSetupDefinition } from "@/services/provider-setup-registry";
 import {
   getPendingWalletLabel,
@@ -17,7 +35,21 @@ import {
 import type { Env } from "@/types/env";
 
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
+const credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).strict();
+const rotationBodySchema = z
+  .object({
+    fields: z
+      .object({
+        appId: z.string().trim().min(1).max(4096),
+        appSecret: z.string().min(1).max(4096),
+      })
+      .strict(),
+  })
+  .strict();
 const privySetup = getProviderSetupDefinition("custody", "privy");
+const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
+// Rotation retries must not consume the budget for rollback or candidate cancellation.
+const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
 
 const internalCustody = new Hono<{ Bindings: Env }>();
 
@@ -42,32 +74,35 @@ internalCustody.get("/connections", async (c) => {
     : 0;
 
   const store = new ProviderCredentialStore(getDb(c.env));
-  const { connections, total } = await store.listProjectConnectionsPage(
-    auth.organizationId,
-    projectId,
-    { limit, offset }
-  );
+  const [{ connections, total }, availability] = await Promise.all([
+    store.listProjectConnectionsPage(auth.organizationId, projectId, { limit, offset }),
+    getProviderAvailability(c.env, getDb(c.env), auth.organizationId),
+  ]);
 
   return success(c, {
     connections: connections.map((row) => ({
       id: row.id,
       provider: row.provider,
-      status: row.status,
+      label: row.credential_label,
+      status: row.connection_status,
+      isDefault: isCustodyConnectionRuntimeEnabled(c.env, row.provider) && row.is_selected,
+      isRuntimeExecutionAllowed:
+        isCustodyConnectionRuntimeAvailable(c.env, row.provider, row) &&
+        isCustodyProviderEntitled(availability, row.provider),
+      defaultCustodyWalletId: row.default_custody_wallet_id,
       createdAt: row.created_at,
       activatedAt: row.activated_at,
       lastCheck: row.last_check_status
         ? {
             status: row.last_check_status,
             at: row.last_check_at,
-            failureCode: row.last_check_failure_code,
+            failureCode:
+              CUSTODY_CONNECTION_FAILURE_CODES.find(
+                (code) => code === row.last_check_failure_code
+              ) ?? null,
           }
         : null,
       pendingWalletLabel: getPendingWalletLabel(row.setup_metadata) ?? null,
-      providerCredential: {
-        id: row.credential_id,
-        label: row.credential_label,
-        status: row.credential_status,
-      },
     })),
     pagination: { limit, offset, total },
   });
@@ -143,6 +178,70 @@ internalCustody.get("/connections/:connectionId", async (c) => {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
   }
   return success(c, await getProviderCredentialInstallation(c, params.data.connectionId));
+});
+
+internalCustody.get("/connections/:connectionId/provider-credential", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  return success(c, await getProviderCredentialLifecycle(c, params.data.connectionId));
+});
+
+internalCustody.post("/connections/:connectionId/deactivate", async (c) => {
+  const params = connectionParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  await enforceMeteredQuota(c, recoveryQuota);
+  return success(c, await deactivateCustodyConnection(c, params.data.connectionId));
+});
+
+internalCustody.post("/provider-credentials/:credentialId/rotate", async (c) => {
+  const params = credentialParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  const body = rotationBodySchema.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(body.error).fieldErrors,
+    });
+  }
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  if (!idempotencyKey) throw badRequest("Idempotency-Key is required");
+  await enforceMeteredQuota(c, rotationQuota);
+  return success(
+    c,
+    await rotateProviderCredential(c, params.data.credentialId, body.data.fields, idempotencyKey)
+  );
+});
+
+internalCustody.post("/provider-credentials/:credentialId/complete-rotation", async (c) => {
+  const params = credentialParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  await enforceMeteredQuota(c, rotationQuota);
+  return success(c, await completeRotationCandidate(c, params.data.credentialId));
+});
+
+internalCustody.post("/provider-credentials/:credentialId/rollback", async (c) => {
+  const params = credentialParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  await enforceMeteredQuota(c, recoveryQuota);
+  return success(c, await rollbackProviderCredential(c, params.data.credentialId));
+});
+
+internalCustody.post("/provider-credentials/:credentialId/deactivate", async (c) => {
+  const params = credentialParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+  }
+  await enforceMeteredQuota(c, recoveryQuota);
+  return success(c, await deactivateProviderCredential(c, params.data.credentialId));
 });
 
 internalCustody.post("/connections/:connectionId/complete", async (c) => {

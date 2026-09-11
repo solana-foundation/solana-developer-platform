@@ -30,7 +30,11 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
   { domain: "policies", path: "/v1/policies", scope: "project" },
-  { domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project" },
+  // Earn answers 403 wherever EARN_ENABLED is off (stage and prod today); the smoke pins the
+  // flag off in smoke-flags.json, so the row is only meaningful when the posture turns it on.
+  ...(process.env.EARN_ENABLED === "true"
+    ? [{ domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project" as const }]
+    : []),
 ];
 
 test.describe("GCP dev API golden endpoints", () => {

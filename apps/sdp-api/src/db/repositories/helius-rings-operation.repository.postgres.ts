@@ -1,3 +1,4 @@
+import { HeliusRingsError } from "@sdp/helius-rings";
 import type { AppDb } from "@/db";
 import {
   DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
@@ -35,6 +36,7 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     id: row.id as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string,
+    rings_connection_id: row.rings_connection_id as string,
     wallet_id: row.wallet_id as string,
     op_type: row.op_type as HeliusRingsOperationRow["op_type"],
     state: row.state as HeliusRingsOperationRow["state"],
@@ -44,6 +46,7 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     to_addr: (row.to_addr ?? null) as string | null,
     zone_id: (row.zone_id ?? null) as string | null,
     transfer_mode: (row.transfer_mode ?? null) as HeliusRingsOperationRow["transfer_mode"],
+    ring_program_id: (row.ring_program_id ?? null) as string | null,
     intent_key: row.intent_key as string,
     approval_request_id: (row.approval_request_id ?? null) as string | null,
     policy_evaluation_id: (row.policy_evaluation_id ?? null) as string | null,
@@ -142,12 +145,35 @@ export function createPostgresHeliusRingsOperationRepository(
       const id = generateHeliusRingsOperationId();
 
       return db.transaction(async (tx) => {
+        const existing = await tx
+          .prepare("SELECT * FROM helius_rings_operations WHERE intent_key = ?")
+          .bind(input.intentKey)
+          .first<Record<string, unknown>>();
+        if (existing) return { operation: mapRow(existing), reserved: false };
+
+        const connection = await tx
+          .prepare(
+            `SELECT id
+               FROM helius_rings_connections
+              WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+              FOR SHARE`
+          )
+          .bind(input.ringsConnectionId, input.organizationId, input.projectId)
+          .first<{ id: string }>();
+        if (!connection) {
+          throw new HeliusRingsError(
+            "config_error",
+            "The selected Helius Rings connection is no longer active"
+          );
+        }
+
         const row = await tx
           .prepare(
             `INSERT INTO helius_rings_operations (
                id,
                organization_id,
                project_id,
+               rings_connection_id,
                wallet_id,
                op_type,
                intent_key,
@@ -157,9 +183,10 @@ export function createPostgresHeliusRingsOperationRepository(
                to_addr,
                zone_id,
                transfer_mode,
+               ring_program_id,
                retry_of_operation_id,
                timelock_unlock_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (intent_key)
              -- Self-assignment rather than DO NOTHING: DO NOTHING returns zero
              -- rows on a replay, which is indistinguishable from a failed
@@ -172,6 +199,7 @@ export function createPostgresHeliusRingsOperationRepository(
             id,
             input.organizationId,
             input.projectId,
+            input.ringsConnectionId,
             input.walletId,
             input.opType,
             input.intentKey,
@@ -181,6 +209,7 @@ export function createPostgresHeliusRingsOperationRepository(
             input.toAddr ?? null,
             input.zoneId ?? null,
             input.transferMode ?? null,
+            input.ringProgramId ?? null,
             input.retryOfOperationId ?? null,
             input.timelock?.unlockAt ?? null
           )

@@ -144,7 +144,7 @@ describe("WalletIdentityCheck", () => {
     expect(await screen.findByText("Registered with different keys")).toBeTruthy();
     // SDP does not rotate keys, so the resolution is a different custody
     // wallet, not a retry.
-    expect(screen.getByText(/will refuse rather than re-key it/)).toBeTruthy();
+    expect(screen.getByText(/refuse rather than write over it/)).toBeTruthy();
     expect(screen.getByText(/different custody wallet/)).toBeTruthy();
     expect(screen.getByText("Differs in: the nullifier key")).toBeTruthy();
     expect(screen.getByText(PUBLISHED)).toBeTruthy();
@@ -184,13 +184,13 @@ describe("WalletIdentityCheck", () => {
 
   it("surfaces the server's own reason when the read fails", async () => {
     mocks.fetchRingsWalletIdentity.mockResolvedValue({
-      error: "Helius Rings is enabled but HELIUS_RINGS_RPC_URL is not configured",
+      error: "Helius Rings setup is required for this project",
     });
     renderCheck();
 
     await userEvent.setup().click(checkButton());
 
-    expect(await screen.findByText(/HELIUS_RINGS_RPC_URL is not configured/)).toBeTruthy();
+    expect(await screen.findByText(/Helius Rings setup is required/)).toBeTruthy();
     // A failure is not a verdict about the chain.
     expect(screen.queryByText("Not registered")).toBeNull();
     expect(checkButton().disabled).toBe(false);
@@ -246,16 +246,16 @@ describe("WalletIdentityCheck", () => {
     const user = userEvent.setup();
 
     await user.click(checkButton());
-    expect(await screen.findByText(/will refuse rather than re-key it/)).toBeTruthy();
+    expect(await screen.findByText(/refuse rather than write over it/)).toBeTruthy();
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.queryByText(/will refuse rather than re-key it/)).toBeNull();
+    expect(screen.queryByText(/refuse rather than write over it/)).toBeNull();
     expect(mocks.fetchRingsWalletIdentity).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "View details" }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(screen.getByText(/will refuse rather than re-key it/)).toBeTruthy();
+    expect(screen.getByText(/refuse rather than write over it/)).toBeTruthy();
     expect(mocks.fetchRingsWalletIdentity).toHaveBeenCalledTimes(1);
   });
 });

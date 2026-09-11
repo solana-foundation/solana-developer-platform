@@ -1,11 +1,6 @@
 import type { PayoutRequirementTree, RequirementField } from "@sdp/types/ramp-requirements";
 import { describe, expect, it } from "vitest";
-import {
-  activePayoutAccounts,
-  derivePayoutRequirementFields,
-  payoutAccountSelectionAfterFieldChange,
-  resolvePayoutAccountSelection,
-} from "./use-counterparty-requirements";
+import { derivePayoutRequirementFields } from "./use-counterparty-requirements";
 
 const labels = {
   destinationCountry: "Destination country",
@@ -64,7 +59,7 @@ const payout = {
 
 describe("derivePayoutRequirementFields", () => {
   it("builds the country select from payout country keys", () => {
-    const fields = derivePayoutRequirementFields(payout, {}, labels, { kind: "none" });
+    const fields = derivePayoutRequirementFields(payout, {}, labels);
 
     expect(fields).toEqual([
       {
@@ -80,35 +75,14 @@ describe("derivePayoutRequirementFields", () => {
     ] satisfies RequirementField[]);
   });
 
-  it("uses the existing active account without revealing rail fields", () => {
-    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "CA" }, labels, {
-      kind: "existing",
-      id: "account_ca",
-    });
+  it("keeps the collection form fully derivable when the corridor has a saved account", () => {
+    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "CA" }, labels);
 
-    expect(fields.map((field) => field.key)).toEqual(["destinationCountry"]);
-  });
-
-  it("reveals rail fields when the user chooses a new account", () => {
-    const fields = derivePayoutRequirementFields(
-      payout,
-      { destinationCountry: "CA", paymentRails: "SWIFT" },
-      labels,
-      { kind: "new" }
-    );
-
-    expect(fields.map((field) => field.key)).toEqual([
-      "destinationCountry",
-      "paymentRails",
-      "bankAccount.accountNumber",
-      "bankAccount.swiftCode",
-    ]);
+    expect(fields.map((field) => field.key)).toEqual(["destinationCountry", "paymentRails"]);
   });
 
   it("reveals the selected country's rail options verbatim", () => {
-    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "US" }, labels, {
-      kind: "none",
-    });
+    const fields = derivePayoutRequirementFields(payout, { destinationCountry: "US" }, labels);
 
     expect(fields[1]).toEqual({
       kind: "select",
@@ -123,8 +97,7 @@ describe("derivePayoutRequirementFields", () => {
     const fields = derivePayoutRequirementFields(
       payout,
       { destinationCountry: "US", paymentRails: "ACH" },
-      labels,
-      { kind: "none" }
+      labels
     );
 
     expect(fields.map((field) => field.key)).toEqual([
@@ -133,55 +106,5 @@ describe("derivePayoutRequirementFields", () => {
       "bankAccount.accountNumber",
     ]);
     expect(fields[2]).toMatchObject({ required: true });
-  });
-});
-
-describe("payout account selection", () => {
-  it("pre-selects a single active account for the selected country", () => {
-    const selection = resolvePayoutAccountSelection(
-      { kind: "none" },
-      activePayoutAccounts(payout, "CA")
-    );
-
-    expect(selection).toEqual({ kind: "existing", id: "account_ca" });
-  });
-
-  it("resets the account choice when the destination country changes", () => {
-    const selection = payoutAccountSelectionAfterFieldChange(
-      { kind: "existing", id: "account_ca" },
-      "destinationCountry",
-      "CA",
-      "US"
-    );
-
-    expect(selection).toEqual({ kind: "none" });
-  });
-});
-
-describe("activePayoutAccounts", () => {
-  it("returns every active account for the selected country", () => {
-    const accounts = activePayoutAccounts(
-      {
-        ...payout,
-        accounts: [
-          ...payout.accounts,
-          {
-            id: "account_ca_second",
-            destinationCountry: "CA",
-            paymentRail: "SEPA",
-            status: "ACTIVE",
-          },
-          {
-            id: "account_ca_archived",
-            destinationCountry: "CA",
-            paymentRail: "ACH",
-            status: "ARCHIVED",
-          },
-        ],
-      },
-      "CA"
-    );
-
-    expect(accounts.map((account) => account.id)).toEqual(["account_ca", "account_ca_second"]);
   });
 });

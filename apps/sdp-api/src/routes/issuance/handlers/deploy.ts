@@ -10,18 +10,18 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS, type TokenResponse } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import type { ApiKeyContext } from "@/lib/auth";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import type { MosaicFeePayment } from "@/services/issuance/mosaic";
-import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -29,11 +29,18 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import type { confirmDeploySchema, deployTokenSchema } from "../schemas";
+import type { confirmDeploySchema, deployTokenSchema, legacyDeployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
-import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
+import {
+  admitIssuanceRuntimeExecution,
+  createLegacyResolvedAuthoritySigner,
+  createResolvedAuthoritySigner,
+  getInitialPermanentDelegateAuthority,
+  resolveIssuanceWallet,
+} from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
+import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -246,6 +253,48 @@ async function completeDeployFailureBeforeEffect(
   });
 }
 
+async function resolveCompletedDeployReplay(params: {
+  env: Env;
+  auth: ApiKeyContext;
+  tokenService: TokenService;
+  token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
+  idempotencyKey?: string;
+  requestedCustodyWalletId?: string;
+  feePayment: MosaicFeePayment;
+}): Promise<boolean> {
+  const { token, idempotencyKey } = params;
+  if (!token.mintAddress || !idempotencyKey) return false;
+
+  const replay = await params.tokenService.findTransactionByIdempotency(
+    params.auth.organizationId,
+    idempotencyKey
+  );
+  if (!replay) return false;
+
+  const custodyWalletId =
+    params.requestedCustodyWalletId ?? token.signingCustodyWalletId ?? replay.custodyWalletId;
+  if (
+    !custodyWalletId ||
+    replay.tokenId !== token.id ||
+    replay.type !== "deploy" ||
+    replay.custodyWalletId !== custodyWalletId ||
+    replay.params.feePayment !== params.feePayment
+  ) {
+    throw conflict("Idempotency key already used with different request payload");
+  }
+  if ((replay.status !== "confirmed" && replay.status !== "finalized") || !replay.signature) {
+    throw conflict("Deployment transaction is not settled");
+  }
+
+  await resolveIssuanceWallet({
+    env: params.env,
+    auth: params.auth,
+    custodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  return true;
+}
+
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -262,6 +311,22 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     throw notFound("Token");
   }
 
+  const { feePayment } = body;
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  if (
+    await resolveCompletedDeployReplay({
+      env: c.env,
+      auth,
+      tokenService,
+      token,
+      idempotencyKey,
+      requestedCustodyWalletId: body.signingCustodyWalletId,
+      feePayment,
+    })
+  ) {
+    return success(c, { token: toPublicToken(token) });
+  }
+
   // Validate token is in pending status
   if (token.status !== "pending") {
     throw new AppError(
@@ -274,9 +339,19 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     throw badRequest("Token already has a mint address");
   }
 
-  const { feePayment } = body;
+  const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
+  if (!requestedCustodyWalletId) {
+    throw badRequest("signingCustodyWalletId is required to deploy this token");
+  }
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+  const deploymentWallet = await resolveIssuanceWallet({
+    env: c.env,
+    auth,
+    custodyWalletId: requestedCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+
+  const idempotencyMetadata = buildIdempotencyMetadata(idempotencyKey, {
     tokenId,
     operation: "deploy",
     mode: "execute",
@@ -288,12 +363,22 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       },
       status: token.status,
       feePayment,
+      custodyWalletId: deploymentWallet.custodyWalletId,
     },
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: deploymentWallet.custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId: deploymentWallet.custodyWalletId,
     type: "deploy",
     params: {
       operation: "deploy",
@@ -309,7 +394,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   });
 
   if (replayed) {
-    return success(c, { token });
+    return success(c, { token: toPublicToken(token) });
   }
 
   // Claim the token for deployment before reading the snapshot we mint from.
@@ -318,15 +403,22 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   // created — which would otherwise leave the DB identity permanently out of
   // sync with the immutable mint. `beginTokenDeploy` re-reads post-claim, so we
   // mint from the now-frozen values.
-  const claimedToken = await tokenService.beginTokenDeploy(tokenId);
+  const claimedToken = await tokenService.beginTokenDeploy(
+    tokenId,
+    {
+      custodyWalletId: deploymentWallet.custodyWalletId,
+      providerWalletId: deploymentWallet.providerWalletId,
+    },
+    body.signingCustodyWalletId === undefined ? requestedCustodyWalletId : undefined
+  );
   if (!claimedToken) {
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
-      error: "Token is already being deployed or was deployed",
+      error: "Token deployment state or selected wallet changed",
     });
     throw new AppError(
       "CONFLICT",
-      "Token is already being deployed or was deployed; re-fetch and retry"
+      "Token deployment state or selected wallet changed; re-fetch and retry"
     );
   }
   token = claimedToken;
@@ -349,26 +441,26 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       action: "deploy",
       resourceType: "token",
       resourceId: tokenId,
-      metadata: { template: token.template, aclMode, feePayment, mode: "execute" },
+      metadata: {
+        template: token.template,
+        aclMode,
+        feePayment,
+        mode: "execute",
+        custodyWalletId: deploymentWallet.custodyWalletId,
+      },
     });
 
     // Resolve the signing wallet inside the try: it can throw, and now that we
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
     // `deploying`, uneditable and un-redeployable.
-    const signingWalletId = resolveApiKeySigningWalletId(
+    const signer = await createResolvedAuthoritySigner({
+      env: c.env,
       auth,
-      body.signingWalletId ?? token.signingWalletId,
-      ["tokens:write"]
-    );
-
-    // Get custody signer (resolves via 3-tier: project → org → env fallback)
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      signingWalletId
-    );
+      custodyWalletId: deploymentWallet.custodyWalletId,
+      currentAuthority: deploymentWallet.publicKey,
+      requiredWalletPermissions: ["tokens:write"],
+    });
     custodyAddress = signer.address;
 
     if (feePayment === "wallet") {
@@ -384,15 +476,10 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
         name: token.name,
         symbol: token.symbol,
         // Fall back to the SDP-hosted metadata JSON when the issuer didn't
-        // supply their own URI (HOO-466). Origin resolves to PUBLIC_API_ORIGIN
-        // when set, else the request origin, so the on-chain MetadataPointer
-        // points each environment at itself.
-        uri:
-          token.uri?.trim() ||
-          canonicalMetadataUrl(
-            resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
-            token.id
-          ),
+        // supply their own URI (HOO-466). The origin comes only from
+        // PUBLIC_API_ORIGIN — never the request — since the on-chain
+        // MetadataPointer is permanent (HOO-1013).
+        uri: token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env), token.id),
       },
       decimals: token.decimals,
       mintAuthority: signer,
@@ -447,8 +534,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       },
     });
 
-    const response: TokenResponse = { token: updatedToken };
-    return success(c, response);
+    return success(c, { token: toPublicToken(updatedToken) });
   } catch (error) {
     // The mint was created on-chain but the metadata-URI follow-up failed. The
     // create is irreversible, so record the mint (marking the token active)
@@ -510,7 +596,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   }
 };
 
-export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
+export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
   const body = c.req.valid("json");
@@ -543,6 +629,22 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSc
     ["tokens:write"]
   );
 
+  if (token.signingCustodyWalletId && signingWalletId !== token.signingWalletId) {
+    throw new AppError(
+      "CONFLICT",
+      "Legacy deploy prepare must use the provider wallet pinned on the token"
+    );
+  }
+
+  // This legacy client-signed flow intentionally remains Config-only. Validate
+  // the exact pin and load the Config signer before mutating the provider mirror.
+  const signer = await createLegacyResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId: signingWalletId,
+    expectedCustodyWalletId: token.signingCustodyWalletId,
+  });
+
   // Pin the resolved signing wallet on the token so confirmDeploy derives the
   // SAME custody address — and thus the same mint/metadata authorities and ABL
   // list PDA. Without this, a caller that passes a custom signingWalletId here
@@ -553,8 +655,6 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSc
     await tokenService.updateToken(tokenId, { signingWalletId });
   }
 
-  // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
@@ -565,11 +665,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof deployTokenSc
 
   // See deployToken above: SDP-hosted metadata fallback (HOO-466).
   const resolvedUri =
-    token.uri?.trim() ||
-    canonicalMetadataUrl(
-      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
-      token.id
-    );
+    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env), token.id);
 
   const buildMetadata = (uri: string) => ({ name: token.name, symbol: token.symbol, uri });
   const prepareOptions = {
@@ -706,91 +802,116 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     throw badRequest("Token already has a mint address");
   }
 
-  const mint = body.mint as Address;
-
-  // Verify the deploy actually landed before recording it: any tokens:write
-  // caller could otherwise pin an arbitrary mint to this token and poison the
-  // public metadata.json. See verifyTransactionLanded for why each of the
-  // three checks exists; the caller-side check below (findMintInitialization)
-  // is the third leg — it links the signature to THIS mint.
-  const signature = body.signature as Signature;
-  const rpc = createRpc(c.env);
-  const verified = await verifyTransactionLanded(rpc, signature, { expectAccount: mint });
-
-  if (!verified.ok) {
-    if (verified.reason === "not_confirmed") {
-      throw badRequest("Deploy transaction is not confirmed on-chain");
-    }
-    if (verified.reason === "account_missing") {
-      throw badRequest("Mint account does not exist on-chain");
-    }
-    // not_indexed: confirmed but not yet queryable via getTransaction — a
-    // retryable race, not a bad deploy. A 400 here would permanently reject a
-    // legitimate deploy.
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      "Deploy transaction is confirmed but not yet indexed by the RPC; retry shortly"
-    );
+  // The read-time guards above only narrow the errors; the claim is what
+  // serializes. Verification below spends several RPC round-trips, and during
+  // that window a concurrent confirm (or custodial deploy) would pass the same
+  // guards and the later commit would overwrite the winner's recorded mint.
+  // Take the same atomic pending→deploying claim the custodial path takes, so
+  // exactly one caller reaches the commit; setTokenDeployed additionally
+  // refuses any write to a row that isn't claimed or already has a mint.
+  // The claim returns the row as frozen at claim time. Every
+  // deployment-sensitive read below (signing wallet, freezability, ACL,
+  // template) must come from THIS snapshot, not the pre-claim `token` read: a
+  // PATCH landing in the read→claim window could otherwise have changed those
+  // fields, making authority verification or ABL derivation operate on stale
+  // values (HOO-1013). The custodial path already deploys from its claim result
+  // for the same reason.
+  const claimed = await tokenService.beginTokenDeploy(tokenId, null);
+  if (!claimed) {
+    throw new AppError("CONFLICT", "Token deployment is already in progress");
   }
 
-  const confirmedTx = verified.transaction;
-
-  const mintInitialization = findMintInitialization(confirmedTx, mint);
-  if (!mintInitialization) {
-    throw badRequest("Deploy transaction did not create this mint");
-  }
-
-  // Use the signing wallet prepareDeploy resolved and persisted, NOT the request
-  // body. A body value that diverged from prepare's would derive a different
-  // custody address and silently record the wrong mint/metadata authorities —
-  // and, for ABL tokens, the wrong list PDA. token.signingWalletId is the source
-  // of truth; resolve it again only to re-assert the key still has access.
-  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
-    "tokens:write",
-  ]);
-
-  // Recompute the authorities the deploy used (custody signer === mint &
-  // metadata authority, matching prepareDeploy) rather than trusting the
-  // request, so a recorded mint can't claim authorities the caller lacks.
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const custodyAddress = signer.address;
-  const freezeAuthority = token.isFreezable ? custodyAddress : null;
-
-  if (
-    mintInitialization.info?.mintAuthority !== custodyAddress ||
-    (mintInitialization.info?.freezeAuthority ?? null) !== freezeAuthority
-  ) {
-    throw badRequest("Deploy transaction did not use the expected mint authorities");
-  }
-
-  // Re-derive the ABL list address server-side instead of trusting the request
-  // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
-  // silently break every later allowlist op with no recovery short of a DB
-  // patch. The list-config PDA is deterministic from (mint authority, mint) and
-  // is only seeded on-chain when ACL is enabled and the mint is freezable —
-  // mirror the `enableSrfc37` condition the create path uses (mosaic/service.ts).
-  const listAddress =
-    shouldEnableOnChainAcl(token) && freezeAuthority !== null
-      ? await deriveAblListAddress(custodyAddress, mint)
-      : undefined;
-
+  const { mint, signature } = body;
   const auditService = new AuditService(getDb(c.env));
-  const auditIntent = await auditService.beginCritical(c, {
-    action: "deploy",
-    resourceType: "token",
-    resourceId: tokenId,
-    metadata: {
-      mode: "confirm",
-      mintAddress: mint,
-      signature,
-      slot: verified.status.slot.toString(),
-      template: token.template,
-      ablListAddress: listAddress ?? null,
-    },
-  });
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let deploymentRecorded = false;
 
   try {
+    // Verify the deploy actually landed before recording it: any tokens:write
+    // caller could otherwise pin an arbitrary mint to this token and poison the
+    // public metadata.json. See verifyTransactionLanded for why each of the
+    // three checks exists; the caller-side check below (findMintInitialization)
+    // is the third leg — it links the signature to THIS mint.
+    const rpc = createRpc(c.env);
+    const verified = await verifyTransactionLanded(rpc, signature, { expectAccount: mint });
+
+    if (!verified.ok) {
+      if (verified.reason === "not_confirmed") {
+        throw badRequest("Deploy transaction is not confirmed on-chain");
+      }
+      if (verified.reason === "account_missing") {
+        throw badRequest("Mint account does not exist on-chain");
+      }
+      // not_indexed: confirmed but not yet queryable via getTransaction — a
+      // retryable race, not a bad deploy. A 400 here would permanently reject a
+      // legitimate deploy. The catch below releases the claim so the retry can
+      // re-claim.
+      throw new AppError(
+        "SOLANA_RPC_ERROR",
+        "Deploy transaction is confirmed but not yet indexed by the RPC; retry shortly"
+      );
+    }
+
+    const confirmedTx = verified.transaction;
+
+    const mintInitialization = findMintInitialization(confirmedTx, mint);
+    if (!mintInitialization) {
+      throw badRequest("Deploy transaction did not create this mint");
+    }
+
+    // Use the signing wallet prepareDeploy resolved and persisted, NOT the request
+    // body. A body value that diverged from prepare's would derive a different
+    // custody address and silently record the wrong mint/metadata authorities —
+    // and, for ABL tokens, the wrong list PDA. claimed.signingWalletId is the
+    // source of truth; resolve it again only to re-assert the key still has access.
+    const signingWalletId = resolveApiKeySigningWalletId(auth, claimed.signingWalletId, [
+      "tokens:write",
+    ]);
+
+    // Recompute the authorities the deploy used (custody signer === mint &
+    // metadata authority, matching prepareDeploy) rather than trusting the
+    // request, so a recorded mint can't claim authorities the caller lacks.
+    const signer = await createLegacyResolvedAuthoritySigner({
+      env: c.env,
+      auth,
+      walletId: signingWalletId,
+      expectedCustodyWalletId: claimed.signingCustodyWalletId,
+    });
+    const custodyAddress = signer.address;
+    const freezeAuthority = claimed.isFreezable ? custodyAddress : null;
+
+    if (
+      mintInitialization.info?.mintAuthority !== custodyAddress ||
+      (mintInitialization.info?.freezeAuthority ?? null) !== freezeAuthority
+    ) {
+      throw badRequest("Deploy transaction did not use the expected mint authorities");
+    }
+
+    // Re-derive the ABL list address server-side instead of trusting the request
+    // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
+    // silently break every later allowlist op with no recovery short of a DB
+    // patch. The list-config PDA is deterministic from (mint authority, mint) and
+    // is only seeded on-chain when ACL is enabled and the mint is freezable —
+    // mirror the `enableSrfc37` condition the create path uses (mosaic/service.ts).
+    const listAddress =
+      shouldEnableOnChainAcl(claimed) && freezeAuthority !== null
+        ? await deriveAblListAddress(custodyAddress, mint)
+        : undefined;
+
+    auditIntent = await auditService.beginCritical(c, {
+      action: "deploy",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: {
+        mode: "confirm",
+        mintAddress: mint,
+        signature,
+        slot: verified.status.slot.toString(),
+        template: claimed.template,
+        ablListAddress: listAddress ?? null,
+      },
+    });
+
     // setTokenDeployed flips the token to `active` and records the mint — this
     // is the irreversible commit point. The durable intent above must exist
     // before this write; later bookkeeping/outcome failures cannot make the
@@ -808,7 +929,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       tokenService,
       organizationId: auth.organizationId,
       initiatedByKeyId: auth.id,
-      token,
+      token: claimed,
       tokenId,
       mint,
       custodyAddress,
@@ -820,14 +941,19 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     });
 
     await auditService.completeCritical(c, auditIntent);
-    const response: TokenResponse = { token: updatedToken };
-    return success(c, response);
+    return success(c, { token: toPublicToken(updatedToken) });
   } catch (error) {
     if (!deploymentRecorded) {
-      await auditService.completeCritical(c, auditIntent, {
-        status: "failure",
-        metadata: { error: error instanceof Error ? error.message : "Unknown error" },
-      });
+      // Hand the claim back so a legitimate retry (e.g. not_indexed) can
+      // re-claim. Guarded on deploying/no-mint, so this can never demote a
+      // token whose mint was committed by someone else in the meantime.
+      await tokenService.releaseTokenDeploy(tokenId);
+      if (auditIntent) {
+        await auditService.completeCritical(c, auditIntent, {
+          status: "failure",
+          metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+        });
+      }
     }
     throw error;
   }
@@ -846,7 +972,9 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
  * The update authority is the same signing wallet used for the create tx, so no
  * server key is involved.
  */
-export const prepareDeployMetadata = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
+export const prepareDeployMetadata = async (
+  c: ValidatedBodyContext<typeof legacyDeployTokenSchema>
+) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
 
@@ -873,17 +1001,18 @@ export const prepareDeployMetadata = async (c: ValidatedBodyContext<typeof deplo
     "tokens:write",
   ]);
 
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+  const signer = await createLegacyResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    walletId: signingWalletId,
+    expectedCustodyWalletId: token.signingCustodyWalletId,
+  });
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
   const resolvedUri =
-    token.uri?.trim() ||
-    canonicalMetadataUrl(
-      resolveMetadataOrigin(c.env, c.req.url, c.req.header("x-forwarded-proto")),
-      token.id
-    );
+    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env), token.id);
 
   const prepared = await mosaic.prepareUpdateMetadata({
     mint: token.mintAddress as Address,

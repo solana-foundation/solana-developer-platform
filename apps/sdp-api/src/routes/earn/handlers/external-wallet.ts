@@ -1,4 +1,7 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
+import { notImplemented } from "@sdp/earn/errors";
+import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import { subtractDecimalAmounts, sumDecimalAmounts } from "@sdp/payments/decimal";
 import type {
   EarnDepositSwap,
@@ -20,7 +23,11 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
 } from "@sdp/types";
-import { earnDepositStyle, isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
+import {
+  earnDepositStyle,
+  earnWithdrawSlippageFloor,
+  isVaultDirectDepositEnabled,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnExternalWalletTransactionRow } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -37,32 +44,41 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
 } from "@/services/earn/vault-external-wallet.service";
+import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
+import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import {
   assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
-import { getEarnRepository, resolveSdpEnvironment } from "../context";
+import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
-  earnExternalWalletEarningsParamsSchema,
   earnExternalWalletEarningsQuerySchema,
   earnExternalWalletMovementParamsSchema,
   earnExternalWalletMovementsQuerySchema,
-  earnExternalWalletPositionParamsSchema,
   earnExternalWalletPositionSummaryQuerySchema,
   earnExternalWalletPositionsQuerySchema,
   type earnExternalWalletSubmitSchema,
   type earnExternalWalletWithdrawalTransactionSchema,
+  type earnVaultWithdrawalPreviewSchema,
 } from "../schemas";
 import { assertStrategyDepositable } from "./admission";
+import {
+  beginEarnDepositAudit,
+  completeEarnDepositAudit,
+  concludeEarnDepositAuditOnError,
+  recordEarnWithdrawalAudit,
+} from "./movement-audit";
 import { decodeMovementCursor } from "./movements";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import {
@@ -102,6 +118,7 @@ type EarnExternalWalletDepositTransactionBody = z.output<
 type EarnExternalWalletWithdrawalTransactionBody = z.output<
   typeof earnExternalWalletWithdrawalTransactionSchema
 >;
+type EarnExternalWalletWithdrawalPreviewBody = z.output<typeof earnVaultWithdrawalPreviewSchema>;
 type EarnExternalWalletSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
 
 const EXTERNAL_POSITION_PAGE_SIZE = 100;
@@ -115,7 +132,10 @@ const EXTERNAL_POSITION_PAGE_SIZE = 100;
  * plausible-looking partial total.
  */
 export async function getEarnExternalWalletPositionSummary(c: AppContext) {
-  parseQuery(c, earnExternalWalletPositionSummaryQuerySchema);
+  const { includeOwnerAddresses = true, includePositions = false } = parseQuery(
+    c,
+    earnExternalWalletPositionSummaryQuerySchema
+  );
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -132,7 +152,10 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   );
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
-  const summary = summarizeExternalWalletPositions(holdings, live);
+  const summary = summarizeExternalWalletPositions(holdings, live, {
+    includeOwnerAddresses,
+    includePositions,
+  });
   if (summary.unavailablePositionCount > 0) {
     getLogger().warn(
       {
@@ -152,10 +175,15 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   return success(c, response);
 }
 
-/** GET /v1/earn/external-wallet/positions/:ownerAddress: one end user's holdings. */
+/**
+ * GET /v1/earn/external-wallet/positions?ownerAddress=…: one end user's
+ * holdings. The owner is a REQUIRED query filter, the same addressing every
+ * per-owner read on this surface uses (see the movements list for the original
+ * reasoning).
+ */
 export async function listEarnExternalWalletPositions(c: AppContext) {
-  const { ownerAddress } = parseParams(c, earnExternalWalletPositionParamsSchema);
   const query = parseQuery(c, earnExternalWalletPositionsQuerySchema);
+  const ownerAddress = query.ownerAddress;
   const before = query.before ? decodeVaultPositionCursor(query.before) : null;
   if (query.before && !before) {
     throw badRequest("Invalid external-wallet position pagination cursor");
@@ -291,11 +319,14 @@ export async function listEarnExternalWalletMovements(c: AppContext) {
 
 /**
  * GET /v1/earn/external-wallet/movements/:movementId: poll one movement to a
- * terminal state.
+ * terminal state, with a scoped, fail-soft read-through of its exact Solana
+ * signature — the same interactive fast path the treasury detail reads take.
  *
  * This is what makes the submit's record-before-broadcast answerable on this
  * surface: the partner holds a movement id for a transaction whose fate it
- * never learned, and the reconciliation sweep settles it. Scoping answers 404
+ * never learned, and this poll observes the chain and advances the recorded
+ * movement immediately; the scheduled reconciler stays the durable recovery
+ * path for RPC outages and expiry. Scoping answers 404
  * across the board — organization, EXACT project, environment, and the
  * external-wallet shape itself (a custody movement guessed by id is
  * indistinguishable from a missing row).
@@ -314,14 +345,19 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
   });
   if (!row) throw notFound("Earn external wallet movement");
 
+  // The scope checks happen before the chain read so a guessed movement id
+  // cannot use RPC timing to learn that another project's transaction exists.
+  // The service's own post-write re-read is only organization-scoped, which is
+  // fine here because this row already passed the four-rule scope above.
+  const currentMovement = await reconcileEarnVaultMovementReadThrough(c.env, row);
   const response: EarnExternalWalletMovementResponse = {
-    movement: toExternalWalletMovementWire(row),
+    movement: toExternalWalletMovementWire(currentMovement),
   };
   return success(c, response);
 }
 
 /**
- * GET /v1/earn/external-wallet/earnings/:ownerAddress: balance and total
+ * GET /v1/earn/external-wallet/earnings?ownerAddress=…: balance and total
  * earned for one end user, grouped by deposit token (PRO-1772).
  *
  * `earned` is live current value minus finalized SDP deposits — both facts,
@@ -331,9 +367,8 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  *
  * - a position's live value failed to hydrate (`live_value_unavailable`);
  * - a movement is still settling, so the chain and the ledger describe
- *   different moments (`movements_pending` — the reconciler drives every row
- *   terminal within about ninety seconds, so this is a short window, not a
- *   state);
+ *   different moments (`movements_pending` — detail polling performs a bounded
+ *   live chain read and the scheduled reconciler remains the recovery path);
  * - the wallet has a finalized withdrawal (`withdrawals_not_valued`): the
  *   ledger records exits in SHARES (migration 0070 pins `payout_token` NULL
  *   for vault rows), so no exact token-denominated earned figure exists once
@@ -346,8 +381,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  * fungible shares to SDP movements.
  */
 export async function getEarnExternalWalletEarnings(c: AppContext) {
-  const { ownerAddress } = parseParams(c, earnExternalWalletEarningsParamsSchema);
-  parseQuery(c, earnExternalWalletEarningsQuerySchema);
+  const { ownerAddress } = parseQuery(c, earnExternalWalletEarningsQuerySchema);
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -505,28 +539,6 @@ export async function createEarnExternalWalletDepositTransaction(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  // ENVIRONMENT CAPABILITY first, same constant as the custody deposit: what
-  // keeps production vault deposits closed (PRO-1703) is not custody-shaped,
-  // so the caller-signed path must not slip past it.
-  if (!isVaultDirectDepositEnabled(environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Vault deposits are not available in production yet: vault positions are not surfaced " +
-        "on the Active tab, so a position opened here would sit outside the portfolio view."
-    );
-  }
-
-  // SLIPPAGE FLOOR, required wherever real money moves — see the custody
-  // deposit for the full rationale. It matters MORE here: the signer is a
-  // stranger's wallet, so nothing else stands between a stale vault state and
-  // the legacy no-floor instruction.
-  if (environment === "production" && body.minSharesOut === undefined) {
-    throw badRequest(
-      "minSharesOut is required for a production vault deposit: without a floor the pinned " +
-        "Kamino SDK builds the legacy deposit instruction, which accepts any number of shares."
-    );
-  }
-
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
     throw notFound("Earn strategy");
@@ -552,6 +564,21 @@ export async function createEarnExternalWalletDepositTransaction(
   }
   const provider = strategy.provider;
 
+  if (!isVaultDirectDepositEnabled(environment, provider)) {
+    throw new AppError(
+      "FORBIDDEN",
+      `Vault deposits for ${provider} are not available from a ${environment} project.`
+    );
+  }
+
+  // Every production deposit carries a caller-chosen share floor derived from
+  // the provider's live quote and enforced by its on-chain instruction.
+  if (environment === "production" && body.minSharesOut === undefined) {
+    throw badRequest(
+      "minSharesOut is required for this production vault deposit because the provider supports a share floor."
+    );
+  }
+
   assertEarnProviderSurfaced(provider);
   await assertProviderAvailable(
     c.env,
@@ -572,13 +599,19 @@ export async function createEarnExternalWalletDepositTransaction(
     tokenMint
   );
 
+  // A fee payer equal to the owner IS the default: normalized away here so the
+  // build, the compiled signer set, and the stored row all agree it is absent.
+  const feePayer = body.feePayer === body.ownerAddress ? undefined : body.feePayer;
+
   const result = await buildExternalWalletDepositTransaction(c.env, {
     organizationId: auth.organizationId,
     projectId,
     environment,
     provider,
+    strategyId: strategy.id,
     providerReference: strategy.provider_reference,
     ownerAddress: body.ownerAddress,
+    ...(feePayer === undefined ? {} : { feePayer }),
     tokenMint,
     shareMint,
     label: strategy.name,
@@ -611,6 +644,9 @@ export async function createEarnExternalWalletDepositTransaction(
         // floor is required there), and elsewhere a floor-less rebuild on
         // Kamino's pinned SDK selects the legacy unprotected instruction.
         ...(body.minSharesOut === undefined ? {} : { minSharesOut: body.minSharesOut }),
+        // The fee payer survives the split for the same reason: a follow-up
+        // build that silently dropped it would bill the customer's wallet.
+        ...(feePayer === undefined ? {} : { feePayer }),
       },
     };
     return success(c, response);
@@ -687,6 +723,18 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     throw notFound("Earn external-wallet position");
   }
 
+  // Same provider-policy exit floor as the custody withdrawal: a non-null
+  // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
+  // derived from the withdrawal preview — never an admission gate).
+  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+    throw badRequest(
+      `minAmountOut is required for this withdrawal because ${position.provider} declares a withdrawal slippage policy.`
+    );
+  }
+
+  // Same owner-is-the-default normalization as the deposit build.
+  const feePayer = body.feePayer === position.ownerAddress ? undefined : body.feePayer;
+
   const built = await buildExternalWalletWithdrawalTransaction(c.env, {
     organizationId: auth.organizationId,
     projectId,
@@ -697,9 +745,11 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     tokenMint: position.tokenMint,
     shareMint: position.shareMint,
     ownerAddress: position.ownerAddress,
+    ...(feePayer === undefined ? {} : { feePayer }),
     label: position.label,
     shareAtaRentFunder: position.shareAtaRentFunder,
     shares: body.shares,
+    ...(body.minAmountOut === undefined ? {} : { minAmountOut: body.minAmountOut }),
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
@@ -709,9 +759,60 @@ export async function createEarnExternalWalletWithdrawalTransaction(
       ...toExternalWalletTransactionWire(built),
       positionId: position.id,
       shares: built.amount_requested,
+      minAmountOut: built.min_shares_out,
     },
   };
   return success(c, response);
+}
+
+/**
+ * POST /v1/earn/external-wallet/withdrawal-previews: quote one caller-owned
+ * exit without applying custody-wallet bindings. The position's exact project
+ * scope is the authorization boundary, matching the external build route.
+ *
+ * Like the build, this keeps every money-in gate out of the exit path. A
+ * delisted strategy and a provider disabled for new deposits must remain
+ * quotable and exitable. The quote is read-only and exists solely to derive a
+ * caller-chosen minAmountOut from current vault accounting.
+ */
+export async function createEarnExternalWalletWithdrawalPreview(
+  c: ValidatedBodyContext<typeof earnVaultWithdrawalPreviewSchema>
+) {
+  const body: EarnExternalWalletWithdrawalPreviewBody = c.req.valid("json");
+  const environment = resolveSdpEnvironment(c);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+
+  const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
+    organizationId: auth.organizationId,
+    environment,
+    positionId: body.positionId,
+  });
+  const position = toExternalWalletHolding(positionRow, projectId);
+  if (!position) throw notFound("Earn external-wallet position");
+
+  const deadline = createVaultDeadline();
+  const client = resolveVaultWithdrawClient(c.env, position.provider, deadline);
+  if (!client || !supportsVaultWithdrawQuote(client)) {
+    throw notImplemented(position.provider, "vault withdrawal quoting");
+  }
+
+  let quote: EarnVaultWithdrawQuote;
+  try {
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
+      providerReference: position.vaultAddress,
+      shares: body.shares,
+    });
+  } catch (error) {
+    rethrowVaultProviderFailure(error);
+  }
+
+  return success(c, {
+    positionId: position.id,
+    assetsOut: quote.assetsOut,
+    assetDecimals: quote.assetDecimals,
+    blockingIssues: quote.blockingIssues,
+  });
 }
 
 /**
@@ -733,15 +834,53 @@ export async function createEarnExternalWalletDeposit(
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const result = await submitExternalWalletDeposit(c.env, {
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    transactionId: body.transactionId,
-    signedTransaction: body.signedTransaction,
-    requestId,
-    userId: auth.userId ?? null,
-    apiKeyId: auth.apiKeyId ?? null,
+  // Fail-closed audit admission (PRO-1866): no durable intent, no broadcast.
+  const auditIntent = await beginEarnDepositAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    },
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      requestId,
+    }
+  );
+
+  let result: Awaited<ReturnType<typeof submitExternalWalletDeposit>>;
+  try {
+    result = await submitExternalWalletDeposit(c.env, {
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      transactionId: body.transactionId,
+      signedTransaction: body.signedTransaction,
+      requestId,
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    });
+  } catch (error) {
+    // A 4xx is a definitive pre-broadcast refusal (verification, build
+    // consumption, recording): close the intent instead of paging
+    // verification over it. Anything else stays UNRESOLVED (the submit can
+    // 5xx after a successful send; see movement-audit.ts).
+    await concludeEarnDepositAuditOnError(c, auditIntent, error);
+    throw error;
+  }
+
+  await completeEarnDepositAudit(c, auditIntent, {
+    resourceId: result.movement.id,
+    metadata: {
+      movementId: result.movement.id,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      replayed: result.replayed,
+    },
   });
 
   const response: EarnExternalWalletDepositResponse = {
@@ -770,6 +909,30 @@ export async function createEarnExternalWalletWithdrawal(
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   });
+
+  // Best-effort and post-effect (PRO-1866): a fail-closed audit write would
+  // be a new way for the exit submit to 5xx (ADR 0002). A replay only
+  // backfills an audit row the crashed original never wrote.
+  await recordEarnWithdrawalAudit(
+    c,
+    {
+      organizationId: auth.organizationId,
+      userId: result.movement.created_by,
+      apiKeyId: result.movement.initiated_by_key_id,
+    },
+    result.movement.id,
+    {
+      executionModel: "vault_direct",
+      signer: "external_wallet",
+      transactionId: body.transactionId,
+      ownerAddress: result.movement.owner_address,
+      amount: result.movement.amount_requested,
+      denomination: result.movement.denomination,
+      signature: result.movement.signature,
+      requestId,
+    },
+    { replayed: result.replayed }
+  );
 
   const response: EarnExternalWalletWithdrawalResponse = {
     withdrawal: toExternalWalletMovementWire(result.movement, result.replayed),
@@ -898,13 +1061,18 @@ interface MutableStrategyTotal {
   providerReference: string;
   label: string;
   owners: Set<string>;
+  positions?: EarnExternalWalletPosition[];
   positionCount: number;
   tokens: Map<string, MutableTokenTotal>;
 }
 
 function summarizeExternalWalletPositions(
   holdings: readonly ExternalWalletHolding[],
-  live: ReadonlyMap<string, HydratedVaultPositionValue>
+  live: ReadonlyMap<string, HydratedVaultPositionValue>,
+  options: { includeOwnerAddresses: boolean; includePositions: boolean } = {
+    includeOwnerAddresses: true,
+    includePositions: false,
+  }
 ): EarnExternalWalletPositionSummary {
   const owners = new Set<string>();
   const strategies = new Map<string, MutableStrategyTotal>();
@@ -926,12 +1094,14 @@ function summarizeExternalWalletPositions(
         providerReference: holding.vaultAddress,
         label: holding.label,
         owners: new Set(),
+        ...(options.includePositions ? { positions: [] } : {}),
         positionCount: 0,
         tokens: new Map(),
       };
       strategies.set(strategyKey, strategy);
     }
     strategy.owners.add(holding.ownerAddress);
+    strategy.positions?.push(toExternalWalletPositionWire(holding, live.get(holding.id)));
     strategy.positionCount += 1;
     addToTokenTotal(strategy.tokens, holding, value);
     addToTokenTotal(tokens, holding, value);
@@ -946,6 +1116,21 @@ function summarizeExternalWalletPositions(
         provider: strategy.provider,
         providerReference: strategy.providerReference,
         label: strategy.label,
+        // The address list is the PII-bearing half of this read (EARN-028):
+        // omitted, not emptied, when the caller asked for totals only, so a
+        // consumer cannot mistake "not requested" for "no owners".
+        ...(options.includeOwnerAddresses
+          ? { ownerAddresses: [...strategy.owners].sort(compareWireStrings) }
+          : {}),
+        ...(strategy.positions
+          ? {
+              positions: strategy.positions.sort(
+                (left, right) =>
+                  compareWireStrings(left.ownerAddress, right.ownerAddress) ||
+                  compareWireStrings(left.id, right.id)
+              ),
+            }
+          : {}),
         walletCount: strategy.owners.size,
         positionCount: strategy.positionCount,
         totalsByToken: [...strategy.tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),
@@ -1010,6 +1195,9 @@ function toExternalWalletTransactionWire(built: EarnExternalWalletTransactionRow
     transaction: built.unsigned_transaction,
     lastValidBlockHeight: built.last_valid_block_height,
     ownerAddress: built.owner_address,
+    // Echoed so the co-signing side can be driven from the response alone:
+    // present means this transaction requires the fee payer's signature too.
+    ...(built.fee_payer === null ? {} : { feePayer: built.fee_payer }),
     provider: built.provider,
     providerReference: built.vault_address,
     tokenMint: built.token_mint,

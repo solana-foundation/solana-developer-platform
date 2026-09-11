@@ -4,6 +4,8 @@ import {
   type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
+  earnDepositSlippageFloor,
+  earnWithdrawSlippageFloor,
   isEarnProviderSurfaced,
   type ListEarnStrategiesResponse,
   type SdpEnvironment,
@@ -11,7 +13,9 @@ import {
 } from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
+import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
+import type { Env } from "@/types/env";
 import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
 import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
@@ -58,8 +62,20 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * stored: the catalogue is platform-global and the same row answers differently
  * to a sandbox and a production caller. A mainnet-only provider's row is listed
  * in both and fundable in one — see `hostCluster` in @sdp/types.
+ *
+ * `feeSponsored` is derived the same way, from the deployment's sponsorship
+ * gate: the flag plus the cluster allowlist `resolveVaultSponsorship` reads at
+ * execution, answered for the row's own cluster. A row that is not fundable is
+ * never sponsored (there is no movement to sponsor), so the two agree.
  */
-export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironment): EarnStrategy {
+export function mapToEarnStrategy(
+  row: EarnStrategyRow,
+  environment: SdpEnvironment,
+  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
+): EarnStrategy {
+  const depositSlippage = earnDepositSlippageFloor(row.provider);
+  const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
+  const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {
     id: row.id,
     provider: row.provider,
@@ -75,8 +91,15 @@ export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironm
     redemptionDelayDays: row.redemption_delay_days ?? undefined,
     riskMetadata: row.risk_metadata,
     status: row.status,
+    depositSlippage: depositSlippage
+      ? { quoteRequired: true, defaultToleranceBps: depositSlippage.defaultToleranceBps }
+      : null,
+    withdrawalSlippage: withdrawalSlippage
+      ? { quoteRequired: true, defaultToleranceBps: withdrawalSlippage.defaultToleranceBps }
+      : null,
     hostCluster: row.host_cluster,
-    fundable: isClusterFundableInEnvironment(row.host_cluster, environment),
+    fundable,
+    feeSponsored: fundable && isEarnVaultSponsorshipEnabled(env, row.host_cluster),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -134,7 +157,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   });
 
   const response: ListEarnStrategiesResponse = listResponse(query, total, {
-    strategies: rows.map((row) => mapToEarnStrategy(row, environment)),
+    strategies: rows.map((row) => mapToEarnStrategy(row, environment, c.env)),
   });
 
   return success(c, response);
@@ -146,7 +169,7 @@ export const getEarnStrategy = async (c: AppContext) => {
   const strategy = await requireEarnStrategy(c, strategyId);
 
   const response: EarnStrategyResponse = {
-    strategy: mapToEarnStrategy(strategy, resolveSdpEnvironment(c)),
+    strategy: mapToEarnStrategy(strategy, resolveSdpEnvironment(c), c.env),
   };
   return success(c, response);
 };

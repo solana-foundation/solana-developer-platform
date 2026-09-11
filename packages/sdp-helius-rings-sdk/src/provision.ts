@@ -14,9 +14,11 @@ import {
 } from "@solana/kit";
 import {
   canonicalShieldedIdentity,
+  publishedHalves,
   type ShieldedMaterial,
   type ShieldedMaterialSource,
 } from "./material.js";
+import { ensureRingsMergingEnabled } from "./merging.js";
 
 /**
  * Registers a shielded identity on chain.
@@ -89,13 +91,94 @@ export async function provisionRingsIdentity(
       }
       assertRecordMatchesMaterial(confirmed, material, input.owner);
 
+      // Registration cannot carry the merging flag, so a freshly published
+      // record refuses merges until this lands. Doing it here means the wallet
+      // is complete when provisioning returns rather than on its first merge.
+      if (!confirmed.mergingEnabled) {
+        const enabled = await ensureRingsMergingEnabled(deps, { owner: input.owner });
+        if (enabled.signature) signatures.push(enabled.signature);
+      }
+
       return {
         identity: {
           shieldedAddress: canonicalShieldedIdentity(material.shieldedAddress),
           owner: input.owner,
         },
         registrationSignatures: signatures,
-        mergingEnabled: confirmed.mergingEnabled,
+        materialTag: "live",
+      };
+    }
+  );
+}
+
+/**
+ * Repoints an owner's published record at the identity its material derives now.
+ *
+ * This is the deliberate opposite of `provisionRingsIdentity`, which refuses a
+ * mismatch: rotating the record orphans every note encrypted to the old keys,
+ * because the notes stay on chain while nothing can derive the keys that open
+ * them. It exists only as the last recovery step for a wallet whose material no
+ * longer derives its record, where the alternative is a wallet that can never
+ * be read or spent again. The caller is responsible for having confirmed the
+ * loss with a human first.
+ *
+ * Idempotent by re-reading: a rotation that landed but whose response was lost
+ * finds the record already matching and returns it rather than sending a second
+ * one.
+ */
+export async function rekeyRingsIdentity(
+  deps: ProvisionDeps,
+  input: ProvisionInput
+): Promise<ProvisionIdentityResult> {
+  const owner = address(input.owner);
+
+  return deps.material.withMaterial(
+    {
+      organizationId: deps.organizationId,
+      projectId: deps.projectId,
+      walletId: input.walletId,
+      owner: input.owner,
+    },
+    async (material) => {
+      const published = await fetchUserRecord({ rpc: deps.client, owner });
+      if (!published) {
+        // Nothing to rotate. Registering here would quietly turn a recovery into
+        // a first provision, and the two are not the same decision.
+        throw new HeliusRingsError(
+          "conflict",
+          `no Rings user record exists for ${input.owner}; provision the wallet instead of re-keying it`
+        );
+      }
+
+      const signatures: string[] = [];
+      // Undefined means the record already publishes these keys, which is the
+      // landed-but-unacknowledged case rather than an error.
+      const rotation = await buildRegistrationTransaction({
+        client: deps.client,
+        owner,
+        address: material.shieldedAddress,
+      });
+      if (rotation) {
+        signatures.push(await landTransaction(deps, rotation, input.owner));
+      }
+
+      // Re-read rather than trust the send: confirmation says the transaction
+      // landed, not that the record now holds what was intended.
+      const confirmed = await fetchUserRecord({ rpc: deps.client, owner });
+      if (!confirmed) {
+        throw new HeliusRingsError(
+          "gateway_unavailable",
+          "the Rings user record is absent after a confirmed re-key"
+        );
+      }
+      assertRecordMatchesMaterial(confirmed, material, input.owner);
+
+      return {
+        identity: {
+          shieldedAddress: canonicalShieldedIdentity(material.shieldedAddress),
+          owner: input.owner,
+        },
+        registrationSignatures: signatures,
         materialTag: "live",
       };
     }
@@ -106,10 +189,10 @@ export async function provisionRingsIdentity(
  * Fails closed when the published record is not the identity this material
  * derives.
  *
- * There is no recovery path worth offering here. The SDK exposes an update
- * instruction, but using it would repoint an owner at different keys and orphan
- * every note already encrypted to the old ones, so a mismatch has to stop
- * provisioning and be looked at by a human.
+ * Provisioning never rotates: the SDK's update instruction would repoint an
+ * owner at different keys and orphan every note already encrypted to the old
+ * ones, so a mismatch stops provisioning here. `rekeyRingsIdentity` is the
+ * explicit, separately-confirmed recovery path for that state.
  */
 function assertRecordMatchesMaterial(
   record: UserRecord,
@@ -131,10 +214,12 @@ function firstMismatch(
   owner: string
 ): string | undefined {
   if (record.owner !== owner) return "owner";
-  if (!sameBytes(record.nullifierPublicKey, material.nullifierKey.publicKey())) {
+
+  const derived = publishedHalves(material.shieldedAddress);
+  if (!sameBytes(record.nullifierPublicKey, derived.nullifierPublicKey)) {
     return "nullifier key";
   }
-  if (!sameBytes(record.viewingPublicKey, material.viewingKey.publicKey().toBytes())) {
+  if (!sameBytes(record.viewingPublicKey, derived.viewingPublicKey)) {
     return "viewing key";
   }
   return undefined;
@@ -144,9 +229,13 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
-/** Signs through custody, broadcasts, and waits for the chain to accept it. */
-async function landTransaction(
-  deps: ProvisionDeps,
+/**
+ * Signs through custody, broadcasts, and waits for the chain to accept it.
+ * The one place bring-up bytes reach `deps.signTransaction`, shared with ring
+ * bring-up in `provision-ring.ts`.
+ */
+export async function landTransaction(
+  deps: Pick<ProvisionDeps, "client" | "signTransaction" | "submitTransaction">,
   transaction: Transaction,
   owner: string
 ): Promise<string> {

@@ -195,8 +195,9 @@ export interface ListCounterpartyAccountsResponse {
 export interface CounterpartyProviderAccount {
   id: string;
   provider: RampProviderId;
-  fiatCurrency: string;
-  destinationCountry: CountryCode;
+  kind: CounterpartyProviderAccountKind;
+  fiatCurrency: string | null;
+  destinationCountry: CountryCode | null;
   paymentRail: string | null;
   status: CounterpartyAccountStatus;
   providerStatus: string | null;
@@ -204,7 +205,22 @@ export interface CounterpartyProviderAccount {
   bankName?: string;
   accountNumberLast4?: string;
   paymentRails?: string[];
+  customerLink?: CounterpartyProviderCustomerLink;
 }
+
+export interface CounterpartyProviderCustomerLink {
+  id: string;
+  providerCustomerReference: string;
+  status: CounterpartyAccountStatus;
+  providerStatus: string | null;
+  createdAt: string;
+}
+
+export type CounterpartyProviderAccountKind =
+  | "customer_link"
+  | "payout_account"
+  | "funding_wallet"
+  | "merchant_wallet";
 
 export interface ListCounterpartyProviderAccountsResponse {
   accounts: CounterpartyProviderAccount[];

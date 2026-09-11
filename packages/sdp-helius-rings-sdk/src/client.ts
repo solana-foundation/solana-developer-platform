@@ -1,7 +1,7 @@
 import { createZolanaClient } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import { address } from "@solana/kit";
-import { withConfiguredTreeErrorBridge } from "./error-bridge.js";
+import { withConfiguredAddressErrorBridge } from "./error-bridge.js";
 
 export interface RingsClientConfig {
   /** Full Helius RPC URL, API key included. */
@@ -15,6 +15,11 @@ export interface RingsClientConfig {
    * indexer response reveals which notes an identity owns.
    */
   readonly allowInsecureHttp?: boolean;
+  /**
+   * Carries the indexer and prover legs; the client's own Solana RPC leg
+   * builds its transport internally and cannot take one (upstream gap).
+   */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -27,7 +32,8 @@ export function createRingsClient(config: RingsClientConfig): Promise<ZolanaClie
     solanaRpcUrl: config.solanaRpcUrl,
     indexerUrl: config.indexerUrl,
     proverUrl: config.proverUrl,
-    tree: tree === undefined ? undefined : withConfiguredTreeErrorBridge(() => address(tree)),
+    tree: tree === undefined ? undefined : withConfiguredAddressErrorBridge(() => address(tree)),
     allowInsecureHttp: config.allowInsecureHttp ?? false,
+    ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
   });
 }

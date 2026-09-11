@@ -2,17 +2,22 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
-const OTHER_PROJECT_ID = "prj_preq_repo_test_other";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
 
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -43,15 +48,12 @@ describe("PaymentRequestsRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs
@@ -194,17 +196,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(row?.id).toBe(created?.id);
     });
 
-    it("returns null when project doesn't match (tenancy guard)", async () => {
-      const created = await repo.createPaymentRequest(createInput());
-
-      const row = await repo.getPaymentRequestById({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
-      });
-      expect(row).toBeNull();
-    });
-
     it("returns null when org doesn't match (tenancy guard)", async () => {
       const created = await repo.createPaymentRequest(createInput());
 
@@ -214,6 +205,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
       });
       expect(row).toBeNull();
+    });
+
+    it("returns null when the project does not match", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+      if (!created) throw new Error("createPaymentRequest returned null");
+      await expectProjectScoped(
+        (projectId) =>
+          repo.getPaymentRequestById({
+            requestId: created.id,
+            organizationId: TEST_ORG.id,
+            projectId,
+          }),
+        { own: projects.sandbox, other: projects.production },
+        (row) => row === null
+      );
     });
   });
 
@@ -243,6 +249,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(rows.map((row) => row.id)).toEqual([second?.id, first?.id]);
     });
 
+    it("scopes lists by project", async () => {
+      await repo.createPaymentRequest(createInput());
+      await expectProjectScoped(
+        (projectId) =>
+          repo.listPaymentRequests({
+            organizationId: TEST_ORG.id,
+            projectId,
+            limit: 50,
+            offset: 0,
+          }),
+        { own: projects.sandbox, other: projects.production },
+        ({ rows }) => rows.length === 0
+      );
+    });
+
     it("filters by status", async () => {
       const toCancel = await repo.createPaymentRequest(createInput());
       await repo.createPaymentRequest(createInput());
@@ -266,20 +287,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(total).toBe(1);
       expect(rows[0].status).toBe("awaiting_payment");
     });
-
-    it("scopes by project — requests in a sibling project are excluded", async () => {
-      await repo.createPaymentRequest(createInput({ projectId: TEST_PROJECT_ID }));
-      await repo.createPaymentRequest(createInput({ projectId: OTHER_PROJECT_ID }));
-
-      const { rows, total } = await repo.listPaymentRequests({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        limit: 50,
-        offset: 0,
-      });
-      expect(total).toBe(1);
-      expect(rows[0].project_id).toBe(TEST_PROJECT_ID);
-    });
   });
 
   describe("markPaymentRequest", () => {
@@ -299,6 +306,25 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(canceled?.canceled_by).toBe(TEST_USER.id);
       expect(canceled?.lifecycle).toHaveLength(2);
       expect(canceled?.lifecycle[1]).toMatchObject({ status: "canceled" });
+    });
+
+    it("does not transition another project's request", async () => {
+      const created = await repo.createPaymentRequest(createInput());
+      if (!created) throw new Error("createPaymentRequest returned null");
+      const transition = (projectId: string) =>
+        repo.markPaymentRequest({
+          requestId: created.id,
+          organizationId: TEST_ORG.id,
+          projectId,
+          status: "canceled",
+          fulfilledByTransferId: null,
+          canceledBy: TEST_USER.id,
+        });
+      await expectProjectScoped(
+        transition,
+        { own: projects.sandbox, other: projects.production },
+        (row) => row === null
+      );
     });
 
     it("marks paid and links the settling transfer", async () => {
@@ -392,19 +418,160 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
       expect(current?.status).toBe("canceled");
     });
+  });
 
-    it("returns null when project doesn't match (tenancy guard)", async () => {
-      const created = await repo.createPaymentRequest(createInput());
+  describe("sponsored transaction window", () => {
+    const ACCOUNT_A = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+    const ACCOUNT_B = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJfhRhPkV";
 
-      const result = await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
+    it("admits exactly one of two concurrent claims", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+      const results = await Promise.all([
+        repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhB",
+          lastValidBlockHeight: 1_000n,
+          currentBlockHeight: 900n,
+        }),
+        repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_B,
+          unsignedTransaction: "dHhC",
+          lastValidBlockHeight: 1_000n,
+          currentBlockHeight: 900n,
+        }),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+
+      const claim = await repo.getSponsoredTransactionClaim(request.id);
+      expect(claim).not.toBeNull();
+      expect([ACCOUNT_A, ACCOUNT_B]).toContain(claim?.account);
+      expect(claim?.signedTransaction).toBeNull();
+      expect(claim?.lastValidBlockHeight).toBe(1_000n);
+    });
+
+    it("refuses a reclaim while the window is live and admits one after expiry", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+      expect(
+        await repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhB",
+          lastValidBlockHeight: 1_000n,
+          currentBlockHeight: 900n,
+        })
+      ).toBe(true);
+      expect(
+        await repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_B,
+          unsignedTransaction: "dHhC",
+          lastValidBlockHeight: 1_100n,
+          currentBlockHeight: 950n,
+        })
+      ).toBe(false);
+      expect(
+        await repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_B,
+          unsignedTransaction: "dHhC",
+          lastValidBlockHeight: 1_200n,
+          currentBlockHeight: 1_001n,
+        })
+      ).toBe(true);
+      const claim = await repo.getSponsoredTransactionClaim(request.id);
+      expect(claim?.account).toBe(ACCOUNT_B);
+      expect(claim?.signedTransaction).toBeNull();
+    });
+
+    it("stores the signature for the claiming account only", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+      await repo.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhB",
+        lastValidBlockHeight: 1_000n,
+        currentBlockHeight: 900n,
+      });
+      await repo.storeSponsoredTransactionSignature({
+        requestId: request.id,
+        account: ACCOUNT_B,
+        unsignedTransaction: "dHhB",
+        signedTransaction: "c2lnQg==",
+      });
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
+
+      await repo.storeSponsoredTransactionSignature({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhB",
+        signedTransaction: "c2lnQQ==",
+      });
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
+        "c2lnQQ=="
+      );
+    });
+
+    it("refuses a stale signature written against superseded unsigned bytes", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+      await repo.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhPbGQ=",
+        lastValidBlockHeight: 1_000n,
+        currentBlockHeight: 900n,
+      });
+      await repo.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhOZXc=",
+        lastValidBlockHeight: 1_200n,
+        currentBlockHeight: 1_001n,
+      });
+
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhPbGQ=",
+          signedTransaction: "c2lnT2xk",
+        })
+      ).toBe(false);
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
+
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhOZXc=",
+          signedTransaction: "c2lnTmV3",
+        })
+      ).toBe(true);
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
+        "c2lnTmV3"
+      );
+    });
+
+    it("refuses a claim on a request that is not awaiting payment", async () => {
+      const request = await repo.createPaymentRequest(createInput());
+      await repo.markPaymentRequest({
+        requestId: request.id,
         organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT_ID,
+        projectId: TEST_PROJECT_ID,
         status: "canceled",
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
       });
-      expect(result).toBeNull();
+      expect(
+        await repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhB",
+          lastValidBlockHeight: 1_000n,
+          currentBlockHeight: 900n,
+        })
+      ).toBe(false);
     });
   });
 });

@@ -4,7 +4,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import app from "@/index";
 import * as solanaServices from "@/services/solana";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -27,7 +30,6 @@ vi.mock("@/services/private-channels/auth/gateway-auth", async (importOriginal) 
 
 const ORGANIZATION_ID = "org_pc_transfers";
 const PROJECT_ID = "prj_pc_transfers";
-const OTHER_PROJECT_ID = "prj_pc_transfers_other";
 const SESSION_ID = "ses_pc_transfers";
 const ACTOR_USER_ID = "usr_pc_transfer_actor";
 const RECIPIENT_USER_ID = "usr_pc_transfer_recipient";
@@ -57,6 +59,12 @@ const API_KEY = {
   raw: "sk_test_private_channel_transfers",
   prefix: "sk_test_pct",
 };
+/** Selected-scope key bound to the other member's wallet only. */
+const SCOPED_API_KEY = {
+  id: "key_pc_transfer_scoped",
+  raw: "sk_test_private_channel_transfer_scoped",
+  prefix: "sk_test_pcts",
+};
 
 const UNSAFE_RECIPIENTS = [
   ["system", "11111111111111111111111111111111"],
@@ -84,6 +92,10 @@ function apiKeyHeaders() {
     Authorization: `Bearer ${API_KEY.raw}`,
     "Content-Type": "application/json",
   };
+}
+
+function scopedApiKeyHeaders() {
+  return { ...apiKeyHeaders(), Authorization: `Bearer ${SCOPED_API_KEY.raw}` };
 }
 
 function transferDto(overrides: Partial<PrivateChannelTransfer> = {}): PrivateChannelTransfer {
@@ -124,6 +136,12 @@ async function seedRouteState(): Promise<void> {
     expiresAt: null,
   };
   await seedCachedApiKey(env, keyHash, cachedApiKey);
+  await seedCachedApiKey(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...cachedApiKey,
+    id: SCOPED_API_KEY.id,
+    walletScope: "selected",
+    walletBindings: [{ walletId: OTHER_USER_WALLET_ID, permissions: ["payments:write"] }],
+  });
 
   await db.batch([
     db
@@ -154,28 +172,22 @@ async function seedRouteState(): Promise<void> {
         ORGANIZATION_ID,
         new Date(Date.now() + 60_000).toISOString()
       ),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES
-           (?, ?, 'Transfer Project', 'pc-transfer-project', 'sandbox', 'active', ?),
-           (?, ?, 'Other Project', 'pc-transfer-other', 'sandbox', 'active', ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        ACTOR_USER_ID,
-        OTHER_PROJECT_ID,
-        ORGANIZATION_ID,
-        ACTOR_USER_ID
-      ),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_pc_transfers', ?, ?, 'admin')`
-      )
-      .bind(PROJECT_ID, ACTOR_USER_ID),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: ACTOR_USER_ID,
+    members: [ACTOR_USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await seedProjectApiKey(db, env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: ORGANIZATION_ID,
+    projectId: `${PROJECT_ID}_production`,
+    createdBy: ACTOR_USER_ID,
+    role: "api_admin",
+    permissions: ["payments:read"],
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys
@@ -376,9 +388,13 @@ async function seedTransfer(input: {
     .run();
 }
 
+/**
+ * The route requires `Idempotency-Key`, so the default headers carry one; the
+ * tests that care about the reservation pass their own.
+ */
 async function postTransfer(
   body: Record<string, unknown>,
-  headers: Record<string, string> = sessionHeaders()
+  headers: Record<string, string> = sessionHeaders({ "Idempotency-Key": "idem_route_transfer" })
 ) {
   return app.request(
     `/v1/private-channels/channels/${CHANNEL_ID}/transfers`,
@@ -428,10 +444,26 @@ describe("Private Channels — transfer access and routes", () => {
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
-      apiKeyHeaders()
+      { ...apiKeyHeaders(), "Idempotency-Key": "idem_route_transfer" }
     );
     expect(transfer.status).toBe(200);
     expect(createChannelTransferMock).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to move funds without an idempotency key", async () => {
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      sessionHeaders()
+    );
+
+    expect(response.status).toBe(400);
+    // Nothing is resolved, signed or broadcast: without a key there is no way to
+    // tell a retry from a second spend, so the request never starts.
+    expect(createChannelTransferMock).not.toHaveBeenCalled();
   });
 
   it("lists one entry per verified wallet in the active channel, the caller's own first", async () => {
@@ -512,7 +544,24 @@ describe("Private Channels — transfer access and routes", () => {
     }
   );
 
-  it("requires the source custody wallet to be verified by the acting member", async () => {
+  it("refuses a selected-scope API key naming an enrolled wallet it is not bound to", async () => {
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      { ...scopedApiKeyHeaders(), "Idempotency-Key": "idem_route_transfer_scoped" }
+    );
+
+    expect(response.status).toBe(403);
+    expect(JSON.stringify(await response.json())).toContain(
+      "not authorized for the requested wallet"
+    );
+    expect(createChannelTransferMock).not.toHaveBeenCalled();
+  });
+
+  it("requires the source custody wallet to be enrolled under the principal", async () => {
     const response = await postTransfer({
       walletId: UNVERIFIED_WALLET_ID,
       recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
@@ -705,20 +754,17 @@ describe("Private Channels — transfer access and routes", () => {
           pubkey: RECIPIENT_ADDRESS,
         },
         amount: "1.5",
+        // The caller's header, forwarded verbatim: the service reserves against
+        // it before anything is signed.
+        idempotencyKey: "idem_route_transfer",
         gatewayAuth: expect.objectContaining({ pcUserId: ACTOR_PC_USER_ID }),
       })
     );
   });
 
-  it("keeps transfer reads project scoped and supports an optional channel filter", async () => {
+  it("supports transfer reads and an optional channel filter", async () => {
     await seedTransfer({ id: "pct-visible-a" });
     await seedTransfer({ id: "pct-visible-b", channelId: OTHER_CHANNEL_ID });
-    await seedTransfer({
-      id: "pct-other-project",
-      projectId: OTHER_PROJECT_ID,
-      instanceId: "pci-other",
-      channelId: "pch-other",
-    });
 
     const list = await app.request(
       "/v1/private-channels/transfers",
@@ -753,12 +799,17 @@ describe("Private Channels — transfer access and routes", () => {
       env
     );
     expect(getVisible.status).toBe(200);
+  });
 
-    const getOtherProject = await app.request(
-      "/v1/private-channels/transfers/pct-other-project",
-      { headers: sessionHeaders() },
+  it("returns 404 for another project's transfer", async () => {
+    await seedTransfer({ id: "pct-sandbox-owned" });
+    const response = await app.request(
+      "/v1/private-channels/transfers/pct-sandbox-owned",
+      {
+        headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
+      },
       env
     );
-    expect(getOtherProject.status).toBe(404);
+    expect(response.status).toBe(404);
   });
 });

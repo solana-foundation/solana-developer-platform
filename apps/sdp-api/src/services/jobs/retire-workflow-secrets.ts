@@ -34,8 +34,8 @@ function nextAttemptIso(now: Date, attemptCount: number): string {
   return new Date(now.getTime() + minutes * 60 * 1000).toISOString();
 }
 
-function isAlreadyDestroyed(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("FAILED_PRECONDITION");
+function isMissingVersion(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("NOT_FOUND");
 }
 
 function isKnownBackend(value: string): value is CredentialSecretStorageBackend {
@@ -100,27 +100,39 @@ export async function retireOrphanedActionSecrets(
   const stores = new Map<string, CredentialSecretStore | Error>();
 
   for (const row of due) {
+    // Claim before destroying, never after listing. A version's obligation can
+    // be cancelled by the transaction that references it at any moment, and
+    // destroying is an external side effect that cannot be rolled back — so the
+    // row is taken first, and a row that cannot be taken is one somebody else
+    // is entitled to. Without this the destroy could land on a version that a
+    // just-committed credential row points at.
+    const claimed = await repo.claimRetirement({
+      id: row.id,
+      expectedAttemptCount: row.attempt_count,
+      nextAttemptAt: nextAttemptIso(now, row.attempt_count + 1),
+    });
+    if (!claimed) {
+      continue;
+    }
+
     try {
       const secretStore = storeForBackend(env, row.storage_backend, stores);
       await secretStore.destroyVersion({ secretVersionRef: row.secret_version_ref });
       await repo.deleteRetirement(row.id);
       result.retired += 1;
     } catch (error) {
-      // A version that is already gone is the outcome this row wanted. Secret Manager
-      // answers FAILED_PRECONDITION for destroying one twice, which is exactly what a row
-      // left behind by a successful request-time destroy looks like — clearing it beats
-      // retrying it to the backoff cap forever.
-      if (isAlreadyDestroyed(error)) {
+      // Predicted versions can remain absent when their write never happened.
+      // An already-destroyed version is confirmed by the store, not by a
+      // FAILED_PRECONDITION message, which can have other causes.
+      if (isMissingVersion(error)) {
         await repo.deleteRetirement(row.id);
         result.retired += 1;
         continue;
       }
+      // The claim already counted this attempt and set the next one, so only
+      // the reason is left to record.
       const reason = error instanceof Error ? error.message : String(error);
-      await repo.rescheduleRetirement({
-        id: row.id,
-        error: reason,
-        nextAttemptAt: nextAttemptIso(now, row.attempt_count + 1),
-      });
+      await repo.recordRetirementFailure({ id: row.id, error: reason });
       result.failed += 1;
       getLogger().error(
         {

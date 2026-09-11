@@ -12,15 +12,18 @@ import { SdpPaymentsError } from "../errors";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
 
+/**
+ * Builds the ready state for a non-Lightspark ramp counterparty.
+ *
+ * @param provider - Ramp provider whose requirements are complete.
+ * @param direction - Ramp direction whose requirements are complete.
+ * @returns The provider's ready counterparty state.
+ */
 export function readyCounterparty(
-  provider: RampProviderId,
-  direction: RampDirection,
-  providerAccountId?: string
+  provider: Exclude<RampProviderId, "lightspark">,
+  direction: RampDirection
 ): CounterpartyRequirements {
-  if (providerAccountId === undefined) {
-    return { provider, direction, status: "ready" };
-  }
-  return { provider, direction, status: "ready", providerAccountId };
+  return { provider, direction, status: "ready" };
 }
 
 export function humanizeEnumLabel(value: string): string {

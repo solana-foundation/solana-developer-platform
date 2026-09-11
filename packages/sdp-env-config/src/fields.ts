@@ -698,6 +698,13 @@ export const FIELDS: EnvField[] = [
     help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
   },
   {
+    key: "PRIVATE_CHANNEL_EGRESS_ALLOWLIST",
+    section: "advanced",
+    kind: "text",
+    label: "Private Channels egress allowlist",
+    help: "Comma-separated origins (https://host[:port]) a project's Private Channels gateway or auth URL may point at. Projects supply those URLs, so anything not listed here is refused before SDP connects. The public sandbox is approved without configuring anything; a plaintext or loopback entry is honoured as written, so add one only for a destination you mean to approve.",
+  },
+  {
     key: "HELIUS_RINGS_ENABLED",
     section: "advanced",
     kind: "select",
@@ -708,39 +715,6 @@ export const FIELDS: EnvField[] = [
       { value: "true", label: "Enabled" },
     ],
     help: "Gates the devnet-only Helius Rings shielded wallet API routes.",
-  },
-  {
-    key: "HELIUS_RINGS_RPC_URL",
-    section: "advanced",
-    kind: "password",
-    label: "Helius Rings Solana RPC URL",
-    help: "Helius devnet RPC the Rings SDK reads and submits through, with the API key already applied. Required once Rings is enabled.",
-  },
-  {
-    key: "HELIUS_RINGS_INDEXER_URL",
-    section: "advanced",
-    kind: "url",
-    label: "Helius Rings Photon indexer URL",
-    help: "Photon indexer the shielded balance reads come from. Required once Rings is enabled.",
-  },
-  {
-    key: "HELIUS_RINGS_PROVER_URL",
-    section: "advanced",
-    kind: "url",
-    label: "Helius Rings prover URL",
-    help: "Proving service the Rings SDK calls. Required once Rings is enabled.",
-  },
-  {
-    key: "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
-    section: "advanced",
-    kind: "select",
-    label: "Helius Rings allow plain-http upstreams",
-    defaultValue: "false",
-    options: [
-      { value: "false", label: "Require https (default)" },
-      { value: "true", label: "Allow http" },
-    ],
-    help: "The public devnet indexer and prover are plain http on a real host, and the SDK refuses to dial them without this. Over plaintext an indexer response reveals which notes an identity owns, so leave it off outside devnet.",
   },
   {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",

@@ -12,6 +12,12 @@ export const TEST_API_KEY = {
   prefix: "sk_test_sha",
 };
 
+export const TEST_PRODUCTION_API_KEY = {
+  id: "key_test_production",
+  raw: "sk_live_shared_fixture",
+  prefix: "sk_live_sha",
+};
+
 export const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -25,6 +31,7 @@ export const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
   rotationDeadline: null,
+  organizationStatus: "active",
 };
 
 export const TEST_REVOKED_KEY: CachedApiKey = {

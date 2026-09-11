@@ -43,6 +43,8 @@ describe("dashboard loading route", () => {
     ["/dashboard/approvals", "approvals-list"],
     ["/dashboard/approvals/request-1", "approval-detail"],
     ["/dashboard/settings", "settings"],
+    ["/dashboard/members", "settings"],
+    ["/dashboard/helius-rings", "helius-rings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
     ["/dashboard/integrations/private-channels/setup", "private-channels-setup"],
@@ -71,6 +73,21 @@ describe("integrations route", () => {
       isDashboardNavItemActive("/dashboard/integrations/privy", "/dashboard/integrations")
     ).toBe(true);
     expect(isDashboardNavItemActive("/dashboard/wallets", "/dashboard/integrations")).toBe(false);
+  });
+
+  it("marks only the selected integration family as active", () => {
+    expect(
+      isDashboardNavItemActive(
+        "/dashboard/integrations?tab=custody",
+        "/dashboard/integrations?tab=custody"
+      )
+    ).toBe(true);
+    expect(
+      isDashboardNavItemActive(
+        "/dashboard/integrations?tab=custody",
+        "/dashboard/integrations?tab=rpc"
+      )
+    ).toBe(false);
   });
 });
 

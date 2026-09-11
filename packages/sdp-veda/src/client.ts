@@ -103,6 +103,11 @@ export function toEarnVaultTransactionPlan(plan: VedaInstructionPlan): EarnVault
     // The mint-scale amounts the instructions actually encode. The API ledgers
     // this shape; dropping it reintroduces raw-request drift.
     accepted: { ...plan.accepted },
+    // Builder truth about whether rent is charged; the API records who funded
+    // it so an exit can refund the right party.
+    ...(plan.createsShareAccount === undefined
+      ? {}
+      : { createsShareAccount: plan.createsShareAccount }),
   };
 }
 
@@ -268,6 +273,10 @@ export class VedaVaultDirectClient
         owner: address(input.owner),
         amount: input.amount,
         minSharesOut: input.minSharesOut as string,
+        // A sponsored movement's rent funder (PRO-1736). The builder rewrites
+        // the SDK's ATA creates to charge this address, because the SDK itself
+        // offers no payer knob — see `./rent.ts`.
+        ...(input.rentPayer === undefined ? {} : { rentPayer: address(input.rentPayer) }),
       })
     );
     return toEarnVaultTransactionPlan(plan);
@@ -300,6 +309,10 @@ export class VedaVaultDirectClient
         owner: address(input.owner),
         shares: input.shares,
         minAmountOut: input.minAmountOut as string,
+        // Rent for the asset account an exit may create, same contract as the
+        // deposit. `rentRefundTo` is deliberately ignored: an instant exit
+        // closes nothing, so there is no rent to give back.
+        ...(input.rentPayer === undefined ? {} : { rentPayer: address(input.rentPayer) }),
       })
     );
     return toEarnVaultTransactionPlan(plan);

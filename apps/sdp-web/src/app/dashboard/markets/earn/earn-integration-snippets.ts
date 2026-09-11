@@ -4,8 +4,8 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * The complete B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
  * partner's backend BUILDS an unsigned transaction for the customer's own
  * wallet, the wallet signs it in the browser, the backend SUBMITS the signed
- * bytes — SDP verifies the signature, records the movement, then broadcasts —
- * and the reads close the loop: poll the movement to a terminal state, show
+ * bytes, and SDP verifies the signature, records the movement, then broadcasts.
+ * The reads close the loop: poll the movement to a terminal state, show
  * balance + earned, list activity, and withdraw the same way money came in.
  *
  * Server-only examples by construction: the API key comes from process.env
@@ -16,7 +16,12 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * custody wallet.
  *
  * The guide renders one section per concern so a partner engineer can read it
- * top to bottom; the sections concatenate into one server module.
+ * top to bottom. The sections concatenate into one module. Wallet products
+ * supply a base64-in, base64-out signer for their customer wallet and, when
+ * sponsoring fees, their server-side sponsor wallet.
+ *
+ * The public docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
+ * documents this same flow. Update both together.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope. */
@@ -30,10 +35,64 @@ export interface EarnIntegrationSections {
 }
 
 export function buildEarnIntegrationSections(
-  strategy: Pick<EarnStrategy, "id">,
+  strategy: Pick<
+    EarnStrategy,
+    "id" | "provider" | "depositMints" | "hostCluster" | "depositSlippage" | "withdrawalSlippage"
+  >,
   apiBaseUrl?: string
 ): EarnIntegrationSections {
+  const directDepositMint = strategy.depositMints[0];
+  if (!directDepositMint) throw new Error(`Earn strategy ${strategy.id} has no deposit mint`);
+  const requiresDepositFloor = strategy.depositSlippage?.quoteRequired === true;
+  const requiresWithdrawalFloor = strategy.withdrawalSlippage?.quoteRequired === true;
+  const depositSlippageInput = requiresDepositFloor
+    ? `  slippageBps = ${strategy.depositSlippage?.defaultToleranceBps ?? 10},\n`
+    : "";
+  const withdrawalSlippageInput = requiresWithdrawalFloor
+    ? `  slippageBps = ${strategy.withdrawalSlippage?.defaultToleranceBps ?? 10},\n`
+    : "";
+  const depositSlippageType = requiresDepositFloor
+    ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
+    : "";
+  const withdrawalSlippageType = requiresWithdrawalFloor
+    ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
+    : "";
+  const depositFloor = requiresDepositFloor
+    ? `  const quote = await sdpFetch("/v1/earn/vault-deposit-previews", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ strategyId: EMBEDDED_YIELD_STRATEGY.id, amount }),
+  });
+  if (quote.blockingIssues.length > 0) {
+    throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
+  }
+  const minSharesOut = floorForTolerance(quote.sharesOut, quote.shareDecimals, slippageBps);`
+    : "  const minSharesOut = undefined; // This provider does not require a quote-derived floor.";
+  const withdrawalFloor = requiresWithdrawalFloor
+    ? `  const quote = await sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares }),
+  });
+  if (quote.blockingIssues.length > 0) {
+    throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
+  }
+  const minAmountOut = floorForTolerance(quote.assetsOut, quote.assetDecimals, slippageBps);`
+    : "  const minAmountOut = undefined; // This provider does not require a quote-derived floor.";
   const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
+const EMBEDDED_YIELD_STRATEGY = ${JSON.stringify(
+    {
+      id: strategy.id,
+      provider: strategy.provider,
+      directDepositMint,
+      hostCluster: strategy.hostCluster,
+    },
+    null,
+    2
+  )} as const;
+
+// Create an API key scoped to this project with earn:read + earn:write.
+// Keep it on your server. The customer's wallet signs in the browser or app.
 
 function sdpHeaders(extra: Record<string, string> = {}) {
   const apiKey = process.env.SDP_API_KEY;
@@ -51,72 +110,87 @@ async function sdpFetch(path: string, init?: RequestInit) {
   // defensively and keep the status in the thrown message either way.
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(
-      result?.error?.message ?? \`SDP request failed: \${path} (\${response.status})\`
-    );
+    const code = result?.error?.code ? \` \${result.error.code}\` : "";
+    const message = result?.error?.message ?? "Request failed";
+    throw new Error(\`SDP \${response.status}\${code}: \${message}\`);
   }
   return result.data;
+}
+
+/** Discover strategy ids and accepted direct-deposit mints from the API. */
+export async function listEarnStrategies() {
+  return sdpFetch("/v1/earn/strategies?page=1&pageSize=100", {
+    headers: sdpHeaders(),
+  });
+}
+
+/** Exact decimal floor without a JavaScript number round-trip. */
+function floorForTolerance(quote: string, decimals: number, toleranceBps: number) {
+  if (!Number.isInteger(toleranceBps) || toleranceBps < 1 || toleranceBps > 1_000) {
+    throw new Error("slippage tolerance must be 1-1000 basis points");
+  }
+  const [whole, fraction = ""] = quote.split(".");
+  if (!/^\\d+$/.test(whole ?? "") || !/^\\d*$/.test(fraction) || fraction.length > decimals) {
+    throw new Error("provider quote is not a valid decimal at the reported mint scale");
+  }
+  const atoms = BigInt((whole ?? "0") + fraction.padEnd(decimals, "0"));
+  if (atoms === 0n) throw new Error("provider quote returned zero output");
+  const floored = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
+  const digits = floored.toString().padStart(decimals + 1, "0");
+  if (decimals === 0) return digits;
+  const wholeResult = digits.slice(0, -decimals);
+  const fractionResult = digits.slice(-decimals).replace(/0+$/, "");
+  return fractionResult ? \`\${wholeResult}.\${fractionResult}\` : wholeResult;
+}
+
+export type EarnTransactionSigner = (transactionBase64: string) => Promise<string>;
+
+/** Collect every signature required by the exact transaction SDP built. */
+export async function signEarnTransaction(
+  built: { transaction: string; feePayer?: string },
+  customerSigner: EarnTransactionSigner,
+  sponsorSigner?: EarnTransactionSigner
+) {
+  const customerSigned = await customerSigner(built.transaction);
+  if (!built.feePayer) return customerSigned;
+  if (!sponsorSigner) throw new Error("Sponsor signature is required for this transaction");
+  return sponsorSigner(customerSigned);
 }`;
 
   const deposit = `/**
- * Step 1 — build. SDP returns an UNSIGNED transaction for your customer's
- * wallet: it is the fee payer and the only required signer. Hand the base64
- * \`transaction\` to the wallet in the browser, e.g. with wallet-adapter:
- *
- *   const tx = VersionedTransaction.deserialize(Buffer.from(transaction, "base64"));
- *   const signed = await wallet.signTransaction(tx);
- *   const signedTransaction = Buffer.from(signed.serialize()).toString("base64");
- *
- * A built transaction expires with its blockhash (about a minute); build a
- * fresh one if the customer walks away before signing.
- *
- * Optional swap funding: pass \`sourceTokenMint\` (USDC, USDG, PYUSD or USDT on
- * this cluster) to accept a stablecoin the vault does not take — SDP prepends
- * a Jupiter swap inside the same transaction, \`amount\` becomes the SOURCE
- * amount, and the response's \`transaction.swap\` reports the derived deposit.
- * If the composed transaction cannot fit one Solana packet, the response is
- * \`{ requiresSeparateSwap: true, swap, followUp }\` instead: have the wallet
- * sign and send \`swap.transaction\` itself, then build again with
- * \`followUp.amount\` and \`followUp.minSharesOut\` (your original floor,
- * echoed back) and no \`sourceTokenMint\`.
+ * Build an unsigned direct deposit. Omit feePayer for customer-paid fees.
+ * Pass your sponsor address to pay fees and first-deposit account rent.
+ * signEarnTransaction collects both signatures when the built transaction
+ * echoes a feePayer.
  */
 export async function buildEarnDepositTransaction({
   ownerAddress,
   amount,
-  minSharesOut,
-  sourceTokenMint,
-}: {
-  /** The customer's Solana wallet address. */
+  feePayer,
+${depositSlippageInput}}: {
   ownerAddress: string;
-  /** Deposit amount in the vault token's units — or the source token's, when swapping. */
   amount: string;
-  /** Minimum acceptable shares, derived from your quote and slippage tolerance. */
-  minSharesOut: string;
-  /** Optional: fund the deposit in a different supported stablecoin. */
-  sourceTokenMint?: string;
-}) {
+  feePayer?: string;
+${depositSlippageType}}) {
+${depositFloor}
   const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
-      strategyId: ${JSON.stringify(strategy.id)},
+      strategyId: EMBEDDED_YIELD_STRATEGY.id,
       ownerAddress,
       amount,
-      minSharesOut,
-      ...(sourceTokenMint ? { sourceTokenMint } : {}),
+      sourceTokenMint: EMBEDDED_YIELD_STRATEGY.directDepositMint,
+      ...(feePayer ? { feePayer } : {}),
+      ...(minSharesOut ? { minSharesOut } : {}),
     }),
   });
-  // { transactionId, transaction, lastValidBlockHeight, swap?, ... }
-  // or { requiresSeparateSwap: true, swap, followUp } — see above.
-  return data;
+  return data.transaction;
 }
 
 /**
- * Step 2 — submit the signed bytes. SDP verifies they are exactly the
- * transaction it built and that your customer's signature is genuine, records
- * the deposit, then broadcasts it. Reuse the SAME idempotency key when
- * retrying this call: a retry returns the original deposit with
- * \`replayed: true\` instead of moving money twice.
+ * Submit only after every required wallet has signed. Reuse the same
+ * idempotency key when retrying this exact submission.
  */
 export async function submitEarnDeposit({
   transactionId,
@@ -124,7 +198,6 @@ export async function submitEarnDeposit({
   idempotencyKey,
 }: {
   transactionId: string;
-  /** Base64 of the signed transaction bytes from the customer's wallet. */
   signedTransaction: string;
   idempotencyKey: string;
 }) {
@@ -138,9 +211,9 @@ export async function submitEarnDeposit({
 }
 
 /**
- * Step 3 — poll the movement to a terminal state. \`confirmed\` is optimistic;
- * only \`finalized\` and \`failed\` are terminal, and SDP settles every movement
- * within about ninety seconds.
+ * Poll the movement to a terminal state. \`confirmed\` is optimistic;
+ * only \`finalized\` and \`failed\` are terminal. Each detail read performs a
+ * bounded live chain check; scheduled reconciliation remains the recovery path.
  */
 export async function getEarnMovement(movementId: string) {
   const data = await sdpFetch(
@@ -149,6 +222,24 @@ export async function getEarnMovement(movementId: string) {
   );
   // { movementId, direction, status, amount, denomination, signature, ... }
   return data.movement;
+}
+
+export async function waitForEarnMovement(
+  movementId: string,
+  { signal, intervalMs = 2_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
+) {
+  while (true) {
+    signal?.throwIfAborted();
+    const movement = await getEarnMovement(movementId);
+    if (movement.status === "finalized" || movement.status === "failed") return movement;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, intervalMs);
+      signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error("Polling aborted"));
+      }, { once: true });
+    });
+  }
 }`;
 
   const portfolio = `/**
@@ -158,7 +249,7 @@ export async function getEarnMovement(movementId: string) {
  */
 export async function getEarnEarnings(ownerAddress: string) {
   const data = await sdpFetch(
-    \`/v1/earn/external-wallet/earnings/\${encodeURIComponent(ownerAddress)}\`,
+    \`/v1/earn/external-wallet/earnings?\${new URLSearchParams({ ownerAddress })}\`,
     { headers: sdpHeaders() }
   );
   // { ownerAddress, totalsByToken: [{ currentValue?, totalDeposited, earned?, ... }] }
@@ -182,9 +273,10 @@ export async function listEarnPositions(ownerAddress: string) {
   const positions = [];
   let cursor;
   do {
-    const query = cursor ? \`?before=\${encodeURIComponent(cursor)}\` : "";
+    const query = new URLSearchParams({ ownerAddress });
+    if (cursor) query.set("before", cursor);
     const data = await sdpFetch(
-      \`/v1/earn/external-wallet/positions/\${encodeURIComponent(ownerAddress)}\${query}\`,
+      \`/v1/earn/external-wallet/positions?\${query}\`,
       { headers: sdpHeaders() }
     );
     // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }], hasMore, nextCursor }
@@ -198,23 +290,29 @@ export async function listEarnPositions(ownerAddress: string) {
 }`;
 
   const withdraw = `/**
- * Withdraw, step 1 — build the unsigned exit for the customer's wallet to
- * sign. Exits keep working even when deposits are paused: money out is never
- * gated by money-in rules.
+ * Build an unsigned exit. Omit feePayer for customer-paid fees, or pass the
+ * same sponsor address pattern used for deposits. Exits remain available when
+ * deposits are paused.
  */
 export async function buildEarnWithdrawalTransaction({
   positionId,
   shares,
-}: {
-  /** The position \`id\` from listEarnPositions. */
+  feePayer,
+${withdrawalSlippageInput}}: {
   positionId: string;
-  /** Shares to redeem, at most \`withdrawableShares\`, as a decimal string. */
   shares: string;
-}) {
+  feePayer?: string;
+${withdrawalSlippageType}}) {
+${withdrawalFloor}
   const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
     method: "POST",
     headers: sdpHeaders(),
-    body: JSON.stringify({ positionId, shares }),
+    body: JSON.stringify({
+      positionId,
+      shares,
+      ...(feePayer ? { feePayer } : {}),
+      ...(minAmountOut ? { minAmountOut } : {}),
+    }),
   });
   return data.transaction;
 }
@@ -242,7 +340,10 @@ export async function submitEarnWithdrawal({
 
 /** The sections joined into the one server module they document. */
 export function buildEarnServerIntegration(
-  strategy: Pick<EarnStrategy, "id">,
+  strategy: Pick<
+    EarnStrategy,
+    "id" | "provider" | "depositMints" | "hostCluster" | "depositSlippage" | "withdrawalSlippage"
+  >,
   apiBaseUrl?: string
 ): string {
   const sections = buildEarnIntegrationSections(strategy, apiBaseUrl);

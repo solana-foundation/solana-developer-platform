@@ -16,6 +16,7 @@ let client: Client;
 beforeAll(async () => {
   client = new Client({ connectionString: env.DATABASE_URL });
   await client.connect();
+  await client.query("SET app.tenant_isolation_identity = 'system'");
 });
 
 afterAll(async () => {
@@ -40,8 +41,10 @@ describe("0073_private_channel_principals legacy reconciliation", () => {
          ('usr_0073', 'owner-0073@example.test')`
     );
     await client.query(
-      `INSERT INTO projects (id, organization_id, name, slug, created_by)
-       VALUES ('prj_0073', 'org_0073', 'Project 0073', 'project-0073', 'usr_0073')`
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       VALUES
+         ('prj_0073', 'org_0073', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_0073'),
+         ('prj_0073_production', 'org_0073', 'Default Production Project', 'default-production', 'production', 'active', 'usr_0073')`
     );
     await client.query(
       `INSERT INTO private_channel_instances (

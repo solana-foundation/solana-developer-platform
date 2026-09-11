@@ -16,6 +16,7 @@ import {
 } from "react";
 import { SWRConfig } from "swr";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
+import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
@@ -34,7 +35,9 @@ export interface DashboardPlaygroundApiKeyOption {
 }
 
 type DashboardWorkspaceContextValue = {
+  initialQuickStartStep: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   dashboardAccess: DashboardAccess;
+  flags: DashboardFlags;
   dashboardCacheScope: DashboardCacheScope;
   projects: Project[];
   sandboxProject: Project | null;
@@ -58,8 +61,10 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 );
 
 type DashboardWorkspaceProviderProps = {
+  initialQuickStartStep?: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   children: ReactNode;
   dashboardAccess: DashboardAccess;
+  flags: DashboardFlags;
   serverDashboardCacheScope: DashboardCacheScope;
   projects: Project[];
   initialSelectedProjectId: string | null;
@@ -68,8 +73,10 @@ type DashboardWorkspaceProviderProps = {
 };
 
 export function DashboardWorkspaceProvider({
+  initialQuickStartStep = null,
   children,
   dashboardAccess,
+  flags,
   serverDashboardCacheScope,
   projects,
   initialSelectedProjectId,
@@ -217,7 +224,9 @@ export function DashboardWorkspaceProvider({
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
+      initialQuickStartStep,
       dashboardAccess,
+      flags,
       dashboardCacheScope: liveDashboardCacheScope,
       projects,
       sandboxProject,
@@ -236,7 +245,9 @@ export function DashboardWorkspaceProvider({
       toggleSidebar,
     }),
     [
+      initialQuickStartStep,
       dashboardAccess,
+      flags,
       liveDashboardCacheScope,
       projects,
       sandboxProject,
@@ -276,4 +287,8 @@ export function useDashboardWorkspace() {
   }
 
   return context;
+}
+
+export function useOptionalDashboardWorkspace() {
+  return useContext(DashboardWorkspaceContext);
 }

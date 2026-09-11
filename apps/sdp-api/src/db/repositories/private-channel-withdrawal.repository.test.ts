@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   CreateWithdrawalInput,
@@ -10,9 +11,15 @@ import type {
 import { createPostgresPrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_pcw_repo_test";
+const TEST_PRODUCTION_PROJECT_ID = "prj_pcw_repo_production";
 const TEST_INSTANCE_ID = "inst_pcw_1";
 
+/** Fresh reservation per call; the idempotency test below pins the key. */
+let nextIdempotencyKey = 0;
+
 function makeInput(overrides: Partial<CreateWithdrawalInput> = {}): CreateWithdrawalInput {
+  nextIdempotencyKey += 1;
+  const key = `idem_pcw_${nextIdempotencyKey}`;
   return {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
@@ -28,6 +35,8 @@ function makeInput(overrides: Partial<CreateWithdrawalInput> = {}): CreateWithdr
       escrowInstanceAddr: "EscrowInst1111111111111111111111111111111",
       actingUserId: TEST_USER.id,
     },
+    idempotencyKey: key,
+    idempotencyFingerprint: `fp_${key}`,
     ...overrides,
   };
 }
@@ -60,16 +69,29 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: TEST_PRODUCTION_PROJECT_ID },
+    });
+    await seedInstance(TEST_INSTANCE_ID);
 
     repo = createPostgresPrivateChannelWithdrawalRepository(db);
   });
+
+  async function seedInstance(instanceId: string, projectId = TEST_PROJECT_ID) {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_instances (
+           id, organization_id, project_id, gateway_url,
+           escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+         ) VALUES (?, ?, ?, ?,
+           'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+      )
+      .bind(instanceId, TEST_ORG.id, projectId, `https://gateway.example/${instanceId}`)
+      .run();
+  }
 
   async function seed(overrides: Partial<CreateWithdrawalInput> = {}) {
     const row = await repo.createWithdrawal(makeInput(overrides));
@@ -182,9 +204,12 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
   });
 
   it("countNonTerminalByInstance counts only in-flight rows for the instance", async () => {
-    const inFlight = await repo.createWithdrawal(makeInput({ instanceId: "inst_A" }));
-    const other = await seed({ instanceId: "inst_A" });
-    await repo.createWithdrawal(makeInput({ instanceId: "inst_B" }));
+    await seedInstance("inst_B", TEST_PRODUCTION_PROJECT_ID);
+    const inFlight = await repo.createWithdrawal(makeInput({ instanceId: TEST_INSTANCE_ID }));
+    const other = await seed({ instanceId: TEST_INSTANCE_ID });
+    await repo.createWithdrawal(
+      makeInput({ instanceId: "inst_B", projectId: TEST_PRODUCTION_PROJECT_ID })
+    );
     // Drive one to terminal.
     await repo.updateWithdrawal({ id: other.id, status: "submitted", expectedStatus: "pending" });
     await repo.updateWithdrawal({
@@ -199,8 +224,31 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       expectedStatus: "confirmed",
     });
 
-    expect(await repo.countNonTerminalByInstance("inst_A")).toBe(1);
+    expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(1);
     expect(await repo.countNonTerminalByInstance("inst_B")).toBe(1);
     void inFlight;
+  });
+
+  it("holds one withdrawal per idempotency key within a tenant", async () => {
+    const first = await repo.createWithdrawal(
+      makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+    );
+    expect(first).not.toBeNull();
+
+    // The unique index IS the reservation: a duplicate cannot insert, which is
+    // what stops a retry from broadcasting a second irreversible burn.
+    await expect(
+      repo.createWithdrawal(
+        makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+      )
+    ).rejects.toThrow();
+
+    const found = await repo.findWithdrawalByIdempotency({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      idempotencyKey: "idem_shared",
+    });
+    expect(found?.id).toBe(first?.id);
+    expect(found?.idempotency_fingerprint).toBe("fp_idem_shared");
   });
 });

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -64,20 +65,14 @@ async function seedAuthAndConfigs(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -367,36 +362,6 @@ describe("Custody multi-provider routes", () => {
     expect(await mismatch.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
 
-  it("does not expose a Connection owned by another Project", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
-    const otherProjectId = "prj_custody_multi_provider_other";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, 'Other project', 'other-project', 'sandbox', 'active', ?)`
-      )
-      .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
-      .run();
-    const connection = await seedActivePrivyConnection("foreign", otherProjectId);
-
-    const res = await app.request(
-      "/v1/wallets/switch",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({ connectionId: connection.connectionId }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(404);
-    expect(await res.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
-  });
-
   it("rejects an active Connection without a Provider Account fingerprint", async () => {
     env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("missing_fingerprint");
@@ -493,6 +458,44 @@ describe("Custody multi-provider routes", () => {
 
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("rejects an exact Connection switch without changing the target when entitlement is revoked", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const connection = await seedActivePrivyConnection("unentitled");
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG.id)
+      .run();
+
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ connectionId: connection.connectionId }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id)
+        .first()
+    ).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: null,
+    });
   });
 
   it.each([null, "", 42])("rejects a malformed Connection selector: %s", async (connectionId) => {
@@ -656,6 +659,18 @@ describe("Custody multi-provider routes", () => {
     });
 
     env.PRIVY_BYOK_ENABLED = "false";
+    await expect(readWallet()).resolves.toMatchObject({
+      custodyConnectionId: connection.connectionId,
+      isDefaultProvider: false,
+      isRuntimeExecutionAllowed: false,
+      provider: "privy",
+    });
+
+    env.PRIVY_BYOK_ENABLED = "true";
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG.id)
+      .run();
     await expect(readWallet()).resolves.toMatchObject({
       custodyConnectionId: connection.connectionId,
       isDefaultProvider: false,

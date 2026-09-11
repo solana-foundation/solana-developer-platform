@@ -76,12 +76,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     quote,
     transferStatus,
     setField,
+    selectProvider,
     handlePairChange,
     requirementFields,
-    existingPayoutAccounts,
-    payoutAccountSelection,
     selectedProviderAccountId,
-    addingNewAccount,
+    payoutAccounts,
     selectPayoutAccount,
     collectedData,
     setCollectedField,
@@ -102,12 +101,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
-  const payoutAccountChoice = addingNewAccount ? "new" : selectedProviderAccountId;
   const requirementsKey = [
     "offramp-requirements",
     destinationCountry,
     paymentRails,
-    payoutAccountChoice,
+    selectedProviderAccountId,
   ].join(":");
 
   if (currentStepId === "WALLET") {
@@ -155,7 +153,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           onAmountBlur={() => {}}
           onWalletChange={(walletId) => setField("walletId", walletId)}
           onPairChange={handlePairChange}
-          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+          onProviderSelect={selectProvider}
         />
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
@@ -173,20 +171,31 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   if (currentStepId === "REQUIREMENTS") {
     // Native fieldset[disabled] freezes every nested input, combobox trigger and
     // account-chooser button while the advance POST is in flight, so mid-flight
-    // edits can't desync the form from what the provider was sent.
+    // edits can't desync the form from what the provider was sent. A corridor
+    // blocker renders above STILL-ENABLED fields: the country select is the only
+    // way out of a blocked corridor, so it must stay interactive.
     return (
-      <fieldset disabled={isAdvancing} className="min-w-0">
-        <RequirementsFields
-          key={requirementsKey}
-          provider={fields.provider}
-          fields={requirementFields}
-          values={collectedData}
-          onChange={setCollectedField}
-          existingPayoutAccounts={existingPayoutAccounts}
-          payoutAccountSelection={payoutAccountSelection}
-          onPayoutAccountSelectionChange={selectPayoutAccount}
-        />
-      </fieldset>
+      <div className="space-y-4">
+        {requirementsBlocker ? (
+          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+            {requirementsBlocker}
+          </div>
+        ) : null}
+        <fieldset disabled={isAdvancing} className="min-w-0">
+          <RequirementsFields
+            key={requirementsKey}
+            provider={fields.provider}
+            fields={requirementFields}
+            values={collectedData}
+            onChange={setCollectedField}
+            payoutAccountPicker={{
+              accounts: payoutAccounts,
+              selectedProviderAccountId,
+              onSelect: selectPayoutAccount,
+            }}
+          />
+        </fieldset>
+      </div>
     );
   }
 
@@ -205,7 +214,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     onboarding &&
     !quote &&
     hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding.status)
+    isOnboardingPanelStatus(onboarding)
   ) {
     return (
       <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />

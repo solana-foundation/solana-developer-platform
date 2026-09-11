@@ -26,11 +26,30 @@ export interface ProvisionIdentityInput {
 export interface ProvisionIdentityResult {
   identity: ShieldedIdentity;
   registrationSignatures: string[];
-  mergingEnabled: boolean;
   materialTag: MaterialTag;
 }
 
 export interface ReadIdentityInput {
+  walletId: string;
+  owner: string;
+}
+
+export interface EnsureMergingEnabledInput {
+  walletId: string;
+  owner: string;
+}
+
+export interface EnsureMergingEnabledResult {
+  /** Null when the record already permitted merging and nothing was sent. */
+  signature: string | null;
+}
+
+/**
+ * Rotating a published record to the identity the wallet's material derives
+ * now. Destructive and irreversible: notes encrypted to the old keys stay on
+ * chain with nothing able to derive the keys that open them.
+ */
+export interface RekeyIdentityInput {
   walletId: string;
   owner: string;
 }
@@ -77,6 +96,13 @@ export interface BuildOperationInput {
   knownAssets?: KnownAsset[];
   requireSlot?: string;
   /**
+   * The pinned ring and its address lookup table, resolved together from the
+   * ring row; present exactly when the operation is a ring-bound spend. Ring
+   * transacts are v0 transactions compressed through the table. (A ring shield
+   * builds from `operation.ringProgramId` alone and needs no table.)
+   */
+  ring?: { programId: string; lookupTable: string };
+  /**
    * Present only for private transfers: identifies the recipient wallet so the
    * SDK can load its material and derive the ShieldedAddress needed to build the
    * transfer output. Same tenant as the sender is enforced upstream.
@@ -102,10 +128,49 @@ export interface VerifyIndexedResult {
   slot: string;
 }
 
+export interface ProvisionRingInput {
+  /** Base58 program id of the pre-deployed ring program. */
+  ringProgramId: string;
+  /**
+   * The lookup table already recorded for this ring, if any; bring-up adopts a
+   * complete existing table instead of renting a second one.
+   */
+  lookupTableAddress?: string | null;
+}
+
+export interface ProvisionRingResult {
+  /**
+   * Uncompressed SEC1 P-256 auditor public key as hex, as the ring's on-chain
+   * config publishes it. The caller persists it; SDP never holds the secret half.
+   */
+  auditorPublicKeyHex: string;
+  /** The ring's address lookup table, created or adopted by bring-up. */
+  lookupTableAddress: string;
+}
+
 export interface RingsGatewayPort {
   probeHealth(): Promise<RuntimeHealth>;
   provisionIdentity(input: ProvisionIdentityInput): Promise<ProvisionIdentityResult>;
+  /**
+   * Completes bring-up of a pre-deployed ring program. Idempotent against
+   * on-chain state; see docs/ops/helius-rings.md for the step sequence.
+   */
+  provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult>;
   readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult>;
+  /**
+   * Repoints the owner's on-chain record at the identity its material derives
+   * now, abandoning every note encrypted to the published keys. Only for a
+   * wallet already quarantined for a mismatch, and only behind an explicit
+   * human confirmation — nothing about this is recoverable.
+   */
+  rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult>;
+  /**
+   * Clears the on-chain precondition for merging, which registration cannot
+   * set. Idempotent and cheap when already on: it reads the record first and
+   * sends nothing in the common case. Provisioning runs it for new wallets, so
+   * this is reached only by wallets registered before merge shipped.
+   */
+  ensureMergingEnabled(input: EnsureMergingEnabledInput): Promise<EnsureMergingEnabledResult>;
   syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult>;
   buildOperation(input: BuildOperationInput): Promise<BuildOperationResult>;
   verifyIndexed(signature: string): Promise<VerifyIndexedResult | null>;

@@ -30,6 +30,8 @@ const OBSERVED: RingsWalletSync = {
       symbol: "SOL",
       amountRaw: "1000000000",
       decimals: 9,
+      ringProgramId: null,
+      noteCount: 1,
       usdPrice: 150,
       usdValue: 150,
     },
@@ -101,6 +103,49 @@ describe("ShieldedBalanceCard", () => {
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
     // Reason is text (not a tooltip on a disabled button) so it reaches screen readers.
     expect(screen.getByText(/no shielded identity yet/)).toBeTruthy();
+  });
+
+  it("skips the read entirely for a paused wallet", () => {
+    // The server refuses a paused wallet, and this card mounts per wallet on
+    // every visit, so asking would fail on a loop.
+    renderCard({ ...WALLET, status: "paused" });
+
+    expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
+    expect(screen.getByText(/paused/)).toBeTruthy();
+  });
+
+  it("offers the re-key recovery beside the paused reason", () => {
+    // Where an operator learns the wallet is stuck is where the one way out
+    // has to be; the dialog itself is what explains the cost.
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ShieldedBalanceCard
+          wallet={{ ...WALLET, status: "paused" }}
+          onRekeyed={vi.fn().mockResolvedValue(undefined)}
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.getByRole("button", { name: /Re-key wallet/i })).toBeTruthy();
+  });
+
+  it("keeps the recovery after a failed re-key leaves the wallet paused with no address", () => {
+    // A re-key claims the row before it rotates, so a rotation that fails lands
+    // here. Reading this as merely unprovisioned would answer a paused wallet
+    // with an instruction to provision — which is what a paused wallet refuses —
+    // and strand the operator on reload with no way back.
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ShieldedBalanceCard
+          wallet={{ ...WALLET, shieldedAddress: null, status: "paused" }}
+          onRekeyed={vi.fn().mockResolvedValue(undefined)}
+        />
+      </I18nProvider>
+    );
+
+    expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
+    expect(screen.queryByText(/no shielded identity yet/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Re-key wallet/i })).toBeTruthy();
   });
 
   it("falls back to the unpriced marker when totalUsd is absent", async () => {

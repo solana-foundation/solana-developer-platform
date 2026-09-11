@@ -17,6 +17,7 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TOKEN_ID = "tok_workflow_authz_test";
@@ -95,21 +96,12 @@ describe("workflow authorization (routes)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        TEST_PROJECT.name,
-        TEST_PROJECT.slug,
-        TEST_PROJECT.environment,
-        "active",
-        TEST_USER.id
-      )
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    });
 
     // A deployed, allowlist-enabled token so both an automated and a privileged action
     // clear the capability gate and only the tier gate can reject.

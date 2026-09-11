@@ -11,10 +11,18 @@
  * It applies to tenant endpoints alone. Platform provider endpoints come from
  * deployment config and are legitimately private in local development and in
  * the Surfpool integration suites, so those keep the ordinary fetch.
+ *
+ * Private Channels probes come through here too, via
+ * `services/private-channels/egress.ts`, which pairs this transport with an
+ * exact origin allowlist because a project supplies those URLs directly.
  */
 import { lookup as dnsLookup } from "node:dns";
+import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import type { LookupFunction } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
+import { isBlockedAddress } from "@sdp/rpc/blocked-address";
+
+export { isBlockedAddress };
 
 export class EgressBlockedError extends Error {
   constructor(host: string) {
@@ -25,64 +33,6 @@ export class EgressBlockedError extends Error {
 
 /** Statuses the Response constructor refuses a body for. */
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
-
-function isBlockedIpv4(address: string): boolean {
-  const octets = address.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0)) {
-    // Not a dotted quad we can reason about; refuse rather than guess.
-    return true;
-  }
-
-  const [a, b] = octets as [number, number, number, number];
-
-  if (a === 0 || a === 127) return true; // this host, loopback
-  if (a === 10) return true; // private
-  if (a === 172 && b >= 16 && b <= 31) return true; // private
-  if (a === 192 && b === 168) return true; // private
-  if (a === 169 && b === 254) return true; // link-local, including the metadata address
-  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
-  if (a === 192 && b === 0) return true; // IETF protocol assignments
-  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
-  if (a >= 224) return true; // multicast and reserved, 255.255.255.255 included
-
-  return false;
-}
-
-function isBlockedIpv6(address: string): boolean {
-  const host =
-    address
-      .toLowerCase()
-      .replace(/^\[|\]$/g, "")
-      .split("%")[0] ?? "";
-
-  // An IPv4-mapped address is an IPv4 destination wearing IPv6 notation, so it
-  // is classified as one. Node can hand this back in either spelling.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
-  if (mapped?.[1]) {
-    return isBlockedIpv4(mapped[1]);
-  }
-  if (/^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(host)) {
-    const parts = host.split(":");
-    const high = Number.parseInt(parts[3] ?? "", 16);
-    const low = Number.parseInt(parts[4] ?? "", 16);
-    if (Number.isInteger(high) && Number.isInteger(low)) {
-      return isBlockedIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff].map(String).join("."));
-    }
-    return true;
-  }
-
-  if (host === "::" || host === "::1") return true; // unspecified, loopback
-  if (/^f[cd][0-9a-f]{2}:/.test(host)) return true; // unique local
-  if (/^fe[89ab][0-9a-f]:/.test(host)) return true; // link-local
-  if (/^ff[0-9a-f]{2}:/.test(host)) return true; // multicast
-
-  return false;
-}
-
-/** Whether SDP refuses to open a connection to this resolved address. */
-export function isBlockedAddress(address: string): boolean {
-  return address.includes(":") ? isBlockedIpv6(address) : isBlockedIpv4(address);
-}
 
 /**
  * A `dns.lookup` replacement that drops every blocked address before the
@@ -126,6 +76,31 @@ export interface GuardedFetchInit {
    * the guard again rather than trusted for having come from an allowed one.
    */
   maxRedirects?: number;
+  /**
+   * Stop buffering the response body past this many bytes. Callers that relay
+   * an upstream payload leave it off; a probe that only reads a status and a
+   * short reason sets it, so a hostile endpoint cannot answer a health check
+   * with a body large enough to matter.
+   */
+  maxResponseBytes?: number;
+  /**
+   * Set only for a destination that matched an exact operator-approved
+   * allowlist entry which is itself plaintext or a private literal — the public
+   * Private Channels sandbox answers on `http://`, and a developer's gateway is
+   * on loopback. It permits `http:` and dials without the address check, since
+   * the operator named that exact origin in deployment config. It must never be
+   * set from anything a request can influence: for tenant input, the allowlist
+   * is what decides, and this flag then only repeats a decision already made.
+   */
+  approvedInsecureDestination?: boolean;
+  /**
+   * The operator approved this origin on plaintext http, but its host is a
+   * NAME: the transport is relaxed while the connect-time address check stays,
+   * so the name still resolves through `guardedLookup`. Same trust rule as
+   * `approvedInsecureDestination`: never set from anything a request can
+   * influence.
+   */
+  approvedPlaintextDestination?: boolean;
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -187,10 +162,18 @@ export function nextRedirectStep(
  * Same shape as a `fetch` call the caller would otherwise make. Every hop,
  * including a redirected one, resolves through `guardedLookup`, so a redirect
  * cannot walk the request somewhere the first check refused.
+ *
+ * `approvedInsecureDestination` names the origin the caller approved, which the
+ * upstream's `Location` header is not, so it does not travel to the next hop:
+ * a redirect off an approved plaintext origin is a fresh destination and faces
+ * the full check.
  */
 export async function guardedFetch(url: string, init: GuardedFetchInit): Promise<Response> {
   const target = new URL(url);
-  if (target.protocol !== "https:") {
+  const plaintextApproved =
+    target.protocol === "http:" &&
+    (init.approvedPlaintextDestination || init.approvedInsecureDestination);
+  if (target.protocol !== "https:" && !plaintextApproved) {
     throw new EgressBlockedError(target.hostname);
   }
 
@@ -206,17 +189,44 @@ export async function guardedFetch(url: string, init: GuardedFetchInit): Promise
     method: step.method,
     body: step.body,
     maxRedirects: init.maxRedirects - 1,
+    approvedInsecureDestination: false,
+    approvedPlaintextDestination: false,
   });
 }
 
 async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Response> {
+  // An operator-approved destination is reached without the address check —
+  // that is what approving a plaintext or loopback origin means — but the
+  // request still refuses redirects and still bounds what it reads back.
+  const request = target.protocol === "http:" ? httpRequest : httpsRequest;
+  const lookup = init.approvedInsecureDestination ? undefined : guardedLookup;
+
+  // A host written as an address never reaches the lookup hook — Node dials a
+  // literal directly — so it is classified here, before the socket exists.
+  const literalHost = target.hostname.replace(/^\[|\]$/g, "");
+  if (!init.approvedInsecureDestination && isIP(literalHost) && isBlockedAddress(literalHost)) {
+    throw new EgressBlockedError(target.hostname);
+  }
+
   return new Promise<Response>((resolve, reject) => {
-    const req = httpsRequest(
+    const req = request(
       target,
-      { method: init.method, headers: init.headers, lookup: guardedLookup, signal: init.signal },
+      { method: init.method, headers: init.headers, lookup, signal: init.signal },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        let buffered = 0;
+        res.on("data", (chunk: Buffer) => {
+          // Past the cap the stream is drained rather than destroyed: an
+          // aborted read races the `end` this promise settles on, and the
+          // caller's signal already bounds how long draining can take.
+          const room =
+            init.maxResponseBytes === undefined
+              ? chunk.length
+              : Math.max(0, init.maxResponseBytes - buffered);
+          if (room === 0) return;
+          chunks.push(room < chunk.length ? chunk.subarray(0, room) : chunk);
+          buffered += Math.min(room, chunk.length);
+        });
         res.on("error", reject);
         res.on("end", () => {
           const status = res.statusCode ?? 502;
@@ -234,4 +244,43 @@ async function guardedRequest(target: URL, init: GuardedFetchInit): Promise<Resp
     req.on("error", reject);
     req.end(init.body);
   });
+}
+
+/**
+ * `guardedFetch` behind the WHATWG fetch signature, for libraries that accept
+ * a `fetch` implementation but know nothing about the egress guard.
+ *
+ * Strict on purpose: a `Request` input or a non-string body is refused rather
+ * than partially honored, because silently dropping a body or an option would
+ * send a request the caller did not write. Every JSON-RPC client this serves
+ * sends string bodies.
+ */
+export function createGuardedFetch(options?: {
+  maxRedirects?: number;
+  maxResponseBytes?: number;
+}): typeof globalThis.fetch {
+  return async (input, init) => {
+    if (typeof input !== "string" && !(input instanceof URL)) {
+      throw new TypeError("guarded fetch takes a URL, not a Request");
+    }
+    if (init?.body !== undefined && init.body !== null && typeof init.body !== "string") {
+      throw new TypeError("guarded fetch only sends string bodies");
+    }
+
+    const headers: Record<string, string> = {};
+    new Headers(init?.headers).forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    return guardedFetch(input.toString(), {
+      method: init?.method ?? "GET",
+      headers,
+      body: init?.body ?? "",
+      ...(init?.signal ? { signal: init.signal } : {}),
+      ...(options?.maxRedirects === undefined ? {} : { maxRedirects: options.maxRedirects }),
+      ...(options?.maxResponseBytes === undefined
+        ? {}
+        : { maxResponseBytes: options.maxResponseBytes }),
+    });
+  };
 }

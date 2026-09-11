@@ -4,9 +4,14 @@ import {
   type ClientErrorDetailsMap,
 } from "@heliuslabs/zolana/client";
 import { InterfaceError, type InterfaceErrorCode } from "@heliuslabs/zolana/interface";
+import { RingError, type RingErrorCode } from "@heliuslabs/zolana/ring";
 import { TransactionError, type TransactionErrorCode } from "@heliuslabs/zolana/transaction";
 import { WalletError, type WalletErrorCode } from "@heliuslabs/zolana/wallet";
-import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings";
+import {
+  HeliusRingsError,
+  type HeliusRingsErrorCode,
+  type RingsErrorCause,
+} from "@sdp/helius-rings";
 import {
   isSolanaError,
   SOLANA_ERROR__ADDRESSES__INVALID_BASE58_ENCODED_ADDRESS,
@@ -50,6 +55,9 @@ const INTERFACE_ERROR_CODES_TO_DOMAIN = {
  * classified before this package typechecks.
  */
 const WALLET_ERROR_CODES_TO_DOMAIN = {
+  // A mint's metadata account was missing, foreign-owned, or undecodable:
+  // upstream chain data this tenant cannot correct.
+  WALLET_ASSET_METADATA: "gateway_unavailable",
   WALLET_BUILD_DEPOSIT: "gateway_unavailable",
   WALLET_BUILD_MERGE: "gateway_unavailable",
   WALLET_BUILD_REGISTRATION: "gateway_unavailable",
@@ -64,7 +72,11 @@ const WALLET_ERROR_CODES_TO_DOMAIN = {
   WALLET_INPUT_UTXO_TREE_MISMATCH: "conflict",
   WALLET_INPUT_UTXO_UNAVAILABLE: "conflict",
   WALLET_INSUFFICIENT_BALANCE: "insufficient_balance",
+  WALLET_INTENT_MISMATCH: "conflict",
   WALLET_INVALID_ADDRESS: "invalid_input",
+  // A key holder answered a batch with the wrong number of results. In-process
+  // that is a bug; over TVC it is a misbehaving upstream.
+  WALLET_KEYS_BATCH_MISMATCH: "gateway_unavailable",
   WALLET_INVALID_AMOUNT: "invalid_input",
   WALLET_INVALID_BASE64: "invalid_input",
   WALLET_INVALID_LENGTH: "invalid_input",
@@ -78,19 +90,28 @@ const WALLET_ERROR_CODES_TO_DOMAIN = {
   WALLET_MISSING_SPL_TOKEN_ACCOUNT: "invalid_input",
   WALLET_MULTIPLE_INPUT_TREES: "conflict",
   WALLET_NO_INPUTS: "invalid_input",
+  // The SDK's own note reservation holds this note for another in-flight spend.
+  WALLET_NOTE_RESERVED: "conflict",
   WALLET_NOTHING_TO_MERGE: "invalid_input",
   WALLET_P256_REGISTRATION_UNSUPPORTED: "invalid_input",
   WALLET_PDA_DERIVATION: "invalid_input",
+  // Snapshot store and seal failures. Unreachable until wallet state is
+  // persisted, but classified so adding that does not need this map reopened.
+  WALLET_PERSIST: "gateway_unavailable",
+  WALLET_SNAPSHOT: "gateway_unavailable",
   WALLET_REGISTERED_KEYPAIR_MISMATCH: "conflict",
   WALLET_RECIPIENT_CLIENT_REQUIRED: "invalid_input",
   WALLET_RECIPIENT_NOT_REGISTERED: "invalid_input",
   WALLET_SELECTED_BALANCE_OVERFLOW: "invalid_input",
   WALLET_SPLIT_INPUT_HAS_DATA: "invalid_input",
-  WALLET_SPLIT_INPUT_ZONE_MISMATCH: "invalid_input",
+  WALLET_SPLIT_INPUT_RING_MISMATCH: "invalid_input",
   WALLET_SPLIT_INVALID_PART_COUNT: "invalid_input",
   WALLET_SPLIT_NOT_DIVISIBLE: "invalid_input",
   WALLET_SYNC: "gateway_unavailable",
   WALLET_TOO_MANY_INPUTS: "invalid_input",
+  // A fetched note names an asset the registry cannot resolve, so 0.1.6 refuses
+  // to commit the sync rather than advance its cursors past an unstored note.
+  WALLET_UNRESOLVED_ASSET: "gateway_unavailable",
   WALLET_UNSIGNED_INPUT_UNAVAILABLE: "conflict",
   WALLET_USER_RECORD_BUMP_MISMATCH: "conflict",
   WALLET_USER_RECORD_OWNER_MISMATCH: "conflict",
@@ -120,26 +141,35 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_INVALID_ASSET_ID: "invalid_input",
   TRANSACTION_INVALID_BLINDING: "invalid_input",
   TRANSACTION_INVALID_DATA_LENGTH: "invalid_input",
+  TRANSACTION_INVALID_DECIMALS: "invalid_input",
+  TRANSACTION_INVALID_DERIVATION_SEED: "invalid_input",
+  TRANSACTION_INVALID_DISPLAY_AMOUNT: "invalid_input",
   TRANSACTION_INVALID_INTEGER: "invalid_input",
   TRANSACTION_INVALID_LENGTH: "invalid_input",
   TRANSACTION_INVALID_POSITION: "invalid_input",
   TRANSACTION_INVALID_OUTPUT_COUNT: "invalid_input",
   TRANSACTION_INVALID_OUTPUT_POSITION: "invalid_input",
   TRANSACTION_KEYPAIR: "invalid_input",
+  // Same reasoning as the wallet-layer keys codes: a batch answered with the
+  // wrong shape, or a key set that does not describe this wallet.
+  TRANSACTION_KEYS_BATCH_MISMATCH: "gateway_unavailable",
+  TRANSACTION_KEYS_IDENTITY_MISMATCH: "conflict",
+  TRANSACTION_KEYS_UNRESOLVED: "gateway_unavailable",
   TRANSACTION_MERGE_INPUT_ASSET_MISMATCH: "conflict",
   TRANSACTION_MERGE_INPUT_HAS_DATA: "conflict",
   TRANSACTION_MERGE_INPUT_NULLIFIER_KEY_MISMATCH: "conflict",
   TRANSACTION_MERGE_INPUT_OWNER_MISMATCH: "conflict",
   TRANSACTION_MERGE_INPUT_RAIL_MISMATCH: "conflict",
-  TRANSACTION_MERGE_INPUT_ZONE_MISMATCH: "conflict",
+  TRANSACTION_MERGE_INPUT_RING_MISMATCH: "conflict",
   TRANSACTION_MISSING_CURRENT_VIEWING_KEY: "conflict",
   TRANSACTION_MISSING_OUTPUT: "invalid_input",
   TRANSACTION_MISSING_PUBLIC_SPL_ASSET: "invalid_input",
-  TRANSACTION_MISSING_ZONE_PROGRAM_ID: "invalid_input",
+  TRANSACTION_MISSING_RING_PROGRAM_ID: "invalid_input",
   TRANSACTION_MULTIPLE_PUBLIC_SPL_ASSETS: "invalid_input",
   TRANSACTION_NON_CANONICAL_DATA_ORDER: "invalid_input",
   TRANSACTION_NONCANONICAL_DUMMY_INPUT: "invalid_input",
   TRANSACTION_NO_INPUTS: "invalid_input",
+  TRANSACTION_NOTE_RESERVED: "conflict",
   TRANSACTION_ADDRESS_HASH_COUNT_MISMATCH: "invalid_input",
   TRANSACTION_OUTPUT_TAG_MISMATCH: "conflict",
   TRANSACTION_OUTPUT_AMOUNT_MISMATCH: "conflict",
@@ -148,12 +178,13 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_OUTPUT_DATA_MISMATCH: "conflict",
   TRANSACTION_OUTPUT_OWNER_MISMATCH: "conflict",
   TRANSACTION_OUTPUT_SLOT_OVERFLOW: "invalid_input",
-  TRANSACTION_OUTPUT_ZONE_MISMATCH: "conflict",
+  TRANSACTION_OUTPUT_RING_MISMATCH: "conflict",
   TRANSACTION_P256_TRANSACT_UNSUPPORTED: "invalid_input",
   TRANSACTION_POSEIDON: "gateway_unavailable",
   TRANSACTION_PUBLIC_SOL_ALREADY_SET: "invalid_input",
   TRANSACTION_PUBLIC_SPL_ALREADY_SET: "invalid_input",
   TRANSACTION_RESERVED_ASSET_ID: "invalid_input",
+  TRANSACTION_RESERVED_NOTE_UNAVAILABLE: "conflict",
   TRANSACTION_SELECTED_BALANCE_OVERFLOW: "invalid_input",
   TRANSACTION_WALLET_BALANCE_OVERFLOW: "invalid_input",
   TRANSACTION_SERIALIZE: "gateway_unavailable",
@@ -164,7 +195,7 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_SPLIT_INPUT_IS_DUMMY: "conflict",
   TRANSACTION_SPLIT_INPUT_NULLIFIER_KEY_MISMATCH: "conflict",
   TRANSACTION_SPLIT_INPUT_OWNER_MISMATCH: "conflict",
-  TRANSACTION_SPLIT_INPUT_ZONE_MISMATCH: "conflict",
+  TRANSACTION_SPLIT_INPUT_RING_MISMATCH: "conflict",
   TRANSACTION_SPLIT_INVALID_PART_COUNT: "invalid_input",
   TRANSACTION_TOO_MANY_INPUTS: "invalid_input",
   TRANSACTION_TOO_MANY_INTERFACE_TRANSFERS: "invalid_input",
@@ -175,7 +206,8 @@ const TRANSACTION_ERROR_CODES_TO_DOMAIN = {
   TRANSACTION_UNKNOWN_ASSET_FIELD: "invalid_input",
   TRANSACTION_UNKNOWN_MINT: "invalid_input",
   TRANSACTION_UNSUPPORTED_SHAPE: "invalid_input",
-  TRANSACTION_WALLET_AUTHORITY_MISMATCH: "conflict",
+  // The wallet view a build was prepared against moved underneath it.
+  TRANSACTION_WALLET_STATE_STALE: "conflict",
   TRANSACTION_WITHDRAWAL_ALREADY_SET: "invalid_input",
   TRANSACTION_WITHDRAWAL_ASSET_MISMATCH: "conflict",
   TRANSACTION_ZERO_INTERFACE_TRANSFER_AMOUNT: "invalid_input",
@@ -236,8 +268,12 @@ const CLIENT_ERROR_CODES_TO_DOMAIN = {
   CLIENT_PROOF_POINT: "gateway_unavailable",
   CLIENT_PROOF_TREE_MISMATCH: "gateway_unavailable",
   CLIENT_INVALID_MERGE_OUTPUT: "conflict",
-  CLIENT_INVALID_MERGE_MATERIAL: "conflict",
   CLIENT_INVALID_MERGE_SHAPE: "invalid_input",
+  CLIENT_INTENT_MISMATCH: "conflict",
+  // Proving was handed a key holder that cannot prove, or one that could not
+  // supply the nullifier secret the witness needs.
+  CLIENT_INVALID_PROOF_AUTHORITY: "invalid_input",
+  CLIENT_MISSING_NULLIFIER_SECRET: "invalid_input",
   CLIENT_PROVER_INPUT: "invalid_input",
   CLIENT_PROVER_REQUEST: "gateway_unavailable",
   CLIENT_PROVER_HTTP: "gateway_unavailable",
@@ -249,12 +285,80 @@ const CLIENT_ERROR_CODES_TO_DOMAIN = {
   CLIENT_INVALID_RPC_RESPONSE: "gateway_unavailable",
 } satisfies Record<ClientErrorCode, BridgedErrorCode>;
 
+/**
+ * Total by construction, like the wallet map: a new public RingError code in
+ * Zolana must be classified before this package typechecks. Build and origin
+ * failures wrap upstream I/O; definitive chain-state absences and invariant
+ * failures are conflicts the tenant cannot fix by retrying.
+ */
+const RING_ERROR_CODES_TO_DOMAIN = {
+  RING_AUDIT_KEY_MISMATCH: "conflict",
+  RING_AUDIT_MESSAGE: "gateway_unavailable",
+  RING_AUDIT_UNSEALED: "gateway_unavailable",
+  RING_BUILD_DEPOSIT: "gateway_unavailable",
+  RING_BUILD_ENTRY: "gateway_unavailable",
+  RING_BUILD_LOOKUP_TABLE: "gateway_unavailable",
+  RING_BUILD_TRANSFER: "gateway_unavailable",
+  RING_BUILD_WITHDRAWAL: "gateway_unavailable",
+  // A ring config that decodes but fails its invariants is chain state this
+  // tenant cannot fix by retrying, like the user-record mismatches above.
+  RING_CONFIG_INVALID: "conflict",
+  RING_CONFIG_NOT_FOUND: "conflict",
+  RING_DATA_OUTSIDE_RING: "invalid_input",
+  RING_FOREIGN_RING: "invalid_input",
+  RING_INSUFFICIENT_BALANCE: "insufficient_balance",
+  RING_INTENT_MISMATCH: "conflict",
+  RING_INVALID_LENGTH: "invalid_input",
+  RING_LOOKUP_TABLE_INCOMPLETE: "gateway_unavailable",
+  RING_LOOKUP_TABLE_NOT_FOUND: "conflict",
+  RING_MULTIPLE_INPUT_TREES: "conflict",
+  RING_ORIGIN_DECODE: "gateway_unavailable",
+  RING_ORIGIN_STACK: "gateway_unavailable",
+  RING_ORIGIN_UNAVAILABLE: "gateway_unavailable",
+  RING_PADDED_CHANGE: "gateway_unavailable",
+  RING_PASSKEY: "invalid_input",
+  RING_PROOF_LENGTH: "invalid_input",
+  RING_READ_ACCESS_RECORD_INVALID: "conflict",
+  RING_READ_CURSOR: "invalid_input",
+  RING_READ_LIMIT: "invalid_input",
+  RING_READER_KEY: "invalid_input",
+  RING_RESERVED_AUDITOR_KEY: "conflict",
+  RING_RPC: "gateway_unavailable",
+  RING_RPC_CONFIG: "config_error",
+  RING_RPC_TRANSPORT: "gateway_unavailable",
+  RING_SELECTED_BALANCE_OVERFLOW: "invalid_input",
+  RING_TOO_MANY_INPUTS: "invalid_input",
+  RING_TREE_MISMATCH: "conflict",
+  RING_ZERO_AMOUNT: "invalid_input",
+} satisfies Record<RingErrorCode, BridgedErrorCode>;
+
+/**
+ * A prover that refuses the request itself refuses the identical bytes on every
+ * attempt, so the fault is the endpoint, not an outage: it serves a contract
+ * this client does not speak, and the operator has to change where we point
+ * rather than wait. Calling that retryable is what sent a prover too old to
+ * serve `custom-ring` round a retry loop that could never converge.
+ *
+ * 408 and 429 are the two rejections that do clear on their own.
+ */
+function proverHttpCode(error: ClientError): BridgedErrorCode {
+  const details = error.details as ClientErrorDetailsMap["CLIENT_PROVER_HTTP"] | undefined;
+  const status = details?.status;
+
+  if (status === undefined || status < 400 || status >= 500) return "gateway_unavailable";
+  return status === 408 || status === 429 ? "gateway_unavailable" : "config_error";
+}
+
 function clientErrorCode(error: ClientError): BridgedErrorCode {
   if (error.code === "CLIENT_TRANSACTION") {
     const details = error.details as ClientErrorDetailsMap["CLIENT_TRANSACTION"] | undefined;
     if (details) {
       return TRANSACTION_ERROR_CODES_TO_DOMAIN[details.code];
     }
+  }
+
+  if (error.code === "CLIENT_PROVER_HTTP") {
+    return proverHttpCode(error);
   }
 
   return CLIENT_ERROR_CODES_TO_DOMAIN[error.code];
@@ -280,6 +384,26 @@ function bridgedCode(error: unknown): BridgedErrorCode | undefined {
     return WALLET_ERROR_CODES_TO_DOMAIN[error.code];
   }
 
+  if (error instanceof RingError) {
+    // Ring wrappers retain the more specific Zolana error the same way.
+    if (error.cause instanceof InterfaceError) {
+      return INTERFACE_ERROR_CODES_TO_DOMAIN[error.cause.code];
+    }
+    if (error.cause instanceof ClientError) {
+      return clientErrorCode(error.cause);
+    }
+    if (error.cause instanceof TransactionError) {
+      return TRANSACTION_ERROR_CODES_TO_DOMAIN[error.cause.code];
+    }
+    // The ring builders wrap their own domain errors too: RING_BUILD_TRANSFER
+    // around RING_INSUFFICIENT_BALANCE would otherwise report a retryable
+    // upstream outage for a balance the caller can see is short.
+    if (error.cause instanceof RingError) {
+      return RING_ERROR_CODES_TO_DOMAIN[error.cause.code];
+    }
+    return RING_ERROR_CODES_TO_DOMAIN[error.code];
+  }
+
   if (error instanceof ClientError) {
     return clientErrorCode(error);
   }
@@ -291,17 +415,52 @@ function bridgedCode(error: unknown): BridgedErrorCode | undefined {
   return undefined;
 }
 
-function bridgedError(code: BridgedErrorCode): HeliusRingsError {
-  return new HeliusRingsError(code, SAFE_MESSAGES[code]);
+/**
+ * The upstream discriminator and nothing else. A Zolana error code is a fixed
+ * enum string and an HTTP status is a number, so neither can carry the
+ * endpoints, caller payloads, account data, or key material that `details` and
+ * the error chain do. Enough to name a fault in a log without reproducing it.
+ *
+ * Shared with every other bridged failure, identity mismatch included, so a
+ * caller reads one shape whatever raised it.
+ */
+export type BridgedErrorCause = RingsErrorCause;
+
+function upstreamCause(error: unknown): BridgedErrorCause | undefined {
+  if (
+    !(
+      error instanceof InterfaceError ||
+      error instanceof WalletError ||
+      error instanceof RingError ||
+      error instanceof ClientError ||
+      error instanceof TransactionError
+    )
+  ) {
+    return undefined;
+  }
+
+  const status =
+    error instanceof ClientError && error.code === "CLIENT_PROVER_HTTP"
+      ? (error.details as ClientErrorDetailsMap["CLIENT_PROVER_HTTP"] | undefined)?.status
+      : undefined;
+
+  return Object.freeze(
+    status === undefined ? { upstream: error.code } : { upstream: error.code, status }
+  );
+}
+
+function bridgedError(code: BridgedErrorCode, cause?: BridgedErrorCause): HeliusRingsError {
+  return new HeliusRingsError(code, SAFE_MESSAGES[code], cause && { cause });
 }
 
 function throwBridgedError(error: unknown): never {
   const code = bridgedCode(error);
   if (code === undefined) throw error;
 
-  // Never retain the upstream cause or details: either can contain endpoints,
-  // caller payloads, account data, or key material.
-  throw bridgedError(code);
+  // The upstream cause and details are never retained: either can contain
+  // endpoints, caller payloads, account data, or key material. Only the
+  // discriminator crosses, so a failure stays nameable in a log.
+  throw bridgedError(code, upstreamCause(error));
 }
 
 /**
@@ -325,7 +484,7 @@ export function withZolanaErrorBridgeSync<T>(work: () => T): T {
   }
 }
 
-function isConfiguredTreeAddressError(error: unknown): boolean {
+function isConfiguredAddressError(error: unknown): boolean {
   return (
     isSolanaError(error, SOLANA_ERROR__ADDRESSES__STRING_LENGTH_OUT_OF_RANGE) ||
     isSolanaError(error, SOLANA_ERROR__ADDRESSES__INVALID_BYTE_LENGTH) ||
@@ -335,14 +494,15 @@ function isConfiguredTreeAddressError(error: unknown): boolean {
 }
 
 /**
- * Narrows Kit address failures to the configured-tree parsing site. The same
- * SolanaError codes thrown elsewhere remain untouched.
+ * Narrows Kit address failures to a configured-address parsing site (the tree
+ * or a pinned ring program id). The same SolanaError codes thrown elsewhere
+ * remain untouched.
  */
-export function withConfiguredTreeErrorBridge<T>(work: () => T): T {
+export function withConfiguredAddressErrorBridge<T>(work: () => T): T {
   try {
     return work();
   } catch (error) {
-    if (!isConfiguredTreeAddressError(error)) throw error;
+    if (!isConfiguredAddressError(error)) throw error;
     throw bridgedError("config_error");
   }
 }

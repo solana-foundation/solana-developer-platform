@@ -2,6 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   CreateDepositInput,
@@ -14,7 +19,16 @@ const TEST_INSTANCE_ID = "inst_pcd_1";
 const RECIPIENT = "RecipientAddr11111111111111111111111111111";
 const MINT = "MintAddr11111111111111111111111111111111111";
 
+/**
+ * Each call defaults to a FRESH reservation, so a test that seeds several
+ * deposits is not silently testing the unique index. The idempotency tests below
+ * pin the key explicitly.
+ */
+let nextIdempotencyKey = 0;
+
 function makeInput(overrides: Partial<CreateDepositInput> = {}): CreateDepositInput {
+  nextIdempotencyKey += 1;
+  const key = `idem_pcd_${nextIdempotencyKey}`;
   return {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
@@ -30,12 +44,15 @@ function makeInput(overrides: Partial<CreateDepositInput> = {}): CreateDepositIn
       escrowInstanceAddr: "EscrowInst1111111111111111111111111111111",
       actingUserId: TEST_USER.id,
     },
+    idempotencyKey: key,
+    idempotencyFingerprint: `fp_${key}`,
     ...overrides,
   };
 }
 
 describe("PrivateChannelDepositRepository (postgres)", () => {
   let repo: PrivateChannelDepositRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -62,12 +79,21 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+        `INSERT INTO private_channel_instances (
+           id, organization_id, project_id, gateway_url,
+           escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+         ) VALUES (?, ?, ?, 'https://gateway.example',
+           'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
       )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+      .bind(TEST_INSTANCE_ID, TEST_ORG.id, TEST_PROJECT_ID)
       .run();
 
     repo = createPostgresPrivateChannelDepositRepository(db);
@@ -155,6 +181,29 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
     expect(reloaded?.context.gatewayUrl).toBe("https://gw.example");
   });
 
+  it("holds one deposit per idempotency key within a tenant", async () => {
+    const first = await repo.createDeposit(
+      makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+    );
+    expect(first).not.toBeNull();
+
+    // The unique index IS the reservation: a duplicate cannot insert, which is
+    // what stops a retry from broadcasting a second escrow transfer.
+    await expect(
+      repo.createDeposit(
+        makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })
+      )
+    ).rejects.toThrow();
+
+    const found = await repo.findDepositByIdempotency({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      idempotencyKey: "idem_shared",
+    });
+    expect(found?.id).toBe(first?.id);
+    expect(found?.idempotency_fingerprint).toBe("fp_idem_shared");
+  });
+
   it("countNonTerminalByInstance ignores terminal deposits", async () => {
     const created = await repo.createDeposit(makeInput());
     expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(1);
@@ -165,5 +214,35 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       expectedStatus: "pending",
     });
     expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(0);
+  });
+
+  it("scopes idempotency reservations to the project", async () => {
+    await repo.createDeposit(makeInput({ idempotencyKey: "idem_scoped" }));
+    const read = (projectId: string) =>
+      repo.findDepositByIdempotency({
+        organizationId: TEST_ORG.id,
+        projectId,
+        idempotencyKey: "idem_scoped",
+      });
+    await expectProjectScoped(
+      read,
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_instances (id, organization_id, project_id, gateway_url, escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active) VALUES ('inst_pcd_production', ?, ?, 'https://production.example', 'escrow_program', 'withdraw_program', 'escrow_instance_production', 'https://auth.example', TRUE)`
+      )
+      .bind(TEST_ORG.id, projects.production.id)
+      .run();
+    await expect(
+      repo.createDeposit(
+        makeInput({
+          projectId: projects.production.id,
+          instanceId: "inst_pcd_production",
+          idempotencyKey: "idem_scoped",
+        })
+      )
+    ).resolves.not.toBeNull();
   });
 });

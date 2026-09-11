@@ -100,7 +100,7 @@ async function postWithSigningProviderRetry<T>(
 
 async function createAndDeployWalletActivityToken(
   api: LocalApiClient,
-  signingWalletId: string
+  signingCustodyWalletId: string
 ): Promise<Token> {
   const suffix = Date.now().toString(36).slice(-6).toUpperCase();
   const created = await api.post<TokenResponse>("/v1/issuance/tokens", {
@@ -110,7 +110,7 @@ async function createAndDeployWalletActivityToken(
     decimals: 6,
     uri: `https://example.com/metadata/e2e-wallet-burn-${suffix.toLowerCase()}.json`,
     description: "Wallet activity burn coverage token",
-    signingWalletId,
+    signingCustodyWalletId,
     requiresAllowlist: false,
     isMintable: true,
     isFreezable: true,
@@ -120,7 +120,7 @@ async function createAndDeployWalletActivityToken(
     api,
     `/v1/issuance/tokens/${encodeURIComponent(created.token.id)}/deploy`,
     {
-      signingWalletId,
+      signingCustodyWalletId,
     }
   );
 
@@ -629,7 +629,7 @@ test.describe
             throw new Error("Failed to bootstrap wallet burn activity fixture");
           }
 
-          const deployedToken = await createAndDeployWalletActivityToken(api, wallet.walletId);
+          const deployedToken = await createAndDeployWalletActivityToken(api, wallet.id);
           const mintAddress = deployedToken.mintAddress;
           if (!mintAddress) {
             throw new Error("Failed to deploy wallet activity token with a mint address");
@@ -639,7 +639,7 @@ test.describe
             api,
             `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/mint`,
             {
-              signingWalletId: wallet.walletId,
+              signingCustodyWalletId: wallet.id,
               mint: {
                 destination: wallet.publicKey,
                 amount: "6",
@@ -653,7 +653,7 @@ test.describe
             api,
             `/v1/issuance/tokens/${encodeURIComponent(deployedToken.id)}/burn`,
             {
-              signingWalletId: wallet.walletId,
+              signingCustodyWalletId: wallet.id,
               burn: {
                 source: minted.tokenAccount,
                 amount: "2",

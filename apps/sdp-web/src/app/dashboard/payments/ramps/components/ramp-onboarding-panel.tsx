@@ -4,7 +4,7 @@ import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-re
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
-import { onboardingCopy, provisioningDetail } from "./providers";
+import { isOnboardingPanelStatus, onboardingCopy, provisioningDetail } from "./providers";
 
 export function RampOnboardingPanel({
   direction,
@@ -16,17 +16,11 @@ export function RampOnboardingPanel({
   onRetry: () => void;
 }) {
   const t = useTranslations();
-  const { provider, status } = onboarding;
-  if (
-    status === "collect" ||
-    status === "collect_counterparty" ||
-    status === "collect_account" ||
-    status === "unsupported" ||
-    status === "onboarding_not_started"
-  ) {
-    throw new Error(`RampOnboardingPanel received non-onboarding status: ${status}`);
+  if (!isOnboardingPanelStatus(onboarding)) {
+    throw new Error(`RampOnboardingPanel received non-onboarding status: ${onboarding.status}`);
   }
-  const copy = onboardingCopy(provider, status, t);
+  const { provider, status } = onboarding;
+  const copy = onboardingCopy(onboarding, t);
   const Icon = copy.icon;
   const hostedAction =
     status === "terms_of_service_required"
@@ -51,15 +45,16 @@ export function RampOnboardingPanel({
           {hostedAction.label}
         </Button>
       ) : null}
-      {status === "funding_account_provisioning" ? (
+      {(status === "customer_funding_account_provisioning" ||
+        status === "funding_account_provisioning") && (
         <div className="flex items-center gap-2 rounded-full bg-fill-subtle px-3 py-1.5">
           <span className="size-2 shrink-0 animate-pulse rounded-full bg-secondary" />
           <span className="text-xs text-tertiary">
             {provisioningDetail(provider, direction, t)}
           </span>
         </div>
-      ) : null}
-      {status === "provisioning_failed" ? (
+      )}
+      {status === "customer_funding_account_provisioning_failed" ? (
         <Button type="button" variant="secondary" onClick={onRetry}>
           {t("DashboardPayments.ramps.tryAgain")}
         </Button>

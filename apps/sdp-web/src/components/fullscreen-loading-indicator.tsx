@@ -62,11 +62,11 @@ export function FullscreenLoadingIndicator({
         {t("Shared.dashboardShell.loadingDashboard")}
       </p>
 
-      {/* Sidebar silhouette. Hidden below xl to match the real shell, which has no
+      {/* Sidebar silhouette. Hidden below md to match the real shell, which has no
           persistent sidebar on small screens. */}
       <div
         aria-hidden="true"
-        className="hidden w-72 shrink-0 flex-col gap-8 border-r border-border-default px-4 py-5 xl:flex"
+        className="hidden w-72 shrink-0 flex-col gap-8 border-r border-border-default px-4 py-5 md:flex"
       >
         <div className="flex items-center gap-3">
           <SkeletonBlock className="size-8 shrink-0 rounded-lg" />

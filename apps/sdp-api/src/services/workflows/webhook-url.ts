@@ -11,10 +11,11 @@
 //     is the actual security boundary: the save-time check can't see where a hostname
 //     points, and the answer can change between save and send.
 //
-// A DNS-rebinding attacker can still flip a public hostname to a private address in the
-// window between our lookup and the runtime's own connect. Closing that needs a
-// pinned-IP connect (custom agent/socket), which is out of scope here; the metadata
-// endpoint and every literal private address are blocked either way.
+// Neither check is the final boundary: delivery goes through `guardedFetch`
+// (`services/guarded-egress.ts`), which filters the addresses actually dialled at
+// connect time, so a record that flips between the lookup here and the connection is
+// still refused. What these layers add is a readable rejection for the issuer and a
+// hostname denylist the address-level guard cannot express.
 
 import { lookup } from "node:dns/promises";
 

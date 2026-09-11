@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { SdpKaminoError } from "@sdp/kamino";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
@@ -24,6 +23,10 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnSplitSwapAdvisoriesRepository,
+  generateEarnSplitSwapAdvisoryId,
+} from "@/db/repositories/earn-split-swap-advisories.repository";
 import { badRequest, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnExternalWalletDepositFingerprint,
@@ -45,8 +48,10 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
   prependSwapLegToVaultPlan,
   RETRY_SWAP_MAX_ACCOUNTS,
+  requireWellKnownMintDecimals,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
+import { readOwnerMintBalance } from "./owner-token-balance";
 import { createVaultDeadline } from "./vault-deadline";
 import { requireAcceptedPlan } from "./vault-deposit.service";
 import {
@@ -56,7 +61,12 @@ import {
   type UnsignedVaultTransaction,
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
-import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
+import {
+  broadcastRecordedVaultMovement,
+  isSlippageSimulationFailure,
+} from "./vault-intent-execution.service";
+import { rethrowVaultProviderFailure } from "./vault-refusals";
+import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 
 /**
@@ -83,10 +93,21 @@ export interface ExternalWalletDepositBuildInput {
   projectId: string;
   environment: SdpEnvironment;
   provider: EarnProviderId;
+  /** Catalogue row id, so a split-swap advisory can name the strategy (PRO-1864). */
+  strategyId: string;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
-  /** The external wallet that will sign, own the shares, and pay the fee. */
+  /** The external wallet that will sign and own the shares. */
   ownerAddress: string;
+  /**
+   * Optional partner fee payer: a caller-controlled wallet that pays the
+   * network fee and — because the provider build charges account rent to the
+   * same identity — the share-ATA rent a first deposit creates. The compiled
+   * transaction requires its signature alongside the owner's; the partner
+   * co-signs before submit. Absent, the owner pays everything. Already
+   * normalized by the route: never equal to `ownerAddress`.
+   */
+  feePayer?: string;
   /** Trusted catalogue metadata persisted so delisted positions still render. */
   tokenMint: string;
   shareMint: string;
@@ -109,6 +130,39 @@ export interface ExternalWalletDepositBuildInput {
   apiKeyId?: string | null;
 }
 
+/**
+ * Normalize a provider build failure, shared by both directions: a refused
+ * amount is the CALLER's 400; anything else stays the provider's own error.
+ */
+function rethrowProviderBuildFailure(error: unknown, operation: string): never {
+  getLogger().error({ error }, `${operation}: build failed`);
+  rethrowVaultProviderFailure(error);
+}
+
+/**
+ * Map a failed simulation verdict to HTTP, shared by every build simulation
+ * on this surface: a caller fault (broke owner or fee payer, program refusal)
+ * is a 400 the caller can act on, while a sponsor fault is SDP's own problem
+ * (a plan that under-prefunded rent — see VaultSimulationVerdict.sponsorCause)
+ * and surfaces as a 5xx so a client never treats it as a permanent request
+ * error to stop retrying differently.
+ */
+function throwSimulationRefusal(
+  prefix: string,
+  simulation: { error: string; fault: "caller" | "sponsor"; logs: readonly string[] }
+): never {
+  const message = `${prefix}: ${simulation.error}`;
+  if (simulation.fault === "sponsor") throw internalError(message);
+  if (isSlippageSimulationFailure(simulation.error, simulation.logs)) {
+    throw badRequest(
+      `${prefix}: the vault would return less than the request's slippage floor allows. ` +
+        "Raise the slippage tolerance (or lower the floor) and try again.",
+      { reason: "slippage_exceeded" }
+    );
+  }
+  throw badRequest(message);
+}
+
 export type ExternalWalletDepositBuildResult =
   | {
       kind: "built";
@@ -119,9 +173,10 @@ export type ExternalWalletDepositBuildResult =
   | {
       /**
        * The composed swap + deposit could not fit one Solana packet, even
-       * after re-routing for compactness. Nothing was persisted. The caller
-       * gets an unsigned SWAP-ONLY transaction to sign and broadcast itself,
-       * then requests an ordinary (unswapped) build for `swap.minOutAmount`.
+       * after re-routing for compactness. No submit-capable build or movement
+       * was persisted; only the recovery advisory was. The caller gets an
+       * unsigned SWAP-ONLY transaction to sign and broadcast itself, then
+       * requests an ordinary (unswapped) build for `swap.minOutAmount`.
        */
       kind: "swap_required";
       swap: JupiterSwapLeg;
@@ -149,6 +204,17 @@ export async function buildExternalWalletDepositTransaction(
     shareMint: input.shareMint,
   };
   const runtime: EarnRuntimeContext = { env, environment: input.environment };
+  // A fee payer equal to the owner IS the default; normalized here (the route
+  // does too) so no caller can store a fee payer the compiled transaction does
+  // not actually require. One fee mode then drives the provider's rent payer,
+  // the fee payer every simulation runs with, and the compiled fee-payer seat —
+  // the same three-places-must-agree rule sponsorship follows
+  // (vault-sponsorship.ts).
+  const feePayer = input.feePayer === input.ownerAddress ? undefined : input.feePayer;
+  const fee: VaultFeeMode = feePayer
+    ? { kind: "caller-provided", feePayer: address(feePayer) }
+    : { kind: "wallet-pays" };
+  const rentPayer = vaultRentPayer(fee);
 
   /**
    * One build attempt at a given swap route width. Swap-funded builds may run
@@ -194,10 +260,11 @@ export async function buildExternalWalletDepositTransaction(
         owner: input.ownerAddress,
         amount: depositAmount,
         minSharesOut: input.minSharesOut,
-        // No rentPayer: the owner funds its own accounts, fee and rent alike.
-        // Kora sponsorship for caller-signed movements is PRO-1744, not wired
-        // yet: the sponsor co-signs a transaction a wallet outside SDP custody
-        // also signs, which is its own design decision.
+        // The partner fee payer funds account rent too, or nobody but the
+        // owner does — the one-identity rule from vault-sponsorship.ts. This
+        // is the CALLER's wallet co-signing, not Kora: SDP-side sponsorship
+        // for caller-signed movements stays PRO-1744, a separate decision.
+        ...(rentPayer === undefined ? {} : { rentPayer }),
       });
       plan = appendVaultRequestMemo(
         swapLeg ? prependSwapLegToVaultPlan(built, swapLeg) : built,
@@ -205,11 +272,7 @@ export async function buildExternalWalletDepositTransaction(
         transactionId
       );
     } catch (error) {
-      getLogger().error({ error }, "external-wallet deposit: build failed");
-      if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-        throw badRequest(error.message);
-      }
-      throw error;
+      rethrowProviderBuildFailure(error, "external-wallet deposit");
     }
 
     if (plan.cluster !== cluster) {
@@ -225,28 +288,24 @@ export async function buildExternalWalletDepositTransaction(
     // instruction. Without it, a high-CU route under the 1.4M ceiling would
     // die on Solana's per-instruction default budget despite being valid.
     if (swapLeg) {
-      const probe = await simulateVaultPlan(env, {
+      plan = await pinProbedComputeUnitLimit(env, {
         cluster,
         deadline,
         expectedAssetIdentity,
-        plan: withComputeUnitLimit(plan, MAX_COMPUTE_UNIT_LIMIT),
-        owner: address(input.ownerAddress),
+        plan,
+        ownerAddress: input.ownerAddress,
         rpcUrl,
-        fee: { kind: "wallet-pays" },
+        fee,
+        probeLabel: "external-wallet deposit: compute-unit probe simulation failed",
+        refusalNoun: "Vault deposit",
       });
-      if (!probe.ok) {
-        getLogger().error(
-          { error: probe.error, logs: probe.logs.slice(-5) },
-          "external-wallet deposit: compute-unit probe simulation failed"
-        );
-        throw badRequest(`Vault deposit simulation failed: ${probe.error}`);
-      }
-      plan = withComputeUnitLimit(plan, bufferedComputeUnitLimit(probe.unitsConsumed));
     }
 
-    // Simulate with the OWNER as fee payer — the shape the owner will sign.
-    // This is also the funds check: an owner with no SOL or no tokens surfaces
-    // here as a readable error at build time, before anyone signs anything.
+    // Simulate with the resolved fee payer — the exact shape that will be
+    // signed. This is also the funds check: it asks the FEE PAYER's lamports
+    // (the partner's wallet on a feePayer build — the zero-SOL owners this
+    // exists for must not fail here) and the owner's tokens, surfacing both as
+    // readable errors at build time, before anyone signs anything.
     // On a swap-funded build the swap leg executes inside this simulation, so
     // "the owner holds enough of the SOURCE token" is checked by the chain
     // itself rather than re-derived here.
@@ -257,14 +316,14 @@ export async function buildExternalWalletDepositTransaction(
       plan,
       owner: address(input.ownerAddress),
       rpcUrl,
-      fee: { kind: "wallet-pays" },
+      fee,
     });
     if (!simulation.ok) {
       getLogger().error(
         { error: simulation.error, logs: simulation.logs.slice(-5) },
         "external-wallet deposit: simulation failed"
       );
-      throw badRequest(`Vault deposit simulation failed: ${simulation.error}`);
+      throwSimulationRefusal("Vault deposit simulation failed", simulation);
     }
 
     try {
@@ -274,6 +333,7 @@ export async function buildExternalWalletDepositTransaction(
         expectedAssetIdentity,
         plan,
         owner: address(input.ownerAddress),
+        ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
         prepared: simulation.prepared,
       });
       return {
@@ -301,24 +361,67 @@ export async function buildExternalWalletDepositTransaction(
   }
   if (!attempt.fit) {
     // Split flow: the swap alone, compiled through the same simulate-and-size
-    // seam, for the owner to sign and broadcast itself. Deliberately NOT
-    // persisted and carrying no request memo — it moves the owner's own funds
-    // between the owner's own accounts, records no SDP movement, and its
-    // follow-up deposit build takes the ordinary path.
+    // seam, for the owner to sign and broadcast itself. It carries no request
+    // memo and records NO movement: it moves the owner's own funds between the
+    // owner's own accounts, and the follow-up deposit build takes the ordinary
+    // path. What it DOES record is an ADVISORY (PRO-1864, EARN-026): the
+    // standalone swap is the one transaction this flow hands out that SDP never
+    // sees again, so without a row here a partner that broadcast it and crashed
+    // left the customer's funds swapped-but-undeposited with nothing for a
+    // detector to even look for.
     const swapLeg = attempt.swapLeg;
-    return {
-      kind: "swap_required",
-      swap: swapLeg,
-      swapTransaction: await compileStandaloneSwapTransaction(env, {
+    const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
+    const depositTokenDecimals = requireWellKnownMintDecimals(input.tokenMint, "deposit token");
+    // The baseline is read in parallel with the compile, so it costs the
+    // partner's blockhash window nothing extra, and under the same deadline.
+    // FAIL-CLOSED alongside the insert: a blind advisory could only ever page
+    // on any wallet that happened to hold the deposit token, and money IN may
+    // refuse; the partner simply builds again.
+    const [swapTransaction, baseline] = await Promise.all([
+      compileStandaloneSwapTransaction(env, {
         cluster,
         deadline,
         rpcUrl,
         ownerAddress: input.ownerAddress,
-        sourceTokenMint: input.swap?.sourceTokenMint ?? input.tokenMint,
+        sourceTokenMint,
         depositTokenMint: input.tokenMint,
         swapLeg,
+        // The split swap is one of the transactions this flow hands out, so
+        // the partner fee payer covers it too — co-signed before the owner
+        // broadcasts it, exactly like the deposit it precedes.
+        fee,
       }),
-    };
+      deadline.run("Reading the split-swap baseline balance", () =>
+        readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
+      ),
+    ]);
+    if (baseline.decimals !== null && baseline.decimals !== depositTokenDecimals) {
+      throw internalError(
+        `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`
+      );
+    }
+    await createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env)).create({
+      id: generateEarnSplitSwapAdvisoryId(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      environment: input.environment,
+      provider: input.provider,
+      strategyId: input.strategyId,
+      vaultAddress: input.providerReference,
+      ownerAddress: input.ownerAddress,
+      sourceTokenMint,
+      depositTokenMint: input.tokenMint,
+      depositTokenDecimals,
+      swapSourceAmount: swapLeg.sourceAmount,
+      swapMinOutAmount: swapLeg.minOutAmount,
+      swapMinOutAtoms: swapLeg.minOutAtoms,
+      swapLastValidBlockHeight: swapTransaction.lastValidBlockHeight,
+      feePayer: feePayer ?? null,
+      baselineDepositTokenAtoms: baseline.atoms.toString(),
+      createdBy: input.userId ?? null,
+      initiatedByKeyId: input.apiKeyId ?? null,
+    });
+    return { kind: "swap_required", swap: swapLeg, swapTransaction };
   }
 
   const { unsigned, plan, depositAmount, minSharesOut, swapLeg } = attempt;
@@ -341,12 +444,56 @@ export async function buildExternalWalletDepositTransaction(
     amountRequested: depositAmount,
     minSharesOut,
     createsShareAccount: plan.createsShareAccount === true,
+    feePayer: feePayer ?? null,
+    // The rent funder to carry onto the movement at submit: the fee payer when
+    // the plan creates the share account (its address was embedded as the
+    // provider's rentPayer), NULL otherwise — the owner paid, or nothing was
+    // created. Recorded at build because the exit must refund whoever actually
+    // paid, never whoever is configured when the exit happens.
+    shareAtaRentFunder:
+      plan.createsShareAccount === true && feePayer !== undefined ? feePayer : null,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
     lastValidBlockHeight: unsigned.lastValidBlockHeight,
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
   return { kind: "built", built, ...(swapLeg === undefined ? {} : { swap: swapLeg }) };
+}
+
+/**
+ * Probe-simulate a plan at the maximum compute-unit limit, then pin the
+ * buffered observed consumption as its limit. Shared by the composed
+ * swap-funded build and the standalone split swap — one copy of the sizing
+ * rule, one copy of its refusal shape.
+ */
+async function pinProbedComputeUnitLimit(
+  env: Env,
+  input: {
+    cluster: ReturnType<typeof earnClusterFor>;
+    deadline: ReturnType<typeof createVaultDeadline>;
+    expectedAssetIdentity: { depositTokenMint: string; shareMint: string };
+    plan: EarnVaultTransactionPlan;
+    ownerAddress: string;
+    rpcUrl: string;
+    fee: VaultFeeMode;
+    probeLabel: string;
+    refusalNoun: string;
+  }
+): Promise<EarnVaultTransactionPlan> {
+  const probe = await simulateVaultPlan(env, {
+    cluster: input.cluster,
+    deadline: input.deadline,
+    expectedAssetIdentity: input.expectedAssetIdentity,
+    plan: withComputeUnitLimit(input.plan, MAX_COMPUTE_UNIT_LIMIT),
+    owner: address(input.ownerAddress),
+    rpcUrl: input.rpcUrl,
+    fee: input.fee,
+  });
+  if (!probe.ok) {
+    getLogger().error({ error: probe.error, logs: probe.logs.slice(-5) }, input.probeLabel);
+    throwSimulationRefusal(`${input.refusalNoun} simulation failed`, probe);
+  }
+  return withComputeUnitLimit(input.plan, bufferedComputeUnitLimit(probe.unitsConsumed));
 }
 
 /**
@@ -366,6 +513,8 @@ async function compileStandaloneSwapTransaction(
     sourceTokenMint: string;
     depositTokenMint: string;
     swapLeg: JupiterSwapLeg;
+    /** The build's resolved fee mode — the split swap keeps the same payer. */
+    fee: VaultFeeMode;
   }
 ): Promise<UnsignedVaultTransaction> {
   const assetIdentity = {
@@ -380,23 +529,17 @@ async function compileStandaloneSwapTransaction(
   };
   // Same locally derived compute-unit limit as the composed path: probe at
   // the maximum, then pin the buffered consumption.
-  const probe = await simulateVaultPlan(env, {
+  const plan = await pinProbedComputeUnitLimit(env, {
     cluster: input.cluster,
     deadline: input.deadline,
     expectedAssetIdentity: assetIdentity,
-    plan: withComputeUnitLimit(bare, MAX_COMPUTE_UNIT_LIMIT),
-    owner: address(input.ownerAddress),
+    plan: bare,
+    ownerAddress: input.ownerAddress,
     rpcUrl: input.rpcUrl,
-    fee: { kind: "wallet-pays" },
+    fee: input.fee,
+    probeLabel: "external-wallet deposit: standalone swap probe simulation failed",
+    refusalNoun: "Swap",
   });
-  if (!probe.ok) {
-    getLogger().error(
-      { error: probe.error, logs: probe.logs.slice(-5) },
-      "external-wallet deposit: standalone swap probe simulation failed"
-    );
-    throw badRequest(`Swap simulation failed: ${probe.error}`);
-  }
-  const plan = withComputeUnitLimit(bare, bufferedComputeUnitLimit(probe.unitsConsumed));
   const simulation = await simulateVaultPlan(env, {
     cluster: input.cluster,
     deadline: input.deadline,
@@ -404,14 +547,14 @@ async function compileStandaloneSwapTransaction(
     plan,
     owner: address(input.ownerAddress),
     rpcUrl: input.rpcUrl,
-    fee: { kind: "wallet-pays" },
+    fee: input.fee,
   });
   if (!simulation.ok) {
     getLogger().error(
       { error: simulation.error, logs: simulation.logs.slice(-5) },
       "external-wallet deposit: standalone swap simulation failed"
     );
-    throw badRequest(`Swap simulation failed: ${simulation.error}`);
+    throwSimulationRefusal("Swap simulation failed", simulation);
   }
   return compileUnsignedVaultTransaction({
     cluster: input.cluster,
@@ -419,6 +562,7 @@ async function compileStandaloneSwapTransaction(
     expectedAssetIdentity: assetIdentity,
     plan,
     owner: address(input.ownerAddress),
+    ...(input.fee.kind === "caller-provided" ? { feePayer: input.fee.feePayer } : {}),
     prepared: simulation.prepared,
   });
 }
@@ -434,11 +578,19 @@ export interface ExternalWalletWithdrawalBuildInput {
   tokenMint: string;
   shareMint: string;
   ownerAddress: string;
+  /**
+   * Optional partner fee payer, same contract as the deposit build: pays the
+   * fee and any rent an exit consolidation creates, co-signs before submit.
+   * Never equal to `ownerAddress` (route-normalized).
+   */
+  feePayer?: string;
   label: string;
   /** Recorded rent attribution from the position row; null means the owner. */
   shareAtaRentFunder: string | null;
   /** Decimal string in share units. */
   shares: string;
+  /** Minimum deposit-token amount the exit may return. */
+  minAmountOut?: string;
   userId?: string | null;
   apiKeyId?: string | null;
 }
@@ -463,12 +615,19 @@ export async function buildExternalWalletWithdrawalTransaction(
   };
   const runtime: EarnRuntimeContext = { env, environment: input.environment };
 
-  // External-wallet positions record no third-party rent funder (the owner paid its own
-  // rent, stored as NULL), so the refund defaults back to the owner inside the
-  // builder. The recorded value is still passed through when present, for the
-  // same reason the custody exit reads it from the position: refund whoever
-  // actually paid, never whoever is convenient today.
+  // The recorded rent funder (NULL means the owner paid its own rent) drives
+  // the refund, for the same reason the custody exit reads it from the
+  // position: refund whoever actually paid, never whoever is configured today.
+  // A partner-funded position therefore refunds the PARTNER on exit.
   const rentRefundTo = input.shareAtaRentFunder ?? undefined;
+  // Same one-value rule (and owner normalization) as the deposit build: the
+  // fee mode drives the provider's rent payer (an exit consolidation can
+  // create an account), the simulation fee payer, and the compiled seat.
+  const feePayer = input.feePayer === input.ownerAddress ? undefined : input.feePayer;
+  const fee: VaultFeeMode = feePayer
+    ? { kind: "caller-provided", feePayer: address(feePayer) }
+    : { kind: "wallet-pays" };
+  const rentPayer = vaultRentPayer(fee);
 
   let plan: EarnVaultTransactionPlan;
   try {
@@ -476,15 +635,13 @@ export async function buildExternalWalletWithdrawalTransaction(
       providerReference: input.vaultAddress,
       owner: input.ownerAddress,
       shares: input.shares,
+      ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
+      ...(rentPayer === undefined ? {} : { rentPayer }),
       ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
     });
     plan = appendVaultRequestMemo(built, "external-withdrawal", transactionId);
   } catch (error) {
-    getLogger().error({ error }, "external-wallet withdrawal: build failed");
-    if (error instanceof SdpKaminoError && error.code === "INVALID_AMOUNT") {
-      throw badRequest(error.message);
-    }
-    throw error;
+    rethrowProviderBuildFailure(error, "external-wallet withdrawal");
   }
 
   if (plan.cluster !== cluster) {
@@ -501,14 +658,14 @@ export async function buildExternalWalletWithdrawalTransaction(
     plan,
     owner: address(input.ownerAddress),
     rpcUrl,
-    fee: { kind: "wallet-pays" },
+    fee,
   });
   if (!simulation.ok) {
     getLogger().error(
       { error: simulation.error, logs: simulation.logs.slice(-5) },
       "external-wallet withdrawal: simulation failed"
     );
-    throw badRequest(`Vault withdrawal simulation failed: ${simulation.error}`);
+    throwSimulationRefusal("Vault withdrawal simulation failed", simulation);
   }
 
   const unsigned = compileUnsignedVaultTransaction({
@@ -517,6 +674,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     expectedAssetIdentity,
     plan,
     owner: address(input.ownerAddress),
+    ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
     prepared: simulation.prepared,
   });
 
@@ -537,7 +695,15 @@ export async function buildExternalWalletWithdrawalTransaction(
     // same denomination rule the custody exit follows.
     denomination: input.shareMint,
     amountRequested: input.shares,
+    // The build table predates withdrawal floors and names its shared
+    // protection column `min_shares_out`; direction disambiguates the unit.
+    minSharesOut: input.minAmountOut ?? null,
     createsShareAccount: plan.createsShareAccount === true,
+    feePayer: feePayer ?? null,
+    // Same recording rule as the deposit build: an exit consolidation that
+    // creates an account was rent-funded by the fee payer when one was named.
+    shareAtaRentFunder:
+      plan.createsShareAccount === true && feePayer !== undefined ? feePayer : null,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
     lastValidBlockHeight: unsigned.lastValidBlockHeight,
     createdBy: input.userId ?? null,
@@ -622,6 +788,9 @@ export async function submitExternalWalletDeposit(
     idempotencyFingerprint: fingerprint,
     externalWalletTransactionId: built.id,
     createsShareAccount: built.creates_share_account,
+    // Rent attribution recorded at build time: the partner fee payer when it
+    // funded the share ATA, NULL when the owner did. The exit refunds this.
+    shareAtaRentFunder: built.share_ata_rent_funder,
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
@@ -683,6 +852,7 @@ export async function submitExternalWalletWithdrawal(
     idempotencyFingerprint: fingerprint,
     externalWalletTransactionId: built.id,
     createsShareAccount: built.creates_share_account,
+    shareAtaRentFunder: built.share_ata_rent_funder,
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
@@ -765,16 +935,18 @@ interface VerifiedSignedExternalWalletTransaction {
 
 /**
  * Prove the submitted bytes are the transaction SDP built, with only
- * signatures added, and that the owner's signature is genuine.
+ * signatures added, and that EVERY signature on it is genuine.
  *
  * MESSAGE equality is the check that matters, for the same reason the
  * sponsored custody path compares messages after the paymaster round trip:
  * nothing about "it decodes" or "a signature is present" constrains the bytes
  * to the fee payer, blockhash, and instruction list SDP simulated and
- * gate-checked. The ed25519 verification then keeps garbage out of the
- * ledger: without it an invalid signature would be recorded as a durable
- * movement that parks reconcilable until its blockhash expires, failing a
- * customer minutes later for something knowable now.
+ * gate-checked. It is also what pins a build-time `feePayer`: the fee payer
+ * lives in the message bytes, so it can never be swapped at submit. The
+ * ed25519 verification then keeps garbage out of the ledger — the owner's AND
+ * the fee payer's: without it an invalid signature would be recorded as a
+ * durable movement that parks reconcilable until its blockhash expires,
+ * failing a customer minutes later for something knowable now.
  */
 async function verifySignedExternalWalletTransaction(
   built: EarnExternalWalletTransactionRow,
@@ -799,25 +971,43 @@ async function verifySignedExternalWalletTransaction(
   }
 
   const ownerAddress = address(built.owner_address);
-  const ownerSignature = decoded.signatures[ownerAddress];
-  if (ownerSignature === null || ownerSignature === undefined) {
-    throw badRequest("signedTransaction is missing the owner signature");
+  if (decoded.signatures[ownerAddress] === undefined) {
+    throw internalError(
+      `Earn external-wallet build ${built.id} does not require its owner to sign`
+    );
   }
-  if (Object.values(decoded.signatures).some((signature) => signature == null)) {
-    throw badRequest("signedTransaction is not fully signed");
-  }
-  const ownerKey = await getPublicKeyFromAddress(ownerAddress);
-  const validSignature = await verifySignature(
-    ownerKey,
-    ownerSignature as SignatureBytes,
-    decoded.messageBytes
-  );
-  if (!validSignature) {
-    throw badRequest("signedTransaction carries an invalid owner signature");
+  for (const [signerAddress, signature] of Object.entries(decoded.signatures)) {
+    const slotNoun =
+      signerAddress === ownerAddress
+        ? "owner"
+        : signerAddress === built.fee_payer
+          ? "fee-payer"
+          : `${signerAddress}`;
+    if (signature == null) {
+      throw badRequest(
+        signerAddress === built.fee_payer
+          ? "signedTransaction is missing the fee-payer signature; the fee payer co-signs before submit"
+          : `signedTransaction is missing the ${slotNoun} signature`
+      );
+    }
+    // Sequential on purpose: at most two slots, and each failure names its
+    // slot so a partner can tell its own co-signing bug from the customer's.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded two-signer loop.
+    const signerKey = await getPublicKeyFromAddress(address(signerAddress));
+    const validSignature = await verifySignature(
+      signerKey,
+      signature as SignatureBytes,
+      decoded.messageBytes
+    );
+    if (!validSignature) {
+      throw badRequest(`signedTransaction carries an invalid ${slotNoun} signature`);
+    }
   }
 
   return {
     bytes: signedBytes,
+    // Slot zero: the fee payer's signature when a partner fee payer is set,
+    // the owner's otherwise — either way the transaction's on-chain id.
     signature: getSignatureFromTransaction(decoded),
     // Canonicalized: Buffer's base64 decoder is lenient, so the stored outbox
     // value is re-encoded from the verified bytes rather than trusted verbatim.

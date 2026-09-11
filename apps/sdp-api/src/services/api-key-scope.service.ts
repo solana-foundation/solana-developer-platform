@@ -1,5 +1,6 @@
 import {
   type ApiKeyRole,
+  type ApiKeyStatus,
   type ApiKeyWalletBinding,
   type ApiKeyWalletScope,
   getPermissionsForApiKeyRole,
@@ -7,6 +8,7 @@ import {
   hasAnyPermission,
   type Permission,
 } from "@sdp/types";
+import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import {
@@ -47,10 +49,12 @@ function trimWalletId(walletId: string): string {
 }
 
 function normalizeBindings(auth: ApiKeyContext) {
+  // Bindings arrive normalized from the auth middleware; an empty
+  // permissions list is an explicit deny-all and must never widen to "*".
   return auth.walletBindings.map((binding) => ({
     walletId: binding.walletId,
     custodyWalletId: binding.custodyWalletId,
-    permissions: binding.permissions.length > 0 ? binding.permissions : (["*"] as Permission[]),
+    permissions: binding.permissions,
   }));
 }
 
@@ -595,6 +599,43 @@ export function resolveApiKeyCustodyWalletId(
  * The request auth context may contain a one-hour KV snapshot; duplicate
  * Provider wallet IDs must become deny-only immediately for Payments writes.
  */
+/**
+ * Asserts the calling API key is still active, re-read from the database.
+ *
+ * The auth context is a KV snapshot up to an hour stale, and
+ * {@link assertFreshApiKeyCustodyWalletAccess} only runs for wallet-scoped
+ * keys against a named wallet — so a path that provisions or spends without
+ * naming one (DvP create's defaulted payer) needs this liveness check or a
+ * revoked key keeps acting for the cache window. No-op for non-key auth.
+ */
+export async function assertFreshApiKeyActive(
+  db: DatabaseClient,
+  auth: ApiKeyContext
+): Promise<void> {
+  if (auth.authType !== "api_key") {
+    return;
+  }
+  const currentKey = await db
+    .prepare(
+      `SELECT status, expires_at, rotation_deadline
+       FROM api_keys
+       WHERE id = ? AND organization_id = ?`
+    )
+    .bind(auth.apiKeyId, auth.organizationId)
+    .first<{ status: ApiKeyStatus; expires_at: string | null; rotation_deadline: string | null }>();
+  // The same predicate request authentication applies: exists, active, not
+  // past expiry, and not past its rotation grace period — a rotated key stays
+  // `active` in the row and is retired by the deadline alone.
+  if (
+    !currentKey ||
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
+    isRotationDeadlineReached(currentKey.rotation_deadline)
+  ) {
+    throw new AppError("FORBIDDEN", "API key is no longer active");
+  }
+}
+
 export async function assertFreshApiKeyCustodyWalletAccess(
   db: DatabaseClient,
   auth: ApiKeyContext,
@@ -610,15 +651,32 @@ export async function assertFreshApiKeyCustodyWalletAccess(
 
   const currentKey = await db
     .prepare(
-      `SELECT signing_wallet_id
+      `SELECT signing_wallet_id, status, expires_at, rotation_deadline
        FROM api_keys
        WHERE id = ?
          AND organization_id = ?
          AND project_id = ?`
     )
     .bind(auth.apiKeyId, auth.organizationId, auth.projectId)
-    .first<{ signing_wallet_id: string | null }>();
+    .first<{
+      signing_wallet_id: string | null;
+      status: ApiKeyStatus;
+      expires_at: string | null;
+      rotation_deadline: string | null;
+    }>();
   if (!currentKey) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+  // Re-reading the key's PERMISSIONS while trusting the snapshot's word that
+  // the key still exists leaves the hour-long cache window open for exactly the
+  // key someone just revoked. The predicate request authentication applies:
+  // active, not past expiry, not past its rotation grace period (a rotated key
+  // stays `active` in the row and is retired by the deadline alone).
+  if (
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
+    isRotationDeadlineReached(currentKey.rotation_deadline)
+  ) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 

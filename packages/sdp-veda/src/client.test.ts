@@ -27,6 +27,7 @@ const VAULT_B = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const DEPOSIT_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
 const OWNER = "11111111111111111111111111111112";
+const SPONSOR = "SysvarRent111111111111111111111111111111111";
 
 const DEPLOYMENT: VedaDeployment = {
   vaultProgramAddress: VAULT_PROGRAM,
@@ -186,6 +187,18 @@ describe("buildVaultDeposit", () => {
     });
   });
 
+  it("passes a sponsored rentPayer through as an address", async () => {
+    mocks.buildVedaDepositPlan.mockResolvedValue(plan());
+    await client.buildVaultDeposit(sandbox, { ...input, rentPayer: SPONSOR });
+
+    const [, , built] = mocks.buildVedaDepositPlan.mock.calls[0] as [
+      unknown,
+      unknown,
+      { rentPayer?: string },
+    ];
+    expect(String(built.rentPayer)).toBe(SPONSOR);
+  });
+
   it("serializes the plan into the dependency-free Earn contract", async () => {
     mocks.buildVedaDepositPlan.mockResolvedValue(plan());
     const result = await client.buildVaultDeposit(sandbox, input);
@@ -228,6 +241,16 @@ describe("buildVaultDeposit", () => {
 });
 
 describe("toEarnVaultTransactionPlan", () => {
+  it("carries createsShareAccount only when the builder reported it", () => {
+    expect("createsShareAccount" in toEarnVaultTransactionPlan(plan())).toBe(false);
+    expect(
+      toEarnVaultTransactionPlan({ ...plan(), createsShareAccount: true }).createsShareAccount
+    ).toBe(true);
+    expect(
+      toEarnVaultTransactionPlan({ ...plan(), createsShareAccount: false }).createsShareAccount
+    ).toBe(false);
+  });
+
   it("tolerates an instruction with no accounts and no data", () => {
     const bare: VedaInstructionPlan = {
       ...plan(),
@@ -449,6 +472,28 @@ describe("buildVaultWithdrawal", () => {
     expect(String(input.owner)).toBe(OWNER);
     expect(input.shares).toBe("5");
     expect(input.minAmountOut).toBe("4.99");
+  });
+
+  it("passes a sponsored rentPayer through for the exit's own account creation", async () => {
+    mocks.buildVedaWithdrawPlan.mockResolvedValue({
+      ...plan(),
+      accepted: { shares: "5", minAmountOut: "4.99" },
+    });
+
+    await client.buildVaultWithdrawal(sandbox, {
+      providerReference: VAULT_A,
+      owner: OWNER,
+      shares: "5",
+      minAmountOut: "4.99",
+      rentPayer: SPONSOR,
+    });
+
+    const [, , input] = mocks.buildVedaWithdrawPlan.mock.calls[0] as [
+      unknown,
+      unknown,
+      { rentPayer?: string },
+    ];
+    expect(String(input.rentPayer)).toBe(SPONSOR);
   });
 });
 

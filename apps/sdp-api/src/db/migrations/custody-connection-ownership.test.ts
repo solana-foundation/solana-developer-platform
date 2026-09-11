@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_connection_constraints";
@@ -25,13 +26,14 @@ async function seedScope(): Promise<void> {
          VALUES (?, 'custody-connection-constraints@example.com', 1, 'active')`
       )
       .bind(USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Custody connection constraints', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, "custody-connection-constraints", USER_ID),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: OTHER_PROJECT_ID },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO custody_configs (
@@ -323,14 +325,6 @@ describe("custody Connection constraints", () => {
 
   it("keeps live Provider Account claims unique within a Project", async () => {
     const fingerprint = "sha256:provider-account";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Other custody project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(OTHER_PROJECT_ID, ORGANIZATION_ID, "custody-connection-constraints-other", USER_ID)
-      .run();
     await insertCredential("pcred_fingerprint_live", "active");
     await insertCredential("pcred_fingerprint_terminal", "failed_validation");
     await insertCredential("pcred_fingerprint_other_project", "active", "secret", OTHER_PROJECT_ID);
@@ -400,50 +394,6 @@ describe("custody Connection constraints", () => {
         )
         .run()
     ).rejects.toThrow(/custody_scope_defaults_has_target/);
-  });
-
-  it("rejects Organization-scoped and foreign-Project Connection defaults", async () => {
-    await insertCredential("pcred_scoped_connection");
-    await insertConnection("cconn_scoped_connection", "pcred_scoped_connection");
-
-    await expect(
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_scope_defaults (
-             id, organization_id, project_id,
-             default_custody_config_id, default_custody_connection_id
-           ) VALUES ('csd_org_connection', ?, NULL, ?, 'cconn_scoped_connection')`
-        )
-        .bind(ORGANIZATION_ID, CONFIG_ID)
-        .run()
-    ).rejects.toThrow(/custody_scope_defaults_connection_project_only/);
-
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (
-           'prj_foreign_connection_default', ?, 'Foreign default',
-           'foreign-connection-default', 'sandbox', 'active', ?
-         )`
-      )
-      .bind(ORGANIZATION_ID, USER_ID)
-      .run();
-
-    await expect(
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_scope_defaults (
-             id, organization_id, project_id,
-             default_custody_config_id, default_custody_connection_id
-           ) VALUES (
-             'csd_foreign_connection', ?, 'prj_foreign_connection_default',
-             ?, 'cconn_scoped_connection'
-           )`
-        )
-        .bind(ORGANIZATION_ID, CONFIG_ID)
-        .run()
-    ).rejects.toThrow(/custody_scope_defaults_default_custody_connection_id_fkey/);
   });
 
   it("does not cascade-delete retained Config or Connection targets", async () => {

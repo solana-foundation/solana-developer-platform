@@ -44,10 +44,6 @@
     "FLAGS",
     "FLAGS_SECRET",
     "HELIUS_RINGS_ENABLED",
-    "HELIUS_RINGS_RPC_URL",
-    "HELIUS_RINGS_INDEXER_URL",
-    "HELIUS_RINGS_PROVER_URL",
-    "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
     "CHAINALYSIS_API_BASE_URL",
     "CHAINALYSIS_API_KEY",
     "ELLIPTIC_API_BASE_URL",
@@ -89,6 +85,7 @@
     "PARA_REQUEST_DELAY_MS",
     "PARA_WALLET_ID",
     "PRIVATE_CHANNELS_ENABLED",
+    "PRIVATE_CHANNEL_EGRESS_ALLOWLIST",
     "PRIVY_API_BASE_URL",
     "PRIVY_APP_ID",
     "PRIVY_APP_SECRET",
@@ -213,7 +210,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "env": ["TEST_SHARD"],
+      "outputs": ["coverage/**", ".vitest-reports/**"]
     },
     "test:coverage": {
       "dependsOn": ["^build"],

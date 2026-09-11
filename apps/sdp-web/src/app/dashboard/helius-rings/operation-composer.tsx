@@ -8,38 +8,68 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import {
+  DEFAULT_RING_NAME,
+  type ProjectRing,
   prepareRingsOperation,
   RINGS_ALLOWLISTED_ASSETS,
-  type RingsOpType,
+  RINGS_NATIVE_SOL_MINT,
   type RingsWallet,
 } from "./helius-rings.data";
 import { formatAssetAmount, parseDecimalToBaseUnits } from "./helius-rings.utils";
 
 type Translate = ReturnType<typeof useTranslations>;
 
-// UI tab labels map 1:1 to server op types; `transfer_registered` is what the
-// API accepts for shielded → shielded transfers within this project.
-const OP_TABS: readonly RingsOpType[] = ["shield", "withdraw", "transfer_registered"] as const;
+// UI tab labels map 1:1 to server op types, except "move", which resolves to
+// ring_exit or ring_entry from its From/To pair at submit. `transfer_registered`
+// is what the API accepts for shielded → shielded transfers within this project.
+const OP_TABS = ["shield", "withdraw", "transfer_registered", "merge", "move"] as const;
+
+type ComposerTab = (typeof OP_TABS)[number];
+
+/** A merge takes no amount and no recipient; it only names an asset. */
+function movesValue(tab: ComposerTab): boolean {
+  return tab !== "merge";
+}
 
 type Phase = { name: "compose" } | { name: "review"; error: string | null };
 
 interface ComposerDraft {
   walletId: string;
-  opType: RingsOpType;
+  tab: ComposerTab;
   assetMint: string;
   /** User-typed decimal amount, e.g. "1.01". Converted to base units at submit. */
   amountDecimal: string;
   recipient: string;
+  /** Ring NAME the operation targets; null = the default public pool, as the API speaks it. */
+  ring: string | null;
+  /** Move tab only: where the funds leave; null = the default pool. */
+  fromRing: string | null;
+  /** Move tab only: where the funds land; null = the default pool. */
+  toRing: string | null;
 }
 
-function newDraft(walletId: string, opType: RingsOpType = "shield"): ComposerDraft {
+function newDraft(walletId: string, tab: ComposerTab = "shield"): ComposerDraft {
   return {
     walletId,
-    opType,
-    assetMint: RINGS_ALLOWLISTED_ASSETS[0].mint,
+    tab,
+    assetMint: RINGS_NATIVE_SOL_MINT,
     amountDecimal: "",
     recipient: "",
+    ring: null,
+    fromRing: null,
+    toRing: null,
   };
+}
+
+/**
+ * The server op type a move resolves to: exactly one side names a custom ring.
+ * Both-default has nothing to do; both-custom is the deferred two-hop case
+ * (custom → default → custom), refused here with a hint instead of built.
+ */
+function moveOpType(draft: ComposerDraft): "ring_exit" | "ring_entry" | null {
+  if (draft.fromRing !== null && draft.toRing === null) return "ring_exit";
+  if (draft.fromRing === null && draft.toRing !== null) return "ring_entry";
+  return null;
 }
 
 function assetOf(mint: string) {
@@ -52,11 +82,17 @@ function draftAmountRaw(draft: ComposerDraft): string | null {
 }
 
 function isDraftComplete(draft: ComposerDraft): boolean {
+  // A merge is complete as soon as an asset is chosen: there is nothing else to
+  // fill in, and the wallet's own notes decide the rest.
+  if (!movesValue(draft.tab)) return true;
   if (draftAmountRaw(draft) === null) return false;
   // Withdraw's recipient is derived from the wallet's own custody address; only
   // private transfers still need an explicit recipient choice.
-  if (draft.opType === "transfer_registered") {
+  if (draft.tab === "transfer_registered") {
     return draft.recipient.trim().length > 0;
+  }
+  if (draft.tab === "move") {
+    return moveOpType(draft) !== null;
   }
   return true;
 }
@@ -64,20 +100,40 @@ function isDraftComplete(draft: ComposerDraft): boolean {
 function buildSummaryRows(
   t: Translate,
   draft: ComposerDraft,
-  recipientOptions: readonly RingsWallet[]
+  recipientOptions: readonly RingsWallet[],
+  projectRings: readonly ProjectRing[]
 ): Array<[string, string]> {
   const amountRaw = draftAmountRaw(draft);
+  const operation = draft.tab === "move" ? moveOpType(draft) : draft.tab;
   const rows: Array<[string, string]> = [
     [
       t("DashboardHeliusRings.composer.summaryOperation"),
-      t(`DashboardHeliusRings.activity.opType_${draft.opType}`),
-    ],
-    [
-      t("DashboardHeliusRings.composer.summaryAmount"),
-      formatAssetAmount(amountRaw, draft.assetMint),
+      operation === null ? "—" : t(`DashboardHeliusRings.activity.opType_${operation}`),
     ],
   ];
-  if (draft.opType === "transfer_registered") {
+  if (movesValue(draft.tab)) {
+    rows.push([
+      t("DashboardHeliusRings.composer.summaryAmount"),
+      formatAssetAmount(amountRaw, draft.assetMint),
+    ]);
+  }
+  if (draft.tab === "move") {
+    const defaultPool = t("DashboardHeliusRings.composer.ringDefault");
+    rows.push(
+      [t("DashboardHeliusRings.composer.summaryFrom"), draft.fromRing ?? defaultPool],
+      [t("DashboardHeliusRings.composer.summaryTo"), draft.toRing ?? defaultPool]
+    );
+    return rows;
+  }
+  // A merge is always the default ring's: ring-bound notes are consolidated by
+  // an instruction the protocol ships no builder for.
+  if (projectRings.length > 0 && movesValue(draft.tab)) {
+    rows.push([
+      t("DashboardHeliusRings.composer.summaryRing"),
+      draft.ring === null ? t("DashboardHeliusRings.composer.ringDefault") : draft.ring,
+    ]);
+  }
+  if (draft.tab === "transfer_registered") {
     const recipientWallet = recipientOptions.find((w) => w.shieldedAddress === draft.recipient);
     rows.push([
       t("DashboardHeliusRings.composer.summaryRecipient"),
@@ -92,6 +148,7 @@ export function OperationComposer({
   wallet,
   recipientOptions,
   custodyPublicKey,
+  projectRings,
   gatewayRed,
   onPrepared,
 }: {
@@ -100,6 +157,8 @@ export function OperationComposer({
   recipientOptions: RingsWallet[];
   /** Solana pubkey of the custody wallet backing this private wallet. */
   custodyPublicKey: string | null;
+  /** The project's custom rings; empty while none are recorded. */
+  projectRings: ProjectRing[];
   gatewayRed: boolean;
   onPrepared: () => Promise<void>;
 }) {
@@ -120,24 +179,37 @@ export function OperationComposer({
 
   const handleConfirm = useCallback(async () => {
     const amountRaw = draftAmountRaw(draft);
-    if (amountRaw === null) return;
+    if (amountRaw === null && movesValue(draft.tab)) return;
+    // A move resolves to its server op type from the From/To pair; the review
+    // button is disabled until exactly one side names a custom ring.
+    const opType = draft.tab === "move" ? moveOpType(draft) : draft.tab;
+    if (opType === null) return;
     setSubmitting(true);
     setPhase({ name: "review", error: null });
     let prepared: Awaited<ReturnType<typeof prepareRingsOperation>>;
     try {
       // Withdraw always lands in the wallet's own custody address — no free
       // input. Transfer uses the recipient private wallet's shielded address.
+      // A merge and a move are self-only and carry no recipient at all.
       const to =
-        draft.opType === "withdraw"
+        draft.tab === "withdraw"
           ? (custodyPublicKey ?? undefined)
-          : draft.opType === "transfer_registered"
+          : draft.tab === "transfer_registered"
             ? draft.recipient.trim()
             : undefined;
+      const ring = draft.tab === "move" ? (draft.fromRing ?? draft.toRing) : draft.ring;
       prepared = await prepareRingsOperation({
         walletId: draft.walletId,
-        opType: draft.opType,
-        asset: { mint: draft.assetMint, amountRaw },
+        opType,
+        // The API's merge arm is strict: sending an amount it has no use for
+        // would be refused rather than ignored.
+        asset: {
+          mint: draft.assetMint,
+          ...(amountRaw !== null && movesValue(draft.tab) ? { amountRaw } : {}),
+        },
         to,
+        // Omitted when default: the field exists only to name a custom ring.
+        ...(ring ? { ring } : {}),
       });
     } finally {
       setSubmitting(false);
@@ -151,13 +223,13 @@ export function OperationComposer({
     }
     setStarted(true);
     setPhase({ name: "compose" });
-    setDraft(newDraft(draft.walletId, draft.opType));
+    setDraft(newDraft(draft.walletId, draft.tab));
     await onPrepared();
   }, [draft, custodyPublicKey, onPrepared, t]);
 
   const summaryRows = useMemo(
-    () => buildSummaryRows(t, draft, recipientOptions),
-    [t, draft, recipientOptions]
+    () => buildSummaryRows(t, draft, recipientOptions, projectRings),
+    [t, draft, recipientOptions, projectRings]
   );
 
   return (
@@ -165,7 +237,7 @@ export function OperationComposer({
       <CardHeader>
         <CardTitle>{t("DashboardHeliusRings.composer.title")}</CardTitle>
         <CardDescription>
-          {t(`DashboardHeliusRings.composer.description_${draft.opType}`)}
+          {t(`DashboardHeliusRings.composer.description_${draft.tab}`)}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -178,15 +250,30 @@ export function OperationComposer({
         {phase.name === "compose" ? (
           <>
             <OpTabs
-              value={draft.opType}
-              onSelect={(opType) => {
+              value={draft.tab}
+              // The Move tab has nothing to offer until a custom ring exists.
+              tabs={projectRings.length > 0 ? OP_TABS : OP_TABS.filter((tab) => tab !== "move")}
+              onSelect={(tab) => {
                 setPhase({ name: "compose" });
-                patchDraft({ opType });
+                // The ring's meaning flips with the op type — a shield's
+                // destination, a spend's source of funds — so a carried-over
+                // choice would silently redirect value. Every switch starts
+                // from the default pool, which takes the whole allowlist, so
+                // the chosen asset carries over — except onto Move, whose arm
+                // is SOL-only and would 400 on a carried USDC.
+                patchDraft({
+                  tab,
+                  ring: null,
+                  fromRing: null,
+                  toRing: null,
+                  ...(tab === "move" ? { assetMint: RINGS_NATIVE_SOL_MINT } : {}),
+                });
               }}
             />
             <ComposeStep
               draft={draft}
               recipientOptions={recipientOptions}
+              projectRings={projectRings}
               onPatch={patchDraft}
               onReview={() => setPhase({ name: "review", error: null })}
             />
@@ -208,8 +295,16 @@ export function OperationComposer({
   );
 }
 
-// Segmented control: three buttons that read as one connected group.
-function OpTabs({ value, onSelect }: { value: RingsOpType; onSelect: (op: RingsOpType) => void }) {
+// Segmented control: buttons that read as one connected group.
+function OpTabs({
+  value,
+  tabs,
+  onSelect,
+}: {
+  value: ComposerTab;
+  tabs: readonly ComposerTab[];
+  onSelect: (op: ComposerTab) => void;
+}) {
   const t = useTranslations();
   return (
     <div
@@ -217,7 +312,7 @@ function OpTabs({ value, onSelect }: { value: RingsOpType; onSelect: (op: RingsO
       aria-label={t("DashboardHeliusRings.composer.operation")}
       className="inline-flex w-fit rounded-md border border-border-default bg-surface p-0.5"
     >
-      {OP_TABS.map((op) => {
+      {tabs.map((op) => {
         const active = op === value;
         return (
           <button
@@ -249,20 +344,215 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** A ring choice: the default pool or one of the project's rings. */
+function RingEndpointSelect({
+  label,
+  value,
+  projectRings,
+  onChange,
+}: {
+  label: string;
+  /** Ring NAME, or null for the default pool, as the API speaks it. */
+  value: string | null;
+  projectRings: readonly ProjectRing[];
+  onChange: (ring: string | null) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <Field label={label}>
+      <Select
+        ariaLabel={label}
+        // DOM select values are strings, so the reserved name stands in for
+        // null at this one boundary; the server makes a ring literally named
+        // "default" impossible.
+        value={value ?? DEFAULT_RING_NAME}
+        onValueChange={(next) => {
+          if (next) onChange(next === DEFAULT_RING_NAME ? null : next);
+        }}
+      >
+        <SelectItem value={DEFAULT_RING_NAME}>
+          {t("DashboardHeliusRings.composer.ringDefault")}
+        </SelectItem>
+        {/* Non-active rings are disabled rather than hidden: the option
+            exists, the server would refuse it, and the hint below says why. */}
+        {projectRings.map((ring) => (
+          <SelectItem key={ring.id} value={ring.name} disabled={ring.status !== "active"}>
+            {ring.name}
+          </SelectItem>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * The blocker hint for a move draft whose sides don't yet name exactly one
+ * custom ring; null once the pair resolves to an op type. The two refused
+ * shapes each get their own hint instead of a disabled button with no
+ * explanation.
+ */
+function moveHintFor(t: Translate, draft: ComposerDraft): string | null {
+  if (draft.fromRing !== null && draft.toRing !== null) {
+    return t("DashboardHeliusRings.composer.moveBothCustom");
+  }
+  if (draft.fromRing === null && draft.toRing === null) {
+    return t("DashboardHeliusRings.composer.moveChooseRing");
+  }
+  return null;
+}
+
+function AssetField({
+  draft,
+  onPatch,
+}: {
+  draft: ComposerDraft;
+  onPatch: (patch: Partial<ComposerDraft>) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <Field label={t("DashboardHeliusRings.composer.asset")}>
+      {draft.tab === "move" ? (
+        // Moves are SOL-only (the API's schema pins the mint), so the choice
+        // collapses to a label.
+        <span className="py-1.5 text-sm text-primary">
+          {assetOf(RINGS_NATIVE_SOL_MINT)?.symbol ?? "SOL"}
+        </span>
+      ) : (
+        <Select
+          ariaLabel={t("DashboardHeliusRings.composer.asset")}
+          value={draft.assetMint}
+          onValueChange={(value) => {
+            if (value) onPatch({ assetMint: value });
+          }}
+        >
+          {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
+            <SelectItem key={entry.mint} value={entry.mint}>
+              {entry.symbol}
+            </SelectItem>
+          ))}
+        </Select>
+      )}
+    </Field>
+  );
+}
+
+function RecipientField({
+  draft,
+  recipientOptions,
+  onPatch,
+}: {
+  draft: ComposerDraft;
+  recipientOptions: readonly RingsWallet[];
+  onPatch: (patch: Partial<ComposerDraft>) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <Field label={t("DashboardHeliusRings.composer.recipientPrivateWallet")}>
+      <Select
+        ariaLabel={t("DashboardHeliusRings.composer.recipientPrivateWallet")}
+        value={draft.recipient || null}
+        onValueChange={(value) => {
+          if (value) onPatch({ recipient: value });
+        }}
+        placeholder={t("DashboardHeliusRings.composer.recipientPrivateWalletPlaceholder")}
+      >
+        {recipientOptions.map((option) =>
+          option.shieldedAddress === null ? null : (
+            <SelectItem key={option.id} value={option.shieldedAddress}>
+              {option.name}
+            </SelectItem>
+          )
+        )}
+      </Select>
+    </Field>
+  );
+}
+
+/** A move's From/To pair; each side is the default pool or one custom ring. */
+function MoveEndpoints({
+  draft,
+  projectRings,
+  onPatch,
+}: {
+  draft: ComposerDraft;
+  projectRings: readonly ProjectRing[];
+  onPatch: (patch: Partial<ComposerDraft>) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      <RingEndpointSelect
+        label={t("DashboardHeliusRings.composer.moveFrom")}
+        value={draft.fromRing}
+        projectRings={projectRings}
+        onChange={(fromRing) => onPatch({ fromRing })}
+      />
+      <RingEndpointSelect
+        label={t("DashboardHeliusRings.composer.moveTo")}
+        value={draft.toRing}
+        projectRings={projectRings}
+        onChange={(toRing) => onPatch({ toRing })}
+      />
+    </>
+  );
+}
+
+/**
+ * The hint under the fields: a move's pair guidance, or what the ring choice
+ * means for the current tab. Either way, a bring-up nudge is appended while no
+ * ring is active.
+ */
+function ComposeHints({
+  draft,
+  projectRings,
+  showRingSelect,
+}: {
+  draft: ComposerDraft;
+  projectRings: readonly ProjectRing[];
+  showRingSelect: boolean;
+}) {
+  const t = useTranslations();
+  const bringUp = projectRings.some((ring) => ring.status === "active")
+    ? ""
+    : ` ${t("DashboardHeliusRings.composer.ringNoneActive")}`;
+
+  if (draft.tab === "move") {
+    return (
+      <p className="text-sm text-secondary">
+        {moveHintFor(t, draft) ?? t("DashboardHeliusRings.composer.moveHint")}
+        {bringUp}
+      </p>
+    );
+  }
+  if (!showRingSelect) return null;
+  return (
+    <p className="text-sm text-secondary">
+      {t(
+        draft.tab === "shield"
+          ? "DashboardHeliusRings.composer.ringShieldHint"
+          : "DashboardHeliusRings.composer.ringSpendHint"
+      )}
+      {bringUp}
+    </p>
+  );
+}
+
 function ComposeStep({
   draft,
   recipientOptions,
+  projectRings,
   onPatch,
   onReview,
 }: {
   draft: ComposerDraft;
   recipientOptions: readonly RingsWallet[];
+  projectRings: readonly ProjectRing[];
   onPatch: (patch: Partial<ComposerDraft>) => void;
   onReview: () => void;
 }) {
   const t = useTranslations();
 
-  if (draft.opType === "transfer_registered" && recipientOptions.length === 0) {
+  if (draft.tab === "transfer_registered" && recipientOptions.length === 0) {
     return (
       <Callout variant="info">
         {t("DashboardHeliusRings.composer.privateTransferNoRecipients")}
@@ -270,57 +560,50 @@ function ComposeStep({
     );
   }
 
+  const isMove = draft.tab === "move";
+  // A merge names neither an amount nor a ring: it consolidates this wallet's
+  // own default-ring notes, and their sum is the amount. A move names its ring
+  // through the From/To pair instead of the generic ring select.
+  const showAmount = movesValue(draft.tab);
+  const showRingSelect = projectRings.length > 0 && movesValue(draft.tab) && !isMove;
+
   return (
     <>
       <div className="flex flex-wrap gap-3">
-        <Field label={t("DashboardHeliusRings.composer.asset")}>
-          <Select
-            ariaLabel={t("DashboardHeliusRings.composer.asset")}
-            value={draft.assetMint}
-            onValueChange={(value) => {
-              if (value) onPatch({ assetMint: value });
-            }}
-          >
-            {RINGS_ALLOWLISTED_ASSETS.map((entry) => (
-              <SelectItem key={entry.mint} value={entry.mint}>
-                {entry.symbol}
-              </SelectItem>
-            ))}
-          </Select>
-        </Field>
-        <Field label={t("DashboardHeliusRings.composer.amount")}>
-          <Input
-            inputMode="decimal"
-            value={draft.amountDecimal}
-            placeholder="1.01"
-            onChange={(event) =>
-              onPatch({
-                amountDecimal: event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"),
-              })
-            }
+        <AssetField draft={draft} onPatch={onPatch} />
+        {showAmount ? (
+          <Field label={t("DashboardHeliusRings.composer.amount")}>
+            <Input
+              inputMode="decimal"
+              value={draft.amountDecimal}
+              placeholder="1.01"
+              onChange={(event) =>
+                onPatch({
+                  amountDecimal: event.target.value
+                    .replace(/[^\d.]/g, "")
+                    .replace(/(\..*)\./g, "$1"),
+                })
+              }
+            />
+          </Field>
+        ) : null}
+        {isMove ? (
+          <MoveEndpoints draft={draft} projectRings={projectRings} onPatch={onPatch} />
+        ) : null}
+        {showRingSelect ? (
+          <RingEndpointSelect
+            label={t("DashboardHeliusRings.composer.ring")}
+            value={draft.ring}
+            projectRings={projectRings}
+            onChange={(ring) => onPatch({ ring })}
           />
-        </Field>
+        ) : null}
       </div>
 
-      {draft.opType === "transfer_registered" ? (
-        <Field label={t("DashboardHeliusRings.composer.recipientPrivateWallet")}>
-          <Select
-            ariaLabel={t("DashboardHeliusRings.composer.recipientPrivateWallet")}
-            value={draft.recipient || null}
-            onValueChange={(value) => {
-              if (value) onPatch({ recipient: value });
-            }}
-            placeholder={t("DashboardHeliusRings.composer.recipientPrivateWalletPlaceholder")}
-          >
-            {recipientOptions.map((option) =>
-              option.shieldedAddress === null ? null : (
-                <SelectItem key={option.id} value={option.shieldedAddress}>
-                  {option.name}
-                </SelectItem>
-              )
-            )}
-          </Select>
-        </Field>
+      <ComposeHints draft={draft} projectRings={projectRings} showRingSelect={showRingSelect} />
+
+      {draft.tab === "transfer_registered" ? (
+        <RecipientField draft={draft} recipientOptions={recipientOptions} onPatch={onPatch} />
       ) : null}
 
       <div>

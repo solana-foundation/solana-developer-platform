@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
+import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -32,6 +33,7 @@ import {
 } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -97,20 +99,14 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -146,28 +142,6 @@ async function seedSessionAuth(): Promise<void> {
          VALUES (?, ?, ?, 'member', 'active')`
       )
       .bind("om_earn_routes_session", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_routes_sandbox", TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_routes_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
     getDb(env)
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
@@ -573,6 +547,9 @@ describe("Earn routes — strategy catalogue", () => {
     expect(defaultBody.data.strategies[0]).toMatchObject({
       hostCluster: "devnet",
       fundable: true,
+      // Sponsorship is unset in this harness, so a fundable row still reads
+      // wallet-pays. The flag is a fact about the deployment, not the row.
+      feeSponsored: false,
     });
     // The filter runs in SQL: the total describes the default view, not the
     // store, so pagination never walks a reader into hidden rows.
@@ -591,8 +568,50 @@ describe("Earn routes — strategy catalogue", () => {
     expect(optInBody.data.strategies[0]).toMatchObject({
       hostCluster: "mainnet-beta",
       fundable: false,
+      feeSponsored: false,
     });
     expect(optInBody.data.total).toBe(1);
+  });
+
+  /**
+   * `feeSponsored` rides on the catalogue row, not on the deposit quote, so a
+   * provider that never quotes (Kamino has no deposit floor) still gets honest
+   * fee copy. It answers the execution gate (`isEarnVaultSponsorshipEnabled`
+   * against the row's cluster), and a row that cannot be funded is never
+   * sponsored, whatever the flag says.
+   */
+  it("derives feeSponsored per request from the sponsorship gate and the row's cluster", async () => {
+    await seedAuth();
+    const local = await seedStrategy({ provider: "kamino", hostCluster: "devnet" });
+    const mirrored = await seedStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
+    const original = env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED;
+    env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = "true";
+    try {
+      const list = await getEarn("/v1/earn/strategies");
+      expect(list.status).toBe(200);
+      const listBody = (await list.json()) as {
+        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
+      };
+      expect(listBody.data.strategies).toEqual([
+        expect.objectContaining({ id: local.id, fundable: true, feeSponsored: true }),
+      ]);
+
+      const detail = await getEarn(`/v1/earn/strategies/${local.id}`);
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as { data: { strategy: { feeSponsored: boolean } } };
+      expect(detailBody.data.strategy.feeSponsored).toBe(true);
+
+      // Sponsorship is devnet-only and the mirrored row is not fundable here.
+      const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+      const optInBody = (await optIn.json()) as {
+        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
+      };
+      expect(optInBody.data.strategies).toEqual([
+        expect.objectContaining({ id: mirrored.id, fundable: false, feeSponsored: false }),
+      ]);
+    } finally {
+      env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
+    }
   });
 
   it("rejects a cluster value outside the Solana cluster vocabulary", async () => {
@@ -763,25 +782,35 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     expect(body.data.total).toBe(1);
   });
 
-  /**
-   * The Jupiter Lend exclusion is a name TERM, so it must hold even in the
-   * worst case: a row squatting a curated address. Terms can exclusively
-   * REMOVE rows, which is what makes stacking them on the allowlist safe.
-   */
-  it("hides a Jupiter Lend row even when it carries a curated address", async () => {
+  it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
-    const shelf = (await shippedCuratedVaults()).devnet?.kamino ?? [];
-
     const jupiter = await seedStrategy({
-      providerReference: shelf[0],
-      name: "Jupiter Lend USDC",
+      provider: "jupiter_lend",
+      providerReference: JUPITER_LEND_USDT.assetMint,
+      name: "Jupiter Lend USDT",
+      underlyingSource: "Jupiter Lend",
+      depositMints: [JUPITER_LEND_USDT.assetMint],
+      shareMint: JUPITER_LEND_USDT.shareMint,
+      hostCluster: "mainnet-beta",
     });
 
-    const list = await getEarn("/v1/earn/strategies");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
     expect(list.status).toBe(200);
-    const body = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
-    expect(body.data.strategies).toEqual([]);
-    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(404);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([jupiter.id]);
+    expect(body.data.strategies[0]).toMatchObject({
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
+    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(200);
   });
 });

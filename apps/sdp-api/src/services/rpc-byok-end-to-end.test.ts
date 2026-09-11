@@ -15,6 +15,7 @@ import {
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
 import { RpcConnectionStore } from "@/services/stores/rpc-connection.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -68,11 +69,10 @@ vi.mock("@sdp/rpc/byok", async (importOriginal) => {
 const ORG_ID = "org_rpc_byok_e2e";
 const PROJECT_ID = "prj_rpc_byok_e2e";
 /**
- * Extra projects. One connection per project (HOO-1227) means each save needs
+ * The other environment project. One connection per project (HOO-1227) means each save needs
  * somewhere of its own, so the saving cases cannot share the fixture's.
  */
 const PROJECT_ID_2 = "prj_rpc_byok_e2e_2";
-const PROJECT_ID_3 = "prj_rpc_byok_e2e_3";
 const USER_ID = "usr_rpc_byok_e2e";
 const CREDENTIAL_ID = "pcred_rpc_byok_e2e";
 const CONNECTION_ID = "rconn_rpc_byok_e2e";
@@ -189,29 +189,12 @@ beforeAll(async () => {
     )
     .bind(USER_ID)
     .run();
-  // Connections hang off a project since HOO-1226, so the chain needs a real
-  // one to attach to rather than the organization fallback.
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E', 'byok-e2e', 'sandbox', ?)`
-    )
-    .bind(PROJECT_ID, ORG_ID, USER_ID)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E Two', 'byok-e2e-2', 'sandbox', ?)`
-    )
-    .bind(PROJECT_ID_2, ORG_ID, USER_ID)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, created_by)
-       VALUES (?, ?, 'BYOK E2E Three', 'byok-e2e-3', 'sandbox', ?)`
-    )
-    .bind(PROJECT_ID_3, ORG_ID, USER_ID)
-    .run();
+  await seedDefaultProjects(db, {
+    organizationId: ORG_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID_2, production: PROJECT_ID },
+  });
 
   // The real secret path: encrypted through the configured backend.
   // The test env has no GCP config; encrypted_db is the backend local dev
@@ -268,6 +251,25 @@ afterAll(async () => {
 });
 
 describe("BYOK end to end", () => {
+  it("stores nothing when the provider rejects the key on save", async () => {
+    rejectNextProbe = true;
+    await expect(
+      submitRpcConnection(serviceContext(PROJECT_ID_2), {
+        provider: "helius",
+        scope: "project",
+        credentialLabel: "Never stored",
+        endpointUrl: endpointBase,
+        apiKey: "rejected-key-1111",
+      })
+    ).rejects.toThrow(/rejected this connection/i);
+
+    const stored = await getDb(appEnv)
+      .prepare("SELECT COUNT(*)::int AS count FROM provider_credentials WHERE label = ?")
+      .bind("Never stored")
+      .first<{ count: number }>();
+    expect(stored?.count).toBe(0);
+  });
+
   it("checks the key on save and stores a connection that is already live", async () => {
     // Saving probes (HOO-1228), so the endpoint has to be the stand-in server
     // rather than a vendor host nobody can reach from a test.
@@ -331,27 +333,6 @@ describe("BYOK end to end", () => {
       network: "devnet",
     });
     expect(state.kind).toBe("active");
-  });
-
-  it("stores nothing when the provider rejects the key on save", async () => {
-    // The stand-in answers 401 for this one pass, which is what a wrong key
-    // looks like. Nothing may be written on the way out.
-    rejectNextProbe = true;
-    await expect(
-      submitRpcConnection(serviceContext(PROJECT_ID_3), {
-        provider: "helius",
-        scope: "project",
-        credentialLabel: "Never stored",
-        endpointUrl: endpointBase,
-        apiKey: "rejected-key-1111",
-      })
-    ).rejects.toThrow(/rejected this connection/i);
-
-    const stored = await getDb(appEnv)
-      .prepare("SELECT COUNT(*)::int AS count FROM provider_credentials WHERE label = ?")
-      .bind("Never stored")
-      .first<{ count: number }>();
-    expect(stored?.count).toBe(0);
   });
 
   it("takes the platform rail while a connection is only submitted", async () => {

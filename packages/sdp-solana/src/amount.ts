@@ -1,3 +1,10 @@
+import {
+  cmpDecimalFixedPoint,
+  decimalFixedPoint,
+  decimalFixedPointToString,
+  rawDecimalFixedPoint,
+} from "@solana/fixed-points";
+
 export const MAX_SAFE_BASE_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
 
 export class AmountError extends Error {
@@ -46,7 +53,26 @@ const normalizeDecimalParts = (value: string): { whole: string; fraction: string
 export const decimalScale = (value: string): number =>
   normalizeDecimalParts(value.trim()).fraction.length;
 
-export const parseDecimalAmount = (value: string, decimals: number): bigint => {
+const TOTAL_BITS = 256;
+
+/**
+ * Parses a decimal amount string into a kit unsigned decimal fixed-point at
+ * the given scale, enforcing the SDP input grammar and error contract before
+ * delegating to kit.
+ *
+ * The guards run before the kit call in the exact order callers have always
+ * seen; the only kit failure they cannot exclude is a raw value above the
+ * unsigned 256-bit range, which is rethrown as
+ * `AmountError("Amount is out of range")`.
+ *
+ * @param value - Decimal amount string; surrounding whitespace is ignored.
+ * @param decimals - Non-negative integer count of fractional digits.
+ * @returns The parsed amount as a frozen kit decimal fixed-point.
+ * @throws {AmountError} When the string is not a plain unsigned decimal, the
+ * decimals configuration is invalid, the string exceeds the target scale, or
+ * the scaled value overflows the 256-bit raw range.
+ */
+const parseDecimalFixedPoint = (value: string, decimals: number) => {
   const normalized = value.trim();
 
   if (!isDecimalString(normalized)) {
@@ -57,65 +83,75 @@ export const parseDecimalAmount = (value: string, decimals: number): bigint => {
     throw new AmountError("Invalid decimals configuration");
   }
 
-  const { whole, fraction } = normalizeDecimalParts(normalized);
-
-  if (fraction.length > decimals) {
+  if (decimalScale(normalized) > decimals) {
     throw new AmountError("Amount has too many decimal places");
   }
 
-  const paddedFraction = fraction.padEnd(decimals, "0");
-  const combined = `${whole}${paddedFraction}`;
-  let startIndex = 0;
-  while (startIndex < combined.length && combined[startIndex] === "0") {
-    startIndex += 1;
+  try {
+    return decimalFixedPoint("unsigned", TOTAL_BITS, decimals)(normalized);
+  } catch {
+    throw new AmountError("Amount is out of range");
   }
-  const sanitized = startIndex >= combined.length ? "0" : combined.slice(startIndex);
-
-  return BigInt(sanitized);
 };
 
+/**
+ * Parses a decimal amount string into base units at the given scale.
+ *
+ * @param value - Decimal amount string; surrounding whitespace is ignored.
+ * @param decimals - Non-negative integer count of fractional digits.
+ * @returns The amount in base units as a bigint.
+ * @throws {AmountError} When the string is not a plain unsigned decimal, the
+ * decimals configuration is invalid, the string exceeds the target scale, or
+ * the scaled value overflows the 256-bit raw range.
+ */
+export const parseDecimalAmount = (value: string, decimals: number): bigint =>
+  parseDecimalFixedPoint(value, decimals).raw;
+
+/**
+ * Compares two decimal amount strings at their maximum shared scale.
+ *
+ * @param left - First decimal amount string; surrounding whitespace is ignored.
+ * @param right - Second decimal amount string; surrounding whitespace is ignored.
+ * @returns -1 when left is less than right, 0 when they are equal, 1 when left
+ * is greater.
+ * @throws {AmountError} When either string fails the parse guards.
+ */
 export const compareDecimalAmounts = (left: string, right: string): number => {
   const decimals = Math.max(decimalScale(left), decimalScale(right));
-  const leftAmount = parseDecimalAmount(left, decimals);
-  const rightAmount = parseDecimalAmount(right, decimals);
-
-  if (leftAmount === rightAmount) {
-    return 0;
-  }
-  return leftAmount < rightAmount ? -1 : 1;
+  const leftAmount = parseDecimalFixedPoint(left, decimals);
+  const rightAmount = parseDecimalFixedPoint(right, decimals);
+  return cmpDecimalFixedPoint(leftAmount, rightAmount);
 };
 
+/**
+ * Formats base units at the given scale as a canonical decimal string,
+ * trimming trailing zeros and dropping the decimal point for whole numbers.
+ *
+ * The `BigInt(value || "0")` conversion for string inputs is intentionally
+ * outside the kit try/catch so that non-numeric strings keep throwing the
+ * same native SyntaxError they always have.
+ *
+ * @param value - Base units as a bigint, or a base-unit string; an empty
+ * string formats as "0".
+ * @param decimals - Non-negative integer count of fractional digits.
+ * @returns The canonical decimal string, prefixed with "-" for negatives.
+ * @throws {AmountError} When the decimals configuration is invalid or the
+ * value overflows the signed 256-bit raw range.
+ */
 export const formatDecimalAmount = (value: string | bigint, decimals: number): string => {
   if (!Number.isInteger(decimals) || decimals < 0) {
     throw new AmountError("Invalid decimals configuration");
   }
 
   const bigintValue = typeof value === "bigint" ? value : BigInt(value || "0");
-  const negative = bigintValue < 0n;
-  const absolute = negative ? -bigintValue : bigintValue;
 
-  let digits = absolute.toString();
-
-  if (decimals === 0) {
-    return `${negative ? "-" : ""}${digits}`;
+  try {
+    return decimalFixedPointToString(
+      rawDecimalFixedPoint("signed", TOTAL_BITS, decimals)(bigintValue)
+    );
+  } catch {
+    throw new AmountError("Amount is out of range");
   }
-
-  if (digits.length <= decimals) {
-    digits = digits.padStart(decimals + 1, "0");
-  }
-
-  const whole = digits.slice(0, -decimals);
-  let fraction = digits.slice(-decimals);
-
-  let trimIndex = fraction.length;
-  while (trimIndex > 0 && fraction[trimIndex - 1] === "0") {
-    trimIndex -= 1;
-  }
-
-  fraction = fraction.slice(0, trimIndex);
-
-  const formatted = fraction.length ? `${whole}.${fraction}` : whole;
-  return `${negative ? "-" : ""}${formatted}`;
 };
 
 /**

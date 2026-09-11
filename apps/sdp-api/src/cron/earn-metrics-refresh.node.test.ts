@@ -17,6 +17,13 @@ import {
 const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   updateStrategyMetrics: vi.fn(),
+  listStrategyFigures: vi.fn(),
+  logEvent: vi.fn(),
+}));
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent: mocks.logEvent,
 }));
 
 vi.mock("@sdp/earn", async (importOriginal) => {
@@ -27,6 +34,7 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     updateStrategyMetrics: mocks.updateStrategyMetrics,
+    listStrategyFigures: mocks.listStrategyFigures,
   })),
 }));
 
@@ -60,6 +68,7 @@ beforeEach(() => {
     delete mocks.providerClients[key];
   }
   mocks.updateStrategyMetrics.mockResolvedValue(true);
+  mocks.listStrategyFigures.mockResolvedValue([]);
 });
 
 describe("refreshEarnStrategyMetrics", () => {
@@ -81,6 +90,54 @@ describe("refreshEarnStrategyMetrics", () => {
         riskMetadata: { tvlUsd: 1_000_000 },
       });
     }
+  });
+
+  it("emits a figure anomaly on a 10x APY jump against the stored row, and still writes it (PRO-1867)", async () => {
+    mocks.listStrategyFigures.mockResolvedValue([
+      {
+        provider_reference: "vault-a",
+        host_cluster: "mainnet-beta",
+        status: "active",
+        current_apy: "0.051",
+        tvl_usd: 1_000_000,
+      },
+    ]);
+    mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => [
+      metrics("vault-a", "0.51"),
+    ]);
+
+    await refreshEarnStrategyMetrics(env);
+
+    // Once per environment: both refresh passes read the same stored fixture.
+    expect(mocks.logEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.logEvent).toHaveBeenCalledWith("warn", {
+      event: "sdp_api_earn_catalogue_figure_anomaly",
+      source: "metrics_refresh",
+      provider: "kamino",
+      environment: "production",
+      provider_reference: "vault-a",
+      host_cluster: "mainnet-beta",
+      metric: "apy",
+      reason: "jump",
+      previous: 0.051,
+      current: 0.51,
+      ratio: 10,
+    });
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({ providerReference: "vault-a", currentApy: "0.51" })
+    );
+  });
+
+  it("never lets a stored-figure read failure cost the refresh its write", async () => {
+    mocks.listStrategyFigures.mockRejectedValue(new Error("unreadable"));
+    mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => [
+      metrics("vault-a", "0.051"),
+    ]);
+
+    await refreshEarnStrategyMetrics(env);
+
+    expect(mocks.logEvent).not.toHaveBeenCalled();
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
   });
 
   it("skips providers without the live-metrics capability", async () => {
