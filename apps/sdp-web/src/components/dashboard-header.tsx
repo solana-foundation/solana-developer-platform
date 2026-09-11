@@ -32,6 +32,8 @@ type DashboardPageConfig = {
   };
 };
 
+const TRAILING_CONTENT = <LanguagePicker />;
+
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
@@ -183,7 +185,6 @@ export function DashboardTopBar({
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
-  const trailingContent = <LanguagePicker />;
 
   if (centersPageTitle) {
     return (
@@ -199,7 +200,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={TRAILING_CONTENT}
       />
     );
   }
@@ -218,7 +219,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={TRAILING_CONTENT}
     />
   );
 }
