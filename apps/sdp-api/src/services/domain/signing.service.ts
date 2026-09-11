@@ -1623,6 +1623,18 @@ export class SigningService {
     });
   }
 
+  async admitConnectionApproval(
+    orgId: string,
+    projectId: string | undefined,
+    custodyWalletId: string
+  ): Promise<void> {
+    return this.runtimeTargets.admitConnectionApproval({
+      organizationId: orgId,
+      projectId,
+      custodyWalletId,
+    });
+  }
+
   async getTransactionSignerForWalletRecord(
     orgId: string,
     projectId: string | undefined,
@@ -1919,6 +1931,7 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "getKeypairSigner",
     "getTransactionSigner",
     "admitRuntimeExecution",
+    "admitConnectionApproval",
     "getTransactionSignerForWalletRecord",
     "sign",
     "getSigningStatus",

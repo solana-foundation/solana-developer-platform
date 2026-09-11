@@ -172,6 +172,9 @@ describe("CustodyRuntimeTargets", () => {
       service.admitRuntimeExecution("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
     ).toThrow(TenantScopeViolationError);
     expect(() =>
+      service.admitConnectionApproval("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
+    ).toThrow(TenantScopeViolationError);
+    expect(() =>
       service.getTransactionSignerForWalletRecord("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
     ).toThrow(TenantScopeViolationError);
   });

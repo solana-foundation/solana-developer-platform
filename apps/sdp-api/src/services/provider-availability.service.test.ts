@@ -167,7 +167,11 @@ describe("provider-availability.service", () => {
     ]);
     await expect(
       assertCustodyProviderEntitled(env, getDb(env), TEST_ORG_ID, "privy")
-    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      statusCode: 403,
+      details: undefined,
+    });
     expect(warn).toHaveBeenCalledExactlyOnceWith(
       {
         event: "sdp_api_custody_entitlement_denied",
