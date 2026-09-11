@@ -278,6 +278,12 @@ export async function runFreeze(
   }
   const { mintAddress, signer, mosaic } = prep.ctx;
 
+  // The same flag the direct freeze endpoint enforces: a rule-driven freeze is
+  // that operation with a different trigger, not an exemption from it.
+  if (!prep.ctx.token.isFreezable) {
+    return permanentFail("TOKEN_NOT_FREEZABLE");
+  }
+
   const targetRaw = resolveTargetWallet(execution, action);
   if (!targetRaw) {
     return permanentFail("MISSING_PARAM:wallet");
