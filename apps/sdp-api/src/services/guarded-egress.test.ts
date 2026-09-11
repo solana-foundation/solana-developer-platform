@@ -227,6 +227,30 @@ describe("guardedFetch", () => {
     }
   });
 
+  it("keeps the address check on an approved-plaintext destination", async () => {
+    // approvedPlaintextDestination relaxes only the protocol; the host still
+    // faces the full check, unlike approvedInsecureDestination.
+    const server = createServer((_req, res) => {
+      res.writeHead(200);
+      res.end("reached");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      await expect(
+        guardedFetch(`http://127.0.0.1:${port}/`, {
+          method: "POST",
+          headers: {},
+          body: "{}",
+          approvedPlaintextDestination: true,
+        })
+      ).rejects.toBeInstanceOf(EgressBlockedError);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("still dials an operator-approved loopback literal", async () => {
     const server = createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
