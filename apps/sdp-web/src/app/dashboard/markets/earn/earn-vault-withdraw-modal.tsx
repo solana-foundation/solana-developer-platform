@@ -217,8 +217,8 @@ function withdrawalProgressStep(
 
 function withdrawalPanelKey(outcome: WithdrawalOutcome | null, step: "details" | "review"): string {
   if (!outcome) return `form:${step}`;
-  const status = outcome.kind === "withdrawal" ? outcome.withdrawal.status : "approval";
-  return `outcome:${outcome.kind}:${status}`;
+  if (outcome.kind === "approval_pending") return "outcome:approval";
+  return outcome.absorbedByApproval ? "outcome:withdrawal:absorbed" : "outcome:withdrawal";
 }
 
 function deriveWithdrawalFormState(
@@ -433,10 +433,15 @@ function WithdrawalMovementResult({
       );
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
+  const processing =
+    !outcome.absorbedByApproval &&
+    (withdrawal.status === "requested" ||
+      withdrawal.status === "submitted" ||
+      withdrawal.status === "confirmed");
 
   return (
     <>
-      <EarnOutcomeMark tone={outcomeTone(statusVariant)} />
+      <EarnOutcomeMark processing={processing} tone={outcomeTone(statusVariant)} />
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -795,6 +800,12 @@ export function EarnVaultWithdrawModal({
     t("DashboardEarn.vaultWithdraw.flowProcessing"),
     t("DashboardEarn.vaultWithdraw.flowComplete"),
   ];
+  const movementProcessing =
+    visibleOutcome?.kind === "withdrawal" &&
+    !visibleOutcome.absorbedByApproval &&
+    (visibleOutcome.withdrawal.status === "requested" ||
+      visibleOutcome.withdrawal.status === "submitted" ||
+      visibleOutcome.withdrawal.status === "confirmed");
   const panelKey = withdrawalPanelKey(visibleOutcome, step);
   const contentRef = useModalFocus({
     focusKey: panelKey,
@@ -950,7 +961,11 @@ export function EarnVaultWithdrawModal({
     return (
       <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
         <div className="p-6" ref={contentRef}>
-          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
+          <EarnFlowStepper
+            currentStep={progressStep}
+            processing={movementProcessing}
+            steps={progressSteps}
+          />
           <EarnFlowTransition stepKey={panelKey}>
             <WithdrawalResult
               environment={environment}

@@ -171,6 +171,8 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/Signed and recorded/)).toBeTruthy();
     expect(screen.getByText("Processing")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
+    expect(document.querySelector('[data-earn-processing="true"]')).toBeTruthy();
+    expect(document.querySelector('[data-earn-step-processing="true"]')).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
     expect(onWithdrawn).toHaveBeenCalledWith(recorded);
   });

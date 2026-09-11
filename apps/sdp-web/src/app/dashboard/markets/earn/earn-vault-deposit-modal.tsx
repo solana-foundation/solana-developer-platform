@@ -278,8 +278,8 @@ function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "
 
 function depositPanelKey(outcome: DepositOutcome | null, step: "details" | "review"): string {
   if (!outcome) return `form:${step}`;
-  const status = outcome.kind === "deposit" ? outcome.deposit.status : "approval";
-  return `outcome:${outcome.kind}:${status}`;
+  if (outcome.kind === "approval_pending") return "outcome:approval";
+  return outcome.absorbedByApproval ? "outcome:deposit:absorbed" : "outcome:deposit";
 }
 
 function depositAssetMetadata(strategy: EarnStrategy) {
@@ -672,10 +672,13 @@ function DepositMovementResult({
       );
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
+  const processing =
+    !outcome.absorbedByApproval && (deposit.status === "pending" || deposit.status === "submitted");
 
   return (
     <>
       <EarnOutcomeMark
+        processing={processing}
         tone={
           statusVariant === "success" ? "success" : statusVariant === "warning" ? "warning" : "info"
         }
@@ -1261,6 +1264,10 @@ export function EarnVaultDepositModal({
     t("DashboardEarn.deposit.flowProcessing"),
     t("DashboardEarn.deposit.flowComplete"),
   ];
+  const movementProcessing =
+    visibleOutcome?.kind === "deposit" &&
+    !visibleOutcome.absorbedByApproval &&
+    (visibleOutcome.deposit.status === "pending" || visibleOutcome.deposit.status === "submitted");
   const panelKey = depositPanelKey(visibleOutcome, step);
   const contentRef = useModalFocus({
     focusKey: panelKey,
@@ -1518,8 +1525,12 @@ export function EarnVaultDepositModal({
   if (visibleOutcome) {
     return (
       <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="sm">
-        <div className="p-5" ref={contentRef}>
-          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
+        <div className="p-6" ref={contentRef}>
+          <EarnFlowStepper
+            currentStep={progressStep}
+            processing={movementProcessing}
+            steps={progressSteps}
+          />
           <EarnFlowTransition stepKey={panelKey}>
             <DepositResult outcome={visibleOutcome} symbol={fundingSymbol} onClose={onClose} />
           </EarnFlowTransition>
