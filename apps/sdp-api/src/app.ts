@@ -155,7 +155,7 @@ function getSafeSigningErrorMessage(err: SigningError): string {
 }
 
 function mapFeePaymentError(err: FeePaymentError): {
-  status: 400 | 429 | 502 | 503;
+  status: 400 | 422 | 429 | 502 | 503;
   code: string;
   message: string;
 } {
@@ -189,6 +189,16 @@ function mapFeePaymentError(err: FeePaymentError): {
         status: 429,
         code: err.code,
         message: "The signing provider is busy. Try again.",
+      };
+    case "SIGNING_FAILED":
+      // Deterministic: the provider refused these exact bytes (policy,
+      // allowlist, malformed request). Retrying the same transaction cannot
+      // succeed, so do not tell the caller to try again.
+      return {
+        status: 422,
+        code: "SIGNING_REJECTED",
+        message:
+          "The signing provider rejected this transaction. Retrying will not help; check the transaction and provider policy.",
       };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":

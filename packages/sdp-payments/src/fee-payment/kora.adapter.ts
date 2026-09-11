@@ -402,9 +402,15 @@ function everyAuthorityDisabled(value: unknown): boolean {
   return keys.every((key) => everyAuthorityDisabled(value[key]));
 }
 
+// The @solana/kora SDK throws `KoraError` with a numeric `code` and a
+// "Kora Error <code>: <message>" string; the in-house AuthorizedKoraClient
+// throws a plain Error formatted "RPC Error <code>: <message>". Accept both so
+// a Kora policy rejection is never misread as a transient network failure.
 function extractRpcErrorCode(error: unknown): number | undefined {
   if (!(error instanceof Error)) return undefined;
-  const match = /RPC Error (-?\d+):/.exec(error.message);
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "number" && Number.isInteger(code)) return code;
+  const match = /(?:Kora|RPC) Error (-?\d+):/.exec(error.message);
   if (!match) return undefined;
   return Number.parseInt(match[1], 10);
 }
@@ -447,17 +453,27 @@ function isRetryableGetFeePayerError(error: unknown): boolean {
   );
 }
 
+// Kora's stable error codes (crates/lib/src/error.rs `KoraErrorCode`).
+// Deterministic rejections (the same bytes will be refused again) map to
+// codes the sponsorship budget releases immediately; anything ambiguous stays
+// NETWORK_ERROR so the reservation is held for reconciliation.
 function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
   switch (code) {
-    case -32001:
-      return "RATE_LIMITED";
-    case -32002:
-      return "INSUFFICIENT_BALANCE";
-    case -32600:
-    case -32602:
+    case -32000: // InvalidTransaction
+    case -32001: // ValidationError (policy: allowlists, token-2022 guards, ...)
+    case -32002: // UnsupportedFeeToken
+    case -32004: // InvalidRequest
+    case -32032: // Unauthorized
+    case -32600: // JSON-RPC invalid request
+    case -32602: // JSON-RPC invalid params
       return "SIGNING_FAILED";
-    case -32003:
+    case -32003: // InsufficientFunds
+      return "INSUFFICIENT_BALANCE";
+    case -32006: // TransactionExecutionFailed
       return "SUBMISSION_FAILED";
+    case -32030: // RateLimitExceeded
+    case -32031: // UsageLimitExceeded
+      return "RATE_LIMITED";
     default:
       return "NETWORK_ERROR";
   }

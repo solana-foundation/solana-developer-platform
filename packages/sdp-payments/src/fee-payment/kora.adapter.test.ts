@@ -51,12 +51,12 @@ function makeAdapter(getConfig: () => Promise<unknown>): KoraAdapter {
   return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
 }
 
-function makeAdapterRejectingSend(rpcErrorMessage: string): KoraAdapter {
+function makeAdapterRejectingSend(rpcError: string | Error): KoraAdapter {
   const transport = {
     getPayerSigner: async () => ({ signer_address: SIGNER }),
     signTransaction: async () => ({ signed_transaction: "" }),
     signAndSendTransaction: async () => {
-      throw new Error(rpcErrorMessage);
+      throw typeof rpcError === "string" ? new Error(rpcError) : rpcError;
     },
     estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
     getSupportedTokens: async () => ({ tokens: [] }),
@@ -120,11 +120,45 @@ describe("KoraAdapter transient-failure handling", () => {
 });
 
 describe("KoraAdapter error classification", () => {
-  it("treats a generic Kora server error as ambiguous, not a deterministic rejection", async () => {
-    const adapter = makeAdapterRejectingSend("RPC Error -32000: server exploded");
+  it("treats a Kora internal server error as ambiguous, not a deterministic rejection", async () => {
+    const adapter = makeAdapterRejectingSend("RPC Error -32090: server exploded");
     await assert.rejects(
       adapter.signAndSend(new Uint8Array(64)),
       (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+  });
+
+  it("treats an invalid transaction as a deterministic rejection", async () => {
+    const adapter = makeAdapterRejectingSend(
+      "RPC Error -32000: Invalid transaction: simulation failed"
+    );
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "SIGNING_FAILED"
+    );
+  });
+
+  it("classifies a Kora policy rejection from the SDK error format as deterministic", async () => {
+    // @solana/kora throws KoraError, whose message reads "Kora Error <code>: ...".
+    const adapter = makeAdapterRejectingSend(
+      "Kora Error -32001: Validation error: Mutable transfer-hook authority found on mint account CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM"
+    );
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) =>
+        error instanceof FeePaymentError &&
+        error.code === "SIGNING_FAILED" &&
+        error.message.includes("Mutable transfer-hook authority")
+    );
+  });
+
+  it("prefers a numeric code property over parsing the message", async () => {
+    const adapter = makeAdapterRejectingSend(
+      Object.assign(new Error("Kora Error -32603: wrapped"), { code: -32003 })
+    );
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "INSUFFICIENT_BALANCE"
     );
   });
 
@@ -137,7 +171,7 @@ describe("KoraAdapter error classification", () => {
   });
 
   it("keeps rate limits deterministic and releasable", async () => {
-    const adapter = makeAdapterRejectingSend("RPC Error -32001: rate limited");
+    const adapter = makeAdapterRejectingSend("Kora Error -32030: Rate limit exceeded");
     await assert.rejects(
       adapter.signAndSend(new Uint8Array(64)),
       (error: unknown) => error instanceof FeePaymentError && error.code === "RATE_LIMITED"
