@@ -7,9 +7,8 @@
  * Deliberately absent — `organizationId`/`projectId`, `refString`, `sdpWallet`,
  * counterparty attribution (a fact about the CREATING org, so always null),
  * funding claims (tenant-scoped, so null by construction), the derived `kind`
- * (`wallet` + `yourSide` convey standing), `idempotencyKey`, and
- * `settlementReadiness`. `symbolA`/`symbolB` ARE included; they are read off
- * the mint on chain.
+ * (`wallet` + `yourSide` convey standing), and `idempotencyKey`.
+ * `symbolA`/`symbolB` ARE included; they are read off the mint on chain.
  */
 
 import type { DvpLegOutcome } from "@sdp/types";

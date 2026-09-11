@@ -259,9 +259,8 @@ const dvpInboundLegSchema = z
  * Deliberately NOT `dvpTradeSchema`: the terms are public on chain and are
  * yours to read, but everything around them belongs to the creating
  * organization. The counterparty attribution, funding claims, the derived
- * `kind` and `settlementReadiness` are all withheld, and the serializer builds
- * this shape from scratch rather than trimming the full one so a field added
- * there cannot leak here by default.
+ * `kind` is withheld, and the serializer builds this shape from scratch rather
+ * than trimming the full one so a field added there cannot leak here by default.
  */
 export const dvpInboundTradeSchema = z
   .object({

@@ -1048,7 +1048,6 @@ describe("DvP routes", () => {
         observedAt: null,
         createdAt,
         updatedAt,
-        settlementReadiness: null,
       });
     });
 
@@ -1138,7 +1137,6 @@ describe("DvP routes", () => {
         createdAt,
         updatedAt,
         yourSide: "a",
-        settlementReadiness: null,
       });
     });
 

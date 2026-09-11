@@ -38,8 +38,6 @@ import {
   observeDvpTradeWithoutRecording,
 } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
-import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight";
-import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
@@ -673,43 +671,6 @@ export const listTrades = async (c: AppContext) => {
   });
 };
 
-/**
- * Whether the settlement authority can pay for the close this trade will need.
- * Read on the detail view rather than left for the attempt (the failure is
- * silent until paid for). Never fatal: an RPC that will not answer must not
- * take the trade with it.
- */
-async function readSettlementReadiness(
-  c: AppContext,
-  trade: DvpTradeRow
-): Promise<{ address: string; balance: string; required: string; funded: boolean } | null> {
-  try {
-    const settlement = await readDvpSettlementWallet(c.env, {
-      organizationId: trade.organizationId,
-      projectId: trade.projectId,
-    });
-    if (!settlement) {
-      return null;
-    }
-    const rpc = solanaRpc.createRpc(c.env);
-    // Settlement's worst case (4 accounts) is the number worth quoting: the ceiling once beats more mid-flow.
-    const funding = await findSettlementFundingShortfall(
-      rpc,
-      settlement.address,
-      trade,
-      new Set(["userADestinationAtaB", "userBDestinationAtaA", "userAAtaA", "userBAtaB"])
-    );
-    return {
-      address: settlement.address,
-      balance: funding.balance.toString(),
-      required: funding.required.toString(),
-      funded: funding.shortfall === 0n,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export const getTrade = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -737,14 +698,12 @@ export const getTrade = async (c: AppContext) => {
   // every few seconds, closed ones once a minute for late deposits.
   const observed = await observeDvpTradeIfStale(c.env, trade);
 
-  const [callerAddresses, counterpartyLabels, fundingClaims, settlementReadiness, mintImages] =
-    await Promise.all([
-      callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
-      readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
-      readFundingClaims(c.env, observed.id),
-      readSettlementReadiness(c, observed),
-      readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
-    ]);
+  const [callerAddresses, counterpartyLabels, fundingClaims, mintImages] = await Promise.all([
+    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+    readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
+    readFundingClaims(c.env, observed.id),
+    readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
+  ]);
   return success(c, {
     trade: {
       ...toTradeResponse(observed, {
@@ -753,7 +712,6 @@ export const getTrade = async (c: AppContext) => {
         fundingClaims,
         mintImages,
       }),
-      settlementReadiness,
     },
   });
 };
@@ -782,9 +740,8 @@ async function resolveYourSide(
 
 /**
  * The same page, for a party who is not the trade's author: the detail
- * shape with the creating org's facts (attribution, funding claims,
- * settlement readiness) withheld. 404 when they are not a party, matching
- * the read above.
+ * shape with the creating org's facts (attribution and funding claims)
+ * withheld. 404 when they are not a party, matching the read above.
  */
 async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   const auth = getAuth(c);
@@ -844,7 +801,6 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
       }),
       // Theirs, not ours: a party gets the trade without the creator's fields.
       refString: null,
-      settlementReadiness: null,
       /** Which leg is the reader's, so the page can say so. */
       yourSide: fundable.side,
     },
