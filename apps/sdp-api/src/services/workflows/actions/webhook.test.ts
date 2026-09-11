@@ -24,6 +24,33 @@ vi.mock("node:dns/promises", () => ({
       : [{ address: "93.184.216.34", family: 4 }],
 }));
 
+// The delivery transport is delegated to the test's fetch stub so delivery
+// behavior stays assertable without sockets; the transport's own rules
+// (connect-time address filtering, literal refusal) are asserted in
+// guarded-egress.test.ts. The recorder proves delivery goes through the
+// guard rather than a bare fetch.
+const guardedTransport = vi.hoisted(() => ({
+  calls: [] as Array<{ url: string; init: Record<string, unknown> }>,
+}));
+vi.mock("@/services/guarded-egress", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/guarded-egress")>();
+  return {
+    ...actual,
+    guardedFetch: (
+      url: string,
+      init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }
+    ) => {
+      guardedTransport.calls.push({ url, init: init as unknown as Record<string, unknown> });
+      return fetch(url, {
+        method: init.method,
+        headers: init.headers,
+        body: init.body,
+        signal: init.signal,
+      });
+    },
+  };
+});
+
 import { runSendWebhook } from "./webhook";
 
 const env = {} as Env;
@@ -56,6 +83,7 @@ function executionFixture(): WorkflowExecutionRow {
 describe("runSendWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    guardedTransport.calls.length = 0;
   });
 
   afterEach(() => {
@@ -132,6 +160,21 @@ describe("runSendWebhook", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(outcome).toMatchObject({ status: "failed", retryable: false });
     expect(String((outcome as { error: string }).error)).toContain("BLOCKED_URL");
+  });
+
+  it("delivers through the guarded egress transport with a bounded read", async () => {
+    // The pre-flight lookup is advisory; the transport is the boundary that
+    // holds when a DNS record flips between validation and connect.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+
+    const outcome = await runSendWebhook(env, executionFixture(), {
+      params: { url: "https://example.com/hook" },
+    });
+
+    expect(outcome).toMatchObject({ status: "succeeded" });
+    expect(guardedTransport.calls).toHaveLength(1);
+    expect(guardedTransport.calls[0]?.url).toBe("https://example.com/hook");
+    expect(Number(guardedTransport.calls[0]?.init.maxResponseBytes)).toBeGreaterThan(0);
   });
 
   it("POSTs the trigger event and signs the body when a secret is set", async () => {
