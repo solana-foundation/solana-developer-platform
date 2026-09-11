@@ -3,6 +3,7 @@ import { runWithSystemDatabaseIdentity } from "@/db";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -82,6 +83,9 @@ import {
   updateTokenSchema,
 } from "./schemas";
 
+export const ISSUANCE_SUPPLY_QUOTA = { name: "issuance-supply", actorMax: 10, orgMax: 40 };
+export const ISSUANCE_PREPARE_QUOTA = { name: "issuance-prepare", actorMax: 30, orgMax: 120 };
+
 const issuance = new Hono<{ Bindings: Env }>();
 
 // Public: SDP-hosted token metadata JSON. Registered BEFORE the auth middleware
@@ -123,6 +127,7 @@ issuance.get("/tokens/:tokenId/audit", requirePermissions("tokens:read"), getAss
 issuance.post(
   "/tokens/:tokenId/supply/refresh",
   requirePermissions("tokens:read"),
+  meteredQuota(ISSUANCE_SUPPLY_QUOTA),
   refreshTokenSupply
 );
 issuance.patch(
@@ -143,6 +148,7 @@ issuance.post(
   "/tokens/:tokenId/deploy/prepare",
   requirePermissions("tokens:write"),
   validateBody(legacyDeployTokenSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeploy
 );
 // Confirmation step for the non-custodial deploy flow: records the mint after
@@ -161,6 +167,7 @@ issuance.post(
   "/tokens/:tokenId/deploy/prepare-metadata",
   requirePermissions("tokens:write"),
   validateBody(legacyDeployTokenSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeployMetadata
 );
 
@@ -169,6 +176,7 @@ issuance.post(
   "/tokens/:tokenId/mint/prepare",
   requirePermissions("tokens:write"),
   validateBody(mintSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareMint
 );
 issuance.post(
@@ -188,6 +196,7 @@ issuance.post(
   "/tokens/:tokenId/burn/prepare",
   requirePermissions("tokens:write"),
   validateBody(burnSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareBurn
 );
 issuance.post(
@@ -203,6 +212,7 @@ issuance.post(
   "/tokens/:tokenId/seize/prepare",
   requirePermissions("tokens:admin"),
   validateBody(seizeSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareSeize
 );
 issuance.post(
@@ -218,6 +228,7 @@ issuance.post(
   "/tokens/:tokenId/force-burn/prepare",
   requirePermissions("tokens:admin"),
   validateBody(forceBurnSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareForceBurn
 );
 issuance.post(
@@ -233,6 +244,7 @@ issuance.post(
   "/tokens/:tokenId/authority/prepare",
   requirePermissions("tokens:admin"),
   validateBody(updateAuthoritySchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareUpdateAuthority
 );
 issuance.post(
