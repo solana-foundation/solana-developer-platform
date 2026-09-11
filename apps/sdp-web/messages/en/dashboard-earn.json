@@ -425,6 +425,7 @@
       "txCreate": "Create transaction",
       "txFunding": "Funding transaction",
       "txFundingExternal": "Sent by the counterparty",
+      "txFundingNone": "No deposit received",
       "viewOnExplorer": "View on explorer",
       "wizardBack": "Back",
       "wizardContinue": "Continue",

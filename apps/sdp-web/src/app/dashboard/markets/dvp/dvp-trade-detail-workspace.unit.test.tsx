@@ -395,6 +395,21 @@ describe("DvpTradeDetailWorkspace", () => {
   // Expired is not closed: the escrow still holds the deposit until a cancel
   // returns it, so the leg shows what it holds, says why it is waiting, and
   // stops offering the pay-in address.
+  it("never claims a counterparty deposit on a leg nothing reached", () => {
+    const html = renderDetail(
+      trade({
+        status: "expired",
+        legs: {
+          a: testLeg({ escrow: LEG_ESCROW_A, outcome: "expired" }),
+          b: testLeg({ escrow: LEG_ESCROW_B, outcome: "expired", funding: FUNDED }),
+        },
+      })
+    );
+
+    expect(html).toContain("No deposit received");
+    expect(html).toContain("Sent by the counterparty");
+  });
+
   it("shows held deposits awaiting refund on an expired trade", () => {
     const html = renderDetail(
       trade({

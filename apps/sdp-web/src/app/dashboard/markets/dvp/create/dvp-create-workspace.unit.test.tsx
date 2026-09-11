@@ -186,6 +186,18 @@ describe("DvpCreateWorkspace", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
+  it("trims a pasted address so surrounding whitespace never blocks Continue", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(`  ${PARTY_B}  `);
+    fillAssetMint();
+    fillCashMint();
+    fillAmounts();
+
+    expect(screen.queryByText("Not a valid Solana address")).toBeNull();
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false);
+  });
+
   it("clears a filled slot when its mode changes", () => {
     renderForm();
     fillPartyA();

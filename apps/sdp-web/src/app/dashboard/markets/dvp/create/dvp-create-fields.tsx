@@ -300,9 +300,7 @@ export function PartySlotPicker({
 }) {
   const t = useTranslations();
   const formatError =
-    slot.mode === "address" &&
-    slot.address.trim().length > 0 &&
-    !BASE58_ADDRESS.test(slot.address.trim())
+    slot.mode === "address" && slot.address.length > 0 && !BASE58_ADDRESS.test(slot.address)
       ? t("DashboardMarkets.dvp.partyAddressInvalid")
       : null;
   const pickerError = formatError === null ? error : formatError;
@@ -349,7 +347,7 @@ export function PartySlotPicker({
         <Input
           iconLeft={<HashIcon />}
           id={id}
-          onChange={(event) => onChange({ mode: "address", address: event.target.value })}
+          onChange={(event) => onChange({ mode: "address", address: event.target.value.trim() })}
           placeholder={t("DashboardMarkets.dvp.partyAddressPlaceholder")}
           size="xl"
           value={slot.address}

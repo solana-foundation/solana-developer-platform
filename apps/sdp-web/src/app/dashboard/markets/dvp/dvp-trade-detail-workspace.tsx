@@ -434,7 +434,9 @@ function LegCard({
           </span>
         ) : (
           <span className="py-1 text-secondary text-xs">
-            {t("DashboardMarkets.dvp.txFundingExternal")}
+            {leg.funding !== null && BigInt(leg.funding.observedAmount) > 0n
+              ? t("DashboardMarkets.dvp.txFundingExternal")
+              : t("DashboardMarkets.dvp.txFundingNone")}
           </span>
         )}
       </div>
