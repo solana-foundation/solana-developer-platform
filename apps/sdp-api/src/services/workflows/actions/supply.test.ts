@@ -71,7 +71,7 @@ vi.mock("./onchain", async (importOriginal) => {
     prepareOnchain: async () => ({
       ok: true,
       ctx: {
-        token: { id: "tok_1", symbol: "TKN", ...tokenOverrides.value },
+        token: { id: "tok_1", symbol: "TKN", status: "active", ...tokenOverrides.value },
         decimals: 2,
         mintAddress: MINT,
         signer: { address: DEST },
@@ -325,5 +325,40 @@ describe("custody actions enforce the signing wallet's operation policy", () => 
     expect(forceTransfer).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("succeeded");
     expect(result.result).toMatchObject({ signature: "sig_seize" });
+  });
+});
+
+describe("supply actions honor the token's operational status", () => {
+  beforeEach(() => {
+    tokenOverrides.value = { status: "paused" };
+  });
+
+  // The direct handlers refuse these operations on a paused token via
+  // assertTokenAllowsOperation; a rule is the same operation with a different
+  // trigger and must fail the same way, before any chain call.
+  it("refuses to force-burn from a paused token", async () => {
+    const result = await runForceBurn(env, executionFixture(), {
+      params: { amount: "1" },
+    } as never);
+
+    expect(forceBurn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "failed", retryable: false });
+    expect(String((result as { error: string }).error)).toContain("paused");
+  });
+
+  it("refuses to seize from a paused token", async () => {
+    const result = await runSeize(env, executionFixture(), {
+      params: { amount: "1", destination: TREASURY },
+    } as never);
+
+    expect(forceTransfer).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "failed", retryable: false });
+  });
+
+  it("refuses to mint on a paused token", async () => {
+    const result = await runMint(env, executionFixture(), { params: { amount: "1" } } as never);
+
+    expect(mintTo).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "failed", retryable: false });
   });
 });

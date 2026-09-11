@@ -20,7 +20,11 @@ import {
   resolvePolicyCustodyWallet,
 } from "@/services/policy/enforcement.service";
 import { TokenService } from "@/services/token.service";
-import { resolveMintOperationAmount } from "@/services/token-operation.service";
+import {
+  assertTokenAllowsOperation,
+  resolveMintOperationAmount,
+  type TokenOperation,
+} from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import type { OnchainContext } from "./onchain";
 import { errorMessage, permanentFail } from "./onchain";
@@ -36,6 +40,22 @@ export type PreflightOutcome = { ok: true } | { ok: false; result: ActionExecuti
 
 // Supply + mintability, using the same helper the HTTP mint route uses. Returns the
 // base-unit amount so the caller doesn't parse twice.
+// The operational-status gate every direct supply handler runs
+// (`assertTokenAllowsOperation`): paused and non-active tokens accept none of
+// these operations, and a rule must not reach the chain where the endpoint
+// would have refused.
+export function preflightTokenOperation(
+  ctx: OnchainContext,
+  operation: TokenOperation
+): { ok: true } | { ok: false; result: ActionExecutionResult } {
+  try {
+    assertTokenAllowsOperation(ctx.token as Token, operation);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, result: permanentFail(errorMessage(error)) };
+  }
+}
+
 export function preflightMintAmount(
   ctx: OnchainContext,
   amount: string
