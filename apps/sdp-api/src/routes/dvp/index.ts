@@ -2,6 +2,7 @@ import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -53,6 +54,7 @@ dvp.post(
   "/trades",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(createDvpTradeSchema),
+  meteredQuota({ name: "dvp-create", actorMax: 2, orgMax: 10 }),
   createTrade
 );
 // Reading a mint so the form can convert an amount. Read-only, and public
@@ -69,14 +71,15 @@ dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"),
 
 // Funding ONE side — creator and party funding are the same operation: the
 // right to fund side X is holding a custody wallet whose public key equals
-// that side's party address. The gate sits after `validateBody` (like every
-// body-validated policy-gated route), so a malformed body is a 400 from the
-// schema before any custody or RPC access.
+// that side's party address. Validation precedes policy, and quota follows it:
+// malformed bodies, approval-pending 202s, and policy refusals must not consume
+// the execution quota reserved for an approved attempt.
 dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(fundDvpTradeSchema),
   policyGate({ extract: (c) => extractDvpFundPolicyCandidate(c) }),
+  meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   fundTrade
 );
 // Settle and cancel are the only two actions the settlement authority can take,
@@ -89,12 +92,14 @@ dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle") }),
+  meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
   requirePermissions("payments:write", "wallets:read"),
   policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "cancel") }),
+  meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );
 

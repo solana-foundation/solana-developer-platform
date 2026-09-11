@@ -1,11 +1,6 @@
 /**
  * Settling and cancelling a DvP trade.
  *
- * Both are signed by the project's settlement authority and both close the
- * trade. Settle delivers each leg to the other party; Cancel refunds each leg
- * to whoever deposited it. Nothing else can do either — the parties can only
- * unwind their own leg.
- *
  * The same safety order as create: build, sign, record intent, send. Here the
  * "record" step is the approved-operation effect fence, which is what makes a
  * crash mid-broadcast recoverable rather than ambiguous.
@@ -14,32 +9,34 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   appendTransactionMessageInstructions,
+  createNoopSigner,
   createTransactionMessage,
-  getSignatureFromTransaction,
   getTransactionEncoder,
   pipe,
   type Signature,
-  setTransactionMessageFeePayerSigner,
+  setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { signTransactionMessageWithSigners } from "@solana/signers";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
-import { badRequest } from "@/lib/errors";
+import { badRequest, conflict } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  type SignedSubmissionStore,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import { readDvpAccounts } from "./read-chain";
+import { deriveDvpSettleAtas } from "./settle-atas";
 import {
   buildCancelInstruction,
-  buildMissingAtaInstructions,
+  buildRequiredAtaInstructions,
   buildSettleInstruction,
 } from "./settle-instructions";
-import {
-  type DvpSettleAtas,
-  deriveDvpSettleAtas,
-  findMissingSettleAtas,
-  findSettlementFundingShortfall,
-} from "./settle-preflight";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 
 /** Statuses from which a trade can still be acted on. */
@@ -54,18 +51,9 @@ export type DvpCloseAction = "settle" | "cancel";
 
 export interface DvpCloseResult {
   signature: Signature;
-  /** Accounts this transaction created because settlement required them. */
-  createdAccounts: string[];
 }
 
-/**
- * Settles or cancels a trade on chain.
- *
- * @param c - Request context, needed for the approved-operation effect fence.
- * @param trade - The trade to close, as stored.
- * @param action - Whether to deliver both legs or refund them.
- * @returns The broadcast signature and any accounts created along the way.
- */
+/** Settles or cancels a trade on chain. `c` carries the approved-operation fence context. */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
@@ -107,7 +95,6 @@ export async function closeDvpTrade(
     trade.projectId,
     settlement.custodyWalletId
   );
-
   const atas = await deriveDvpSettleAtas({
     userA: trade.userA,
     userB: trade.userB,
@@ -120,22 +107,24 @@ export async function closeDvpTrade(
   });
 
   const rpc = solanaRpc.createRpc(env);
-  const missing = await resolveMissingAtas(rpc, atas, action);
-
-  // Before a signature is spent. The settlement authority pays the fee and the
-  // rent for every account this close creates, and it is provisioned empty — so
-  // the first settle in a project failed in simulation with an error that named
-  // neither the account nor the amount, and surfaced as "An internal error
-  // occurred". Saying it plainly is the whole fix.
-  const funding = await findSettlementFundingShortfall(rpc, signer.address, missing.size);
-  if (funding.shortfall > 0n) {
-    throw badRequest(
-      `DvP trade ${trade.id}: the settlement authority ${signer.address} holds ${funding.balance} lamports but needs about ${funding.required} to ${action} this trade — it pays the network fee and the rent for ${missing.size} token account(s) this close has to create. Send it at least ${funding.shortfall} more lamports and try again.`
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
+    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+  });
+  if (
+    (!snapshot.legA.exists && snapshot.legA.tampered) ||
+    (!snapshot.legB.exists && snapshot.legB.tampered)
+  ) {
+    throw conflict(
+      `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
     );
   }
+  // Sponsorship is resolved only after every local refusal above, as in create.
+  const feePayment = createRequestSponsorshipFeePayment(c);
+  const sponsor = await feePayment.getFeePayer();
 
   const instructions = [
-    ...buildMissingAtaInstructions(trade, atas, signer, missing),
+    ...buildRequiredAtaInstructions(trade, atas, createNoopSigner(sponsor), action),
     action === "settle"
       ? buildSettleInstruction(trade, atas, signer)
       : buildCancelInstruction(trade, atas, signer),
@@ -144,44 +133,31 @@ export async function closeDvpTrade(
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(signer, m),
+    (m) => setTransactionMessageFeePayer(sponsor, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(instructions, m)
   );
-  const signed = await signTransactionMessageWithSigners(message);
-  const signature = getSignatureFromTransaction(signed);
-
-  // The point of no return. Past this the transaction may land, so an approved
-  // operation that dies here must be reconciled by hand rather than retried —
-  // which is exactly what this fence records.
-  await beginApprovedWalletOperationEffect(c);
-
-  await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
-
-  return {
-    signature,
-    createdAccounts: [...missing].map((key) => atas[key]),
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const bytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
+  // The fence sits between the sponsor signature and the broadcast: a sponsor
+  // refusal leaves the approval retryable, while anything past markStarted may
+  // have landed and is recovered by the reconciler from chain history.
+  const store: SignedSubmissionStore = {
+    persistSigned: async ({ signature }) => {
+      getLogger().info({ tradeId: trade.id, action, signature }, "DvP close signed");
+    },
+    markStarted: () => beginApprovedWalletOperationEffect(c),
+    // Consulted only when markStarted throws; a lost lease is not a started effect.
+    hasStarted: async () => false,
   };
-}
 
-/**
- * Which of Settle's required accounts are missing and must be created first.
- *
- * Cancel needs only the two refund accounts, so it is not held up by a missing
- * delivery destination — a trade being unwound has nothing to deliver, and
- * requiring an account it will never use would block the escape hatch.
- */
-async function resolveMissingAtas(
-  rpc: solanaRpc.SolanaRpc,
-  atas: DvpSettleAtas,
-  action: DvpCloseAction
-): Promise<ReadonlySet<keyof DvpSettleAtas>> {
-  const missing = await findMissingSettleAtas(rpc, atas);
+  const signature = await submitSponsoredTransaction({
+    feePayment,
+    rpc,
+    transaction: bytes,
+    lastValidBlockHeight,
+    store,
+  });
 
-  const relevant: ReadonlyArray<keyof DvpSettleAtas> =
-    action === "settle"
-      ? ["userADestinationAtaB", "userBDestinationAtaA", "userAAtaA", "userBAtaB"]
-      : ["userAAtaA", "userBAtaB"];
-
-  return new Set(relevant.filter((key) => missing.has(key)));
+  return { signature };
 }

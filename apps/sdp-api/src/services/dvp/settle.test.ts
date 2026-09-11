@@ -8,34 +8,59 @@
  * the wrong person — a mistake nothing downstream would catch.
  */
 
+import assert from "node:assert/strict";
 import { getSettleDvpInstruction } from "@sdp/dvp";
-import { address } from "@solana/kit";
+import {
+  address,
+  getCompiledTransactionMessageDecoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+} from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import type { AppError } from "@/lib/errors";
+import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { env } from "@/test/helpers/env";
+import { deriveDvpSettleAtas } from "./settle-atas";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
+const getFeePayer = vi.hoisted(() => vi.fn());
+const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
+const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
-const getAccountInfo = vi.hoisted(() => vi.fn());
-const getMinimumBalanceForRentExemption = vi.hoisted(() => vi.fn());
-const getBalanceValue = vi.hoisted(() => vi.fn());
 const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
+const readDvpAccounts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
+vi.mock("@/services/sponsorship.service", async () => {
+  const actual = await vi.importActual<typeof import("@/services/sponsorship.service")>(
+    "@/services/sponsorship.service"
+  );
+  return {
+    ...actual,
+    createRequestSponsorshipFeePayment: () => ({
+      getFeePayer,
+      prepareOwnedSubmission,
+      providerId: "test",
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(),
+    }),
+  };
+});
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   beginApprovedWalletOperationEffect,
 }));
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
+vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({
-    getBalance: () => ({
-      send: async () => ({ value: getBalanceValue() }),
-    }),
-  }),
-  getAccountInfo,
-  getMinimumBalanceForRentExemption,
+  createRpc: () => ({}),
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,
@@ -68,6 +93,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     decimalsB: 6,
     symbolA: "ATD",
     symbolB: "USDC",
+    nameA: "Acme Treasury Debt",
+    nameB: "USD Coin",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",
@@ -86,6 +113,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
+    closeResolutionAttempts: 0,
+    closeResolutionAfter: null,
     escrowAAmount: "1000",
     escrowBAmount: "2000",
     escrowAPeakAmount: "1000",
@@ -100,43 +129,62 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 
 const context = { env } as never;
 
+function preflightError(): SolanaError {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: ["Program log: Error: IncorrectProgramId"],
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+  });
+}
+
 describe("closeDvpTrade", () => {
-  /** The fee payer, which is what the funding pre-flight actually reads. */
-  let feePayer = "";
+  let authority: Awaited<ReturnType<typeof generateKeyPairSigner>>;
+  let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    const signer = await generateKeyPairSigner();
-    feePayer = signer.address;
-    createOrgSignerForCustodyWallet.mockResolvedValue(signer);
+    readDvpAccounts.mockResolvedValue({
+      trade: { exists: true, address: trade().swapDvp },
+      legA: { exists: true, amount: 1000n, frozen: false },
+      legB: { exists: true, amount: 2000n, frozen: false },
+    });
+    authority = await generateKeyPairSigner();
+    sponsor = await generateKeyPairSigner();
+    createOrgSignerForCustodyWallet.mockResolvedValue(authority);
+    getFeePayer.mockResolvedValue(sponsor.address);
+    prepareOwnedSubmission.mockImplementation(
+      async (
+        bytes: Uint8Array,
+        lifecycle: Parameters<SponsorshipFeePayment["prepareOwnedSubmission"]>[1]
+      ) => {
+        const transaction = getTransactionDecoder().decode(bytes);
+        expect(transaction.signatures[sponsor.address]).toBeNull();
+        const signed = await partiallySignTransaction([sponsor.keyPair], transaction);
+        const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
+        const signature = getSignatureFromTransaction(signed);
+        const submission = { signedTransaction, signature, releaseDefinitelyUnbroadcast };
+        await lifecycle.persistSigned(submission);
+        await lifecycle.markStarted();
+        return submission;
+      }
+    );
     getOrCreateDvpSettlementWallet.mockResolvedValue({
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
     });
-    // Every required account already exists unless a test says otherwise.
-    getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
-      address === feePayer ? { lamports: 1_000_000_000 } : { owner: T22, data: new Uint8Array(165) }
-    );
-    getMinimumBalanceForRentExemption.mockResolvedValue(2_040_000n);
-    // The fee payer is solvent unless a test says otherwise.
-    getBalanceValue.mockReturnValue(1_000_000_000n);
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
-    sendTransaction.mockResolvedValue("sig");
-  });
-
-  it("fences the approved operation before the bytes go out", async () => {
-    const order: string[] = [];
-    beginApprovedWalletOperationEffect.mockImplementation(async () => {
-      order.push("fence");
-    });
-    sendTransaction.mockImplementation(async () => {
-      order.push("send");
-      return "sig";
-    });
-
-    await closeDvpTrade(context, trade(), "settle");
-
-    expect(order).toEqual(["fence", "send"]);
+    sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
+      getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
+    );
   });
 
   it("refuses to settle a trade that is already closed", async () => {
@@ -162,8 +210,7 @@ describe("closeDvpTrade", () => {
   it("cancels a partially funded trade", async () => {
     const result = await closeDvpTrade(context, trade({ status: "partially_funded" }), "cancel");
 
-    // The signature is taken from the SIGNED BYTES, not from what the RPC
-    // returns — so it is known before the send and survives an ambiguous one.
+    // The owned sponsorship path returns the signature in the submitted bytes.
     expect(result.signature).toEqual(expect.any(String));
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
@@ -183,39 +230,62 @@ describe("closeDvpTrade", () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  describe("required accounts", () => {
-    it("creates the accounts settlement needs when they are missing", async () => {
-      // Every token account absent, but the fee payer solvent: this test is
-      // about which accounts get created, not about who pays for them.
-      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
-        address === feePayer ? { lamports: 1_000_000_000 } : null
+  describe("instruction order", () => {
+    it("appends four create-ATA instructions before settle for the derived accounts", async () => {
+      const row = trade();
+      const atas = await deriveDvpSettleAtas(row);
+
+      await closeDvpTrade(context, row, "settle");
+
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      expect(message.instructions).toHaveLength(5);
+      expect(
+        message.instructions.slice(0, 4).map((instruction) => {
+          assert(instruction.accountIndices);
+          return message.staticAccounts[instruction.accountIndices[1]];
+        })
+      ).toEqual([
+        atas.userADestinationAtaB,
+        atas.userBDestinationAtaA,
+        atas.userAAtaA,
+        atas.userBAtaB,
+      ]);
+      expect(
+        message.instructions
+          .slice(0, 4)
+          .map((instruction) => message.staticAccounts[instruction.programAddressIndex])
+      ).toEqual(Array.from({ length: 4 }, () => ASSOCIATED_TOKEN_PROGRAM_ADDRESS));
+      expect(message.staticAccounts[message.instructions[4].programAddressIndex]).not.toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS
       );
-
-      const result = await closeDvpTrade(context, trade(), "settle");
-
-      // All four: both delivery destinations and both surplus-refund accounts.
-      expect(result.createdAccounts).toHaveLength(4);
-      expect(sendTransaction).toHaveBeenCalledTimes(1);
     });
 
-    it("creates nothing when every account already exists", async () => {
-      const result = await closeDvpTrade(context, trade(), "settle");
+    it("appends two create-ATA instructions before cancel for the refund accounts", async () => {
+      const row = trade();
+      const atas = await deriveDvpSettleAtas(row);
 
-      expect(result.createdAccounts).toEqual([]);
-    });
+      await closeDvpTrade(context, row, "cancel");
 
-    // Cancel delivers nothing, so a missing delivery destination must not block
-    // it — that would make the escape hatch depend on an account it never uses.
-    it("creates only the refund accounts for a cancel", async () => {
-      // Every token account absent, but the fee payer solvent: this test is
-      // about which accounts get created, not about who pays for them.
-      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
-        address === feePayer ? { lamports: 1_000_000_000 } : null
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      expect(message.instructions).toHaveLength(3);
+      expect(
+        message.instructions.slice(0, 2).map((instruction) => {
+          assert(instruction.accountIndices);
+          return message.staticAccounts[instruction.accountIndices[1]];
+        })
+      ).toEqual([atas.userAAtaA, atas.userBAtaB]);
+      expect(
+        message.instructions
+          .slice(0, 2)
+          .map((instruction) => message.staticAccounts[instruction.programAddressIndex])
+      ).toEqual(Array.from({ length: 2 }, () => ASSOCIATED_TOKEN_PROGRAM_ADDRESS));
+      expect(message.staticAccounts[message.instructions[2].programAddressIndex]).not.toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS
       );
-
-      const result = await closeDvpTrade(context, trade(), "cancel");
-
-      expect(result.createdAccounts).toHaveLength(2);
     });
   });
 
@@ -224,7 +294,6 @@ describe("closeDvpTrade", () => {
   it("delivers each leg to the counter-party's destination", async () => {
     const signer = await generateKeyPairSigner();
     const row = trade();
-    const { deriveDvpSettleAtas } = await import("./settle-preflight");
     const atas = await deriveDvpSettleAtas({
       userA: row.userA,
       userB: row.userB,
@@ -260,47 +329,71 @@ describe("closeDvpTrade", () => {
     expect(instruction.accounts).toBeDefined();
   });
 
-  /**
-   * The settlement authority pays the fee and the rent for every account a
-   * close creates, and it is provisioned empty. Nothing funds it, so the first
-   * settle in every project failed in simulation with "Attempt to debit an
-   * account but found no record of a prior credit" — an error naming neither
-   * the account nor the amount, nested two levels inside a SolanaError cause,
-   * and shown to the user as "An internal error occurred".
-   */
-  describe("when the settlement authority cannot pay", () => {
-    beforeEach(() => {
-      getAccountInfo.mockImplementation(async (_rpc: unknown, address: string) =>
-        address === feePayer ? { lamports: 0 } : null
+  describe("sponsorship", () => {
+    it("uses the sponsor as fee payer and collects both required signatures", async () => {
+      await closeDvpTrade(context, trade(), "settle");
+
+      const bytes = sendTransaction.mock.calls[0][1];
+      const transaction = getTransactionDecoder().decode(bytes);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      expect(message.staticAccounts[0]).toBe(sponsor.address);
+      expect(Object.keys(transaction.signatures)).toEqual(
+        expect.arrayContaining([sponsor.address, authority.address])
       );
-      getBalanceValue.mockReturnValue(0n);
+      expect(Object.keys(transaction.signatures)).toHaveLength(2);
+      expect(transaction.signatures[sponsor.address]).not.toBeNull();
+      expect(transaction.signatures[authority.address]).not.toBeNull();
     });
 
-    it("refuses before spending a signature, naming the account and the shortfall", async () => {
-      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
-        /settlement authority .* holds 0 lamports but needs about \d+/
+    it("uses the sponsor as payer for every create-ATA instruction", async () => {
+      await closeDvpTrade(context, trade(), "settle");
+
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      for (const instruction of message.instructions.slice(0, 4)) {
+        assert(instruction.accountIndices);
+        expect(message.staticAccounts[instruction.accountIndices[0]]).toBe(sponsor.address);
+      }
+    });
+
+    it("fences after the sponsor signs and before the bytes go out", async () => {
+      await closeDvpTrade(context, trade(), "settle");
+
+      expect(prepareOwnedSubmission.mock.invocationCallOrder[0]).toBeLessThan(
+        beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]
       );
+      expect(beginApprovedWalletOperationEffect.mock.invocationCallOrder[0]).toBeLessThan(
+        sendTransaction.mock.invocationCallOrder[0]
+      );
+    });
+
+    it("leaves the approval unfenced when the sponsor refuses to sign", async () => {
+      prepareOwnedSubmission.mockRejectedValueOnce(new Error("sponsor rate limited"));
+
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
+        "sponsor rate limited"
+      );
+      expect(beginApprovedWalletOperationEffect).not.toHaveBeenCalled();
       expect(sendTransaction).not.toHaveBeenCalled();
     });
 
-    it("says how much more it needs, so the answer is actionable", async () => {
-      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toThrow(
-        /Send it at least \d+ more lamports/
-      );
+    it("maps a preflight rejection and releases the sponsorship reservation", async () => {
+      sendTransaction.mockRejectedValue(preflightError());
+
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toMatchObject({
+        code: "TRANSACTION_FAILED",
+        statusCode: 400,
+      } satisfies Partial<AppError>);
+      expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledOnce();
     });
 
-    // Cancel creates only the two refund accounts, so it needs less. Quoting
-    // settle's figure would over-state what a cancel actually costs.
-    it("asks for less to cancel, which creates fewer accounts", async () => {
-      const settleCost = await closeDvpTrade(context, trade(), "settle").catch(
-        (error: Error) => error.message
-      );
-      const cancelCost = await closeDvpTrade(context, trade(), "cancel").catch(
-        (error: Error) => error.message
-      );
+    it("rethrows an ambiguous send error without releasing the sponsorship reservation", async () => {
+      const error = new Error("socket hang up");
+      sendTransaction.mockRejectedValue(error);
 
-      const figure = (message: string) => Number(/needs about (\d+)/.exec(message)?.[1]);
-      expect(figure(cancelCost as string)).toBeLessThan(figure(settleCost as string));
+      await expect(closeDvpTrade(context, trade(), "settle")).rejects.toBe(error);
+      expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
     });
   });
 });

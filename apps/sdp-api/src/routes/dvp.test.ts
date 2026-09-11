@@ -1,14 +1,30 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
+import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import {
+  clearKVStores,
+  readRateLimitCount,
+  seedCachedApiKey,
+  seedRateLimit,
+} from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
+
+// The fund policy extractor prices the request off a live escrow read. These
+// route tests have no chain, so the shortfall is pinned; everything else in the
+// fund module stays real.
+const readDvpLegShortfall = vi.hoisted(() => vi.fn(async () => 1000n));
+vi.mock("@/services/dvp/fund", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/dvp/fund")>();
+  return { ...actual, readDvpLegShortfall };
+});
 
 const TEST_ORG = { id: "org_dvp_test", name: "DvP Test Org", slug: "dvp-test-org" };
 const TEST_PROJECT = { id: "prj_dvp_test", slug: "dvp-test-project" };
@@ -227,6 +243,35 @@ async function seedCustodyWallets(): Promise<void> {
       )
       .bind(THIRD_WALLET.id, CUSTODY_CONFIG_ID, THIRD_WALLET.walletId, UNRELATED_ADDRESS),
   ]);
+}
+
+async function requireFundApproval(): Promise<void> {
+  const repository = createPostgresPolicyRepository(
+    getDb(env),
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+  );
+  const profile = await repository.createApiKeyControlProfile({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    apiKeyId: TEST_API_KEY.id,
+    name: "Approve DvP funding",
+  });
+  if (profile === null) {
+    throw new Error("Failed to create DvP approval profile");
+  }
+  const revision = await repository.createApiKeyControlProfileRevision({
+    profileId: profile.id,
+    rules: [{ id: "approve-dvp-fund", kind: "approval", operationTypes: ["dvp_fund"] }],
+    defaultAction: "allow",
+    createdBy: TEST_USER.id,
+  });
+  if (revision === null) {
+    throw new Error("Failed to create DvP approval revision");
+  }
+  await repository.activateApiKeyControlProfileRevision({
+    profileId: profile.id,
+    revisionId: revision.id,
+  });
 }
 
 /**
@@ -505,6 +550,47 @@ describe("DvP routes", () => {
   it("requires authentication", async () => {
     const res = await app.request("/v1/dvp/trades", {}, env);
     expect(res.status).toBe(401);
+  });
+
+  it("429s a DvP create once the actor's metered quota is exhausted", async () => {
+    await seedRateLimit(env, `metered:dvp-create:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 2);
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(createBody()),
+      },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+  });
+
+  it("does not consume fund quota when policy parks the request for approval", async () => {
+    await seedCustodyWallets();
+    await seedTradeFor({
+      tradeId: "dvp_pending_fund",
+      observation: { escrowAAmount: "0", escrowAFrozen: false },
+    });
+    await requireFundApproval();
+
+    const response = await app.request(
+      "/v1/dvp/trades/dvp_pending_fund/fund",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ side: "a", walletId: BOUND_WALLET.id }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(202);
+    await expect(
+      readRateLimitCount(env, `metered:dvp-fund:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`)
+    ).resolves.toBe(0);
   });
 
   // Every documented family answers in the { data, meta } envelope. DvP returned
@@ -919,6 +1005,7 @@ describe("DvP routes", () => {
             amount: "1000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: ISSUED_IMAGE_A,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
@@ -942,6 +1029,7 @@ describe("DvP routes", () => {
             amount: "2000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
@@ -960,7 +1048,6 @@ describe("DvP routes", () => {
         observedAt: null,
         createdAt,
         updatedAt,
-        settlementReadiness: null,
       });
     });
 
@@ -1011,6 +1098,7 @@ describe("DvP routes", () => {
             amount: "1000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: null,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
@@ -1029,6 +1117,7 @@ describe("DvP routes", () => {
             amount: "2000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
@@ -1048,7 +1137,6 @@ describe("DvP routes", () => {
         createdAt,
         updatedAt,
         yourSide: "a",
-        settlementReadiness: null,
       });
     });
 
@@ -1109,6 +1197,7 @@ describe("DvP routes", () => {
         amount: "1000",
         decimals: null,
         symbol: null,
+        name: null,
         imageUrl: ISSUED_IMAGE_A,
         escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
         settlementDestination: PARTY_A_ADDRESS,
@@ -1284,6 +1373,7 @@ describe("DvP routes", () => {
         amount: "1000",
         decimals: null,
         symbol: null,
+        name: null,
         imageUrl: null,
         escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
         settlementDestination: PARTY_A_ADDRESS,
@@ -1302,6 +1392,7 @@ describe("DvP routes", () => {
         amount: "2000",
         decimals: null,
         symbol: null,
+        name: null,
         imageUrl: ISSUED_IMAGE_B,
         escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
         settlementDestination: PARTY_B_EXTERNAL,

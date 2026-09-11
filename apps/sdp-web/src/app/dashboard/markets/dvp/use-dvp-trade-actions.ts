@@ -29,7 +29,6 @@ export interface DvpTradeActionOptions {
 export interface DvpTradeActions {
   act: (action: DvpTradeActionName, options?: DvpTradeActionOptions) => Promise<void>;
   awaitingApproval: boolean;
-  error: string | null;
   pending: DvpTradeActionName | null;
 }
 
@@ -57,11 +56,9 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
   const t = useTranslations();
   const [pending, setPending] = useState<DvpTradeActionName | null>(null);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function act(action: DvpTradeActionName, options?: DvpTradeActionOptions) {
     setPending(action);
-    setError(null);
     setAwaitingApproval(false);
     try {
       const response = await fetch(
@@ -91,11 +88,14 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
         // — and showing only the headline left an operator with a red line and
         // nowhere to go. "Destination <escrow> is not allowed by policy" names
         // the rule to change; "denied by policy" names nothing.
-        setError(
-          body.error?.details?.reason ??
-            body.error?.message ??
-            `Request failed (${response.status}).`
-        );
+        let message = `Request failed (${response.status}).`;
+        if (body.error?.message !== undefined) {
+          message = body.error.message;
+        }
+        if (body.error?.details?.reason !== undefined) {
+          message = body.error.details.reason;
+        }
+        toast.error(message, { position: "bottom-right" });
         return;
       }
       // The single biggest source of "did anything happen?": all three of these
@@ -105,11 +105,12 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
       toast.success(t(DONE_MESSAGE[action]), { position: "bottom-right" });
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Request failed.");
+      const message = caught instanceof Error ? caught.message : "Request failed.";
+      toast.error(message, { position: "bottom-right" });
     } finally {
       setPending(null);
     }
   }
 
-  return { act, awaitingApproval, error, pending };
+  return { act, awaitingApproval, pending };
 }

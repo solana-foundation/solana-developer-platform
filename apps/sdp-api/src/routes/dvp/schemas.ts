@@ -63,7 +63,7 @@ const dvpPartySchema = z.union([
 ]);
 
 /** Terms shared by every trade. Only the parties differ. */
-const dvpTradeTermsShape = {
+const dvpTradeTermsFields = {
   mintA: dvpAddressSchema,
   tokenProgramA: dvpAddressSchema,
   mintB: dvpAddressSchema,
@@ -97,7 +97,7 @@ const dvpTradeTermsShape = {
 export const createDvpTradeSchema = z.object({
   partyA: dvpPartySchema,
   partyB: dvpPartySchema,
-  ...dvpTradeTermsShape,
+  ...dvpTradeTermsFields,
 });
 
 /**

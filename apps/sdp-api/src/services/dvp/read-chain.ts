@@ -13,6 +13,7 @@ import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
+import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { DvpLegObservation, DvpTradeObservation } from "./observe";
 
@@ -28,9 +29,11 @@ const TOKEN_ACCOUNT_MIN_SIZE = 165;
 export interface DvpLegAddress {
   escrow: Address;
   tokenProgram: Address;
+  mint: Address;
 }
 
-const MISSING: DvpLegObservation = { exists: false, amount: 0n, frozen: false };
+const MISSING: DvpLegObservation = { exists: false, tampered: false };
+const TAMPERED: DvpLegObservation = { exists: false, tampered: true };
 
 /**
  * Decodes one escrow account, or reports it missing.
@@ -42,7 +45,8 @@ const MISSING: DvpLegObservation = { exists: false, amount: 0n, frozen: false };
  */
 function readLeg(
   account: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number],
-  leg: DvpLegAddress
+  leg: DvpLegAddress,
+  swapDvp: Address
 ): DvpLegObservation {
   if (!account.exists) {
     return MISSING;
@@ -50,19 +54,32 @@ function readLeg(
   if (account.programAddress !== leg.tokenProgram) {
     getLogger().warn(
       { escrow: account.address, owner: account.programAddress, expected: leg.tokenProgram },
-      "dvp reconcile: escrow address is not owned by its token program"
+      "dvp read-chain: escrow address is not owned by its token program"
     );
-    return MISSING;
+    return TAMPERED;
   }
   if (account.data.length < TOKEN_ACCOUNT_MIN_SIZE) {
     getLogger().warn(
       { escrow: account.address, size: account.data.length },
-      "dvp reconcile: escrow account is too small to be a token account"
+      "dvp read-chain: escrow account is too small to be a token account"
     );
-    return MISSING;
+    return TAMPERED;
   }
 
   const token = getTokenDecoder().decode(account.data);
+  if (token.mint !== leg.mint || token.owner !== swapDvp) {
+    getLogger().warn(
+      {
+        escrow: account.address,
+        mint: token.mint,
+        expectedMint: leg.mint,
+        owner: token.owner,
+        expectedOwner: swapDvp,
+      },
+      "dvp read-chain: escrow token account does not match its trade leg"
+    );
+    return TAMPERED;
+  }
   return {
     exists: true,
     // The raw u64. Scaling extensions change only the derived UI amount, never
@@ -78,16 +95,44 @@ function readLeg(
  * Exposed for the funding path, which needs a LIVE reading rather than the
  * reconciler's last sweep: that runs once a minute, so two funding requests
  * seconds apart would both believe the escrow was empty and between them
- * over-fund it.
+ * over-fund it. Null only when the account is genuinely absent; a tampered
+ * account is a conflict, never null.
  */
 export async function readEscrowState(
   rpc: SolanaRpc,
-  escrow: Address,
-  tokenProgram: Address
+  leg: DvpLegAddress,
+  swapDvp: Address,
+  tradeId: string
 ): Promise<{ amount: bigint; frozen: boolean } | null> {
-  const [account] = await fetchEncodedAccounts(rpc, [escrow]);
-  const leg = readLeg(account, { escrow, tokenProgram });
-  return leg.exists ? { amount: leg.amount, frozen: leg.frozen } : null;
+  const [account] = await fetchEncodedAccounts(rpc, [leg.escrow]);
+  const observed = readLeg(account, leg, swapDvp);
+  if (!observed.exists && observed.tampered) {
+    throw conflict(
+      `DvP trade ${tradeId}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+    );
+  }
+  return observed.exists ? { amount: observed.amount, frozen: observed.frozen } : null;
+}
+
+/**
+ * Fetches a trade and both escrows at one slot for callers that must verify
+ * terms before acting.
+ */
+export async function readDvpAccounts(
+  rpc: SolanaRpc,
+  swapDvp: Address,
+  legs: { a: DvpLegAddress; b: DvpLegAddress }
+): Promise<{
+  trade: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number];
+  legA: DvpLegObservation;
+  legB: DvpLegObservation;
+}> {
+  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
+  return {
+    trade: accounts[0],
+    legA: readLeg(accounts[1], legs.a, swapDvp),
+    legB: readLeg(accounts[2], legs.b, swapDvp),
+  };
 }
 
 /**
@@ -146,12 +191,12 @@ export async function readDvpTradeObservation(
   // reads them at different slots, and a settle landing between the two calls
   // would show a closed trade beside still-funded escrows: a half-settled state
   // this program cannot actually produce.
-  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
+  const accounts = await readDvpAccounts(rpc, swapDvp, legs);
 
   return {
-    tradeAccountExists: await readTradeAccountExists(accounts[0]),
-    legA: readLeg(accounts[1], legs.a),
-    legB: readLeg(accounts[2], legs.b),
+    tradeAccountExists: await readTradeAccountExists(accounts.trade),
+    legA: accounts.legA,
+    legB: accounts.legB,
     blockHeight,
     closeResolution: null,
   };

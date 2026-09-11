@@ -8,7 +8,19 @@
  * ordinary tenant isolation.
  */
 
+import { z } from "zod";
 import type { RepositoryDbClient } from "./base";
+
+const dvpLegFundingClaimRowSchema = z.object({
+  trade_id: z.string(),
+  side: z.enum(["a", "b"]),
+  organization_id: z.string(),
+  project_id: z.string(),
+  custody_wallet_id: z.string(),
+  signature: z.string(),
+  expiry_height: z.string(),
+  funding_tx: z.string().nullable(),
+});
 
 export interface DvpLegFundingClaim {
   tradeId: string;
@@ -86,15 +98,16 @@ export interface DvpLegFundingClaimRepository {
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
+  const parsed = dvpLegFundingClaimRowSchema.parse(row);
   return {
-    tradeId: row.trade_id as string,
-    side: row.side as "a" | "b",
-    organizationId: row.organization_id as string,
-    projectId: row.project_id as string,
-    custodyWalletId: row.custody_wallet_id as string,
-    signature: row.signature as string,
-    expiryHeight: row.expiry_height as string,
-    fundingTx: (row.funding_tx as string | null) ?? null,
+    tradeId: parsed.trade_id,
+    side: parsed.side,
+    organizationId: parsed.organization_id,
+    projectId: parsed.project_id,
+    custodyWalletId: parsed.custody_wallet_id,
+    signature: parsed.signature,
+    expiryHeight: parsed.expiry_height,
+    fundingTx: parsed.funding_tx,
   };
 }
 

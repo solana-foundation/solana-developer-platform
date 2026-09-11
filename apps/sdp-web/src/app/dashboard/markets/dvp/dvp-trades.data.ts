@@ -142,6 +142,7 @@ export interface DvpInboundLeg {
   amount: string;
   decimals: number | null;
   symbol: string | null;
+  name: string | null;
   escrow: string;
   observedAmount: string | null;
   frozen: boolean;

@@ -54,6 +54,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
     escrowA: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
     escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+    closeResolutionAttempts: 0,
+    closeResolutionAfter: null,
     tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     observedAt: new Date(NOW - 60_000).toISOString(),
@@ -71,7 +73,7 @@ describe("observeDvpTradeIfStale", () => {
       blockHeight: 100n,
       closeResolution: null,
     });
-    resolveDvpClose.mockResolvedValue(null);
+    resolveDvpClose.mockResolvedValue({ kind: "absent" });
     recordObservation.mockResolvedValue(trade({ status: "funded" }));
   });
 
@@ -138,8 +140,8 @@ describe("observeDvpTradeIfStale", () => {
   it("does not resolve a missing trade account when the close signature is already stored", async () => {
     readDvpTradeObservation.mockResolvedValue({
       tradeAccountExists: false,
-      legA: { exists: false },
-      legB: { exists: false },
+      legA: { exists: false, tampered: false },
+      legB: { exists: false, tampered: false },
       blockHeight: 100n,
       closeResolution: null,
     });

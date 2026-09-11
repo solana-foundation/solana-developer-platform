@@ -1,7 +1,7 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
   type AddressesByLookupTableAddress,
@@ -57,9 +57,6 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
     data: Uint8Array.from(Buffer.from(instruction.data, "base64")),
   } as unknown as Instruction;
 }
-
-// biome-ignore lint/security/noSecrets: public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /**
  * Bind the caller's idempotency key into the transaction plan.

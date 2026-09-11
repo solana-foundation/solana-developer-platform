@@ -12,22 +12,24 @@
  */
 
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
-import { type Address, assertIsSignature } from "@solana/kit";
+import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
-import { deriveDvpTradeState } from "@/services/dvp/observe";
+import { closeIsKnown, deriveDvpTradeState } from "@/services/dvp/observe";
 import { readDvpTradeObservation } from "@/services/dvp/read-chain";
 import type { Env } from "@/types/env";
 
 /**
- * Trades per tick. Each one costs a trade-account read plus a two-account batch,
- * so this is the RPC budget for the sweep, not a database concern.
+ * Trades per tick. Each costs one batch containing the trade and both escrows;
+ * vanished trades with unknown closes can additionally scan bounded history.
  */
 const BATCH_SIZE = 64;
+const CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES = 360;
+const MILLISECONDS_PER_MINUTE = 60_000;
 
 /**
  * Reconciles open DvP trades against the chain.
@@ -165,22 +167,59 @@ async function reconcileTrade(
 ): Promise<void> {
   const observation = await readDvpTradeObservation(
     rpc,
-    trade.swapDvp as Address,
+    trade.swapDvp,
     {
-      a: { escrow: trade.escrowA as Address, tokenProgram: trade.tokenProgramA as Address },
-      b: { escrow: trade.escrowB as Address, tokenProgram: trade.tokenProgramB as Address },
+      a: {
+        escrow: trade.escrowA,
+        tokenProgram: trade.tokenProgramA,
+        mint: trade.mintA,
+      },
+      b: {
+        escrow: trade.escrowB,
+        tokenProgram: trade.tokenProgramB,
+        mint: trade.mintB,
+      },
     },
     blockHeight
   );
-  // Two RPC reads per vanished trade, so only while the close is still unknown:
-  // once a close signature is on the row (ours or decoded) the answer is final,
-  // and closed trades stay in this sweep for a week to catch late deposits.
-  observation.closeResolution =
-    observation.tradeAccountExists || trade.closeSignature !== null
-      ? null
-      : await resolveDvpClose(rpc, trade.swapDvp);
+  // A vanished trade with an unknown close can cost up to 10 × 100 signature
+  // reads plus one transaction read per successful entry. The scan is bounded
+  // by the create signature, the created-at floor, and persisted backoff.
+  const now = Date.now();
+  if (
+    !observation.tradeAccountExists &&
+    !closeIsKnown(trade) &&
+    (trade.closeResolutionAfter === null || Date.parse(trade.closeResolutionAfter) <= now)
+  ) {
+    const lookup = await resolveDvpClose(
+      rpc,
+      trade.swapDvp,
+      trade.createSignature,
+      trade.createdAt
+    );
+    if (lookup.kind === "resolved") {
+      observation.closeResolution = lookup;
+    } else if (lookup.kind === "capped") {
+      const attempts = trade.closeResolutionAttempts + 1;
+      const delayMinutes = Math.min(
+        2 ** trade.closeResolutionAttempts,
+        CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES
+      );
+      const after = new Date(now + delayMinutes * MILLISECONDS_PER_MINUTE).toISOString();
+      await repository.deferCloseResolution({
+        id: trade.id,
+        expectedStatus: trade.status,
+        attempts,
+        after,
+      });
+      getLogger().warn(
+        { trade_id: trade.id, attempts, after },
+        "dvp reconcile: deferred capped close resolution"
+      );
+    }
+  }
 
-  const derived = deriveDvpTradeState(observation, trade, Date.now());
+  const derived = deriveDvpTradeState(observation, trade, now);
 
   const updated = await repository.recordObservation({
     id: trade.id,
@@ -217,9 +256,9 @@ async function reconcileTrade(
     getLogger().warn(
       {
         tradeId: trade.id,
-        escrowA: observation.legA.amount.toString(),
+        escrowA: observation.legA.exists ? observation.legA.amount.toString() : null,
         targetA: trade.amountA,
-        escrowB: observation.legB.amount.toString(),
+        escrowB: observation.legB.exists ? observation.legB.amount.toString() : null,
         targetB: trade.amountB,
       },
       "dvp reconcile: escrow holds more than its target; settle refunds the surplus, which can revert the whole settlement on a transfer-hook mint"

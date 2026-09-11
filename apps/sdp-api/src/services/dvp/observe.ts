@@ -14,13 +14,16 @@ import type { DvpTradeStatus } from "@/db/repositories";
 import type { DvpCloseResolution } from "./closing-transaction";
 
 /** One escrow, as read. `exists: false` means the account is not on chain. */
-export interface DvpLegObservation {
-  exists: boolean;
-  /** Raw base units. NOT a UI amount — scaling extensions never touch this. */
-  amount: bigint;
-  /** A frozen escrow bounces incoming transfers. Blocked, not merely unpaid. */
-  frozen: boolean;
-}
+export type DvpLegObservation =
+  | { exists: false; tampered: false }
+  | { exists: false; tampered: true }
+  | {
+      exists: true;
+      /** Raw base units. NOT a UI amount — scaling extensions never touch this. */
+      amount: bigint;
+      /** A frozen escrow bounces incoming transfers. Blocked, not merely unpaid. */
+      frozen: boolean;
+    };
 
 export interface DvpTradeObservation {
   /** Whether the SwapDvp account is still on chain and passed verification. */
@@ -48,6 +51,19 @@ export interface DvpTradeExpectation {
   createSignature: string | null;
   /** Claim creation time used only to age unsigned orphaned claims. */
   createdAt: string;
+}
+
+/**
+ * Whether a trade's close needs no further decoding.
+ *
+ * True once a close signature is stored AND the status says which close it was.
+ * A `closed_unknown` row with a signature is not done: the decode is what lifts
+ * it to settled, cancelled or rejected.
+ */
+export function closeIsKnown(
+  trade: Pick<DvpTradeExpectation, "status"> & { closeSignature: string | null }
+): boolean {
+  return trade.closeSignature !== null && trade.status !== "closed_unknown";
 }
 
 export interface DvpTradeDerivation {
@@ -82,10 +98,11 @@ function deriveMissingTradeAccountStatus(
   nowMs: number
 ): DvpTradeStatus {
   // A decoded close beats every inference below: the transaction that closed
-  // the account says exactly which terminal path it took.
+  // the account says exactly which terminal path it took. It also lifts a
+  // `closed_unknown` written by an earlier tick that found no history yet.
   if (
     observation.closeResolution !== null &&
-    (trade.status === "creating" || CLOSABLE.has(trade.status))
+    (trade.status === "creating" || trade.status === "closed_unknown" || CLOSABLE.has(trade.status))
   ) {
     return observation.closeResolution.status;
   }

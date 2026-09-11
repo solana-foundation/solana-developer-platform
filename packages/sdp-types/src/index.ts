@@ -31,5 +31,6 @@ export * from "./sessions";
 export * from "./site";
 export * from "./tokens";
 export * from "./veda-programs";
+export * from "./well-known-programs";
 export * from "./well-known-tokens";
 export * from "./workflows";

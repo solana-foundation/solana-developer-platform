@@ -38,8 +38,6 @@ import {
   observeDvpTradeWithoutRecording,
 } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
-import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight";
-import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
@@ -69,6 +67,7 @@ interface LegInput {
   observedAmount: string | null;
   decimals: number | null;
   symbol: string | null;
+  name: string | null;
   imageUrl: string | null;
   frozen: boolean | null;
   outcome: ReturnType<typeof deriveDvpLegOutcome>;
@@ -198,6 +197,7 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     decimals: leg.decimals,
     /** The mint's symbol, or null when it carries no metadata. Never invented. */
     symbol: leg.symbol,
+    name: leg.name,
     /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
     imageUrl: leg.imageUrl,
     /** Pay this address to fund the leg. */
@@ -247,6 +247,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           observedAmount: row.escrowAAmount,
           decimals: row.decimalsA,
           symbol: row.symbolA,
+          name: row.nameA,
           imageUrl: mintAImage === undefined ? null : mintAImage,
           frozen: row.escrowAFrozen,
           outcome: deriveDvpLegOutcome(row, "a"),
@@ -269,6 +270,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           observedAmount: row.escrowBAmount,
           decimals: row.decimalsB,
           symbol: row.symbolB,
+          name: row.nameB,
           imageUrl: mintBImage === undefined ? null : mintBImage,
           frozen: row.escrowBFrozen,
           outcome: deriveDvpLegOutcome(row, "b"),
@@ -495,7 +497,6 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     tradeId: resolved.trade.id,
     action,
     signature: result.signature,
-    createdAccounts: result.createdAccounts,
   });
 };
 
@@ -522,7 +523,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${body.side} party address`
     );
   }
-  const { side } = resolved.funding;
+  const { side, approvedAmount } = resolved.funding;
   const partyAddress = side === "a" ? trade.userA : trade.userB;
 
   // PRE-BROADCAST RE-READ — the ticket's authorization invariant: re-derive
@@ -554,6 +555,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
     custodyWalletId: rereadWalletId,
     organizationId: auth.organizationId,
     projectId,
+    approvedAmount,
   });
 
   await observeDvpTradeNow(c.env, trade, result.signature);
@@ -667,38 +669,6 @@ export const listTrades = async (c: AppContext) => {
   });
 };
 
-/**
- * Whether the settlement authority can pay for the close this trade will need.
- * Read on the detail view rather than left for the attempt (the failure is
- * silent until paid for). Never fatal: an RPC that will not answer must not
- * take the trade with it.
- */
-async function readSettlementReadiness(
-  c: AppContext,
-  trade: DvpTradeRow
-): Promise<{ address: string; balance: string; required: string; funded: boolean } | null> {
-  try {
-    const settlement = await readDvpSettlementWallet(c.env, {
-      organizationId: trade.organizationId,
-      projectId: trade.projectId,
-    });
-    if (!settlement) {
-      return null;
-    }
-    const rpc = solanaRpc.createRpc(c.env);
-    // Settlement's worst case (4 accounts) is the number worth quoting: the ceiling once beats more mid-flow.
-    const funding = await findSettlementFundingShortfall(rpc, settlement.address, 4);
-    return {
-      address: settlement.address,
-      balance: funding.balance.toString(),
-      required: funding.required.toString(),
-      funded: funding.shortfall === 0n,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export const getTrade = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -726,14 +696,12 @@ export const getTrade = async (c: AppContext) => {
   // every few seconds, closed ones once a minute for late deposits.
   const observed = await observeDvpTradeIfStale(c.env, trade);
 
-  const [callerAddresses, counterpartyLabels, fundingClaims, settlementReadiness, mintImages] =
-    await Promise.all([
-      callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
-      readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
-      readFundingClaims(c.env, observed.id),
-      readSettlementReadiness(c, observed),
-      readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
-    ]);
+  const [callerAddresses, counterpartyLabels, fundingClaims, mintImages] = await Promise.all([
+    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+    readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
+    readFundingClaims(c.env, observed.id),
+    readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
+  ]);
   return success(c, {
     trade: {
       ...toTradeResponse(observed, {
@@ -742,7 +710,6 @@ export const getTrade = async (c: AppContext) => {
         fundingClaims,
         mintImages,
       }),
-      settlementReadiness,
     },
   });
 };
@@ -771,9 +738,8 @@ async function resolveYourSide(
 
 /**
  * The same page, for a party who is not the trade's author: the detail
- * shape with the creating org's facts (attribution, funding claims,
- * settlement readiness) withheld. 404 when they are not a party, matching
- * the read above.
+ * shape with the creating org's facts (attribution and funding claims)
+ * withheld. 404 when they are not a party, matching the read above.
  */
 async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   const auth = getAuth(c);
@@ -833,7 +799,6 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
       }),
       // Theirs, not ours: a party gets the trade without the creator's fields.
       refString: null,
-      settlementReadiness: null,
       /** Which leg is the reader's, so the page can say so. */
       yourSide: fundable.side,
     },

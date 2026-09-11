@@ -11,26 +11,43 @@
  * (trade, side) and owned by the organization whose wallet is paying.
  */
 
-import { address } from "@solana/kit";
+import { SwapDvpVerificationError } from "@sdp/dvp";
+import {
+  address,
+  none,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+  some,
+} from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import type { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const beginApprovedWalletOperationEffect = vi.hoisted(() => vi.fn());
 const readEscrowState = vi.hoisted(() => vi.fn());
+const readDvpAccounts = vi.hoisted(() => vi.fn());
+const verifySwapDvpAccount = vi.hoisted(() => vi.fn());
+const decodeSwapDvpChecked = vi.hoisted(() => vi.fn());
 const readMintDecimals = vi.hoisted(() => vi.fn());
 const claimFunding = vi.hoisted(() => vi.fn());
 const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
+const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   beginApprovedWalletOperationEffect,
 }));
-vi.mock("./read-chain", () => ({ readEscrowState }));
+vi.mock("./read-chain", () => ({ readEscrowState, readDvpAccounts }));
+vi.mock("@sdp/dvp", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/dvp")>()),
+  verifySwapDvpAccount,
+  decodeSwapDvpChecked,
+}));
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({
@@ -40,6 +57,10 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   }),
 }));
 vi.mock("./mints", () => ({ readMintDecimals }));
+vi.mock("@solana-program/token-2022", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
+  fetchMaybeToken,
+}));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -71,6 +92,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     decimalsB: 6,
     symbolA: "ATD",
     symbolB: "USDC",
+    nameA: "Acme Treasury Debt",
+    nameB: "USD Coin",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1900000000",
@@ -89,6 +112,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
+    closeResolutionAttempts: 0,
+    closeResolutionAfter: null,
     escrowAAmount: null,
     escrowBAmount: null,
     escrowAPeakAmount: null,
@@ -107,6 +132,7 @@ const FUNDER_A = {
   custodyWalletId: "cwlt_a",
   organizationId: "org_x",
   projectId: "prj_x",
+  approvedAmount: 1000n,
 };
 
 const context = { env } as never;
@@ -116,7 +142,33 @@ describe("fundDvpTradeLeg", () => {
     vi.clearAllMocks();
     createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
+    readDvpAccounts.mockImplementation(async () => {
+      const state = await readEscrowState();
+      const leg =
+        state === null
+          ? { exists: false, tampered: false }
+          : { exists: true, amount: state.amount, frozen: state.frozen };
+      return { trade: { address: trade().swapDvp, exists: true }, legA: leg, legB: leg };
+    });
+    verifySwapDvpAccount.mockResolvedValue({ address: trade().swapDvp });
+    decodeSwapDvpChecked.mockImplementation(() => ({
+      data: {
+        userA: trade().userA,
+        userB: trade().userB,
+        mintA: trade().mintA,
+        mintB: trade().mintB,
+        amountA: BigInt(trade().amountA),
+        amountB: BigInt(trade().amountB),
+        expiryTimestamp: BigInt(trade().expiryTimestamp),
+        userASettlementDestination: trade().userASettlementDestination,
+        userBSettlementDestination: trade().userBSettlementDestination,
+        settlementAuthority: trade().settlementAuthority,
+        nonce: BigInt(trade().nonce),
+        earliestSettlementTimestamp: none(),
+      },
+    }));
     readMintDecimals.mockResolvedValue(6);
+    fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
     beginApprovedWalletOperationEffect.mockResolvedValue(undefined);
     sendTransaction.mockResolvedValue("sig");
     claimFunding.mockResolvedValue(true);
@@ -139,6 +191,7 @@ describe("fundDvpTradeLeg", () => {
       custodyWalletId: "cwlt_b",
       organizationId: "org_x",
       projectId: "prj_x",
+      approvedAmount: 2000n,
     });
 
     expect(result.leg).toBe("b");
@@ -215,12 +268,99 @@ describe("fundDvpTradeLeg", () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  it("funds an escrow that does not exist yet", async () => {
+  it("refuses a fundable leg whose escrow is missing", async () => {
     readEscrowState.mockResolvedValue(null);
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).resolves.toMatchObject({
-      amount: "1000",
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
+      /escrow for this leg is missing; nothing was sent/
+    );
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns a conflict before claiming a tampered escrow", async () => {
+    readDvpAccounts.mockResolvedValue({
+      trade: { address: trade().swapDvp, exists: true },
+      legA: { exists: false, tampered: true },
+      legB: { exists: true, amount: 0n, frozen: false },
     });
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining(
+        "the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it"
+      ),
+    });
+    expect(claimFunding).not.toHaveBeenCalled();
+  });
+
+  it("refuses a trade that is no longer verifiable on chain", async () => {
+    verifySwapDvpAccount.mockRejectedValue(
+      new SwapDvpVerificationError("there is no SwapDvp at that address")
+    );
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
+      /trade is no longer on chain; nothing was sent/
+    );
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the live trade terms do not match the recorded terms", async () => {
+    decodeSwapDvpChecked.mockImplementation(() => ({
+      data: {
+        userA: trade().userA,
+        userB: trade().userB,
+        mintA: trade().mintA,
+        mintB: trade().mintB,
+        amountA: 9999n,
+        amountB: BigInt(trade().amountB),
+        expiryTimestamp: BigInt(trade().expiryTimestamp),
+        userASettlementDestination: trade().userASettlementDestination,
+        userBSettlementDestination: trade().userBSettlementDestination,
+        settlementAuthority: trade().settlementAuthority,
+        nonce: BigInt(trade().nonce),
+        earliestSettlementTimestamp: none(),
+      },
+    }));
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
+      /on-chain trade does not match the recorded terms; nothing was sent/
+    );
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // Not a PDA seed either: a re-created trade can allow settlement earlier
+  // than the recorded deal, and only the terms check would notice.
+  it("refuses when the live trade carries an earliest settlement time the deal did not", async () => {
+    decodeSwapDvpChecked.mockImplementation(() => ({
+      data: {
+        userA: trade().userA,
+        userB: trade().userB,
+        mintA: trade().mintA,
+        mintB: trade().mintB,
+        amountA: BigInt(trade().amountA),
+        amountB: BigInt(trade().amountB),
+        expiryTimestamp: BigInt(trade().expiryTimestamp),
+        userASettlementDestination: trade().userASettlementDestination,
+        userBSettlementDestination: trade().userBSettlementDestination,
+        settlementAuthority: trade().settlementAuthority,
+        nonce: BigInt(trade().nonce),
+        earliestSettlementTimestamp: some(1n),
+      },
+    }));
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
+      /on-chain trade does not match the recorded terms; nothing was sent/
+    );
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the live shortfall exceeds the approved amount", async () => {
+    readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
+
+    await expect(
+      fundDvpTradeLeg(context, trade(), { ...FUNDER_A, approvedAmount: 100n })
+    ).rejects.toThrow(/shortfall grew to 1000 after approval for 100; re-authorize/);
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses a trade that can no longer be funded", async () => {
@@ -285,6 +425,64 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(/could not be read/);
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses before claiming when the funding wallet has no source token account", async () => {
+    const signer = await generateKeyPairSigner();
+    createOrgSignerForCustodyWallet.mockResolvedValue(signer);
+    fetchMaybeToken.mockResolvedValue({ address: signer.address, exists: false });
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: expect.stringContaining(signer.address),
+    } satisfies Partial<AppError>);
+
+    expect(claimFunding).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses before claiming when the source balance is below the shortfall", async () => {
+    fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 250n } });
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: expect.stringMatching(/holds 0\.00025 of the 0\.001 /),
+    } satisfies Partial<AppError>);
+
+    expect(claimFunding).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("maps a preflight rejection and releases the funding claim", async () => {
+    sendTransaction.mockRejectedValue(
+      new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+        accounts: null,
+        fee: null,
+        loadedAccountsDataSize: null,
+        loadedAddresses: null,
+        logs: [
+          "Program log: Instruction: TransferChecked",
+          "Program log: Error: IncorrectProgramId",
+          `Program ${T22} failed: incorrect program id for instruction`,
+        ],
+        postBalances: null,
+        postTokenBalances: null,
+        preBalances: null,
+        preTokenBalances: null,
+        replacementBlockhash: null,
+        returnData: null,
+        unitsConsumed: null,
+      })
+    );
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+      statusCode: 400,
+      message: expect.stringContaining("IncorrectProgramId"),
+    } satisfies Partial<AppError>);
+    expect(releaseFunding).toHaveBeenCalledTimes(1);
   });
 
   // The escrow ATA takes a transfer from ANYONE, and resolving a signer at the
@@ -364,6 +562,7 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_b_of_org_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        approvedAmount: 2000n,
       });
 
       expect(claimFunding).toHaveBeenCalledWith(
@@ -385,12 +584,14 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_a",
         organizationId: "org_a",
         projectId: "prj_a",
+        approvedAmount: 1000n,
       });
       await fundDvpTradeLeg(context, trade(), {
         side: "b",
         custodyWalletId: "cwlt_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        approvedAmount: 2000n,
       });
 
       expect(claimFunding).toHaveBeenCalledTimes(2);
@@ -401,19 +602,6 @@ describe("fundDvpTradeLeg", () => {
       expect(claimFunding).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({ side: "b", organizationId: "org_b", custodyWalletId: "cwlt_b" })
-      );
-    });
-
-    // The second fund of the SAME side while a claim is live is the one case
-    // that must conflict — the claim CAS is the serialization.
-    it("is refused for the same side while a claim is live", async () => {
-      claimFunding.mockResolvedValue(false);
-
-      await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-        /already being funded/
-      );
-      expect(claimFunding).toHaveBeenCalledWith(
-        expect.objectContaining({ tradeId: "dvp_fund_test", side: "a" })
       );
     });
   });
@@ -432,10 +620,12 @@ describe("readDvpLegShortfall", () => {
     await expect(readDvpLegShortfall(env, trade(), "a")).resolves.toBe(600n);
   });
 
-  it("reports the full target when nothing has been deposited", async () => {
+  it("refuses to invent a zero balance when the escrow is missing", async () => {
     readEscrowState.mockResolvedValue(null);
 
-    await expect(readDvpLegShortfall(env, trade(), "a")).resolves.toBe(1000n);
+    await expect(readDvpLegShortfall(env, trade(), "a")).rejects.toThrow(
+      /escrow for this leg is missing; nothing was sent/
+    );
   });
 
   it("reads the side asked for, not always leg A", async () => {

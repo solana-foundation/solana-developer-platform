@@ -34,8 +34,12 @@ export interface DvpTradeRow {
   /** Each leg's token symbol from mint metadata, or null when it carries none. */
   symbolA: string | null;
   symbolB: string | null;
+  nameA: string | null;
+  nameB: string | null;
   /** The transaction that settled or cancelled the trade. Null while open. */
   closeSignature: Signature | null;
+  closeResolutionAttempts: number;
+  closeResolutionAfter: string | null;
 
   amountA: string;
   amountB: string;
@@ -96,6 +100,8 @@ export type DvpTradeInsert = Omit<
   DvpTradeRow,
   // Written by `recordClose`, never at insert: a trade is not born closed.
   | "closeSignature"
+  | "closeResolutionAttempts"
+  | "closeResolutionAfter"
   | "status"
   | "observedAt"
   | "createdAt"
@@ -216,6 +222,13 @@ export interface DvpTradeRepository {
    * observations never move it.
    */
   recordObservation(input: DvpTradeObservationUpdate): Promise<DvpTradeRow | null>;
+  /** Defers the next close-history scan; false when the row no longer holds the expected status. */
+  deferCloseResolution(input: {
+    id: string;
+    expectedStatus: DvpTradeStatus;
+    attempts: number;
+    after: string;
+  }): Promise<boolean>;
   /**
    * The trade a previous request with this key created, or null.
    *

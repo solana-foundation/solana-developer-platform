@@ -1,4 +1,6 @@
+import { DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address, type Signature, signature } from "@solana/kit";
+import { z } from "zod";
 import type { AppDb } from "@/db";
 import type { DatabaseExecutor } from "@/db/client";
 import type {
@@ -8,23 +10,56 @@ import type {
   DvpTradeRepository,
   DvpTradeRow,
   DvpTradeScope,
-  DvpTradeStatus,
 } from "./dvp-trade.repository";
 
-/**
- * Asserts a DB column is a string, throwing if it is missing.
- *
- * Used for plain-string columns only. Address and signature columns are branded
- * with {@link address} / {@link signature} directly — those throw on malformed
- * values, which is correct: a bad value in an address column is DB corruption
- * and must fail loudly, not flow.
- */
-function assertString(value: unknown, field: string): string {
-  if (typeof value !== "string") {
-    throw new Error(`DvP trade ${field} is missing`);
-  }
-  return value;
-}
+const dvpTradeRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  swap_dvp: z.string(),
+  settlement_authority: z.string(),
+  user_a: z.string(),
+  user_b: z.string(),
+  mint_a: z.string(),
+  mint_b: z.string(),
+  nonce: z.string(),
+  token_program_a: z.string(),
+  token_program_b: z.string(),
+  decimals_a: z.number().int().nullable(),
+  decimals_b: z.number().int().nullable(),
+  symbol_a: z.string().nullable(),
+  symbol_b: z.string().nullable(),
+  name_a: z.string().nullable(),
+  name_b: z.string().nullable(),
+  amount_a: z.string(),
+  amount_b: z.string(),
+  expiry_timestamp: z.string(),
+  earliest_settlement_timestamp: z.string().nullable(),
+  user_a_settlement_destination: z.string(),
+  user_b_settlement_destination: z.string(),
+  ref_string: z.string().nullable(),
+  escrow_a: z.string(),
+  escrow_b: z.string(),
+  counterparty_account_id_a: z.string().nullable(),
+  counterparty_account_id_b: z.string().nullable(),
+  status: z.enum(DVP_TRADE_STATUSES),
+  observed_at: z.string().nullable(),
+  idempotency_key: z.string().nullable(),
+  idempotency_fingerprint: z.string().nullable(),
+  create_signature: z.string().nullable(),
+  create_last_valid_block_height: z.string().nullable(),
+  close_signature: z.string().nullable(),
+  close_resolution_attempts: z.number().int(),
+  close_resolution_after: z.string().nullable(),
+  escrow_a_amount: z.string().nullable(),
+  escrow_b_amount: z.string().nullable(),
+  escrow_a_peak_amount: z.string().nullable(),
+  escrow_b_peak_amount: z.string().nullable(),
+  escrow_a_frozen: z.boolean().nullable(),
+  escrow_b_frozen: z.boolean().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
 
 /** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
 function escapeLikePattern(value: string): string {
@@ -32,85 +67,75 @@ function escapeLikePattern(value: string): string {
 }
 
 function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
+  const parsed = dvpTradeRowSchema.parse(row);
   return {
-    id: assertString(row.id, "id"),
-    organizationId: assertString(row.organization_id, "organization_id"),
-    projectId: assertString(row.project_id, "project_id"),
-    swapDvp: address(assertString(row.swap_dvp, "swap_dvp")),
+    id: parsed.id,
+    organizationId: parsed.organization_id,
+    projectId: parsed.project_id,
+    swapDvp: address(parsed.swap_dvp),
 
-    settlementAuthority: address(assertString(row.settlement_authority, "settlement_authority")),
-    userA: address(assertString(row.user_a, "user_a")),
-    userB: address(assertString(row.user_b, "user_b")),
-    mintA: address(assertString(row.mint_a, "mint_a")),
-    mintB: address(assertString(row.mint_b, "mint_b")),
+    settlementAuthority: address(parsed.settlement_authority),
+    userA: address(parsed.user_a),
+    userB: address(parsed.user_b),
+    mintA: address(parsed.mint_a),
+    mintB: address(parsed.mint_b),
     // Stays a string all the way out. See the note in dvp-trade.repository.ts.
-    nonce: assertString(row.nonce, "nonce"),
+    nonce: parsed.nonce,
 
-    tokenProgramA: address(assertString(row.token_program_a, "token_program_a")),
-    decimalsA: typeof row.decimals_a === "number" ? row.decimals_a : null,
-    decimalsB: typeof row.decimals_b === "number" ? row.decimals_b : null,
-    closeSignature: typeof row.close_signature === "string" ? signature(row.close_signature) : null,
-    symbolA: typeof row.symbol_a === "string" ? row.symbol_a : null,
-    symbolB: typeof row.symbol_b === "string" ? row.symbol_b : null,
-    tokenProgramB: address(assertString(row.token_program_b, "token_program_b")),
+    tokenProgramA: address(parsed.token_program_a),
+    decimalsA: parsed.decimals_a,
+    decimalsB: parsed.decimals_b,
+    closeSignature: parsed.close_signature === null ? null : signature(parsed.close_signature),
+    closeResolutionAttempts: parsed.close_resolution_attempts,
+    closeResolutionAfter: parsed.close_resolution_after,
+    symbolA: parsed.symbol_a,
+    symbolB: parsed.symbol_b,
+    nameA: parsed.name_a,
+    nameB: parsed.name_b,
+    tokenProgramB: address(parsed.token_program_b),
 
-    amountA: assertString(row.amount_a, "amount_a"),
-    amountB: assertString(row.amount_b, "amount_b"),
-    expiryTimestamp: assertString(row.expiry_timestamp, "expiry_timestamp"),
-    earliestSettlementTimestamp:
-      typeof row.earliest_settlement_timestamp === "string"
-        ? row.earliest_settlement_timestamp
-        : null,
-    userASettlementDestination: address(
-      assertString(row.user_a_settlement_destination, "user_a_settlement_destination")
-    ),
-    userBSettlementDestination: address(
-      assertString(row.user_b_settlement_destination, "user_b_settlement_destination")
-    ),
-    refString: typeof row.ref_string === "string" ? row.ref_string : null,
+    amountA: parsed.amount_a,
+    amountB: parsed.amount_b,
+    expiryTimestamp: parsed.expiry_timestamp,
+    earliestSettlementTimestamp: parsed.earliest_settlement_timestamp,
+    userASettlementDestination: address(parsed.user_a_settlement_destination),
+    userBSettlementDestination: address(parsed.user_b_settlement_destination),
+    refString: parsed.ref_string,
 
-    escrowA: address(assertString(row.escrow_a, "escrow_a")),
-    escrowB: address(assertString(row.escrow_b, "escrow_b")),
+    escrowA: address(parsed.escrow_a),
+    escrowB: address(parsed.escrow_b),
 
-    counterpartyAccountIdA:
-      typeof row.counterparty_account_id_a === "string" ? row.counterparty_account_id_a : null,
-    counterpartyAccountIdB:
-      typeof row.counterparty_account_id_b === "string" ? row.counterparty_account_id_b : null,
+    counterpartyAccountIdA: parsed.counterparty_account_id_a,
+    counterpartyAccountIdB: parsed.counterparty_account_id_b,
 
-    status: row.status as DvpTradeStatus,
-    observedAt: typeof row.observed_at === "string" ? row.observed_at : null,
-    idempotencyKey: typeof row.idempotency_key === "string" ? row.idempotency_key : null,
-    idempotencyFingerprint:
-      typeof row.idempotency_fingerprint === "string" ? row.idempotency_fingerprint : null,
-    createSignature:
-      typeof row.create_signature === "string" ? signature(row.create_signature) : null,
-    createLastValidBlockHeight:
-      typeof row.create_last_valid_block_height === "string"
-        ? row.create_last_valid_block_height
-        : null,
-    escrowAAmount: typeof row.escrow_a_amount === "string" ? row.escrow_a_amount : null,
-    escrowBAmount: typeof row.escrow_b_amount === "string" ? row.escrow_b_amount : null,
-    escrowAPeakAmount:
-      typeof row.escrow_a_peak_amount === "string" ? row.escrow_a_peak_amount : null,
-    escrowBPeakAmount:
-      typeof row.escrow_b_peak_amount === "string" ? row.escrow_b_peak_amount : null,
-    escrowAFrozen: typeof row.escrow_a_frozen === "boolean" ? row.escrow_a_frozen : null,
-    escrowBFrozen: typeof row.escrow_b_frozen === "boolean" ? row.escrow_b_frozen : null,
-    createdAt: assertString(row.created_at, "created_at"),
-    updatedAt: assertString(row.updated_at, "updated_at"),
+    status: parsed.status,
+    observedAt: parsed.observed_at,
+    idempotencyKey: parsed.idempotency_key,
+    idempotencyFingerprint: parsed.idempotency_fingerprint,
+    createSignature: parsed.create_signature === null ? null : signature(parsed.create_signature),
+    createLastValidBlockHeight: parsed.create_last_valid_block_height,
+    escrowAAmount: parsed.escrow_a_amount,
+    escrowBAmount: parsed.escrow_b_amount,
+    escrowAPeakAmount: parsed.escrow_a_peak_amount,
+    escrowBPeakAmount: parsed.escrow_b_peak_amount,
+    escrowAFrozen: parsed.escrow_a_frozen,
+    escrowBFrozen: parsed.escrow_b_frozen,
+    createdAt: parsed.created_at,
+    updatedAt: parsed.updated_at,
   };
 }
 
 const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
          token_program_a, token_program_b,
-         decimals_a, decimals_b, symbol_a, symbol_b,
+         decimals_a, decimals_b, symbol_a, symbol_b, name_a, name_b,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
          status, observed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
+         close_resolution_attempts, close_resolution_after,
          escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
          escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
@@ -155,14 +180,14 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               id, organization_id, project_id, swap_dvp,
               settlement_authority, user_a, user_b, mint_a, mint_b, nonce,
               token_program_a, token_program_b,
-              decimals_a, decimals_b, symbol_a, symbol_b,
+              decimals_a, decimals_b, symbol_a, symbol_b, name_a, name_b,
               amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
               idempotency_key, idempotency_fingerprint,
               create_signature, create_last_valid_block_height
             ) VALUES (
-              ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
               ?, ?, ?, ?,
@@ -191,6 +216,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         row.decimalsB,
         row.symbolA,
         row.symbolB,
+        row.nameA,
+        row.nameB,
         row.amountA,
         row.amountB,
         row.expiryTimestamp,
@@ -315,6 +342,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   escrow_a_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
                   escrow_b_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
                   close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
+                  close_resolution_attempts = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN 0 ELSE close_resolution_attempts END,
+                  close_resolution_after = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN NULL ELSE close_resolution_after END,
                   closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN sdp_iso_now() ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
@@ -334,6 +363,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.escrowBAmount,
           input.escrowBAmount,
           input.closeSignature,
+          input.closeSignature,
+          input.status,
+          input.closeSignature,
+          input.status,
           input.status,
           input.observedAt,
           input.id,
@@ -341,6 +374,21 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         )
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
+    },
+
+    async deferCloseResolution(input) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET close_resolution_attempts = ?,
+                  close_resolution_after = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND status = ?
+            RETURNING id`
+        )
+        .bind(input.attempts, input.after, input.id, input.expectedStatus)
+        .first<Record<string, unknown>>();
+      return row !== null && row !== undefined;
     },
 
     async getById(scope: DvpTradeScope, id: string) {

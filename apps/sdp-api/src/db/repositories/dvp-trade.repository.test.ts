@@ -53,6 +53,8 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     decimalsB: 6,
     symbolA: "ATD",
     symbolB: "USDC",
+    nameA: "Acme Treasury Debt",
+    nameB: "USD Coin",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",
@@ -153,7 +155,13 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(created.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
     expect(created.counterpartyAccountIdA).toBeNull();
     expect(created.counterpartyAccountIdB).toBeNull();
+    expect(created.nameA).toBe("Acme Treasury Debt");
+    expect(created.nameB).toBe("USD Coin");
     expect(created.createdAt).toBeTruthy();
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      nameA: "Acme Treasury Debt",
+      nameB: "USD Coin",
+    });
   });
 
   it("attaches a create signature exactly once", async () => {
@@ -274,6 +282,66 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(first?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAAmount).toBe("100");
+  });
+
+  it("defers close resolution with a status compare-and-swap", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+    const after = "2026-09-11T02:00:00.000Z";
+
+    await expect(
+      repo.deferCloseResolution({
+        id: created.id,
+        expectedStatus: "creating",
+        attempts: 1,
+        after,
+      })
+    ).resolves.toBe(false);
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      closeResolutionAttempts: 0,
+      closeResolutionAfter: null,
+    });
+
+    await expect(
+      repo.deferCloseResolution({
+        id: created.id,
+        expectedStatus: "created",
+        attempts: 1,
+        after,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      closeResolutionAttempts: 1,
+      closeResolutionAfter: after,
+    });
+  });
+
+  it("resets close-resolution backoff when a known close is recorded", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+    await repo.deferCloseResolution({
+      id: created.id,
+      expectedStatus: "created",
+      attempts: 3,
+      after: "2026-09-11T04:00:00.000Z",
+    });
+
+    const observed = await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "created",
+      status: "settled",
+      escrowAAmount: null,
+      escrowBAmount: null,
+      escrowAFrozen: null,
+      escrowBFrozen: null,
+      closeSignature: CLOSE_SIGNATURE,
+      observedAt: "2026-09-11T00:00:00.000Z",
+    });
+
+    expect(observed).toMatchObject({
+      closeResolutionAttempts: 0,
+      closeResolutionAfter: null,
+    });
   });
 
   it("sets the close time on the first closed observation and never moves it", async () => {

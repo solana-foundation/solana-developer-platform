@@ -7,6 +7,8 @@
  * without scrolling past the other seven.
  */
 
+import { SegmentedControl } from "@solana/design-system/segmented-control";
+import { HashIcon, UsersIcon, WalletIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { TokenMark } from "@/components/token-mark";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -17,7 +19,11 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import { toBaseUnits } from "./dvp-amount";
-import type { DvpCreateCounterpartyAccount, DvpCreateOption } from "./dvp-create.data";
+import type {
+  DvpCreateCounterpartyAccount,
+  DvpCreateOption,
+  DvpCreateWallet,
+} from "./dvp-create.data";
 import { CUSTOM } from "./use-dvp-create-form";
 import type { DvpPayout } from "./use-dvp-destinations";
 import type { DvpPartySlot } from "./use-dvp-parties";
@@ -110,7 +116,8 @@ export function MintField({
   const comboOptions: ComboboxOption[] = [
     ...options.map((option) => ({
       value: option.mint,
-      label: option.label,
+      label: option.name === null ? option.label : option.name,
+      description: option.name === null ? undefined : option.label,
       icon: <TokenMark mint={option.mint} size="xs" symbol={option.label} />,
     })),
     // The pasted mint stays in the list so the trigger can name it; it is
@@ -260,34 +267,6 @@ export function AmountField({
   );
 }
 
-/** The combobox value for a slot: the reference kind, a colon, its id. Base58 never contains a colon, so the first one always splits cleanly. */
-function slotValue(slot: DvpPartySlot): string | null {
-  switch (slot.mode) {
-    case "wallet":
-      return slot.walletId ? `wallet:${slot.walletId}` : null;
-    case "counterparty":
-      return slot.counterpartyAccountId ? `counterparty:${slot.counterpartyAccountId}` : null;
-    case "address":
-      return slot.address ? `address:${slot.address}` : null;
-    default: {
-      const exhausted: never = slot;
-      return exhausted;
-    }
-  }
-}
-
-/**
- * One party slot, as a single searchable combobox.
- *
- * The three reference kinds live in one list: custody wallets and registered
- * counterparties are searchable options, and a pasted base58 address surfaces
- * as an option of its own — an invalid paste simply never becomes selectable,
- * so the slot cannot hold a malformed address.
- *
- * Controlled: the slot value comes from the form's zod values and every change
- * replaces the whole slot object, so a slot never holds a value from a
- * reference kind it is not currently showing.
- */
 export function PartySlotPicker({
   counterpartyAccounts,
   error,
@@ -295,6 +274,7 @@ export function PartySlotPicker({
   label,
   onChange,
   slot,
+  wallets,
 }: {
   counterpartyAccounts: DvpCreateCounterpartyAccount[];
   /** A correction shown under the picker, or null when the slot is fine. */
@@ -303,62 +283,102 @@ export function PartySlotPicker({
   label: string;
   onChange: (next: DvpPartySlot) => void;
   slot: DvpPartySlot;
+  wallets: DvpCreateWallet[];
 }) {
   const t = useTranslations();
+  const formatError =
+    slot.mode === "address" && slot.address.length > 0 && !BASE58_ADDRESS.test(slot.address)
+      ? t("DashboardMarkets.dvp.partyAddressInvalid")
+      : null;
+  const pickerError = formatError === null ? error : formatError;
+  let control: ReactNode;
+  switch (slot.mode) {
+    case "wallet":
+      control = (
+        <Combobox
+          hideLabel
+          icon={<WalletIcon />}
+          label={label}
+          onChange={(walletId) => onChange({ mode: "wallet", walletId })}
+          options={wallets.map((wallet) => ({
+            value: wallet.id,
+            label: wallet.label === null ? t("DashboardMarkets.dvp.partySdpWallet") : wallet.label,
+            description: shortenAddress(wallet.address),
+          }))}
+          placeholder={t("DashboardMarkets.dvp.partyWalletPlaceholder")}
+          value={slot.walletId === "" ? null : slot.walletId}
+        />
+      );
+      break;
+    case "counterparty":
+      control = (
+        <Combobox
+          hideLabel
+          icon={<UsersIcon />}
+          label={label}
+          onChange={(counterpartyAccountId) =>
+            onChange({ mode: "counterparty", counterpartyAccountId })
+          }
+          options={counterpartyAccounts.map((account) => ({
+            value: account.counterpartyAccountId,
+            label: account.name,
+            description: shortenAddress(account.address),
+          }))}
+          placeholder={t("DashboardMarkets.dvp.partyCounterpartyPlaceholder")}
+          value={slot.counterpartyAccountId === "" ? null : slot.counterpartyAccountId}
+        />
+      );
+      break;
+    case "address":
+      control = (
+        <Input
+          iconLeft={<HashIcon />}
+          id={id}
+          onChange={(event) => onChange({ mode: "address", address: event.target.value.trim() })}
+          placeholder={t("DashboardMarkets.dvp.partyAddressPlaceholder")}
+          size="xl"
+          value={slot.address}
+        />
+      );
+      break;
+    default: {
+      const exhausted: never = slot;
+      return exhausted;
+    }
+  }
 
-  const options: ComboboxOption[] = [
-    ...counterpartyAccounts.map((account) => ({
-      value: `counterparty:${account.counterpartyAccountId}`,
-      label: account.name,
-      description: shortenAddress(account.address),
-    })),
-    // The selected pasted address stays in the list so the trigger can name
-    // it; the option is otherwise synthesized from the search text below.
-    ...(slot.mode === "address" && slot.address
-      ? [
-          {
-            value: `address:${slot.address}`,
-            label: shortenAddress(slot.address),
-            description: t("DashboardMarkets.dvp.partyUseAddress"),
-          },
-        ]
-      : []),
-  ];
-
-  // No Field wrapper: the combobox renders its own label, and stacking the
-  // two showed every slot titled twice.
-  // min-w-0 lets a grid column shrink this below the trigger's content width,
-  // so the trigger truncates instead of overflowing its neighbor.
   return (
-    <div className="flex min-w-0 flex-col gap-1.5" id={id}>
-      <Combobox
-        label={label}
-        onChange={(next) => {
-          const separator = next.indexOf(":");
-          const kind = next.slice(0, separator);
-          const reference = next.slice(separator + 1);
-          onChange(
-            kind === "counterparty"
-              ? { mode: "counterparty", counterpartyAccountId: reference }
-              : { mode: "address", address: reference }
-          );
-        }}
-        options={options}
-        placeholder={t("DashboardMarkets.dvp.partySlotPlaceholder")}
-        queryOption={(query) =>
-          BASE58_ADDRESS.test(query)
-            ? {
-                value: `address:${query}`,
-                label: shortenAddress(query),
-                description: t("DashboardMarkets.dvp.partyUseAddress"),
-              }
-            : null
-        }
-        searchPlaceholder={t("DashboardMarkets.dvp.partySlotSearchPlaceholder")}
-        value={slotValue(slot)}
-      />
-      {error === null ? null : <p className="text-error text-xs leading-relaxed">{error}</p>}
-    </div>
+    <Field
+      htmlFor={slot.mode === "address" ? id : undefined}
+      label={label}
+      labelTrailing={
+        <SegmentedControl
+          aria-label={t("DashboardMarkets.dvp.partyModeLabel")}
+          items={[
+            { value: "wallet", label: t("DashboardMarkets.dvp.partyModeWallet") },
+            { value: "counterparty", label: t("DashboardMarkets.dvp.partyModeCounterparty") },
+            { value: "address", label: t("DashboardMarkets.dvp.partyModeAddress") },
+          ]}
+          onValueChange={(mode) => {
+            switch (mode) {
+              case "wallet":
+                onChange({ mode: "wallet", walletId: "" });
+                break;
+              case "counterparty":
+                onChange({ mode: "counterparty", counterpartyAccountId: "" });
+                break;
+              case "address":
+                onChange({ mode: "address", address: "" });
+                break;
+            }
+          }}
+          value={slot.mode}
+        />
+      }
+      warning={pickerError}
+    >
+      {control}
+    </Field>
   );
 }
 

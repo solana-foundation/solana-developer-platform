@@ -246,7 +246,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "fresh_blockhash_per_attempt",
         file: "apps/sdp-api/src/services/dvp/settle.test.ts",
-        evidence: "fences the approved operation before the bytes go out",
+        evidence: "fences after the sponsor signs and before the bytes go out",
       },
     ],
   },
@@ -349,13 +349,12 @@ const signingSinkInventory: Record<string, string[]> = {
     // Wallet-paid signing likewise returns fully signed bytes without sending.
     "signTransactionMessageWithSigners",
   ],
-  // DvP create and payments share the owned sponsorship submission sink, which
-  // signs and persists before broadcasting. Fund and settle still sign from the project's
-  // custody wallets; those sinks likewise return fully signed bytes without
-  // sending, which is what lets settle cross the approved-operation fence
-  // before broadcasting.
+  // DvP create, settle/cancel and payments share the owned sponsorship
+  // submission sink, which signs and persists before broadcasting; settle only
+  // partially signs as the authority and is not a sink of its own. Fund still
+  // signs from the project's custody wallet and returns fully signed bytes
+  // without sending.
   "apps/sdp-api/src/services/dvp/fund.ts": ["signTransactionMessageWithSigners"],
-  "apps/sdp-api/src/services/dvp/settle.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],

@@ -216,7 +216,10 @@ export type DvpCloseResolved =
 /** The trade a fund request resolved, and the wallet that gives the caller the right to fund it. */
 export type DvpFundResolved =
   | { trade: null; funding: null }
-  | { trade: DvpTradeRow; funding: { side: DvpTradeSide; custodyWalletId: string } | null };
+  | {
+      trade: DvpTradeRow;
+      funding: { side: DvpTradeSide; custodyWalletId: string; approvedAmount: bigint } | null;
+    };
 
 /**
  * The policy-gate extractor for `POST /trades/:tradeId/fund`.
@@ -299,8 +302,8 @@ export async function extractDvpFundPolicyCandidate(
   // The shortfall, not the target: funding tops a leg up. On an approved
   // REPLAY the stored amount must win — the replay match compares `amount` for
   // exact equality, and a deposit landing in between would shrink a fresh read.
-  // Pinning is safe: an escrow only gains while open, so the live shortfall
-  // stays at or below what was approved.
+  // Execution treats this pinned amount as a ceiling because ReclaimDvp or a
+  // permanent delegate can drain an open escrow after approval.
   const amount = await approvedOrLiveFundingAmount(c, trade, body.side);
 
   const candidate: PolicyCandidate = {
@@ -330,7 +333,7 @@ export async function extractDvpFundPolicyCandidate(
     candidate,
     legs: [candidate],
     body: {},
-    resolved: { trade, funding: { side: body.side, custodyWalletId } },
+    resolved: { trade, funding: { side: body.side, custodyWalletId, approvedAmount: amount } },
     rawPayload: { tradeId, side: body.side },
     idempotencyKey: null,
   };

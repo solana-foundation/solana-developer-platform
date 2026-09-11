@@ -14,6 +14,7 @@
  */
 
 import { FeePaymentError } from "@sdp/payments/fee-payment";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -145,11 +146,13 @@ async function rowsInDb(): Promise<
     counterparty_account_id_b: string | null;
     create_signature: string | null;
     create_last_valid_block_height: string | null;
+    name_a: string | null;
+    name_b: string | null;
   }[]
 > {
   const result = await getDb(env)
     .prepare(
-      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b, create_signature, create_last_valid_block_height FROM dvp_trades"
+      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b, create_signature, create_last_valid_block_height, name_a, name_b FROM dvp_trades"
     )
     .all<{
       id: string;
@@ -159,6 +162,8 @@ async function rowsInDb(): Promise<
       counterparty_account_id_b: string | null;
       create_signature: string | null;
       create_last_valid_block_height: string | null;
+      name_a: string | null;
+      name_b: string | null;
     }>();
   return result.results ?? [];
 }
@@ -181,7 +186,11 @@ describe("createDvpTrade", () => {
     validateDvpMints.mockResolvedValue([]);
     // Carried onto the row so later surfaces can show the trade in the units
     // somebody typed, with the token named.
-    inspectDvpMint.mockResolvedValue({ decimals: 6, symbol: "ATD" });
+    inspectDvpMint.mockResolvedValue({
+      decimals: 6,
+      symbol: "ATD",
+      name: "Acme Treasury Debt",
+    });
     getOrCreateDvpSettlementWallet.mockResolvedValue({
       custodyWalletId: "cwlt_settlement",
       address: SETTLEMENT_AUTHORITY,
@@ -286,6 +295,23 @@ describe("createDvpTrade", () => {
     expect(rowsAtSendTime[0].id).toBe(trade.id);
     // The nonce is the seed that makes the row recoverable at all.
     expect(rowsAtSendTime[0].nonce).toBe(trade.nonce);
+  });
+
+  it("stores token names from mint metadata and the well-known registry fallback", async () => {
+    inspectDvpMint
+      .mockResolvedValueOnce({ decimals: 6, symbol: "ATD", name: "Circle Reserve Fund" })
+      .mockResolvedValueOnce({ decimals: 6, symbol: null, name: null });
+    const input = {
+      ...tradeInput(),
+      mintB: address(WELL_KNOWN_TOKENS.USDG.mints["mainnet-beta"].address),
+    };
+
+    const trade = await createDvpTrade(env, input);
+    const rows = await rowsInDb();
+
+    expect(trade.nameA).toBe("Circle Reserve Fund");
+    expect(trade.nameB).toBe("Global Dollar");
+    expect(rows).toMatchObject([{ name_a: "Circle Reserve Fund", name_b: "Global Dollar" }]);
   });
 
   it("leaves the trade creating until chain observation confirms it", async () => {

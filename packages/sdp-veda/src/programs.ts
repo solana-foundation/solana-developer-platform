@@ -1,4 +1,4 @@
-import type { SolanaCluster } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import { type VedaDeployment, vedaDeployment } from "@sdp/types/veda-programs";
 import { type Address, address } from "@solana/kit";
 import { deploymentNotConfigured, SdpVedaError } from "./errors";
@@ -98,8 +98,7 @@ const CLUSTER_INVARIANT_PROGRAMS: readonly string[] = [
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-  // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
-  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+  MEMO_PROGRAM_ADDRESS,
   "ComputeBudget111111111111111111111111111111",
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "Ed25519SigVerify111111111111111111111111111",

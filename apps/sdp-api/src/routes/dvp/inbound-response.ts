@@ -7,9 +7,8 @@
  * Deliberately absent — `organizationId`/`projectId`, `refString`, `sdpWallet`,
  * counterparty attribution (a fact about the CREATING org, so always null),
  * funding claims (tenant-scoped, so null by construction), the derived `kind`
- * (`wallet` + `yourSide` convey standing), `idempotencyKey`, and
- * `settlementReadiness`. `symbolA`/`symbolB` ARE included; they are read off
- * the mint on chain.
+ * (`wallet` + `yourSide` convey standing), and `idempotencyKey`.
+ * `symbolA`/`symbolB` ARE included; they are read off the mint on chain.
  */
 
 import type { DvpLegOutcome } from "@sdp/types";
@@ -33,6 +32,7 @@ interface DvpInboundLegResponse {
   amount: string;
   decimals: number | null;
   symbol: string | null;
+  name: string | null;
   /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
   imageUrl: string | null;
   /** The address to pay. The whole of this party's integration. */
@@ -113,6 +113,7 @@ export function toDvpInboundResponse(
         amount: trade.amountA,
         decimals: trade.decimalsA,
         symbol: trade.symbolA,
+        name: trade.nameA,
         imageUrl: mintAImage === undefined ? null : mintAImage,
         escrow: trade.escrowA,
         settlementDestination: trade.userASettlementDestination,
@@ -127,6 +128,7 @@ export function toDvpInboundResponse(
         amount: trade.amountB,
         decimals: trade.decimalsB,
         symbol: trade.symbolB,
+        name: trade.nameB,
         imageUrl: mintBImage === undefined ? null : mintBImage,
         escrow: trade.escrowB,
         settlementDestination: trade.userBSettlementDestination,

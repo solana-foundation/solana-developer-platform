@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { createRpcFromTransport, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -34,9 +35,6 @@ import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
-
-// biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 
 /**
  * Whether `signature` is the custody wallet's own valid Ed25519 signature over

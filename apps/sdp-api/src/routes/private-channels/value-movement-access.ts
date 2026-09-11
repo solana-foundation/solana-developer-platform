@@ -21,7 +21,7 @@
  */
 
 import { isAddress } from "@sdp/solana/address";
-import type { PrivateChannelInstance } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type PrivateChannelInstance } from "@sdp/types";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   mapPrivateChannelInstanceRow,
@@ -41,9 +41,6 @@ import {
 import { requireActiveInstance } from "./helpers";
 
 const SYSTEM_PROGRAM_ADDRESS = "11111111111111111111111111111111";
-// biome-ignore lint/security/noSecrets: This is the public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
-
 /**
  * Program, system and connected-instance addresses, which must never be an
  * endpoint of a value movement.

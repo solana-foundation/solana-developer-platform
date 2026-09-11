@@ -155,13 +155,29 @@ async function insertOrReplay(
 }
 
 /**
- * The catalogue's symbol for a mint, or null.
- *
  * The fallback for mints that carry no metadata of their own, which is every
  * legacy SPL token including the stablecoins most cash legs use.
  */
-function wellKnownSymbol(mint: string): string | null {
-  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? null;
+function wellKnownToken(mint: string): { symbol: string | null; name: string | null } {
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  if (token === undefined) {
+    return { symbol: null, name: null };
+  }
+  return { symbol: token.symbol, name: token.name };
+}
+
+function storedMintMetadata(
+  inspected: Awaited<ReturnType<typeof inspectDvpMint>>,
+  registered: ReturnType<typeof wellKnownToken>
+): { decimals: number | null; symbol: string | null; name: string | null } {
+  if (inspected === null) {
+    return { decimals: null, symbol: registered.symbol, name: registered.name };
+  }
+  return {
+    decimals: inspected.decimals,
+    symbol: inspected.symbol === null ? registered.symbol : inspected.symbol,
+    name: inspected.name === null ? registered.name : inspected.name,
+  };
 }
 
 /**
@@ -330,6 +346,8 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
     inspectDvpMint(rpc, mintA),
     inspectDvpMint(rpc, mintB),
   ]);
+  const metadataA = storedMintMetadata(inspectedA, wellKnownToken(input.mintA));
+  const metadataB = storedMintMetadata(inspectedB, wellKnownToken(input.mintB));
 
   // Only now, after the payload is known to be sound, do we touch the custody
   // provider. Provisioning happens on first use, so a project's very first
@@ -347,7 +365,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // Resolved once, here, and used for the terms check, the row and the ATA
   // derivations alike. The program treats an omitted destination as the party's
   // own address, so mirroring that now means nothing downstream has to branch
-  // on null — `settle-preflight` can derive an ATA from a column that is always
+  // on null — `settle-atas` can derive an ATA from a column that is always
   // populated.
   const destinationA =
     input.userASettlementDestination === null ? userA : input.userASettlementDestination;
@@ -416,10 +434,12 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
       nonce: nonce.toString(),
       tokenProgramA: input.tokenProgramA,
       tokenProgramB: input.tokenProgramB,
-      decimalsA: inspectedA?.decimals ?? null,
-      decimalsB: inspectedB?.decimals ?? null,
-      symbolA: inspectedA?.symbol ?? wellKnownSymbol(input.mintA),
-      symbolB: inspectedB?.symbol ?? wellKnownSymbol(input.mintB),
+      decimalsA: metadataA.decimals,
+      decimalsB: metadataB.decimals,
+      symbolA: metadataA.symbol,
+      symbolB: metadataB.symbol,
+      nameA: metadataA.name,
+      nameB: metadataB.name,
       amountA: input.amountA.toString(),
       amountB: input.amountB.toString(),
       expiryTimestamp: input.expiryTimestamp.toString(),
