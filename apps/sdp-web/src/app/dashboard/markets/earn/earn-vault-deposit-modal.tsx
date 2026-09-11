@@ -31,7 +31,7 @@ import {
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
-import { shortenMarketAddress } from "./earn-market-presentation";
+import { shortenMarketAddress, sumDecimalStrings } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
   type EarnVaultDeposit,
@@ -831,12 +831,36 @@ function useVaultFundingToken(input: {
   }, [decimals, depositMint, strategy.hostCluster, symbol]);
   const fundingTokens = useMemo(() => {
     if (wallets === undefined) return supportedFundingTokens;
-    return supportedFundingTokens.filter((token) =>
-      wallets.some((wallet) => {
-        const balance = walletBalanceForMint(wallet, token.mint, token.decimals);
-        return balance === undefined || compareUnsignedDecimals(balance, "0") === 1;
+    return supportedFundingTokens
+      .map((token, index) => {
+        const balances = wallets.map((wallet) =>
+          walletBalanceForMint(wallet, token.mint, token.decimals)
+        );
+        const knownBalances = balances.filter(
+          (balance): balance is string => balance !== undefined
+        );
+        const hasUnknownBalance = knownBalances.length !== balances.length;
+        const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
+        return {
+          balance,
+          eligible:
+            hasUnknownBalance ||
+            (balance !== undefined && compareUnsignedDecimals(balance, "0") === 1),
+          index,
+          token,
+        };
       })
-    );
+      .filter(({ eligible }) => eligible)
+      .sort((left, right) => {
+        if (left.balance === undefined && right.balance === undefined) {
+          return left.index - right.index;
+        }
+        if (left.balance === undefined) return 1;
+        if (right.balance === undefined) return -1;
+        const order = compareUnsignedDecimals(left.balance, right.balance) ?? 0;
+        return order === 0 ? left.index - right.index : -order;
+      })
+      .map(({ token }) => token);
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
   const fundingToken =
@@ -1318,12 +1342,12 @@ export function EarnVaultDepositModal({
     () => (selectedWallet ? [selectedWallet] : executableWallets),
     [executableWallets, selectedWallet]
   );
-  // What the deposit may be PAID in: the vault's own token first, then every
-  // other swap-source stablecoin held by the selected wallet (or across the
-  // selectable wallets until one is chosen). Unknown balances keep every
-  // option visible rather than guessing that a token is absent. Paying in one
-  // of the others sends `sourceTokenMint`, and the API prepends a Jupiter swap
-  // inside the same transaction.
+  // What the deposit may be PAID in: every supported swap-source stablecoin
+  // held by the selected wallet (or across selectable wallets until one is
+  // chosen), ranked by observed balance so the largest is the default. Unknown
+  // balances remain visible after known holdings rather than being guessed
+  // absent. Paying in a token other than the vault's own sends
+  // `sourceTokenMint`, and the API prepends a Jupiter swap in the transaction.
   const {
     fundingDecimals,
     fundingSymbol,

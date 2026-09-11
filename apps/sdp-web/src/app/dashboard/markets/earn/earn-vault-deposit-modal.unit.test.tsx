@@ -878,7 +878,7 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
-  it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
+  it("defaults to the largest supported stablecoin while keeping every held option selectable", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
     const onDeposited = vi.fn();
     mocks.useEarnFundingWallets.mockReturnValue({
@@ -908,7 +908,18 @@ describe("EarnVaultDepositModal", () => {
     await screen.findByRole("dialog");
 
     expect(screen.queryByRole("radio", { name: "PYUSD" })).toBeNull();
-    await user.click(screen.getByRole("radio", { name: "USDG" }));
+    const usdcOption = screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement;
+    const usdgOption = screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement;
+    expect(usdgOption.checked).toBe(true);
+    expect(usdcOption.checked).toBe(false);
+    expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
+
+    await user.click(usdcOption);
+    expect(usdcOption.checked).toBe(true);
+    expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
+
+    await user.click(usdgOption);
+    expect(usdgOption.checked).toBe(true);
 
     // The whole form speaks the FUNDING token now: label and balance.
     expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
