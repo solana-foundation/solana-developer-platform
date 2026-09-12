@@ -37,7 +37,8 @@
       "noCustodyWallets": "Không có custody wallet nào khả dụng. Hãy tạo Wallet trong mục Wallets trước.",
       "copyShieldedAddress": "Sao chép shielded address",
       "shieldedAddressCopied": "Đã sao chép shielded address",
-      "allCustodyWalletsBound": "Tất cả custody wallet đều đã được gắn với một private wallet."
+      "allCustodyWalletsBound": "Tất cả custody wallet đều đã được gắn với một private wallet.",
+      "retry": "Thử cấp phát lại"
     },
     "identity": {
       "column": "On-chain identity",
@@ -77,7 +78,8 @@
       "empty": "Không có shielded note nào trong wallet này.",
       "degraded": "Đọc một phần — indexer không trả về mọi note, nên hãy coi đây là dữ liệu không đầy đủ thay vì số dư của wallet.",
       "observedAt": "Ghi nhận {when}",
-      "readFailed": "Không thể đọc số dư shielded. Thử lại sau."
+      "readFailed": "Không thể đọc số dư shielded. Thử lại sau.",
+      "paused": "Wallet này đang bị tạm dừng nên không thể đọc số dư: các khóa được công bố cho chủ sở hữu không phải là các khóa mà bản deployment này suy ra. Hãy re-key để công bố các khóa đã suy ra và dùng lại được wallet, đổi lại bằng những gì các khóa đã công bố đang nắm giữ."
     },
     "activity": {
       "title": "Hoạt động",
@@ -110,7 +112,9 @@
       "retriedAs": "Đã thử lại thành {id}",
       "state_voided": "Đã void",
       "ring": "Ring",
-      "ringDefault": "Ring mặc định"
+      "ringDefault": "Ring mặc định",
+      "opType_ring_exit": "Chuyển ra khỏi ring",
+      "opType_ring_entry": "Chuyển vào ring"
     },
     "errors": {
       "loadFailed": "Không thể tải dữ liệu Helius Rings. Vui lòng thử lại sau.",
@@ -162,7 +166,18 @@
       "ringShieldHint": "Ring nơi các shielded notes được ghi vào.",
       "ringSpendHint": "Nguồn tiền: chỉ các note gắn với ring đã chọn mới có thể được chi tiêu từ ring này.",
       "ringNoneActive": "Chưa có ring nào hoạt động; hãy hoàn tất khởi tạo trong thẻ Custom rings trước khi chọn một ring.",
-      "summaryRing": "Ring"
+      "summaryRing": "Ring",
+      "description_merge": "Gộp các note nhỏ của wallet này thành một note. Không di chuyển tiền.",
+      "description_move": "Chuyển SOL shielded của wallet này giữa ring mặc định và một custom ring. Tiền luôn được shield trong suốt quá trình.",
+      "opTab_merge": "Gộp",
+      "opTab_move": "Chuyển",
+      "moveFrom": "Từ",
+      "moveTo": "Đến",
+      "moveHint": "Một bên là custom ring, bên còn lại là ring mặc định. Tiền luôn được shield trong suốt quá trình.",
+      "moveChooseRing": "Chọn một custom ring ở một bên; ring mặc định luôn nằm ở bên còn lại của mỗi lần chuyển.",
+      "moveBothCustom": "Chuyển giữa các custom ring chưa được hỗ trợ — giá trị sẽ đi qua ring mặc định. Thực hiện hai lần chuyển: vào ring mặc định, rồi vào ring đích.",
+      "summaryFrom": "Từ",
+      "summaryTo": "Đến"
     },
     "zones": {
       "title": "Zones",
@@ -232,7 +247,8 @@
       "unpriced": "—",
       "privateBalanceLabel": "Số dư private",
       "defaultRing": "Ring mặc định",
-      "customRing": "Custom ring {id}"
+      "customRing": "Custom ring {id}",
+      "noteCount": "{count} note"
     },
     "ring": {
       "title": "Custom ring",
@@ -257,6 +273,34 @@
       "status_failed": "Thất bại",
       "explain_pending": "Quá trình khởi tạo chưa hoàn tất. Các thao tác chưa thể nhắm đến ring này; các thao tác của ring mặc định không bị ảnh hưởng.",
       "explain_failed": "Khởi tạo thất bại; các thao tác không thể nhắm đến ring này cho đến khi thử lại thành công. Các thao tác của ring mặc định không bị ảnh hưởng."
+    },
+    "setup": {
+      "title": "Thiết lập Helius Rings",
+      "description": "Lưu Solana RPC, Photon indexer, prover và Ring RPC dùng chung cho mọi Helius ring trong dự án này.",
+      "configuredTitle": "Cấu hình Rings",
+      "configuredDescription": "{name} được dùng chung cho mọi Helius ring trong dự án này.",
+      "adminRequired": "Quản trị viên tổ chức phải cấu hình Helius Rings trước khi Wallet có thể được sử dụng.",
+      "name": "Tên cấu hình",
+      "rpc": "Solana RPC URL",
+      "indexer": "Photon indexer URL",
+      "prover": "Prover URL",
+      "ringRpc": "Custom Ring RPC URL (tùy chọn)",
+      "allowHttp": "Cho phép HTTP thường cho phát triển local",
+      "save": "Kiểm tra và lưu cấu hình",
+      "saving": "Đang kiểm tra cấu hình…",
+      "loading": "Đang tải cấu hình project…",
+      "failed": "Không thể lưu cấu hình."
+    },
+    "rekey": {
+      "action": "Re-key wallet",
+      "title": "Re-key wallet này",
+      "warning": "Re-key sẽ bỏ đi những gì các khóa đã công bố của wallet này đang nắm giữ. Không thể hoàn tác.",
+      "effect": "Chủ sở hữu của wallet này đang công bố một identity mà bản deployment này không thể suy ra, nên không gì ở đây có thể đọc hoặc chi tiêu những gì các khóa đó nắm giữ. Re-key sẽ công bố các khóa hiện được suy ra, giúp wallet dùng lại được cho các khoản nạp mới. Mọi thứ được giữ dưới các khóa cũ vẫn nằm trên chain nhưng không gì mở được.",
+      "confirmPrompt": "Nhập {name} để xác nhận.",
+      "submit": "Re-key và bỏ số dư",
+      "submitting": "Đang re-key…",
+      "cancel": "Hủy",
+      "failed": "Re-key chưa hoàn tất. Hãy kiểm tra trạng thái wallet trước khi thử lại — quá trình xoay khóa có thể đã thành công."
     }
   }
 }

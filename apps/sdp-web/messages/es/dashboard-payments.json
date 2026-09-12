@@ -442,7 +442,9 @@
       "cancel": "Cancelar",
       "importing": "Importando…",
       "import": "Importar",
-      "unknownToken": "Token desconocido"
+      "unknownToken": "Token desconocido",
+      "resultApprovalPending": "Lote pendiente de aprobación",
+      "approvalPendingDescription": "Este lote requiere la aprobación de la política antes de enviarse. Aún no se ha movido nada."
     },
     "manualInstructions": {
       "copied": "Se copió {label}.",
