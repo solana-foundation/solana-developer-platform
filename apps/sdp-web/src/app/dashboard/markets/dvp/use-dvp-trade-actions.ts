@@ -142,19 +142,21 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
           ...(call[0] === "fund" ? { body: JSON.stringify({ side: call[1].side }) } : {}),
         }
       );
-      // Null when the body is not JSON at all, such as a proxy's error page. Both
-      // schemas below then fail, which is handled as a failure, not a success.
-      const body: unknown = await response.json().catch(() => null);
+      // Either way the body can fail to be JSON at all, such as a proxy's error
+      // page. It reads as null, and each schema below treats null as not matching.
       if (!response.ok) {
         const symbol = call[0] === "fund" ? call[1].symbol : null;
-        toast.error(refusalMessage(body, response.status, symbol), { position: "bottom-right" });
+        const failure: unknown = await response.json().catch(() => null);
+        toast.error(refusalMessage(failure, response.status, symbol), {
+          position: "bottom-right",
+        });
         return;
       }
       // The single biggest source of "did anything happen?": all three of these
       // succeeded and then said nothing, leaving the page to catch up on the
       // reconciler's next sweep. A refresh is not an answer — it is the same
       // screen again, a minute later.
-      const broadcast = broadcastEnvelopeSchema.safeParse(body);
+      const broadcast = broadcastEnvelopeSchema.safeParse(await response.json().catch(() => null));
       toast.success(t(DONE_MESSAGE[action]), {
         position: "bottom-right",
         // Whatever SDP just sent can be checked on chain from the toast that

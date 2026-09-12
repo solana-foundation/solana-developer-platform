@@ -10,6 +10,7 @@
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
+import { DVP_FUND_REFUSAL } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import { AccountState, getTokenEncoder } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -244,6 +245,11 @@ describe("readEscrowState", () => {
 
     await expect(
       readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP, "dvp_test")
-    ).rejects.toThrow(/owner\/mint\/program mismatch/);
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/owner\/mint\/program mismatch/),
+      // The funding recheck reaches this path too, so the dashboard still
+      // names the refusal instead of relaying the message.
+      details: { reason: DVP_FUND_REFUSAL.escrowMismatch },
+    });
   });
 });

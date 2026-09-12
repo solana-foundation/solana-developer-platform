@@ -294,6 +294,87 @@ function legProgressCaption(
 }
 
 /**
+ * Where this party pays in, as a permanent footer under the progress it feeds,
+ * so both legs keep the same shape. Once the leg can no longer receive (funded,
+ * frozen, or the trade closed) the address goes, since it would only invite
+ * tokens somewhere they bounce, and the transfer this organization sent takes
+ * its place.
+ */
+function LegFundingFooter({
+  cluster,
+  leg,
+  receiving,
+}: {
+  cluster: SolanaCluster;
+  leg: DvpTradeLeg;
+  receiving: boolean;
+}) {
+  const t = useTranslations();
+  const frame = "mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2";
+  const caption = "text-[11px] text-tertiary";
+
+  if (receiving) {
+    return (
+      <div className={frame}>
+        <span className={caption}>{t("DashboardMarkets.dvp.escrowLabel")}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <CopyableAddress
+            address={leg.escrow}
+            className="px-0 hover:bg-transparent"
+            label={t("DashboardMarkets.dvp.escrowLabel")}
+          />
+          <a
+            aria-label={t("DashboardMarkets.dvp.escrowLabel")}
+            className="text-secondary hover:text-primary"
+            href={explorerAddressUrl(leg.escrow, cluster)}
+            rel="noreferrer noopener"
+            target="_blank"
+          >
+            <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+          </a>
+        </span>
+      </div>
+    );
+  }
+
+  if (leg.fundingSignature) {
+    return (
+      <div className={frame}>
+        <span className={caption}>{t("DashboardMarkets.dvp.txFundingSent")}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <CopyableAddress
+            address={leg.fundingSignature}
+            className="px-0 hover:bg-transparent"
+            display={shortenSignature(leg.fundingSignature)}
+            label={t("DashboardMarkets.dvp.txFundingSent")}
+          />
+          <a
+            aria-label={t("DashboardMarkets.dvp.txFundingSent")}
+            className="text-secondary hover:text-primary"
+            href={explorerTxUrl(leg.fundingSignature, cluster)}
+            rel="noreferrer noopener"
+            target="_blank"
+          >
+            <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+          </a>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={frame}>
+      <span className={caption}>{t("DashboardMarkets.dvp.txFunding")}</span>
+      <span className="py-1 text-secondary text-xs">
+        {leg.funding !== null && BigInt(leg.funding.observedAmount) > 0n
+          ? t("DashboardMarkets.dvp.txFundingExternal")
+          : t("DashboardMarkets.dvp.txFundingNone")}
+      </span>
+    </div>
+  );
+}
+
+/**
  * One leg as a fund manager reads it: what it is, who holds it, whether it has
  * arrived, and the transaction that brought it. No addresses; those live in the
  * on-chain details at the foot of the page.
@@ -387,64 +468,7 @@ function LegCard({
         <div className={cn("h-full rounded-full", status.bar)} style={{ width: `${percent}%` }} />
       </div>
 
-      {/* Where this party pays in, as a permanent card under the progress it
-          feeds, so both legs keep the same skeleton. Once the leg can no longer
-          receive (funded, frozen, or the trade closed) the address goes — it
-          would only invite tokens somewhere they bounce — and the transaction
-          that funded the leg takes its place. */}
-      <div className="mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2">
-        <span className="text-[11px] text-tertiary">
-          {receiving
-            ? t("DashboardMarkets.dvp.escrowLabel")
-            : t(
-                leg.fundingSignature
-                  ? "DashboardMarkets.dvp.txFundingSent"
-                  : "DashboardMarkets.dvp.txFunding"
-              )}
-        </span>
-        {receiving ? (
-          <span className="inline-flex items-center gap-1.5">
-            <CopyableAddress
-              address={leg.escrow}
-              className="px-0 hover:bg-transparent"
-              label={t("DashboardMarkets.dvp.escrowLabel")}
-            />
-            <a
-              aria-label={t("DashboardMarkets.dvp.escrowLabel")}
-              className="text-secondary hover:text-primary"
-              href={explorerAddressUrl(leg.escrow, cluster)}
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-            </a>
-          </span>
-        ) : leg.fundingSignature ? (
-          <span className="inline-flex items-center gap-1.5">
-            <CopyableAddress
-              address={leg.fundingSignature}
-              className="px-0 hover:bg-transparent"
-              display={shortenSignature(leg.fundingSignature)}
-              label={t("DashboardMarkets.dvp.txFundingSent")}
-            />
-            <a
-              aria-label={t("DashboardMarkets.dvp.txFundingSent")}
-              className="text-secondary hover:text-primary"
-              href={explorerTxUrl(leg.fundingSignature, cluster)}
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-            </a>
-          </span>
-        ) : (
-          <span className="py-1 text-secondary text-xs">
-            {leg.funding !== null && BigInt(leg.funding.observedAmount) > 0n
-              ? t("DashboardMarkets.dvp.txFundingExternal")
-              : t("DashboardMarkets.dvp.txFundingNone")}
-          </span>
-        )}
-      </div>
+      <LegFundingFooter cluster={cluster} leg={leg} receiving={receiving} />
     </section>
   );
 }
