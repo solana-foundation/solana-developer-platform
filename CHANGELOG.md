@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.75.0...v1.0.0) (2026-09-12)
+
+### Features
+
+* **issuance:** meter the RPC-heavy prepare and supply-refresh routes ([#1765](https://github.com/solana-foundation/solana-developer-platform/pull/1765)) ([d63b153](https://github.com/solana-foundation/solana-developer-platform/commit/d63b1532beb7df4e2e4f231a358aeca2b9ef5f44))
+* **api:** enforce the two-projects-per-org invariant at the DB and API-key boundary ([#1770](https://github.com/solana-foundation/solana-developer-platform/pull/1770)) ([cbc9486](https://github.com/solana-foundation/solana-developer-platform/commit/cbc9486bfaa85fc1e2a3447289236148bddcfa87))
+* **web:** polish embedded yield and treasury flows ([#1767](https://github.com/solana-foundation/solana-developer-platform/pull/1767)) ([40ff947](https://github.com/solana-foundation/solana-developer-platform/commit/40ff9474e23b86c4d7198e4a65763c2679a36c2a))
+* **dvp:** quieter party-mode toggle, buyer-first legs ([#1774](https://github.com/solana-foundation/solana-developer-platform/pull/1774)) ([726eed5](https://github.com/solana-foundation/solana-developer-platform/commit/726eed50efaa345c7bb34b5123d0d67b722d8f37))
+* **helius-rings:** add retry provision for pending private wallets ([#1771](https://github.com/solana-foundation/solana-developer-platform/pull/1771)) ([7738ab1](https://github.com/solana-foundation/solana-developer-platform/commit/7738ab107b4d6e42f0fc5862d99c897586049f71))
+* **earn:** quote Kamino trailing 7d APY on the shelf, carry spot as risk metadata (PRO-1922) ([#1780](https://github.com/solana-foundation/solana-developer-platform/pull/1780)) ([27607f1](https://github.com/solana-foundation/solana-developer-platform/commit/27607f17ae3c7ef73567d89c02c6d7552423a9d4))
+* **web:** add sync-aware dashboard quick start ([#1740](https://github.com/solana-foundation/solana-developer-platform/pull/1740)) ([78a3692](https://github.com/solana-foundation/solana-developer-platform/commit/78a3692d7b3a12f2f77e7a623ff88e58a2e6f86e))
+* **dvp:** sponsor trade creation fee and rent through Kora ([#1748](https://github.com/solana-foundation/solana-developer-platform/pull/1748)) ([8e514be](https://github.com/solana-foundation/solana-developer-platform/commit/8e514bed0dcebed35c4aa6bc370a700b425a5883))
+* **helius-rings:** root shielded key derivation in custody ([#1754](https://github.com/solana-foundation/solana-developer-platform/pull/1754)) ([2651acc](https://github.com/solana-foundation/solana-developer-platform/commit/2651acc0a333f84adcd66998b6296c4ed3184cc0))
+
+### Bug Fixes
+
+* **smoke:** retry external smoke tests twice ([#1775](https://github.com/solana-foundation/solana-developer-platform/pull/1775)) ([8751e71](https://github.com/solana-foundation/solana-developer-platform/commit/8751e717653806d4d3daa286004110f8d9a299a9))
+* **helius-rings:** refuse non-reproducible custody signers, name them, and drop the seed cache ([#1785](https://github.com/solana-foundation/solana-developer-platform/pull/1785)) ([d847519](https://github.com/solana-foundation/solana-developer-platform/commit/d847519468521210b97cf1ac25b12796d89717f2))
+* **api:** deliver workflow webhooks through the guarded egress transport ([#1777](https://github.com/solana-foundation/solana-developer-platform/pull/1777)) ([544dfc6](https://github.com/solana-foundation/solana-developer-platform/commit/544dfc66871a7f79fd642b6d5f4b8106273ccc06))
+* **api:** workflow actions honor the token's freeze-support flag and operational status ([#1778](https://github.com/solana-foundation/solana-developer-platform/pull/1778)) ([c9bfa86](https://github.com/solana-foundation/solana-developer-platform/commit/c9bfa860ee8ac912ced07122dd161403d7361031))
+* **web:** scope the Home skeleton to the Home page ([#1782](https://github.com/solana-foundation/solana-developer-platform/pull/1782)) ([82075a6](https://github.com/solana-foundation/solana-developer-platform/commit/82075a695da05f653f2b42cd7cd2a2641645ca29))
+* **web:** give Helius Rings and the members redirect their own loading skeletons ([#1783](https://github.com/solana-foundation/solana-developer-platform/pull/1783)) ([3b9074b](https://github.com/solana-foundation/solana-developer-platform/commit/3b9074bab0b1f77e9524513bb953996dc5f7c6d2))
+* **helius-rings:** pin custom-ring deploy to alpha.2 program ([#1779](https://github.com/solana-foundation/solana-developer-platform/pull/1779)) ([c5b2409](https://github.com/solana-foundation/solana-developer-platform/commit/c5b24090d5de65e3f9eac495de2fc929637d7520))
+* **api:** classify literal-address hosts in the egress guard and at endpoint submission ([#1772](https://github.com/solana-foundation/solana-developer-platform/pull/1772)) ([36d886b](https://github.com/solana-foundation/solana-developer-platform/commit/36d886b1e55f7b025d7b50be13b7cb46f581c094))
+* **dvp:** verify live terms before funding, harden settle preflight and close resolution ([#1763](https://github.com/solana-foundation/solana-developer-platform/pull/1763)) ([254f36b](https://github.com/solana-foundation/solana-developer-platform/commit/254f36b4c792bdf11ae8ee67b0ef6e89360b08f8))
+
 ## [0.75.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.74.0...v0.75.0) (2026-09-10)
 
 ### Features

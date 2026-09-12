@@ -442,7 +442,9 @@
       "import": "Importer",
       "reference": "Référence",
       "referenceOptional": "Facultatif",
-      "unknownToken": "Token inconnu"
+      "unknownToken": "Token inconnu",
+      "resultApprovalPending": "Batch en attente d'approbation",
+      "approvalPendingDescription": "Ce Batch requiert l'approbation de la politique avant l'envoi. Aucun fonds n'a encore été transféré."
     },
     "manualInstructions": {
       "copied": "{label} copié.",

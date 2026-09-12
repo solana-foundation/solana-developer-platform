@@ -37,7 +37,8 @@
       "noCustodyWallets": "Nenhuma Wallet de custódia disponível. Crie uma Wallet em Wallets primeiro.",
       "copyShieldedAddress": "Copiar endereço protegido",
       "shieldedAddressCopied": "Endereço protegido copiado",
-      "allCustodyWalletsBound": "Todas as Wallets de custódia já estão vinculadas a uma Wallet privada."
+      "allCustodyWalletsBound": "Todas as Wallets de custódia já estão vinculadas a uma Wallet privada.",
+      "retry": "Tentar provisionar novamente"
     },
     "identity": {
       "column": "Identidade on-chain",
@@ -77,7 +78,8 @@
       "empty": "Não há notas shielded nesta Wallet.",
       "degraded": "Leitura parcial — o indexador não conseguiu retornar todas as notas, então trate isso como incompleto, e não como o saldo da Wallet.",
       "observedAt": "Observado em {when}",
-      "readFailed": "Não foi possível ler o saldo shielded. Tente novamente em instantes."
+      "readFailed": "Não foi possível ler o saldo shielded. Tente novamente em instantes.",
+      "paused": "Esta Wallet está pausada e, por isso, o saldo dela não pode ser lido: as chaves publicadas para o proprietário dela não são as que este deployment deriva. Refazer a chave publica as chaves derivadas e torna a Wallet utilizável novamente, ao custo de tudo o que as chaves publicadas detêm."
     },
     "activity": {
       "title": "Atividade",
@@ -110,7 +112,9 @@
       "retriedAs": "Nova tentativa como {id}",
       "state_voided": "Anulada",
       "ring": "Ring",
-      "ringDefault": "Ring padrão"
+      "ringDefault": "Ring padrão",
+      "opType_ring_exit": "Mover para fora do ring",
+      "opType_ring_entry": "Mover para dentro do ring"
     },
     "errors": {
       "loadFailed": "Não foi possível carregar os dados do Helius Rings. Tente novamente em instantes.",
@@ -162,7 +166,18 @@
       "ringShieldHint": "O ring em que as notas protegidas entram.",
       "ringSpendHint": "A fonte dos fundos: só as notas vinculadas ao ring escolhido podem ser gastas por ele.",
       "ringNoneActive": "Nenhum ring está ativo ainda; conclua o bring-up no card de Rings personalizados antes de direcionar um.",
-      "summaryRing": "Ring"
+      "summaryRing": "Ring",
+      "description_merge": "Combine as notas menores desta Wallet em uma só. Não move fundos.",
+      "description_move": "Mova o SOL shielded desta Wallet entre o ring padrão e um ring personalizado. Os fundos permanecem shielded o caminho todo.",
+      "opTab_merge": "Mesclar",
+      "opTab_move": "Mover",
+      "moveFrom": "De",
+      "moveTo": "Para",
+      "moveHint": "Um lado é um ring personalizado; o outro é o ring padrão. Os fundos permanecem shielded o caminho todo.",
+      "moveChooseRing": "Escolha um ring personalizado de um lado; o ring padrão é o outro lado de cada movimentação.",
+      "moveBothCustom": "Movimentações de ring para ring ainda não são suportadas — o valor passa pelo ring padrão. Execute duas movimentações: para o ring padrão e depois para o ring de destino.",
+      "summaryFrom": "De",
+      "summaryTo": "Para"
     },
     "zones": {
       "title": "Zonas",
@@ -232,7 +247,8 @@
       "unpriced": "—",
       "privateBalanceLabel": "Saldo privado",
       "defaultRing": "Ring padrão",
-      "customRing": "Ring personalizado {id}"
+      "customRing": "Ring personalizado {id}",
+      "noteCount": "{count} notas"
     },
     "ring": {
       "title": "Rings personalizados",
@@ -257,6 +273,34 @@
       "status_failed": "Falhou",
       "explain_pending": "O bring-up ainda não foi concluído. As operações ainda não podem direcionar este ring; as operações do ring padrão não são afetadas.",
       "explain_failed": "O bring-up falhou; as operações não podem direcionar este ring até que uma nova tentativa tenha sucesso. As operações do ring padrão não são afetadas."
+    },
+    "setup": {
+      "title": "Configurar Helius Rings",
+      "description": "Salve a Solana RPC, o indexador Photon, o prover e a Ring RPC compartilhados por todos os Helius rings deste projeto.",
+      "configuredTitle": "Configuração de Rings",
+      "configuredDescription": "{name} é compartilhado por todos os Helius rings deste projeto.",
+      "adminRequired": "Um administrador da organização precisa configurar o Helius Rings antes que as Wallets possam ser usadas.",
+      "name": "Nome da configuração",
+      "rpc": "URL do RPC da Solana",
+      "indexer": "URL do indexador Photon",
+      "prover": "URL do Prover",
+      "ringRpc": "URL do RPC de Ring personalizado (opcional)",
+      "allowHttp": "Permitir HTTP puro para desenvolvimento local",
+      "save": "Testar e salvar configuração",
+      "saving": "Verificando configuração…",
+      "loading": "Carregando a configuração do projeto…",
+      "failed": "Não foi possível salvar a configuração."
+    },
+    "rekey": {
+      "action": "Refazer a chave da Wallet",
+      "title": "Refazer a chave desta Wallet",
+      "warning": "Refazer a chave descarta tudo o que as chaves publicadas desta Wallet detêm. Isso não pode ser desfeito.",
+      "effect": "O proprietário desta Wallet publica uma identidade que este deployment não consegue derivar, então nada aqui consegue ler ou gastar o que essas chaves detêm. Ao refazer a chave, o deployment publica as chaves que ele deriva agora, o que torna a Wallet utilizável novamente para novos depósitos. Tudo o que está sob as chaves antigas permanece on-chain, sem que ninguém consiga abrir.",
+      "confirmPrompt": "Digite {name} para confirmar.",
+      "submit": "Refazer a chave e descartar o saldo",
+      "submitting": "Refazendo a chave…",
+      "cancel": "Cancelar",
+      "failed": "A troca de chave não foi concluída. Verifique o status da Wallet antes de tentar novamente — a rotação pode ter sido aplicada."
     }
   }
 }
