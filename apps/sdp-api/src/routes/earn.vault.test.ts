@@ -37,6 +37,7 @@ import { badRequest } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { SigningService } from "@/services/domain/signing.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -456,6 +457,105 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
+  it.each([
+    { action: "approve", status: "approved", operationStatus: "completed", refusal: "unavailable" },
+    { action: "approve", status: "approved", operationStatus: "completed", refusal: "paused" },
+    {
+      action: "approve",
+      status: "approved",
+      operationStatus: "failed",
+      refusal: "provider-denied",
+    },
+    { action: "reject", status: "rejected", operationStatus: "canceled", refusal: "paused" },
+    { action: "cancel", status: "canceled", operationStatus: "canceled", refusal: "unavailable" },
+    { action: "approve", status: "approved", operationStatus: "completed", refusal: "unexpected" },
+  ])(
+    "preserves $status/$operationStatus when $refusal admission races with $action",
+    async ({ action, status, operationStatus, refusal }) => {
+      await seedAuth();
+      const headers = await seedApprover();
+      await seedConnectionWallet();
+      const strategy = await seedStrategy();
+      await requireDepositApproval();
+      env.PRIVY_BYOK_ENABLED = "true";
+      const held = await postVaultDeposit(
+        { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+        "approve-admission-race"
+      );
+      expect(held.status).toBe(202);
+      const body = z
+        .object({ error: z.object({ details: z.object({ approvalRequestId: z.string() }) }) })
+        .parse(await held.json());
+      const path = `/v1/wallets/approval-requests/${body.error.details.approvalRequestId}`;
+      let admissionEntered!: () => void;
+      let releaseAdmission!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        admissionEntered = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        releaseAdmission = resolve;
+      });
+      const admit = SigningService.prototype.admitRuntimeExecution;
+      // Control request ordering; only the infrastructure-failure case replaces admission.
+      vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockImplementationOnce(
+        async function (this: SigningService, ...args) {
+          admissionEntered();
+          await released;
+          if (refusal === "unexpected") throw new Error("Unexpected admission failure");
+          return admit.apply(this, args);
+        }
+      );
+      const first = app.request(`${path}/approve`, { method: "POST", headers }, env);
+      await entered;
+      try {
+        if (operationStatus === "failed") {
+          depositIntoVault.mockRejectedValueOnce(badRequest("Deposit refused"));
+        }
+        const other = await app.request(`${path}/${action}`, { method: "POST", headers }, env);
+        expect(other.status).toBe(200);
+        if (refusal === "paused") {
+          env.PRIVY_BYOK_ENABLED = "false";
+        } else if (refusal === "provider-denied") {
+          await getDb(env)
+            .prepare(
+              "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
+            )
+            .bind(JSON.stringify({ privy: false }), TEST_ORG.id)
+            .run();
+        } else {
+          await getDb(env)
+            .prepare(
+              "UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cwlt_earn_vault_connection'"
+            )
+            .run();
+        }
+      } finally {
+        releaseAdmission();
+        await first;
+      }
+
+      const response = await first;
+      const expectedRequest = { status, operation: { status: operationStatus } };
+      if (refusal === "unexpected") {
+        expect(response.status).toBe(500);
+        expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      } else if (action === "approve") {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ data: { approvalRequest: expectedRequest } });
+      } else {
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({
+          error: { code: "CONFLICT", message: `Approval request is already ${status}` },
+        });
+      }
+      const detail = await app.request(path, { headers }, env);
+      expect(await detail.json()).toMatchObject({
+        data: { approvalRequest: expectedRequest },
+      });
+      expect(depositIntoVault).toHaveBeenCalledTimes(action === "approve" ? 1 : 0);
+    }
+  );
+
   it.each(
     ["false", "true"].flatMap((byokEnabled) =>
       [

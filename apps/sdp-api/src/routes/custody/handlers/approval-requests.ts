@@ -2,7 +2,14 @@ import type { WalletApprovalRequestSummary } from "@sdp/types";
 import { z } from "zod";
 import { type ApprovalRequestDetailRow, createPolicyRepository } from "@/db/repositories";
 import { type ApiKeyContext, getAuth } from "@/lib/auth";
-import { badRequestParams, badRequestQuery, conflict, forbidden, notFound } from "@/lib/errors";
+import {
+  AppError,
+  badRequestParams,
+  badRequestQuery,
+  conflict,
+  forbidden,
+  notFound,
+} from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -202,21 +209,43 @@ export const approveApprovalRequest = async (c: AppContext) => {
   // A new approval admits its pinned wallet before the decision, like every
   // other new execution attempt. Existing approvals keep their replay contract.
   if (current.approval_status === "pending") {
-    if (current.custody_wallet_id) {
-      await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
-        current.organization_id,
-        current.project_id ?? undefined,
-        current.custody_wallet_id
-      );
-    } else if (
-      current.operation_family !== "program" ||
-      current.operation_type !== "earn_program_withdrawal"
-    ) {
-      // Provider-managed program withdrawals have no SDP custody signer.
-      // A missing pin is not an execution bypass for any other operation.
-      throw conflict("Wallet operation has no custody wallet", {
-        reason: "runtime_execution_unavailable",
+    try {
+      if (current.custody_wallet_id) {
+        await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
+          current.organization_id,
+          current.project_id ?? undefined,
+          current.custody_wallet_id
+        );
+      } else if (
+        current.operation_family !== "program" ||
+        current.operation_type !== "earn_program_withdrawal"
+      ) {
+        // Provider-managed program withdrawals have no SDP custody signer.
+        // A missing pin is not an execution bypass for any other operation.
+        throw conflict("Wallet operation has no custody wallet", {
+          reason: "runtime_execution_unavailable",
+        });
+      }
+    } catch (error) {
+      if (
+        !(error instanceof AppError) ||
+        (error.code !== "NOT_FOUND" &&
+          error.details?.reason !== "runtime_execution_paused" &&
+          error.details?.reason !== "runtime_execution_unavailable" &&
+          error.details?.reason !== "provider_not_entitled")
+      ) {
+        throw error;
+      }
+      // Another resolver may have decided while admission was in flight.
+      // Let the existing decision path handle terminal replay or conflict.
+      const latest = await repository.getApprovalRequestDetail({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        approvalRequestId,
       });
+      if (!latest || latest.approval_status === "pending") {
+        throw error;
+      }
     }
   }
   const approvalRequest = await new WalletPolicyEnforcementService(
