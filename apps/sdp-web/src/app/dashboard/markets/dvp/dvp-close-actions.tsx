@@ -48,8 +48,9 @@ export function DvpCloseActions({
     <div className="flex flex-col gap-3">
       {/* Past expiry the program refuses Settle for good, and the next-step line
           already says Cancel is the way out, so a dead Settle panel only offers
-          an action that cannot happen. */}
-      {settle === "expired" ? null : (
+          an action that cannot happen. A settle already in flight keeps its
+          panel: the page can refresh to expired while it is still confirming. */}
+      {settle === "expired" && !settling ? null : (
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4">
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-primary text-sm">

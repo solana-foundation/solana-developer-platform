@@ -22,7 +22,7 @@ import {
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -36,6 +36,8 @@ const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
+// The settlement window is judged by the cluster clock, not the host's.
+const readClusterUnixTimestamp = vi.hoisted(() => vi.fn());
 const getRecentBlockhash = vi.hoisted(() =>
   vi.fn(async () => ({
     blockhash: "11111111111111111111111111111111",
@@ -60,7 +62,7 @@ vi.mock("@/services/sponsorship.service", async () => {
   };
 });
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
-vi.mock("./read-chain", () => ({ readDvpAccounts }));
+vi.mock("./read-chain", () => ({ readDvpAccounts, readClusterUnixTimestamp }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash,
@@ -128,9 +130,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 }
 
 const context = { env } as never;
-/** Inside the fixture's window: 3,600 s before `expiryTimestamp`. */
-const NOW_MS = 1_800_000_000_000;
-const NOW_SECONDS = NOW_MS / 1000;
+/** The cluster clock, inside the fixture's window: 3,600 s before `expiryTimestamp`. */
+const NOW_SECONDS = 1_800_000_000n;
 
 function preflightError(): SolanaError {
   return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
@@ -155,10 +156,7 @@ describe("closeDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    // Settle is refused past expiry by the clock, so the fixture's expiry has
-    // to stay in the future no matter when the suite runs.
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW_MS);
+    readClusterUnixTimestamp.mockResolvedValue(NOW_SECONDS);
     readDvpAccounts.mockResolvedValue({
       trade: { exists: true, address: trade().swapDvp },
       legA: { exists: true, amount: 1000n, frozen: false },
@@ -193,16 +191,12 @@ describe("closeDvpTrade", () => {
     );
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   // The row lags the chain by up to one observation, so a trade that expired a
   // moment ago can still read `funded`. The program would refuse it with
   // DvpExpired after the fee was already spent.
   it("refuses to settle a funded trade past its expiry, before signing anything", async () => {
     await expect(
-      closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1) }), "settle")
+      closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1n) }), "settle")
     ).rejects.toThrow(/past its expiry and can only be cancelled/);
     expect(getFeePayer).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -210,8 +204,6 @@ describe("closeDvpTrade", () => {
 
   // `settle_dvp.rs` checks `now <= expiry`, so the expiry second itself settles.
   it("settles at the exact expiry second", async () => {
-    vi.setSystemTime(NOW_MS + 999);
-
     await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS) }), "settle");
 
     expect(sendTransaction).toHaveBeenCalledTimes(1);
@@ -219,7 +211,21 @@ describe("closeDvpTrade", () => {
 
   // Cancel has no expiry gate on chain, and it is the only way the money goes back.
   it("still cancels a funded trade past its expiry", async () => {
-    await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1) }), "cancel");
+    await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1n) }), "cancel");
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // A host clock ahead of the cluster must not close the window early: the
+  // program reads the cluster clock, and so does this check.
+  it("judges expiry by the cluster clock, not the host clock", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(NOW_SECONDS + 3_600n) * 1000 + 30_000);
+    try {
+      await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS + 10n) }), "settle");
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
@@ -228,7 +234,7 @@ describe("closeDvpTrade", () => {
     await expect(
       closeDvpTrade(
         context,
-        trade({ earliestSettlementTimestamp: String(NOW_SECONDS + 1) }),
+        trade({ earliestSettlementTimestamp: String(NOW_SECONDS + 1n) }),
         "settle"
       )
     ).rejects.toThrow(/before its earliest settlement time/);

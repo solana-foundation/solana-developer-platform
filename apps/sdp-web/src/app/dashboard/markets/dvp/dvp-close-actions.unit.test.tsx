@@ -116,6 +116,14 @@ describe("DvpCloseActions", () => {
     expect(html).not.toContain("Both legs must be funded");
   });
 
+  // The page refreshes every few seconds, so a settle started just before expiry
+  // can re-render as expired while it is still confirming.
+  it("keeps the settle panel and its spinner while a settle confirms past expiry", () => {
+    const html = renderActions(trade("expired", true), new Set(["settle"]));
+
+    expect(html).toContain("Settling…");
+  });
+
   // The close waits for confirmation, up to 15 seconds. A greyed-out button
   // alone read as nothing happening.
   it.each([

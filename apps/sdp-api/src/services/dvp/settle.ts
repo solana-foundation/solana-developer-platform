@@ -30,7 +30,7 @@ import {
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { isPastDvpExpiry } from "./observe";
-import { readDvpAccounts } from "./read-chain";
+import { readClusterUnixTimestamp, readDvpAccounts } from "./read-chain";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import {
   buildCancelInstruction,
@@ -56,25 +56,31 @@ export interface DvpCloseResult {
 /**
  * Refuses a settle the program would refuse on time alone.
  *
- * Checked against the clock rather than trusted to the status: the row is only
- * as fresh as its last observation, so a trade can still read `funded` for a
- * few seconds after it expired. Cancel has no window (`cancel_dvp.rs:17-20`),
- * which is why only settle comes through here.
+ * Judged by the cluster's `Clock` sysvar, the value `settle_dvp.rs` reads, not
+ * the host clock: a host a few seconds off would refuse settlements the program
+ * accepts, before preflight could say otherwise. And not trusted to the status:
+ * the row is only as fresh as its last observation, so a trade can still read
+ * `funded` for a few seconds after it expired. Cancel has no window
+ * (`cancel_dvp.rs:17-20`), which is why only settle comes through here.
+ *
+ * The clock only moves forward, so a read that is already past expiry is past it
+ * for the transaction too. An earliest time is the one edge that can close
+ * between this read and execution, a slot or two later; that refusal is retryable.
  *
  * @param trade - The trade about to settle.
- * @param nowMs - Wall clock in milliseconds.
+ * @param clusterNow - The cluster clock's `unixTimestamp`.
  */
 function assertInsideSettlementWindow(
   trade: Pick<DvpTradeRow, "id" | "expiryTimestamp" | "earliestSettlementTimestamp">,
-  nowMs: number
+  clusterNow: bigint
 ): void {
-  if (isPastDvpExpiry(trade.expiryTimestamp, nowMs)) {
+  if (isPastDvpExpiry(trade.expiryTimestamp, clusterNow)) {
     throw badRequest(`DvP trade ${trade.id} is past its expiry and can only be cancelled`);
   }
   // `settle_dvp.rs:144-146`: `now >= earliest` when the trade sets one.
   if (
     trade.earliestSettlementTimestamp !== null &&
-    BigInt(Math.floor(nowMs / 1000)) < BigInt(trade.earliestSettlementTimestamp)
+    clusterNow < BigInt(trade.earliestSettlementTimestamp)
   ) {
     throw badRequest(
       `DvP trade ${trade.id} cannot settle before its earliest settlement time ${trade.earliestSettlementTimestamp}`
@@ -97,8 +103,9 @@ export async function closeDvpTrade(
     throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be ${action}d`);
   }
 
+  const rpc = solanaRpc.createRpc(env);
   if (action === "settle") {
-    assertInsideSettlementWindow(trade, Date.now());
+    assertInsideSettlementWindow(trade, await readClusterUnixTimestamp(rpc));
   }
 
   // Settle moves both legs, so it needs both actually funded. Cancel does not:
@@ -139,7 +146,6 @@ export async function closeDvpTrade(
     tokenProgramB: trade.tokenProgramB,
   });
 
-  const rpc = solanaRpc.createRpc(env);
   const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
     a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
     b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },

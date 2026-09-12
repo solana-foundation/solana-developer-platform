@@ -11,8 +11,14 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { type Address, fetchEncodedAccounts } from "@solana/kit";
+import {
+  type Address,
+  address,
+  fetchEncodedAccounts,
+  fetchJsonParsedAccount,
+} from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
+import { z } from "zod";
 import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { DvpLegObservation, DvpTradeObservation } from "./observe";
@@ -30,6 +36,38 @@ export interface DvpLegAddress {
   escrow: Address;
   tokenProgram: Address;
   mint: Address;
+}
+
+const SYSVAR_CLOCK_ADDRESS = address("SysvarC1ock11111111111111111111111111111111");
+
+/** The Clock sysvar as the RPC's `jsonParsed` encoding describes it. */
+const parsedClockSchema = z.object({
+  parsedAccountMeta: z.object({ program: z.literal("sysvar"), type: z.literal("clock") }),
+  unixTimestamp: z.bigint(),
+});
+
+/**
+ * The cluster's current `Clock.unix_timestamp`, the time `settle_dvp.rs` reads.
+ *
+ * Asked of the RPC in `jsonParsed` form rather than decoded here: `@solana/kit`
+ * does not re-export `@solana/sysvars`, and declaring that package in this app
+ * re-resolves the Mosaic SDK's sysvars peer. The RPC names the account's program
+ * and type, which is checked before the value is believed.
+ *
+ * @param rpc - The cluster to ask.
+ * @returns Unix seconds, as the cluster's clock has them.
+ */
+export async function readClusterUnixTimestamp(rpc: SolanaRpc): Promise<bigint> {
+  const account = await fetchJsonParsedAccount<{ unixTimestamp: bigint }>(
+    rpc,
+    SYSVAR_CLOCK_ADDRESS
+  );
+  if (!account.exists) {
+    throw new Error("The cluster returned no Clock sysvar account");
+  }
+  // An RPC that could not jsonParse the account hands back raw bytes, which the
+  // schema refuses along with any account that is not the clock.
+  return parsedClockSchema.parse(account.data).unixTimestamp;
 }
 
 const MISSING: DvpLegObservation = { exists: false, tampered: false };
