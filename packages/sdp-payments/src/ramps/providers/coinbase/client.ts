@@ -164,7 +164,31 @@ interface CoinbaseCreateOrderResponse {
     fees: CoinbaseOrderFee[];
   };
   paymentLink: { url: string; paymentLinkType: string };
+  // Embedded orders also return `userAuthToken`; it is intentionally not modelled so nothing
+  // can read, log or persist it (see createOnrampQuote).
 }
+
+/**
+ * Hosts Coinbase will never allow-list. Embedding the payment link on a local page is
+ * permitted, but the `domain` field is refused for these names, so local runs omit it.
+ */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function isLocalHost(hostname: string): boolean {
+  return LOCAL_HOSTS.has(hostname.toLowerCase());
+}
+
+/** Embedded-mode create-order body: payment details and the partner reference, never contact data. */
+type CoinbaseCreateOrderRequest = {
+  paymentCurrency: string;
+  purchaseCurrency: string;
+  paymentMethod: string;
+  destinationAddress: string;
+  destinationNetwork: string;
+  paymentAmount: string;
+  partnerUserRef: string;
+  domain?: string;
+};
 
 export class CoinbaseRampClient implements RampProvider {
   readonly id = "coinbase";
@@ -268,25 +292,29 @@ export class CoinbaseRampClient implements RampProvider {
   }
 
   /**
-   * Creates a guest-checkout Apple Pay order and returns its hosted payment link.
+   * Creates an embedded on-ramp order and returns its hosted payment link.
    *
-   * Sandbox-only for now. Coinbase requires `agreementAcceptedAt` / `phoneNumberVerifiedAt`
-   * timestamps attesting that the buyer accepted their user agreement and passed phone OTP;
-   * sandbox orders (never charged) accept a request-time stamp, but production must carry
-   * the real timestamps from an OTP flow SDP has not built yet — so production mode fails
-   * loudly instead of sending a false attestation.
+   * Embedded mode: the request carries no buyer contact data. Coinbase collects the
+   * buyer's phone number, email, one-time passwords and any identity information for a
+   * limits upgrade inside the hosted flow, so no PII passes through SDP. The buyer is
+   * identified to Coinbase only by `partnerUserRef`, derived from the counterparty id.
    *
-   * Sandbox orders are flagged by a `sandbox-` prefix on `partnerUserRef` (not separate
-   * credentials): the order always succeeds and the card is never charged. The payment link
-   * gets `useApplePaySandbox=true`, which is required for local-dev embedding and swaps the
-   * real Apple Pay sheet with a fake popup.
+   * Sandbox-only for now. Sandbox orders are flagged by a `sandbox-` prefix on
+   * `partnerUserRef` (not separate credentials): the order always succeeds and the card is
+   * never charged. The payment link gets `useApplePaySandbox=true`, which is required for
+   * local-dev embedding and swaps the real Apple Pay sheet with a fake popup. Production
+   * needs the embedding domain registered in the CDP portal and a real Apple Pay run, so
+   * production mode fails loudly until that is done.
    *
-   * `domain` is omitted: it must be a CDP-portal-registered domain — Coinbase rejects
-   * `localhost` in any form with "Domain is not allow listed" (verified empirically); the
-   * docs' localhost exemption applies to embedding the link, not to this field. The
-   * production flow will need it passed once domain registration exists.
+   * `domain` is forwarded when the caller supplies a real host: Coinbase requires it to be a
+   * CDP-portal-registered host and rejects `localhost` in any form with "Domain is not
+   * allow listed", so local hostnames are dropped and registered previews and prod pass theirs.
    *
-   * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview#web-app-testing
+   * Coinbase also returns a reusable `userAuthToken` on embedded orders. It is deliberately
+   * ignored here: never logged, never returned, never stored (decision 2026-09-08), so a
+   * returning buyer re-verifies each order.
+   *
+   * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview
    */
   async createOnrampQuote(
     { env, mode }: RampRuntimeContext,
@@ -294,38 +322,30 @@ export class CoinbaseRampClient implements RampProvider {
   ): Promise<PaymentRampQuote> {
     if (mode !== "sandbox") {
       throw providerUnavailable(
-        "Coinbase Onramp production orders require real agreement/OTP verification timestamps, which are not implemented yet.",
-        { provider: this.id }
-      );
-    }
-    if (!input.email || !input.phone) {
-      throw badRequest(
-        "Coinbase onramp requires identity fields that are no longer stored; JIT collection is not wired yet",
+        "Coinbase Onramp production orders need the registered embedding domain and a real Apple Pay run, which are not done yet.",
         { provider: this.id }
       );
     }
 
-    const now = new Date().toISOString();
     const partnerUserRef = `sandbox-${input.externalCustomerId}`;
-    const phoneNumber = input.phone.replace(/[\s()-]/g, "");
+    const orderRequest: CoinbaseCreateOrderRequest = {
+      paymentCurrency: input.fiatCurrency ?? "USD",
+      purchaseCurrency: getCryptoRailAssetLabel(input.assetRail),
+      paymentMethod: ONRAMP_PAYMENT_METHOD,
+      destinationAddress: input.destinationWalletAddress,
+      destinationNetwork: SOLANA_NETWORK,
+      paymentAmount: input.fiatAmount,
+      partnerUserRef,
+    };
+    if (input.domain !== undefined && !isLocalHost(input.domain)) {
+      orderRequest.domain = input.domain;
+    }
 
     const { order, paymentLink } = await this.request<CoinbaseCreateOrderResponse>(
       env,
       "POST",
       CDP_V2_ORDERS_URL,
-      {
-        paymentCurrency: input.fiatCurrency ?? "USD",
-        purchaseCurrency: getCryptoRailAssetLabel(input.assetRail),
-        paymentMethod: ONRAMP_PAYMENT_METHOD,
-        destinationAddress: input.destinationWalletAddress,
-        destinationNetwork: SOLANA_NETWORK,
-        paymentAmount: input.fiatAmount,
-        email: input.email,
-        phoneNumber,
-        agreementAcceptedAt: now,
-        phoneNumberVerifiedAt: now,
-        partnerUserRef,
-      }
+      orderRequest
     );
 
     // The dashboard iframes this URL and trusts its origin for postMessage

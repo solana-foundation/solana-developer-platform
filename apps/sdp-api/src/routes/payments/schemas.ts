@@ -656,8 +656,9 @@ export const createOnrampQuoteSchema = z.strictObject({
   fiatCurrency: rampFiatCurrencySchema,
   fiatAmount: paymentAmountSchema,
   rampsMemo: rampsMemoSchema.optional(),
-  // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
-  domain: z.string().min(1).optional(),
+  // Embedding host for Coinbase's payment link (browser origin hostname, no scheme or port);
+  // forwarded to Coinbase, which only accepts CDP-registered hosts.
+  domain: z.hostname().optional(),
 });
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
