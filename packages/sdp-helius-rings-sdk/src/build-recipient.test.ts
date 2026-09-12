@@ -40,7 +40,6 @@ const { buildRingsOperation } = await import("./build.js");
 const { derivedIdentity, honestRecord, TEST_FOREIGN_REQUEST, TEST_OWNER, testSignMessage } =
   await import("./test/shielded-identity-fixtures.js");
 const { createCustodyMaterialSource } = await import("./custody-ka/index.js");
-const { clearSeedCache } = await import("./custody-ka/seed-cache.js");
 
 const RECIPIENT = TEST_FOREIGN_REQUEST.owner;
 const BLOCKHASH = "5DjPMLBWWLbNw3TRUEbCwPFvpXqhkdVv2VUb3RJhZmpJ";
@@ -83,7 +82,7 @@ function deps(signMessage = testSignMessage) {
         .fn()
         .mockResolvedValue({ blockhash: BLOCKHASH, lastValidBlockHeight: 1_000n }),
     } as never,
-    material: createCustodyMaterialSource({ signMessage, cache: { ttlMs: 0 } }),
+    material: createCustodyMaterialSource({ signMessage }),
     organizationId: "org_1",
     projectId: "proj_1",
   };
@@ -92,7 +91,6 @@ function deps(signMessage = testSignMessage) {
 describe("buildRingsOperation recipient resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearSeedCache();
     spendKeys.mockReturnValue({ destroy: vi.fn() });
     hydrateWallet.mockResolvedValue({ wallet: {} });
     buildTransfer.mockResolvedValue({ instructions: [], inputNotes: [] });
