@@ -2494,87 +2494,122 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
    * exemption every approved body-keyed withdrawal 400s at execution: money
    * held by policy that could never be paid.
    */
-  it("pays out a body-keyed withdrawal once its approval is granted", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_control_profiles
+  it.each(["recovery", "http"])(
+    "pays out a body-keyed withdrawal through %s approval execution",
+    async (execution) => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles
            (id, organization_id, project_id, api_key_id, name, status)
          VALUES (?, ?, ?, ?, ?, 'active')`
-      )
-      .bind("akcp_exec", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Approve payouts")
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_control_profile_revisions
+        )
+        .bind("akcp_exec", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Approve payouts")
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profile_revisions
            (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
          VALUES (?, ?, 1, ?::jsonb, 'allow', ?, ?)`
-      )
-      .bind(
-        "akcpr_exec_1",
-        "akcp_exec",
-        JSON.stringify([
-          {
-            id: "approve-program-withdrawals",
-            kind: "approval",
-            operationTypes: ["earn_program_withdrawal"],
-          },
-        ]),
-        TEST_USER.id,
-        "2026-09-07T00:00:00.000Z"
-      )
-      .run();
-    await getDb(env)
-      .prepare(
-        "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
-      )
-      .bind("akcpr_exec_1", "2026-09-07T00:00:00.000Z", "akcp_exec")
-      .run();
+        )
+        .bind(
+          "akcpr_exec_1",
+          "akcp_exec",
+          JSON.stringify([
+            {
+              id: "approve-program-withdrawals",
+              kind: "approval",
+              operationTypes: ["earn_program_withdrawal"],
+            },
+          ]),
+          TEST_USER.id,
+          "2026-09-07T00:00:00.000Z"
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
+        )
+        .bind("akcpr_exec_1", "2026-09-07T00:00:00.000Z", "akcp_exec")
+        .run();
 
-    const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
+      const createWithdrawal = vi
+        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
 
-    // The caller keys with body `requestId`, the form this route accepts and
-    // the vault routes reject — which is why the vault suites never caught it.
-    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-      requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
-      amountUsd: "25.50",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
-    });
-    expect(held.status).toBe(202);
-    expect(createWithdrawal).not.toHaveBeenCalled();
-    const heldBody = (await held.json()) as {
-      error: { details: { approvalRequestId: string; walletOperationId: string } };
-    };
+      // The caller keys with body `requestId`, the form this route accepts and
+      // the vault routes reject — which is why the vault suites never caught it.
+      const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+        requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
+        amountUsd: "25.50",
+        token: "usdc",
+        destinationAddress: SOLANA_DESTINATION,
+      });
+      expect(held.status).toBe(202);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+      const heldBody = (await held.json()) as {
+        error: { details: { approvalRequestId: string; walletOperationId: string } };
+      };
 
-    const policyRepository = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    await policyRepository.updateApprovalRequestStatus({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      approvalRequestId: heldBody.error.details.approvalRequestId,
-      status: "approved",
-      operationStatus: "executing",
-      resolvedBy: TEST_API_KEY.id,
-    });
-    // Approved and unclaimed: the recovery pass is how an approved operation
-    // reaches its route, and it is the only in-process way to drive the real
-    // executor — which is the point, since the defect lives in what the
-    // executor sends.
-    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+      const policyRepository = createPostgresPolicyRepository(
+        getDb(env),
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      );
+      if (execution === "recovery") {
+        await policyRepository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId: heldBody.error.details.approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_API_KEY.id,
+        });
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+      } else {
+        const approverKey = "sk_test_program_approver";
+        const approverHash = await hashString(approverKey, env.API_KEY_PEPPER);
+        await getDb(env).batch([
+          getDb(env).prepare(
+            `INSERT INTO users (id, email, email_verified, status)
+           VALUES ('usr_program_approver', 'program-approver@example.com', 1, 'active')`
+          ),
+          getDb(env)
+            .prepare(
+              `INSERT INTO api_keys (id, organization_id, project_id, created_by, name,
+             key_prefix, key_hash, role, permissions, status)
+           VALUES ('key_program_approver', ?, ?, 'usr_program_approver', 'Approver',
+             'sk_test_prog', ?, 'api_admin', '["*"]', 'active')`
+            )
+            .bind(TEST_ORG.id, TEST_PROJECT.id, approverHash),
+        ]);
+        await seedCachedApiKey(env, approverHash, {
+          ...TEST_CACHED_API_KEY,
+          id: "key_program_approver",
+        });
+        const path = `/v1/wallets/approval-requests/${heldBody.error.details.approvalRequestId}/approve`;
+        const headers = { Authorization: `Bearer ${approverKey}` };
+        const flag = env.PRIVY_BYOK_ENABLED;
+        env.PRIVY_BYOK_ENABLED = "false";
+        try {
+          const response = await app.request(path, { method: "POST", headers }, env);
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({
+            data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
+          });
+        } finally {
+          env.PRIVY_BYOK_ENABLED = flag;
+        }
+      }
 
-    // The payout the approval authorized actually left, exactly once.
-    expect(createWithdrawal).toHaveBeenCalledTimes(1);
-    const executed = await policyRepository.getWalletOperationById(
-      heldBody.error.details.walletOperationId
-    );
-    expect(executed).toMatchObject({ status: "completed", execution_error: null });
-  });
+      // The payout the approval authorized actually left, exactly once.
+      expect(createWithdrawal).toHaveBeenCalledTimes(1);
+      const executed = await policyRepository.getWalletOperationById(
+        heldBody.error.details.walletOperationId
+      );
+      expect(executed).toMatchObject({ status: "completed", execution_error: null });
+    }
+  );
 });
 
 /**

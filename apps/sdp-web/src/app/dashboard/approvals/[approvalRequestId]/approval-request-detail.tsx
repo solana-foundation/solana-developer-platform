@@ -4,6 +4,7 @@ import type { WalletApprovalRequestSummary, WalletPolicyEvaluationDetail } from 
 import { Check, Copy, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -51,6 +52,24 @@ const ACTION_COPY = {
 } as const;
 
 const RULE_TYPE_KEYS = ["type", "kind", "ruleType", "rule_type"];
+
+const ADMISSION_ERROR_COPY = {
+  runtime_paused: "DashboardApprovals.runtimePaused",
+  runtime_unavailable: "DashboardApprovals.runtimeUnavailable",
+  provider_not_entitled: "DashboardApprovals.providerAccessDenied",
+} as const;
+
+const runtimeExecutionErrorSchema = z.object({
+  error: z.object({
+    details: z.object({
+      reason: z.enum([
+        "runtime_execution_paused",
+        "runtime_execution_unavailable",
+        "provider_not_entitled",
+      ]),
+    }),
+  }),
+});
 
 export function ApprovalRequestDetail({
   initialRequest,
@@ -101,7 +120,11 @@ export function ApprovalRequestDetail({
         error?: { message?: string } | string;
       } | null;
 
-      const outcome = classifyApprovalActionResponse(response.status);
+      const runtimeError = runtimeExecutionErrorSchema.safeParse(body);
+      const outcome = classifyApprovalActionResponse(
+        response.status,
+        runtimeError.success ? runtimeError.data.error.details.reason : undefined
+      );
 
       if (outcome === "success") {
         if (body?.data?.approvalRequest) {
@@ -112,6 +135,16 @@ export function ApprovalRequestDetail({
         }
         setConfirmation(null);
         toast.success(t(ACTION_COPY[action].success));
+        return;
+      }
+
+      if (
+        outcome === "runtime_paused" ||
+        outcome === "runtime_unavailable" ||
+        outcome === "provider_not_entitled"
+      ) {
+        setConfirmation(null);
+        toast.error(t(ADMISSION_ERROR_COPY[outcome]));
         return;
       }
 

@@ -27,4 +27,19 @@ describe("approval actions", () => {
     expect(classifyApprovalActionResponse(409)).toBe("stale");
     expect(classifyApprovalActionResponse(403)).toBe("forbidden");
   });
+
+  it("distinguishes wallet availability refusals from permission and decision conflicts", () => {
+    expect(classifyApprovalActionResponse(403, "runtime_execution_paused")).toBe("runtime_paused");
+    expect(classifyApprovalActionResponse(409, "runtime_execution_unavailable")).toBe(
+      "runtime_unavailable"
+    );
+    expect(classifyApprovalActionResponse(403, "provider_not_entitled")).toBe(
+      "provider_not_entitled"
+    );
+    expect(classifyApprovalActionResponse(500, "provider_not_entitled")).toBe("failure");
+    expect(classifyApprovalActionResponse(403, "other_reason")).toBe("forbidden");
+    expect(classifyApprovalActionResponse(409, "other_reason")).toBe("stale");
+    expect(classifyApprovalActionResponse(200, "runtime_execution_paused")).toBe("success");
+    expect(classifyApprovalActionResponse(500, "runtime_execution_unavailable")).toBe("failure");
+  });
 });

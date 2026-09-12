@@ -37,6 +37,7 @@ import { badRequest } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { SigningService } from "@/services/domain/signing.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -328,6 +329,35 @@ async function seedAuth(): Promise<void> {
   ]);
 }
 
+async function seedApprover() {
+  const db = getDb(env);
+  await db.batch([
+    db.prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       VALUES ('usr_vault_approver', 'vault-approver@example.com', 1, 'active')`
+    ),
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+       VALUES ('om_vault_approver', ?, 'usr_vault_approver', 'admin', 'active')`
+      )
+      .bind(TEST_ORG.id),
+    db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role)
+       VALUES ('pm_vault_approver', ?, 'usr_vault_approver', 'admin')`
+      )
+      .bind(TEST_PROJECT.id),
+    db
+      .prepare(
+        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+       VALUES ('ses_vault_approver', 'usr_vault_approver', ?, 'session', '2099-01-01T00:00:00.000Z')`
+      )
+      .bind(TEST_ORG.id),
+  ]);
+  return { Cookie: "sdp_session=ses_vault_approver", "x-project-id": TEST_PROJECT.id };
+}
+
 async function seedStrategy(
   overrides: Partial<UpsertEarnStrategyInput> = {}
 ): Promise<EarnStrategyRow> {
@@ -409,6 +439,318 @@ afterEach(() => {
 
 describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
   it.each([
+    { action: "approve", status: "approved", operationStatus: "completed", refusal: "unavailable" },
+    { action: "approve", status: "approved", operationStatus: "completed", refusal: "paused" },
+    {
+      action: "approve",
+      status: "approved",
+      operationStatus: "failed",
+      refusal: "provider-denied",
+    },
+    { action: "reject", status: "rejected", operationStatus: "canceled", refusal: "paused" },
+    { action: "cancel", status: "canceled", operationStatus: "canceled", refusal: "unavailable" },
+    { action: "approve", status: "approved", operationStatus: "completed", refusal: "unexpected" },
+  ])(
+    "preserves $status/$operationStatus when $refusal admission races with $action",
+    async ({ action, status, operationStatus, refusal }) => {
+      await seedAuth();
+      const headers = await seedApprover();
+      await seedConnectionWallet();
+      const strategy = await seedStrategy();
+      await requireDepositApproval();
+      env.PRIVY_BYOK_ENABLED = "true";
+      const held = await postVaultDeposit(
+        { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+        "approve-admission-race"
+      );
+      expect(held.status).toBe(202);
+      const body = z
+        .object({ error: z.object({ details: z.object({ approvalRequestId: z.string() }) }) })
+        .parse(await held.json());
+      const path = `/v1/wallets/approval-requests/${body.error.details.approvalRequestId}`;
+      let admissionEntered!: () => void;
+      let releaseAdmission!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        admissionEntered = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        releaseAdmission = resolve;
+      });
+      const admit = SigningService.prototype.admitRuntimeExecution;
+      // Control request ordering; only the infrastructure-failure case replaces admission.
+      vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockImplementationOnce(
+        async function (this: SigningService, ...args) {
+          admissionEntered();
+          await released;
+          if (refusal === "unexpected") throw new Error("Unexpected admission failure");
+          return admit.apply(this, args);
+        }
+      );
+      const first = app.request(`${path}/approve`, { method: "POST", headers }, env);
+      await entered;
+      try {
+        if (operationStatus === "failed") {
+          depositIntoVault.mockRejectedValueOnce(badRequest("Deposit refused"));
+        }
+        const other = await app.request(`${path}/${action}`, { method: "POST", headers }, env);
+        expect(other.status).toBe(200);
+        if (refusal === "paused") {
+          env.PRIVY_BYOK_ENABLED = "false";
+        } else if (refusal === "provider-denied") {
+          await getDb(env)
+            .prepare(
+              "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
+            )
+            .bind(JSON.stringify({ privy: false }), TEST_ORG.id)
+            .run();
+        } else {
+          await getDb(env)
+            .prepare(
+              "UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cwlt_earn_vault_connection'"
+            )
+            .run();
+        }
+      } finally {
+        releaseAdmission();
+        await first;
+      }
+
+      const response = await first;
+      const expectedRequest = { status, operation: { status: operationStatus } };
+      if (refusal === "unexpected") {
+        expect(response.status).toBe(500);
+        expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      } else if (action === "approve") {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ data: { approvalRequest: expectedRequest } });
+      } else {
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({
+          error: { code: "CONFLICT", message: `Approval request is already ${status}` },
+        });
+      }
+      const detail = await app.request(path, { headers }, env);
+      expect(await detail.json()).toMatchObject({
+        data: { approvalRequest: expectedRequest },
+      });
+      expect(depositIntoVault).toHaveBeenCalledTimes(action === "approve" ? 1 : 0);
+    }
+  );
+
+  it.each(
+    ["false", "true"].flatMap((byokEnabled) =>
+      [
+        { state: "inactive-wallet", status: 409, reason: "runtime_execution_unavailable" },
+        { state: "inactive-config", status: 409, reason: "runtime_execution_unavailable" },
+        { state: "provider-denied", status: 403, reason: "provider_not_entitled" },
+      ].map((expectation) => ({ byokEnabled, ...expectation }))
+    )
+  )(
+    "keeps a new Config approval pending with a $state wallet and BYOK $byokEnabled",
+    async ({ byokEnabled, state, status, reason }) => {
+      await seedAuth();
+      const headers = await seedApprover();
+      await seedWallet({
+        configId: "cust_approval_legacy",
+        custodyWalletId: "cwlt_approval_legacy",
+        providerWalletId: "privy_approval_legacy",
+      });
+      const strategy = await seedStrategy();
+      await requireDepositApproval();
+      env.PRIVY_BYOK_ENABLED = byokEnabled;
+      const held = await postVaultDeposit(
+        { strategyId: strategy.id, custodyWalletId: "cwlt_approval_legacy", amount: "10" },
+        "approve-legacy-deposit"
+      );
+      expect(held.status).toBe(202);
+      const body = z
+        .object({ error: z.object({ details: z.object({ approvalRequestId: z.string() }) }) })
+        .parse(await held.json());
+      const path = `/v1/wallets/approval-requests/${body.error.details.approvalRequestId}`;
+
+      if (state === "inactive-wallet") {
+        await getDb(env)
+          .prepare(
+            "UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cwlt_approval_legacy'"
+          )
+          .run();
+      } else if (state === "inactive-config") {
+        await getDb(env)
+          .prepare(
+            "UPDATE custody_configs SET status = 'inactive' WHERE id = 'cust_approval_legacy'"
+          )
+          .run();
+      } else {
+        await getDb(env)
+          .prepare(
+            "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
+          )
+          .bind(JSON.stringify({ privy: false }), TEST_ORG.id)
+          .run();
+      }
+
+      const response = await app.request(`${path}/approve`, { method: "POST", headers }, env);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { details: { reason } } });
+      const detail = await app.request(path, { headers }, env);
+      expect(await detail.json()).toMatchObject({
+        data: {
+          approvalRequest: {
+            status: "pending",
+            resolvedAt: null,
+            operation: { status: "pending_approval", executionStartedAt: null },
+          },
+        },
+      });
+      expect(depositIntoVault).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { state: "paused", status: 403, reason: "runtime_execution_paused" },
+    { state: "retired-credential", status: 409, reason: "runtime_execution_unavailable" },
+    { state: "inactive-wallet", status: 409, reason: "runtime_execution_unavailable" },
+    { state: "provider-denied", status: 403, reason: "provider_not_entitled" },
+    { state: "missing-pin", status: 409, reason: "runtime_execution_unavailable" },
+    { state: "foreign-pin", status: 404, reason: undefined },
+  ])("keeps a new approval pending with a $state wallet", async ({ state, status, reason }) => {
+    await seedAuth();
+    const headers = await seedApprover();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy();
+    const repo = await requireDepositApproval();
+    env.PRIVY_BYOK_ENABLED = "true";
+    const held = await postVaultDeposit(
+      { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+      "approve-paused-deposit"
+    );
+    expect(held.status).toBe(202);
+    const [pending] = await repo.listApprovalRequestDetails({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+    });
+    const path = `/v1/wallets/approval-requests/${pending.approval_request_id}`;
+    // Changing the default must not replace this operation's retained Connection.
+    await seedWallet({
+      configId: "cust_approval_new_default",
+      custodyWalletId: "cwlt_approval_new_default",
+      providerWalletId: "privy_approval_new_default",
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
+       VALUES ('csd_approval_new_default', ?, ?, 'cust_approval_new_default')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .run();
+    if (state === "paused") env.PRIVY_BYOK_ENABLED = "false";
+    if (state === "retired-credential") {
+      await getDb(env)
+        .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_earn_vault'")
+        .run();
+    }
+    if (state === "inactive-wallet") {
+      await getDb(env)
+        .prepare(
+          "UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cwlt_earn_vault_connection'"
+        )
+        .run();
+    }
+    if (state === "provider-denied") {
+      await getDb(env)
+        .prepare(
+          "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
+        )
+        .bind(JSON.stringify({ privy: false }), TEST_ORG.id)
+        .run();
+    }
+    if (state === "missing-pin") {
+      await getDb(env)
+        .prepare("UPDATE wallet_operations SET custody_wallet_id = NULL WHERE id = ?")
+        .bind(pending.wallet_operation_id)
+        .run();
+    }
+    if (state === "foreign-pin") {
+      await seedWallet({
+        configId: "cust_approval_foreign",
+        custodyWalletId: "cwlt_approval_foreign",
+        providerWalletId: "privy_earn_vault_connection",
+        projectId: TEST_PRODUCTION_PROJECT.id,
+      });
+      await getDb(env)
+        .prepare("UPDATE wallet_operations SET custody_wallet_id = ? WHERE id = ?")
+        .bind("cwlt_approval_foreign", pending.wallet_operation_id)
+        .run();
+    }
+
+    const response = await app.request(`${path}/approve`, { method: "POST", headers }, env);
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({
+      error: reason ? { details: { reason } } : { code: "NOT_FOUND" },
+    });
+    const detail = await app.request(path, { headers }, env);
+    expect(await detail.json()).toMatchObject({
+      data: {
+        approvalRequest: {
+          status: "pending",
+          resolvedAt: null,
+          operation: { status: "pending_approval", executionStartedAt: null },
+        },
+      },
+    });
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    expect(await repo.getWalletOperationById(pending.wallet_operation_id)).toMatchObject({
+      execution_attempts: 0,
+      execution_attempt_id: null,
+      execution_lease_expires_at: null,
+      execution_effect_started_at: null,
+    });
+    if (state === "paused" || state === "provider-denied") {
+      const selfApproval = await app.request(
+        `${path}/approve`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+      expect(selfApproval.status).toBe(403);
+      expect(await selfApproval.json()).toMatchObject({
+        error: { message: "Approval requests must be decided by a different principal" },
+      });
+
+      env.PRIVY_BYOK_ENABLED = "true";
+      if (state === "provider-denied") {
+        await getDb(env)
+          .prepare(
+            "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
+          )
+          .bind(JSON.stringify({ privy: true }), TEST_ORG.id)
+          .run();
+      }
+      const responses = await Promise.all([
+        app.request(`${path}/approve`, { method: "POST", headers }, env),
+        app.request(`${path}/approve`, { method: "POST", headers }, env),
+      ]);
+      expect(responses.map((result) => result.status)).toEqual([200, 200]);
+      const completed = await app.request(path, { headers }, env);
+      expect(await completed.json()).toMatchObject({
+        data: {
+          approvalRequest: {
+            status: "approved",
+            operation: {
+              custodyWalletId: "cwlt_earn_vault_connection",
+              status: "completed",
+            },
+          },
+        },
+      });
+      expect(depositIntoVault).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it.each([
     { state: "paused", status: 403, reason: "runtime_execution_paused" },
     { state: "unavailable", status: 409, reason: "runtime_execution_unavailable" },
   ])(
@@ -448,10 +790,18 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     }
   );
 
-  it.each(["matching", "missing", "different-payload", "different-project", "failed"])(
-    "preserves approved deposit replay with a %s movement while custody execution is paused",
-    async (record) => {
+  it.each(
+    ["recovery", "approve"].flatMap((execution) =>
+      ["matching", "missing", "different-payload", "different-project", "failed"].map((record) => ({
+        execution,
+        record,
+      }))
+    )
+  )(
+    "preserves approved deposit replay with a $record movement while custody execution is paused through $execution",
+    async ({ execution, record }) => {
       await seedAuth();
+      const headers = await seedApprover();
       await seedConnectionWallet();
       const strategy = await seedStrategy();
       const repo = await requireDepositApproval();
@@ -507,7 +857,13 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
         "@/services/earn/vault-deposit.service"
       );
       depositIntoVault.mockImplementation(actual.depositIntoVault);
-      expect(await recoverApprovedWalletOperations(env)).toBe(1);
+      const path = `/v1/wallets/approval-requests/${details.approvalRequestId}/approve`;
+      if (execution === "recovery") {
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+      } else {
+        const response = await app.request(path, { method: "POST", headers }, env);
+        expect(response.status).toBe(200);
+      }
       const operation = await repo.getWalletOperationById(details.walletOperationId);
       if (record === "matching") {
         expect(operation).toMatchObject({ status: "completed", execution_error: null });
@@ -530,6 +886,22 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
           execution_effect_started_at: null,
         });
         expect(depositIntoVault).not.toHaveBeenCalled();
+      }
+      // Neither OFF nor ON can reopen a terminal operation or erase its fence.
+      for (const enabled of ["false", "true"]) {
+        env.PRIVY_BYOK_ENABLED = enabled;
+        const repeated = await app.request(path, { method: "POST", headers }, env);
+        expect(repeated.status).toBe(200);
+        expect(await repeated.json()).toMatchObject({
+          data: {
+            approvalRequest: {
+              status: "approved",
+              operation: { status: record === "matching" ? "completed" : "failed" },
+            },
+          },
+        });
+        expect(await recoverApprovedWalletOperations(env)).toBe(0);
+        expect(await repo.getWalletOperationById(details.walletOperationId)).toEqual(operation);
       }
     }
   );
