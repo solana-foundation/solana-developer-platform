@@ -84,6 +84,9 @@ describe("DvP route skeletons", () => {
 
     expect(html).toContain('data-loading-layout="dvp-trades"');
     expect(occurrences(html, "<th ")).toBe(6);
+    // The toolbar grid the page's TradesToolbar lays out: search, status, create.
+    expect(html).toContain("md:grid-cols-[minmax(280px,1fr)_190px_auto]");
+    expect(html).not.toContain("max-w-[63rem]");
   });
 
   it("draws the trade page as two delivery cards, then settle and cancel", () => {
@@ -92,6 +95,9 @@ describe("DvP route skeletons", () => {
     expect(occurrences(html, "data-loading-leg-card")).toBe(2);
     expect(html).toContain('data-loading-close-action="settle"');
     expect(html).toContain('data-loading-close-action="cancel"');
+    // The page's column and its side-by-side delivery cards from md up.
+    expect(html).toContain("max-w-[63rem]");
+    expect(html).toContain("mt-4 grid gap-4 md:grid-cols-2");
   });
 
   it("draws the create flow as a two-step wizard with both sides and no rail", () => {
@@ -100,5 +106,8 @@ describe("DvP route skeletons", () => {
     expect(occurrences(html, "data-loading-step")).toBe(2);
     expect(occurrences(html, "data-loading-create-leg")).toBe(2);
     expect(html).not.toContain("440px");
+    // WizardFrame's default width, on the stepper, the stage and the footer alike.
+    expect(occurrences(html, "max-w-3xl")).toBe(3);
+    expect(html).not.toContain("max-w-6xl");
   });
 });
