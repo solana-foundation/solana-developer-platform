@@ -260,6 +260,17 @@ describe("closeDvpTrade", () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
+  // The row already answers this one, so the cluster is not asked and an RPC
+  // outage cannot turn a 400 into a 500.
+  it("refuses an unfunded settle without reading the cluster clock", async () => {
+    readClusterUnixTimestamp.mockRejectedValue(new Error("rpc down"));
+
+    await expect(
+      closeDvpTrade(context, trade({ status: "partially_funded" }), "settle")
+    ).rejects.toThrow(/requires both legs funded/);
+    expect(readClusterUnixTimestamp).not.toHaveBeenCalled();
+  });
+
   // Settle moves both legs, so both must be funded. Sending it on a half-funded
   // trade costs a signature to learn what the status already said.
   it("refuses to settle a trade that is not fully funded", async () => {

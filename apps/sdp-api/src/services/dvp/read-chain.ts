@@ -11,12 +11,7 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import {
-  type Address,
-  address,
-  fetchEncodedAccounts,
-  fetchJsonParsedAccount,
-} from "@solana/kit";
+import { type Address, address, fetchEncodedAccounts, fetchJsonParsedAccount } from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
 import { z } from "zod";
 import { conflict } from "@/lib/errors";

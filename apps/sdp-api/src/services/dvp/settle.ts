@@ -103,17 +103,19 @@ export async function closeDvpTrade(
     throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be ${action}d`);
   }
 
-  const rpc = solanaRpc.createRpc(env);
-  if (action === "settle") {
-    assertInsideSettlementWindow(trade, await readClusterUnixTimestamp(rpc));
-  }
-
   // Settle moves both legs, so it needs both actually funded. Cancel does not:
   // refunding an unfunded or half-funded trade is exactly what it is for.
   if (action === "settle" && trade.status !== "funded") {
     throw badRequest(
       `DvP trade ${trade.id} is ${trade.status}; settlement requires both legs funded`
     );
+  }
+
+  // After the local refusals, so a trade the row already rules out is answered
+  // without a chain read, and an unreachable RPC cannot mask that answer.
+  const rpc = solanaRpc.createRpc(env);
+  if (action === "settle") {
+    assertInsideSettlementWindow(trade, await readClusterUnixTimestamp(rpc));
   }
 
   const settlement = await getOrCreateDvpSettlementWallet(env, {
