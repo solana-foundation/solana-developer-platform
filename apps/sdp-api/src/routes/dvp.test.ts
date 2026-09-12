@@ -754,9 +754,7 @@ describe("DvP routes", () => {
       await seedCustodyWallets();
     });
 
-    // The receipt first, the live claim while a funding is still in flight:
-    // a claim alone would link the leg only for the minute the claim lived.
-    it("prefers the funding receipt over a still-live claim", async () => {
+    it("reports the funding receipt once the transfer was broadcast", async () => {
       await seedTradeFor({ tradeId: "dvp_funded_leg" });
       await seedClaim("dvp_funded_leg", "a", "sig_live_claim", "sig_funding_receipt");
 
@@ -772,10 +770,9 @@ describe("DvP routes", () => {
       expect(body.data.trade.legs.a.fundingSignature).toBe("sig_funding_receipt");
     });
 
-    // The fallback exists so an in-flight funding links to the transaction it
-    // is waiting on, rather than showing a funded leg with no transaction at
-    // all until the sweep confirms the transfer.
-    it("falls back to the live claim signature while the funding is in flight", async () => {
+    // The claim's signature is computed before broadcast. Showing it while the
+    // funding is in flight links a transaction the cluster may drop.
+    it("reports null while a funding is in flight, never the pre-broadcast claim signature", async () => {
       await seedTradeFor({ tradeId: "dvp_inflight_leg" });
       await seedClaim("dvp_inflight_leg", "a", "sig_live_claim");
 
@@ -785,10 +782,10 @@ describe("DvP routes", () => {
         env
       );
       const body = (await res.json()) as {
-        data: { trade: { legs: { a: { fundingSignature: string } } } };
+        data: { trade: { legs: { a: { fundingSignature: string | null } } } };
       };
 
-      expect(body.data.trade.legs.a.fundingSignature).toBe("sig_live_claim");
+      expect(body.data.trade.legs.a.fundingSignature).toBeNull();
     });
 
     // A leg with no claim at all has no transaction to show. Null, not a made
@@ -868,7 +865,7 @@ describe("DvP routes", () => {
       await seedCustodyWallets();
     });
 
-    it("answers the creator's view: custodied side, counterparty label, live-claim signature", async () => {
+    it("answers the creator's view: custodied side, counterparty label, funding receipt", async () => {
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
       // Mint A is this org's issued token WITH artwork; mint B is this org's
       // issued token WITHOUT artwork — both must resolve from the token record.
@@ -889,7 +886,7 @@ describe("DvP routes", () => {
         counterpartyAccountIdA: accountId,
         observation: { escrowAAmount: "1000" },
       });
-      await seedClaim("dvp_full", "a", "sig_live_claim");
+      await seedClaim("dvp_full", "a", "sig_live_claim", "sig_funding_receipt");
       const { createdAt, updatedAt } = await readTradeTimestamps("dvp_full");
 
       const res = await app.request("/v1/dvp/trades/dvp_full", { headers: authHeaders() }, env);
@@ -923,7 +920,7 @@ describe("DvP routes", () => {
               surplus: null,
               frozen: false,
             },
-            fundingSignature: "sig_live_claim",
+            fundingSignature: "sig_funding_receipt",
             outcome: "funded",
           },
           b: {

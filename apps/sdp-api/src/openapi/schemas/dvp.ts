@@ -151,7 +151,7 @@ const dvpTradeLegSchema = z
       }),
     fundingSignature: z.string().nullable().openapi({
       description:
-        "The transaction that moved this leg into escrow: the funding receipt when one exists, else the live claim's signature while a funding is still in flight (so an in-flight funding links to the transaction it is waiting on), else null. Funding claims are tenant-scoped to the funding organization, so an organization that cannot read the claim row gets null — never a guess.",
+        "The transfer the calling organization sent into this leg's escrow, once it was broadcast. Null while that transfer is still being sent, for a leg funded by anyone else, and for an organization that did not fund it. Not a record of every deposit: the escrow accepts transfers from any address.",
     }),
     outcome: dvpLegOutcomeSchema,
   })

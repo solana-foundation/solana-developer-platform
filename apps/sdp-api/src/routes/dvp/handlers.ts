@@ -146,22 +146,21 @@ function resolveParty(
 }
 
 /**
- * The transaction that moved a leg into escrow: the receipt, else the live
- * claim's signature while the funding is in flight, else null. Claims rows
- * are tenant-scoped to the FUNDING org, so an unseen row simply reads null.
+ * The transfer this organization sent into a leg's escrow, or null.
+ *
+ * Only the receipt, recorded once the transfer was broadcast. The claim's own
+ * signature is not shown while a funding is in flight: it is computed before
+ * broadcast, and a transfer the cluster drops would leave the leg linking a
+ * transaction that never existed. This is SDP's transfer, not every deposit:
+ * a counterparty's payment never has a claim, and claim rows are tenant-scoped
+ * to the funding organization, so anyone else reads null.
  */
 function fundingSignatureFor(
   claims: ReadonlyMap<DvpTradeSide, DvpLegFundingClaim>,
   side: DvpTradeSide
 ): string | null {
   const claim = claims.get(side);
-  if (claim === undefined) {
-    return null;
-  }
-  if (claim.fundingTx !== null) {
-    return claim.fundingTx;
-  }
-  return claim.signature;
+  return claim === undefined ? null : claim.fundingTx;
 }
 
 /**
@@ -204,7 +203,7 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     settlementDestination: leg.settlementDestination,
     outcome: leg.outcome,
     funding,
-    /** Which transaction funded this leg. @see {@link fundingSignatureFor} */
+    /** The transfer this organization sent into the escrow. @see {@link fundingSignatureFor} */
     fundingSignature,
   };
 }

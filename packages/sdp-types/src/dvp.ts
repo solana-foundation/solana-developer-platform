@@ -60,3 +60,30 @@ export const DVP_LEG_OUTCOMES = [
   "closed",
 ] as const;
 export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];
+
+/**
+ * Why a request to fund a DvP leg was refused, sent as `error.details.reason`.
+ *
+ * The message carries ids and addresses for logs; a client names the problem in
+ * its own words from this code instead of relaying that message.
+ */
+export const DVP_FUND_REFUSAL = {
+  /** The trade is past the point where funding means anything. */
+  tradeNotFundable: "dvp_trade_not_fundable",
+  tradeNotOnChain: "dvp_trade_not_on_chain",
+  /** The account at the trade's address carries terms the row did not record. */
+  termsMismatch: "dvp_terms_mismatch",
+  escrowMissing: "dvp_escrow_missing",
+  /** The escrow is not the trade's token account (owner, mint or program). */
+  escrowMismatch: "dvp_escrow_mismatch",
+  escrowFrozen: "dvp_escrow_frozen",
+  legAlreadyFunded: "dvp_leg_already_funded",
+  mintUnreadable: "dvp_mint_unreadable",
+  /** The paying wallet has no token account for the leg's mint. */
+  walletHoldsNoToken: "dvp_wallet_holds_no_token",
+  walletBalanceShort: "dvp_wallet_balance_short",
+  /** A deposit landed between the balance read and the send. */
+  escrowBalanceChanged: "dvp_escrow_balance_changed",
+  legFundingInProgress: "dvp_leg_funding_in_progress",
+} as const;
+export type DvpFundRefusalReason = (typeof DVP_FUND_REFUSAL)[keyof typeof DVP_FUND_REFUSAL];

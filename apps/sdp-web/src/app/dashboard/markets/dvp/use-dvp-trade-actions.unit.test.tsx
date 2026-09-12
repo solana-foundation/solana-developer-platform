@@ -6,6 +6,7 @@
  * Successful and failed action outcomes.
  */
 
+import { DVP_FUND_REFUSAL } from "@sdp/types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
@@ -48,7 +49,9 @@ describe("useDvpTradeActions", () => {
 
   it("refreshes the page after a successful settle", async () => {
     global.fetch = respond(200) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
 
     await act(async () => await result.current.act("settle"));
 
@@ -57,9 +60,11 @@ describe("useDvpTradeActions", () => {
 
   it("surfaces the API's own message on a failure", async () => {
     global.fetch = respond(409, { error: { message: "Leg already funded." } }) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
 
-    await act(async () => await result.current.act("fund", { side: "a" }));
+    await act(async () => await result.current.act("fund", { side: "a", symbol: "USDC" }));
 
     expect(toast.error).toHaveBeenCalledWith(
       "Leg already funded.",
@@ -69,7 +74,9 @@ describe("useDvpTradeActions", () => {
 
   it("reports a transport failure", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("socket hang up")) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
 
     await act(async () => await result.current.act("settle"));
 
@@ -84,7 +91,9 @@ describe("useDvpTradeActions", () => {
   it("encodes the trade id into the request path", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp/1"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpTradeActions("dvp/1", "devnet"), {
+      wrapper: withI18n,
+    });
 
     await act(async () => await result.current.act("settle"));
 
@@ -96,9 +105,11 @@ describe("useDvpTradeActions", () => {
   it("sends the side as the fund request body", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
 
-    await act(async () => await result.current.act("fund", { side: "b" }));
+    await act(async () => await result.current.act("fund", { side: "b", symbol: "USDC" }));
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
     expect(JSON.parse(init.body)).toEqual({ side: "b" });
@@ -107,11 +118,91 @@ describe("useDvpTradeActions", () => {
   it("sends no body for settle", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
 
     await act(async () => await result.current.act("settle"));
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
     expect(init.body).toBeUndefined();
+  });
+
+  // The API message names the trade id, the wallet and the mint. The toast
+  // names the token and what to do about it.
+  it.each([
+    ["USDC", "This wallet doesn't hold any USDC yet. Send it some, then fund the leg."],
+    [null, "This wallet doesn't hold this token yet. Send it some, then fund the leg."],
+  ] as const)("says in plain words that the wallet holds no %s", async (symbol, copy) => {
+    global.fetch = respond(400, {
+      error: {
+        message: "DvP trade dvp_1: wallet 5vJR… holds no ns7Y… token account",
+        details: { reason: DVP_FUND_REFUSAL.walletHoldsNoToken },
+      },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("fund", { side: "a", symbol }));
+
+    expect(toast.error).toHaveBeenCalledWith(copy, expect.anything());
+  });
+
+  // Every refusal the API can name has copy, so no code ever reaches a toast.
+  it.each(Object.values(DVP_FUND_REFUSAL))("has copy for the %s refusal", async (reason) => {
+    global.fetch = respond(409, {
+      error: { message: "internal message", details: { reason } },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("fund", { side: "a", symbol: "USDC" }));
+
+    const [message] = vi.mocked(toast.error).mock.calls[0] as [string];
+    expect(message).not.toBe("internal message");
+    expect(message).not.toContain(reason);
+  });
+
+  // A reason the dashboard doesn't know is not shown raw; the message is.
+  it("shows the API's message, not an unknown reason code", async () => {
+    global.fetch = respond(403, {
+      error: {
+        message: "Custody wallet is paused",
+        details: { reason: "runtime_execution_paused" },
+      },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("settle"));
+
+    expect(toast.error).toHaveBeenCalledWith("Custody wallet is paused", expect.anything());
+  });
+
+  it("links the broadcast transaction from the success toast", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    global.fetch = respond(200, {
+      data: { tradeId: "dvp_1", action: "settle", signature: "sig_close" },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("settle"));
+
+    const [, options] = vi.mocked(toast.success).mock.calls[0] as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(options.action.label).toBe("View transaction");
+    options.action.onClick();
+    expect(open).toHaveBeenCalledWith(
+      "https://explorer.solana.com/tx/sig_close?cluster=devnet",
+      "_blank",
+      "noopener,noreferrer"
+    );
   });
 });

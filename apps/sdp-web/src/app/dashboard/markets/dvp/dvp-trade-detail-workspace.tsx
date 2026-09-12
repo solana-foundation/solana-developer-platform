@@ -394,7 +394,13 @@ function LegCard({
           that funded the leg takes its place. */}
       <div className="mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2">
         <span className="text-[11px] text-tertiary">
-          {receiving ? t("DashboardMarkets.dvp.escrowLabel") : t("DashboardMarkets.dvp.txFunding")}
+          {receiving
+            ? t("DashboardMarkets.dvp.escrowLabel")
+            : t(
+                leg.fundingSignature
+                  ? "DashboardMarkets.dvp.txFundingSent"
+                  : "DashboardMarkets.dvp.txFunding"
+              )}
         </span>
         {receiving ? (
           <span className="inline-flex items-center gap-1.5">
@@ -419,10 +425,10 @@ function LegCard({
               address={leg.fundingSignature}
               className="px-0 hover:bg-transparent"
               display={shortenSignature(leg.fundingSignature)}
-              label={t("DashboardMarkets.dvp.txFunding")}
+              label={t("DashboardMarkets.dvp.txFundingSent")}
             />
             <a
-              aria-label={t("DashboardMarkets.dvp.txFunding")}
+              aria-label={t("DashboardMarkets.dvp.txFundingSent")}
               className="text-secondary hover:text-primary"
               href={explorerTxUrl(leg.fundingSignature, cluster)}
               rel="noreferrer noopener"
@@ -506,7 +512,6 @@ function OnChainDetails({ cluster, trade }: { cluster: SolanaCluster; trade: Dvp
   const [open, setOpen] = useState(false);
   const accounts: { role: ReactNode; address: string }[] = [
     { role: t("DashboardMarkets.dvp.onChainAddress"), address: trade.swapDvp },
-    { role: t("DashboardMarkets.dvp.settlementAuthority"), address: trade.settlementAuthority },
     {
       role: (
         <span className="flex items-center gap-2">
@@ -796,7 +801,7 @@ export function DvpTradeDetailWorkspace({
 }) {
   const tradeClosed = isDvpTradeClosed(trade);
   const t = useTranslations();
-  const { act, pending } = useDvpTradeActions(trade.id);
+  const { act, pending } = useDvpTradeActions(trade.id, cluster);
   const partyView = isDvpPartyView(trade);
   const expiry = new Date(Number(trade.expiryTimestamp) * 1000).toISOString();
 
@@ -810,7 +815,7 @@ export function DvpTradeDetailWorkspace({
          hold is reserved for destroying something (HOO-1230). */
       <Button
         disabled={pending.has(`fund:${side}`)}
-        onClick={() => act("fund", { side })}
+        onClick={() => act("fund", { side, symbol: trade.legs[side].symbol })}
         type="button"
       >
         {t("DashboardMarkets.dvp.actionFund")}

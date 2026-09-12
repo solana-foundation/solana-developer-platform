@@ -75,6 +75,38 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(text).toContain(LEG_ESCROW_B);
   });
 
+  // The settlement authority is an SDP-held key nobody picks or acts on. It
+  // stays on the API response for ops, not on the page.
+  it("does not list the settlement authority in the on-chain details", () => {
+    const value = trade();
+    const text = renderDetailWithOnChainOpen(value);
+
+    expect(text).not.toContain("Settlement authority");
+    expect(text).not.toContain(value.settlementAuthority);
+  });
+
+  // The link is the transfer this organization sent, so it is labelled as that
+  // and not as the leg's funding, which anyone may have paid.
+  it("labels a funded leg's link as the transfer sent from the caller's wallet", () => {
+    const html = renderDetail(
+      trade({
+        status: "funded",
+        legs: {
+          a: testLeg({
+            party: ownParty(),
+            funding: FUNDED,
+            fundingSignature: "sig_funding_receipt",
+            outcome: "funded",
+          }),
+          b: testLeg({ funding: FUNDED, outcome: "funded" }),
+        },
+      })
+    );
+
+    expect(html).toContain("Sent from your wallet");
+    expect(html).toContain("tx/sig_funding_receipt?cluster=devnet");
+  });
+
   // Position, not count: what matters is that the control falls inside OUR
   // leg's card, which renders first, and before the counterparty's.
   it("attaches funding to the leg the caller custodies", () => {

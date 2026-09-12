@@ -17,6 +17,8 @@ import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 
 // Each row owns a funding action, which reaches for the router on mount.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+// The fund action links its transaction on the project's cluster, read from the dashboard.
+vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 
 const YOUR_ESCROW = "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y";
 const THEIR_ESCROW = "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU";
