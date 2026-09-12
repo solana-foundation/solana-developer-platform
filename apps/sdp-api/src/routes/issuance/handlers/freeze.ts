@@ -9,7 +9,6 @@ import { created, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
-import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -412,15 +411,6 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       reason: body.reason,
     });
 
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "freeze",
-      signature: result.signature,
-      slot: result.slot.toString(),
-    });
-
     const response: FrozenAccountResponse = {
       frozenAccount: {
         ...frozenAccount,
@@ -662,15 +652,6 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       accountAddress: tokenAccount,
       state: "unfrozen",
       actorId: auth.id,
-    });
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "unfreeze",
-      signature: result.signature,
-      slot: result.slot.toString(),
     });
 
     const response: FrozenAccountResponse = {

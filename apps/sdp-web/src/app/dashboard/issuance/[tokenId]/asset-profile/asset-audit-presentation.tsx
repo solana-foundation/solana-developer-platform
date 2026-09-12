@@ -58,8 +58,8 @@ export function auditStatusBadgeClass(status: AssetAuditEvent["status"]): string
   return status === "failure" ? "bg-error-bg text-error" : "bg-success-bg text-success";
 }
 
-// Actor-type chip. `system` (automated/workflow) is the only tinted one, echoing
-// the design sketch's green "Workflow" tag; human/API actors stay neutral gray.
+// Actor-type chip. `system` (automated) is the only tinted one; human/API actors stay
+// neutral gray.
 export function auditActorBadgeClass(actorType: AssetAuditActorType): string {
   return actorType === "system" ? "bg-success-bg text-success" : "bg-fill text-secondary";
 }
@@ -67,7 +67,7 @@ export function auditActorBadgeClass(actorType: AssetAuditActorType): string {
 export function auditActorTypeLabel(actorType: AssetAuditActorType, t: Translate): string {
   switch (actorType) {
     case "system":
-      return t("DashboardIssuance.activity.actorWorkflow");
+      return t("DashboardIssuance.activity.actorSystem");
     case "api_key":
       return t("DashboardIssuance.activity.actorApiKey");
     default:

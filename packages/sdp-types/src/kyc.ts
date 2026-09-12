@@ -1,12 +1,10 @@
 // KYC wallets & asset enrollments: the SDP-owned, provider-agnostic holder-verification
-// layer that feeds workflow triggers. SHAPES ONLY. See Phase 5 plan.
+// layer. SHAPES ONLY.
 //
 // Identity is verified ONCE per wallet (kyc_wallets) and reused across assets; a wallet
 // is "cleared" to hold an asset via an active enrollment (wallet_asset_enrollments).
 // KYC providers (Mural today, others later) are writers into kyc_status — SDP owns the
 // normalized status; kycProvider/providerRef only record who verified it.
-
-import type { ReviewMode } from "./workflows";
 
 export const KYC_STATUSES = ["unverified", "pending", "verified", "rejected"] as const;
 export type KycStatus = (typeof KYC_STATUSES)[number];
@@ -32,6 +30,8 @@ export interface KycWallet {
   createdAt: string;
   updatedAt: string;
 }
+
+export type ReviewMode = "auto" | "manual";
 
 export const WALLET_ENROLLMENT_STATUSES = ["active", "revoked"] as const;
 export type WalletEnrollmentStatus = (typeof WALLET_ENROLLMENT_STATUSES)[number];

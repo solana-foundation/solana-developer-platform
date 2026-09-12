@@ -39,9 +39,9 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
 
 /**
  * Per-user ceiling for verified Clerk dashboard traffic. Set well above what a person
- * driving the UI produces — a dashboard page can fan out to a dozen endpoints, and the
- * notification bell polls on a timer — so this is a runaway-loop backstop, not a
- * throttle anyone should meet while using the product.
+ * driving the UI produces — a dashboard page can fan out to a dozen endpoints and
+ * several panels poll on timers — so this is a runaway-loop backstop, not a throttle
+ * anyone should meet while using the product.
  */
 export const CLERK_USER_MAX_REQUESTS = 600;
 
@@ -144,20 +144,16 @@ function looksLikeClerkJwt(token: string, env: Env): boolean {
 }
 
 /**
- * Verifies the token's signature against Clerk's JWKS.
- *
- * @param c - Request context (provides the JWKS configuration).
- * @param token - JWT-shaped bearer token.
- * @returns True when verification succeeds; false on any verification error.
- */
-/**
  * The verified Clerk user id, or null when the token isn't a valid Clerk JWT.
  *
  * Dashboard traffic used to skip rate limiting entirely, which left every authenticated
- * endpoint unbounded per user: a signed-in caller could loop rule creation or execution
- * decisions (each several queries plus a write), and a `notify` rule turns that into
- * unbounded outbound email. Verification is already cached per request by
+ * endpoint unbounded per user: a signed-in caller could loop any write endpoint (each
+ * several queries plus a write). Verification is already cached per request by
  * `verifyClerkJwtForRequest`, so keying on the user costs nothing extra.
+ *
+ * @param c - Request context (provides the JWKS configuration).
+ * @param token - JWT-shaped bearer token.
+ * @returns The token's `sub` claim, or null when verification fails.
  */
 async function verifiedClerkUserId(
   c: Context<{ Bindings: Env }>,

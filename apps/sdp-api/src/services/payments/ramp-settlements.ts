@@ -13,7 +13,6 @@ import {
   isRampTransferType,
 } from "@/db/repositories";
 import { logEvent } from "@/runtime/money-path-events";
-import { emitRampSettled } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 
 const RAMP_SETTLEMENT_STATUS = {
@@ -160,7 +159,7 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
   // The status transition and the provider-customer link derive from one
   // provider event, so they land or roll back together — and an event whose
   // transition was refused (lost race, out-of-order redelivery) has no
-  // effects at all: no link write, no workflow trigger.
+  // effects at all: no link write.
   const { applied, linkedReference } = await getDb(env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const updated =
@@ -217,24 +216,6 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
       provider_reference: event.reference,
       from_status: transfer.status,
       to_status: RAMP_SETTLEMENT_STATUS[event.kind],
-    });
-  }
-
-  // Workflow trigger seam: a settled ramp fires onramp_settled / offramp_settled —
-  // only when the settled transition actually landed. A settled event that lost a
-  // race to another terminal event must not fire settlement workflows for a
-  // transfer whose persisted state is not settled.
-  if (applied && event.kind === "settled" && transfer.project_id) {
-    emitRampSettled(env, {
-      organizationId: transfer.organization_id,
-      projectId: transfer.project_id,
-      direction: transfer.type === "offramp" ? "offramp" : "onramp",
-      transferId: transfer.id,
-      provider: transfer.provider,
-      counterpartyId: transfer.counterparty_id,
-      amount: event.receivedAmount ?? null,
-      fiatCurrency: transfer.fiat_currency,
-      cryptoToken: transfer.token,
     });
   }
 }

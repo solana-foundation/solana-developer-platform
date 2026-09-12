@@ -17,7 +17,7 @@ export interface KycWalletRow {
   provider_ref: string | null;
   verified_at: string | null;
   // Moves only when kyc_status changes, so it identifies the transition rather than the
-  // last write of any kind. Workflow idempotency keys off it.
+  // last write of any kind.
   status_changed_at: string;
   created_by: string | null;
   created_at: string;

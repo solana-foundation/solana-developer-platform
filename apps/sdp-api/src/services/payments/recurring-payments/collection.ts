@@ -48,7 +48,6 @@ import * as solanaServices from "@/services/solana";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import { emitRecurringPaymentFailed } from "@/services/workflows/payment-events";
 import type { Env } from "@/types/env";
 import {
   DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
@@ -472,7 +471,7 @@ export async function journalAutomatedCollectionFailure(input: {
 
   const attemptedAt = new Date().toISOString();
   const message = activationErrorMessage(input.error);
-  const attempt = await createCollectionAttemptUnderRecurringLock({
+  await createCollectionAttemptUnderRecurringLock({
     ...input,
     attemptedAt,
     status: "failed",
@@ -484,17 +483,6 @@ export async function journalAutomatedCollectionFailure(input: {
       extra: collectionRetryMetadata(input.env, input.error),
     }),
     enforceCooldown: true,
-  });
-
-  if (!attempt) return;
-  await emitRecurringPaymentFailed(input.env, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-    subscriptionId,
-    dueAt,
-    attemptId: attempt.id,
-    error: message,
   });
 }
 
@@ -628,18 +616,6 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     if (attemptRows === 0) {
       throw new AppError("INTERNAL_ERROR", "Failed to mark collection attempt failed");
     }
-  });
-
-  // Workflow trigger seam: a failed collection attempt fires recurring_payment_failed
-  // (not token-scoped). Best-effort — never blocks the collection job.
-  await emitRecurringPaymentFailed(input.env, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPaymentId,
-    subscriptionId: input.attempt.subscription_id,
-    dueAt: input.attempt.due_at,
-    attemptId: input.attempt.id,
-    error: message,
   });
 }
 

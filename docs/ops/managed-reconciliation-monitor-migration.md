@@ -34,8 +34,7 @@ Record the two check-in timestamps and deployed release SHA in the incident.
 | `sdp-api-reconcile-earn-vault-movements` | `sdp-api-managed-reconcile-earn-vault-movements` |
 | `sdp-api-refresh-earn-metrics` | `sdp-api-managed-refresh-earn-metrics` |
 | `sdp-api-sync-earn-catalogue` | `sdp-api-managed-sync-earn-catalogue` |
-| `sdp-api-run-workflow-executions` | `sdp-api-managed-run-workflow-executions` |
-| `sdp-api-retire-workflow-secrets` | `sdp-api-managed-retire-workflow-secrets` |
+| `sdp-api-retire-secrets` | `sdp-api-managed-retire-secrets` |
 
 ## Retirement
 

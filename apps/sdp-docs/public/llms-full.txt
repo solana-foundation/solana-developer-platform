@@ -5253,13 +5253,6 @@ These must be set or the stack will refuse to start:
 The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
 and can auto-generate `POSTGRES_PASSWORD`.
 
-## Transactional Email
-
-SDP-owned Transactional Email uses Resend. Set `EMAIL_FROM` to the sender address
-and `RESEND_API_KEY` to the Resend API key before enabling product flows that send
-email. Organization member invitation emails are handled by Clerk and do not use
-these settings.
-
 ## Database
 
 In the configurator, `DATABASE_MODE` chooses between the bundled Postgres and an
@@ -5928,15 +5921,6 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows` | List workflow rules |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows` | Create a workflow rule |
-| `DELETE` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Delete a workflow rule |
-| `PATCH` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Update a workflow rule |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/catalog` | List the workflow catalog for an asset |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/executions` | List workflow executions |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve` | Approve a held execution |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject` | Reject a held execution |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry` | Retry a failed execution |
 | `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 
