@@ -29,6 +29,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import { isPastDvpExpiry } from "./observe";
 import { readDvpAccounts } from "./read-chain";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import {
@@ -52,6 +53,35 @@ export interface DvpCloseResult {
   signature: Signature;
 }
 
+/**
+ * Refuses a settle the program would refuse on time alone.
+ *
+ * Checked against the clock rather than trusted to the status: the row is only
+ * as fresh as its last observation, so a trade can still read `funded` for a
+ * few seconds after it expired. Cancel has no window (`cancel_dvp.rs:17-20`),
+ * which is why only settle comes through here.
+ *
+ * @param trade - The trade about to settle.
+ * @param nowMs - Wall clock in milliseconds.
+ */
+function assertInsideSettlementWindow(
+  trade: Pick<DvpTradeRow, "id" | "expiryTimestamp" | "earliestSettlementTimestamp">,
+  nowMs: number
+): void {
+  if (isPastDvpExpiry(trade.expiryTimestamp, nowMs)) {
+    throw badRequest(`DvP trade ${trade.id} is past its expiry and can only be cancelled`);
+  }
+  // `settle_dvp.rs:144-146`: `now >= earliest` when the trade sets one.
+  if (
+    trade.earliestSettlementTimestamp !== null &&
+    BigInt(Math.floor(nowMs / 1000)) < BigInt(trade.earliestSettlementTimestamp)
+  ) {
+    throw badRequest(
+      `DvP trade ${trade.id} cannot settle before its earliest settlement time ${trade.earliestSettlementTimestamp}`
+    );
+  }
+}
+
 /** Settles or cancels a trade on chain. `c` carries the approved-operation fence context. */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
@@ -65,6 +95,10 @@ export async function closeDvpTrade(
     // anyway — but saying so here names the reason instead of surfacing a
     // program error, and avoids spending a signature to learn it.
     throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be ${action}d`);
+  }
+
+  if (action === "settle") {
+    assertInsideSettlementWindow(trade, Date.now());
   }
 
   // Settle moves both legs, so it needs both actually funded. Cancel does not:

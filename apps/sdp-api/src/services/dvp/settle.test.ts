@@ -22,7 +22,7 @@ import {
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -128,6 +128,9 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 }
 
 const context = { env } as never;
+/** Inside the fixture's window: 3,600 s before `expiryTimestamp`. */
+const NOW_MS = 1_800_000_000_000;
+const NOW_SECONDS = NOW_MS / 1000;
 
 function preflightError(): SolanaError {
   return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
@@ -152,6 +155,10 @@ describe("closeDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // Settle is refused past expiry by the clock, so the fixture's expiry has
+    // to stay in the future no matter when the suite runs.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW_MS);
     readDvpAccounts.mockResolvedValue({
       trade: { exists: true, address: trade().swapDvp },
       legA: { exists: true, amount: 1000n, frozen: false },
@@ -184,6 +191,58 @@ describe("closeDvpTrade", () => {
     sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // The row lags the chain by up to one observation, so a trade that expired a
+  // moment ago can still read `funded`. The program would refuse it with
+  // DvpExpired after the fee was already spent.
+  it("refuses to settle a funded trade past its expiry, before signing anything", async () => {
+    await expect(
+      closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1) }), "settle")
+    ).rejects.toThrow(/past its expiry and can only be cancelled/);
+    expect(getFeePayer).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // `settle_dvp.rs` checks `now <= expiry`, so the expiry second itself settles.
+  it("settles at the exact expiry second", async () => {
+    vi.setSystemTime(NOW_MS + 999);
+
+    await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS) }), "settle");
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // Cancel has no expiry gate on chain, and it is the only way the money goes back.
+  it("still cancels a funded trade past its expiry", async () => {
+    await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1) }), "cancel");
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to settle before the trade's earliest settlement time", async () => {
+    await expect(
+      closeDvpTrade(
+        context,
+        trade({ earliestSettlementTimestamp: String(NOW_SECONDS + 1) }),
+        "settle"
+      )
+    ).rejects.toThrow(/before its earliest settlement time/);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("settles from the earliest settlement second onwards", async () => {
+    await closeDvpTrade(
+      context,
+      trade({ earliestSettlementTimestamp: String(NOW_SECONDS) }),
+      "settle"
+    );
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("refuses to settle a trade that is already closed", async () => {

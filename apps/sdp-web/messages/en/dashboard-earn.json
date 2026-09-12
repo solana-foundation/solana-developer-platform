@@ -230,8 +230,11 @@
     },
     "dvp": {
       "actionCancel": "Cancel Trade",
+      "actionCancelling": "Cancelling…",
       "actionFund": "Fund",
+      "actionFunding": "Funding…",
       "actionSettle": "Settle",
+      "actionSettling": "Settling…",
       "amountTooPrecise": "More decimal places than {symbol} supports.",
       "authorityUnfundedBody": "Settling costs network fees plus rent for the token accounts it creates, and this project's settlement authority cannot cover that yet. Send at least {sol} SOL to {address}.",
       "authorityUnfundedTitle": "The settlement authority needs SOL",
@@ -397,6 +400,7 @@
       "reviewRedirected": "One side pays out to a different address than it funds from. Check both before you create.",
       "settleHint": "Delivers each leg to the other party and closes the trade. Cannot be undone.",
       "settleBlocked": "Both legs must be funded before a trade can settle.",
+      "settleTooEarly": "This trade can settle from {when}.",
       "settlementAuthority": "Settlement authority",
       "settlementAuthorityHint": "A wallet this project owns, created on its first trade. It holds the only key that can settle or cancel, and pays the fees and rent to do it, so keep a little SOL on it.",
       "status": {

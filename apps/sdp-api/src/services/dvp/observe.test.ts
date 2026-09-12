@@ -240,9 +240,9 @@ describe("deriveDvpTradeState", () => {
       expect(result.status).toBe("expired");
     });
 
-    // A funded trade past expiry still holds both parties' money and needs
-    // unwinding. Writing it off as expired would hide that.
-    it("keeps a fully funded trade funded past expiry", () => {
+    // The program refuses Settle past expiry, so "funded" would offer an action
+    // that can only fail. The balances stay visible through the leg outcomes.
+    it("expires a fully funded trade past its expiry", () => {
       const result = deriveDvpTradeState(
         observation({
           legA: { exists: true, amount: 1000n, frozen: false },
@@ -250,6 +250,19 @@ describe("deriveDvpTradeState", () => {
         }),
         trade({ expiryTimestamp: String(NOW_SECONDS - 1) }),
         NOW_MS
+      );
+      expect(result.status).toBe("expired");
+    });
+
+    // `settle_dvp.rs` checks `now <= expiry`, so the expiry second still settles.
+    it("keeps a fully funded trade funded at its exact expiry second", () => {
+      const result = deriveDvpTradeState(
+        observation({
+          legA: { exists: true, amount: 1000n, frozen: false },
+          legB: { exists: true, amount: 2000n, frozen: false },
+        }),
+        trade({ expiryTimestamp: String(NOW_SECONDS) }),
+        NOW_MS + 999
       );
       expect(result.status).toBe("funded");
     });

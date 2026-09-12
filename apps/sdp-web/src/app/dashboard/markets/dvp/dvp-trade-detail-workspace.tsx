@@ -9,6 +9,7 @@ import {
   CopyIcon,
   ExternalLinkIcon,
   InfoIcon,
+  Loader2Icon,
   type LucideIcon,
   SnowflakeIcon,
   TriangleAlertIcon,
@@ -803,19 +804,25 @@ export function DvpTradeDetailWorkspace({
   // One fund action per custodied side: a bilateral trade funds both legs,
   // each from the wallet that holds its party address, through the unified
   // fund endpoint naming the side.
-  const fundActionFor = (side: DvpTradeSide): ReactNode =>
-    canFundLeg(trade.legs[side], trade.status) ? (
-      /* Clicked, not held. Funding moves your leg into the trade's own
-         escrow, which is a step forward rather than something to walk back;
-         hold is reserved for destroying something (HOO-1230). */
+  const fundActionFor = (side: DvpTradeSide): ReactNode => {
+    if (!canFundLeg(trade.legs[side], trade.status)) {
+      return undefined;
+    }
+    const funding = pending.has(`fund:${side}`);
+    /* Clicked, not held. Funding moves your leg into the trade's own escrow,
+       which is a step forward rather than something to walk back; hold is
+       reserved for destroying something (HOO-1230). */
+    return (
       <Button
-        disabled={pending.has(`fund:${side}`)}
+        disabled={funding}
+        iconLeft={funding ? <Loader2Icon aria-hidden className="animate-spin" /> : undefined}
         onClick={() => act("fund", { side })}
         type="button"
       >
-        {t("DashboardMarkets.dvp.actionFund")}
+        {t(funding ? "DashboardMarkets.dvp.actionFunding" : "DashboardMarkets.dvp.actionFund")}
       </Button>
-    ) : undefined;
+    );
+  };
 
   // Your leg first, whichever it is. With no custodied leg (agent) or both
   // custodied (bilateral) the trade's own asset-then-cash order stays.
