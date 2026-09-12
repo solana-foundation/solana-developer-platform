@@ -69,3 +69,36 @@ describe("Markets route skeletons", () => {
     expect(textOutsideTags(renderToStaticMarkup(<Skeleton />))).toBe("");
   });
 });
+
+/** How many times an attribute or tag opens in the markup. */
+function occurrences(markup: string, needle: string): number {
+  return markup.split(needle).length - 1;
+}
+
+// Each DvP skeleton mirrors the page it stands in for. These pin the parts
+// that went stale before: a five-step wizard with a side rail stood in for a
+// two-step create form, and two coarse blocks for the trade page.
+describe("DvP route skeletons", () => {
+  it("draws the trades list as the toolbar card and its six-column table", () => {
+    const html = renderToStaticMarkup(<DvpTradesSkeleton />);
+
+    expect(html).toContain('data-loading-layout="dvp-trades"');
+    expect(occurrences(html, "<th ")).toBe(6);
+  });
+
+  it("draws the trade page as two delivery cards, then settle and cancel", () => {
+    const html = renderToStaticMarkup(<DvpTradeDetailSkeleton />);
+
+    expect(occurrences(html, "data-loading-leg-card")).toBe(2);
+    expect(html).toContain('data-loading-close-action="settle"');
+    expect(html).toContain('data-loading-close-action="cancel"');
+  });
+
+  it("draws the create flow as a two-step wizard with both sides and no rail", () => {
+    const html = renderToStaticMarkup(<DvpCreateSkeleton />);
+
+    expect(occurrences(html, "data-loading-step")).toBe(2);
+    expect(occurrences(html, "data-loading-create-leg")).toBe(2);
+    expect(html).not.toContain("440px");
+  });
+});
