@@ -12,8 +12,8 @@
  */
 
 import {
-  DVP_FUND_REFUSAL,
-  type DvpFundRefusalReason,
+  DVP_LEG_REFUSAL,
+  type DvpLegRefusalReason,
   type DvpTradeSide,
   type SolanaCluster,
 } from "@sdp/types";
@@ -67,37 +67,37 @@ const DONE_MESSAGE: Record<DvpTradeActionName, MessageKey> = {
  * trade that re-reads differently, an escrow that is missing and a mint that
  * cannot be read are the same answer — nothing moved, and it is not theirs to fix.
  */
-const FUND_REFUSAL_MESSAGE: Record<
-  DvpFundRefusalReason,
+const LEG_REFUSAL_MESSAGE: Record<
+  DvpLegRefusalReason,
   { withSymbol: MessageKey; withoutSymbol: MessageKey }
 > = {
-  [DVP_FUND_REFUSAL.walletHoldsNoToken]: {
+  [DVP_LEG_REFUSAL.walletHoldsNoToken]: {
     withSymbol: "DashboardMarkets.dvp.fundRefusedNoToken",
     withoutSymbol: "DashboardMarkets.dvp.fundRefusedNoTokenUnnamed",
   },
-  [DVP_FUND_REFUSAL.walletBalanceShort]: {
+  [DVP_LEG_REFUSAL.walletBalanceShort]: {
     withSymbol: "DashboardMarkets.dvp.fundRefusedBalanceShort",
     withoutSymbol: "DashboardMarkets.dvp.fundRefusedBalanceShortUnnamed",
   },
-  [DVP_FUND_REFUSAL.legAlreadyFunded]: sameCopy("DashboardMarkets.dvp.fundRefusedAlreadyFunded"),
-  [DVP_FUND_REFUSAL.legFundingInProgress]: sameCopy("DashboardMarkets.dvp.fundRefusedInProgress"),
-  [DVP_FUND_REFUSAL.escrowBalanceChanged]: sameCopy(
+  [DVP_LEG_REFUSAL.legAlreadyFunded]: sameCopy("DashboardMarkets.dvp.fundRefusedAlreadyFunded"),
+  [DVP_LEG_REFUSAL.legFundingInProgress]: sameCopy("DashboardMarkets.dvp.fundRefusedInProgress"),
+  [DVP_LEG_REFUSAL.escrowBalanceChanged]: sameCopy(
     "DashboardMarkets.dvp.fundRefusedBalanceChanged"
   ),
-  [DVP_FUND_REFUSAL.escrowFrozen]: sameCopy("DashboardMarkets.dvp.fundRefusedFrozen"),
-  [DVP_FUND_REFUSAL.tradeNotFundable]: sameCopy("DashboardMarkets.dvp.fundRefusedNotFundable"),
-  [DVP_FUND_REFUSAL.termsMismatch]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
-  [DVP_FUND_REFUSAL.tradeNotOnChain]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
-  [DVP_FUND_REFUSAL.escrowMissing]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
-  [DVP_FUND_REFUSAL.escrowMismatch]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
-  [DVP_FUND_REFUSAL.mintUnreadable]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.escrowFrozen]: sameCopy("DashboardMarkets.dvp.fundRefusedFrozen"),
+  [DVP_LEG_REFUSAL.tradeNotFundable]: sameCopy("DashboardMarkets.dvp.fundRefusedNotFundable"),
+  [DVP_LEG_REFUSAL.termsMismatch]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.tradeNotOnChain]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.escrowMissing]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.escrowMismatch]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.mintUnreadable]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
 };
 
 function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: MessageKey } {
   return { withSymbol: key, withoutSymbol: key };
 }
 
-const fundRefusalReasonSchema = z.enum(DVP_FUND_REFUSAL);
+const legRefusalReasonSchema = z.enum(DVP_LEG_REFUSAL);
 
 /** A failed call's envelope. Only what the toast reads is required. */
 const errorEnvelopeSchema = z.object({
@@ -121,11 +121,11 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
     if (!envelope.success) {
       return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
     }
-    const reason = fundRefusalReasonSchema.safeParse(envelope.data.error.details?.reason);
+    const reason = legRefusalReasonSchema.safeParse(envelope.data.error.details?.reason);
     if (!reason.success) {
       return envelope.data.error.message;
     }
-    const copy = FUND_REFUSAL_MESSAGE[reason.data];
+    const copy = LEG_REFUSAL_MESSAGE[reason.data];
     return symbol === null ? t(copy.withoutSymbol) : t(copy.withSymbol, { symbol });
   }
 

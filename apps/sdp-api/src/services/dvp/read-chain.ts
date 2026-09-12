@@ -11,7 +11,7 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { DVP_FUND_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
 import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
 import { conflict } from "@/lib/errors";
@@ -110,7 +110,7 @@ export async function readEscrowState(
   if (!observed.exists && observed.tampered) {
     throw conflict(
       `DvP trade ${tradeId}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
-      { reason: DVP_FUND_REFUSAL.escrowMismatch }
+      { reason: DVP_LEG_REFUSAL.escrowMismatch }
     );
   }
   return observed.exists ? { amount: observed.amount, frozen: observed.frozen } : null;

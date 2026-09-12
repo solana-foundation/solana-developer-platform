@@ -62,12 +62,13 @@ export const DVP_LEG_OUTCOMES = [
 export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];
 
 /**
- * Why a request to fund a DvP leg was refused, sent as `error.details.reason`.
+ * Why a request to act on one DvP leg (fund it, or reclaim it) was refused, sent
+ * as `error.details.reason`.
  *
  * The message carries ids and addresses for logs; a client names the problem in
  * its own words from this code instead of relaying that message.
  */
-export const DVP_FUND_REFUSAL = {
+export const DVP_LEG_REFUSAL = {
   /** The trade is past the point where funding means anything. */
   tradeNotFundable: "dvp_trade_not_fundable",
   tradeNotOnChain: "dvp_trade_not_on_chain",
@@ -86,4 +87,4 @@ export const DVP_FUND_REFUSAL = {
   escrowBalanceChanged: "dvp_escrow_balance_changed",
   legFundingInProgress: "dvp_leg_funding_in_progress",
 } as const;
-export type DvpFundRefusalReason = (typeof DVP_FUND_REFUSAL)[keyof typeof DVP_FUND_REFUSAL];
+export type DvpLegRefusalReason = (typeof DVP_LEG_REFUSAL)[keyof typeof DVP_LEG_REFUSAL];

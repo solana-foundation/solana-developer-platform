@@ -12,7 +12,7 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
-import { DVP_FUND_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
   address,
   getSignatureFromTransaction,
@@ -255,7 +255,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/nothing left to fund/),
-      details: { reason: DVP_FUND_REFUSAL.legAlreadyFunded },
+      details: { reason: DVP_LEG_REFUSAL.legAlreadyFunded },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -265,7 +265,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/nothing left to fund/),
-      details: { reason: DVP_FUND_REFUSAL.legAlreadyFunded },
+      details: { reason: DVP_LEG_REFUSAL.legAlreadyFunded },
     });
   });
 
@@ -287,7 +287,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/frozen/),
-      details: { reason: DVP_FUND_REFUSAL.escrowFrozen },
+      details: { reason: DVP_LEG_REFUSAL.escrowFrozen },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -297,7 +297,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/escrow for this leg is missing; nothing was sent/),
-      details: { reason: DVP_FUND_REFUSAL.escrowMissing },
+      details: { reason: DVP_LEG_REFUSAL.escrowMissing },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -314,7 +314,7 @@ describe("fundDvpTradeLeg", () => {
       message: expect.stringContaining(
         "the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it"
       ),
-      details: { reason: DVP_FUND_REFUSAL.escrowMismatch },
+      details: { reason: DVP_LEG_REFUSAL.escrowMismatch },
     });
     expect(claimFunding).not.toHaveBeenCalled();
   });
@@ -326,7 +326,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/trade is no longer on chain; nothing was sent/),
-      details: { reason: DVP_FUND_REFUSAL.tradeNotOnChain },
+      details: { reason: DVP_LEG_REFUSAL.tradeNotOnChain },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -353,7 +353,7 @@ describe("fundDvpTradeLeg", () => {
       message: expect.stringMatching(
         /on-chain trade does not match the recorded terms; nothing was sent/
       ),
-      details: { reason: DVP_FUND_REFUSAL.termsMismatch },
+      details: { reason: DVP_LEG_REFUSAL.termsMismatch },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -382,7 +382,7 @@ describe("fundDvpTradeLeg", () => {
       message: expect.stringMatching(
         /on-chain trade does not match the recorded terms; nothing was sent/
       ),
-      details: { reason: DVP_FUND_REFUSAL.termsMismatch },
+      details: { reason: DVP_LEG_REFUSAL.termsMismatch },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -391,7 +391,7 @@ describe("fundDvpTradeLeg", () => {
     for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
       await expect(fundDvpTradeLeg(context, trade({ status }), FUNDER_A)).rejects.toMatchObject({
         message: expect.stringMatching(/can no longer be funded/),
-        details: { reason: DVP_FUND_REFUSAL.tradeNotFundable },
+        details: { reason: DVP_LEG_REFUSAL.tradeNotFundable },
       });
     }
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -404,7 +404,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/already being funded/),
-      details: { reason: DVP_FUND_REFUSAL.legFundingInProgress },
+      details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -474,7 +474,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/could not be read/),
-      details: { reason: DVP_FUND_REFUSAL.mintUnreadable },
+      details: { reason: DVP_LEG_REFUSAL.mintUnreadable },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -488,7 +488,7 @@ describe("fundDvpTradeLeg", () => {
       code: "BAD_REQUEST",
       statusCode: 400,
       message: expect.stringContaining(signer.address),
-      details: { reason: DVP_FUND_REFUSAL.walletHoldsNoToken },
+      details: { reason: DVP_LEG_REFUSAL.walletHoldsNoToken },
     } satisfies Partial<AppError>);
 
     expect(claimFunding).not.toHaveBeenCalled();
@@ -502,7 +502,7 @@ describe("fundDvpTradeLeg", () => {
       code: "BAD_REQUEST",
       statusCode: 400,
       message: expect.stringMatching(/holds 0\.00025 of the 0\.001 /),
-      details: { reason: DVP_FUND_REFUSAL.walletBalanceShort },
+      details: { reason: DVP_LEG_REFUSAL.walletBalanceShort },
     } satisfies Partial<AppError>);
 
     expect(claimFunding).not.toHaveBeenCalled();
@@ -555,7 +555,7 @@ describe("fundDvpTradeLeg", () => {
 
       await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
         message: expect.stringMatching(/no longer the amount owed/),
-        details: { reason: DVP_FUND_REFUSAL.escrowBalanceChanged },
+        details: { reason: DVP_LEG_REFUSAL.escrowBalanceChanged },
       });
       expect(sendTransaction).not.toHaveBeenCalled();
     });

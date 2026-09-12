@@ -6,7 +6,7 @@
  * Successful and failed action outcomes.
  */
 
-import { DVP_FUND_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
@@ -137,7 +137,7 @@ describe("useDvpTradeActions", () => {
     global.fetch = respond(400, {
       error: {
         message: "DvP trade dvp_1: wallet 5vJR… holds no ns7Y… token account",
-        details: { reason: DVP_FUND_REFUSAL.walletHoldsNoToken },
+        details: { reason: DVP_LEG_REFUSAL.walletHoldsNoToken },
       },
     }) as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
@@ -150,7 +150,7 @@ describe("useDvpTradeActions", () => {
   });
 
   // Every refusal the API can name has copy, so no code ever reaches a toast.
-  it.each(Object.values(DVP_FUND_REFUSAL))("has copy for the %s refusal", async (reason) => {
+  it.each(Object.values(DVP_LEG_REFUSAL))("has copy for the %s refusal", async (reason) => {
     global.fetch = respond(409, {
       error: { message: "internal message", details: { reason } },
     }) as never;
