@@ -856,6 +856,55 @@ describe("DvP routes", () => {
     });
   });
 
+  // Reclaim is the same right as funding: the program only lets the leg's own
+  // party sign, so a caller with no wallet at that address has nothing to sign with.
+  describe("reclaim refusal without custody", () => {
+    beforeEach(async () => {
+      await seedCustodyWallets();
+    });
+
+    it.each([
+      [
+        "a side whose party address matches no caller wallet",
+        "dvp_reclaim_no_custody",
+        { side: "a" },
+      ],
+      [
+        "an explicit wallet that does not hold the side's address",
+        "dvp_reclaim_wrong_wallet",
+        { side: "b", walletId: "BOUND" },
+      ],
+    ] as const)("refuses %s", async (_label, tradeId, request) => {
+      await seedTradeFor(
+        tradeId === "dvp_reclaim_no_custody" ? { tradeId, userA: PARTY_B_EXTERNAL } : { tradeId }
+      );
+      const body =
+        "walletId" in request ? { side: request.side, walletId: BOUND_WALLET.id } : request;
+
+      const res = await app.request(
+        `/v1/dvp/trades/${tradeId}/reclaim`,
+        { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const json = (await res.json()) as { error?: { code?: string } };
+      expect(json.error?.code).toBe("FORBIDDEN");
+    });
+
+    it("rejects a request that names no side", async () => {
+      await seedTradeFor({ tradeId: "dvp_reclaim_no_side" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_reclaim_no_side/reclaim",
+        { method: "POST", headers: authHeaders(), body: JSON.stringify({}) },
+        env
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   // A response never states ownership — it derives it for the caller. The
   // full-shape assertions below are the field-additions projection sweep:
   // checking spot fields would let an added field pass silently, so the whole

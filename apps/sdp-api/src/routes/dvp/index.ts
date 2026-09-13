@@ -14,6 +14,7 @@ import {
   inspectMint,
   listInboundTrades,
   listTrades,
+  reclaimTrade,
   settleTrade,
 } from "./handlers";
 import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
@@ -74,6 +75,16 @@ dvp.post(
   validateBody(fundDvpTradeSchema),
   meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   fundTrade
+);
+// Reclaiming ONE side: the same right as funding it, because the program only
+// lets the leg's own party sign, and the deposit goes back to that party. The
+// trade stays open.
+dvp.post(
+  "/trades/:tradeId/reclaim",
+  requirePermissions("payments:write", "wallets:read"),
+  validateBody(fundDvpTradeSchema),
+  meteredQuota({ name: "dvp-reclaim", actorMax: 2, orgMax: 10 }),
+  reclaimTrade
 );
 // Settle and cancel are the only two actions the settlement authority can take,
 // and both are irreversible: settle delivers both legs and closes the trade,

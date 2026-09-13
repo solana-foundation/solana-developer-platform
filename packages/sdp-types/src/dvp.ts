@@ -86,5 +86,14 @@ export const DVP_LEG_REFUSAL = {
   /** A deposit landed between the balance read and the send. */
   escrowBalanceChanged: "dvp_escrow_balance_changed",
   legFundingInProgress: "dvp_leg_funding_in_progress",
+  /** The trade is closed, so its escrows are gone and there is nothing to pull back. */
+  tradeNotReclaimable: "dvp_trade_not_reclaimable",
+  /** The leg's escrow holds nothing. */
+  nothingToReclaim: "dvp_leg_nothing_to_reclaim",
+  /**
+   * The leg's mint carries a transfer hook, whose extra accounts SDP does not
+   * resolve, so the refund transfer would be refused by the token program.
+   */
+  transferHookUnsupported: "dvp_transfer_hook_unsupported",
 } as const;
 export type DvpLegRefusalReason = (typeof DVP_LEG_REFUSAL)[keyof typeof DVP_LEG_REFUSAL];

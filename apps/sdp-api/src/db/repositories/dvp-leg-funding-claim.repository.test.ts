@@ -238,6 +238,33 @@ describe("DvpLegFundingClaimRepository", () => {
     expect(blocked).toBe(false);
   });
 
+  // After a reclaim the deposit is gone, and the receipt would otherwise keep
+  // (trade, side) taken, so every later funding of the leg conflicted.
+  it("frees a reclaimed leg for funding again by clearing its receipt", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
+      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+
+      expect(await repo.deleteReceipt(TRADE_ID, "a")).toBe(true);
+    });
+
+    const refunded = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+      repo.claim(claimInput(PARTY_A_ORG, "a", "sig_refund"))
+    );
+    expect(refunded).toBe(true);
+  });
+
+  // A funding still in flight is a lock, not a receipt, and only its own
+  // request or the expiry sweep may release it.
+  it("never clears a funding that is still in flight", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_inflight"));
+
+      expect(await repo.deleteReceipt(TRADE_ID, "a")).toBe(false);
+      expect(await repo.hasClaim(TRADE_ID, "a", "sig_inflight")).toBe(true);
+    });
+  });
+
   /**
    * Without this the leg is unfundable forever. A claim is deliberately KEPT
    * through an ambiguous broadcast failure, so something has to release it once

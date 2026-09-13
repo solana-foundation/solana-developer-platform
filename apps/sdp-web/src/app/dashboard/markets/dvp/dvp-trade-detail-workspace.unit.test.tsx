@@ -20,6 +20,7 @@ import {
   ownParty,
   THIRD_ADDRESS,
   testLeg,
+  testParty,
   testTrade,
 } from "./dvp.fixtures";
 import type { DvpTrade } from "./dvp-trade";
@@ -105,6 +106,38 @@ describe("DvpTradeDetailWorkspace", () => {
 
     expect(html).toContain("Sent from your wallet");
     expect(html).toContain("tx/sig_funding_receipt?cluster=devnet");
+  });
+
+  // Only the leg's own party can sign a reclaim, and only a deposit can come back.
+  describe("reclaim", () => {
+    const held = (amount: string) => ({
+      observedAmount: amount,
+      funded: amount === "1000",
+      surplus: null,
+      frozen: false,
+    });
+
+    it.each([
+      ["a funded leg the caller holds", "funded", ownParty(), held("1000"), true],
+      ["a partly funded leg the caller holds", "partially_funded", ownParty(), held("400"), true],
+      // No expiry gate on chain, and an expired trade is where it matters most.
+      ["an expired trade's leg the caller holds", "expired", ownParty(), held("1000"), true],
+      ["the counterparty's leg", "funded", testParty(), held("1000"), false],
+      ["an empty escrow", "created", ownParty(), held("0"), false],
+      ["a settled trade", "settled", ownParty(), held("1000"), false],
+    ] as const)("on %s: offered=%s", (_label, status, party, funding, offered) => {
+      const html = renderDetail(
+        trade({
+          status,
+          legs: {
+            a: testLeg({ party, funding, outcome: "funded" }),
+            b: testLeg({ funding: FUNDED, outcome: "funded" }),
+          },
+        })
+      );
+
+      expect(html.includes(">Reclaim<")).toBe(offered);
+    });
   });
 
   // Position, not count: what matters is that the control falls inside OUR

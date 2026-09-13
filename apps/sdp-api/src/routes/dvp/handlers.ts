@@ -36,6 +36,7 @@ import {
   observeDvpTradeNow,
   observeDvpTradeWithoutRecording,
 } from "@/services/dvp/observe-now";
+import { reclaimDvpTradeLeg } from "@/services/dvp/reclaim";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
@@ -523,13 +524,19 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 };
 
 /**
- * Funds one side of a trade. The right to fund side X is holding an active custody
- * wallet whose public key equals `user_x`.
+ * Resolves the trade, the side and the custody wallet for an action on one leg.
  *
- * @param c - Validated request context for the funding action.
- * @returns The funded-leg response envelope.
+ * The right to act on side X, funding or reclaiming, is holding an active
+ * custody wallet whose public key equals `user_x`. The auth context can be an
+ * hour stale, so the wallet is derived and the key's binding asserted from the
+ * database before anything is broadcast. Omitted `walletId`, that is the custody
+ * lookup on the party address; explicit, it is that the named wallet still
+ * holds the address (naming narrows).
+ *
+ * @param c - Validated request context naming the side.
+ * @returns The trade and the re-read wallet to sign with.
  */
-export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+async function resolveLegAction(c: ValidatedBodyContext<typeof fundDvpTradeSchema>) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
@@ -544,12 +551,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
   const side = body.side;
   const partyAddress = side === "a" ? trade.userA : trade.userB;
 
-  // The auth context can be an hour stale, so the wallet is derived and the
-  // key's binding asserted from the database before anything is broadcast.
-  // Omitted `walletId`, that is the custody lookup on the party address;
-  // explicit, it is that the named wallet still holds the address (naming
-  // narrows).
-  const rereadWalletId =
+  const custodyWalletId =
     body.walletId !== null && body.walletId !== undefined
       ? await walletIdIfHoldsAddress(
           getDb(c.env),
@@ -564,22 +566,52 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
           partyAddress,
           getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
         );
-  if (rereadWalletId === null) {
+  if (custodyWalletId === null) {
     throw forbidden(
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
   await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, rereadWalletId, [
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
     "payments:write",
   ]);
 
-  const result = await fundDvpTradeLeg(c, trade, {
-    side,
-    custodyWalletId: rereadWalletId,
-    organizationId: auth.organizationId,
-    projectId,
+  return {
+    trade,
+    params: { side, custodyWalletId, organizationId: auth.organizationId, projectId },
+  };
+}
+
+/**
+ * Funds one side of a trade from the custody wallet holding its party address.
+ *
+ * @param c - Validated request context for the funding action.
+ * @returns The funded-leg response envelope.
+ */
+export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  const { trade, params } = await resolveLegAction(c);
+  const result = await fundDvpTradeLeg(c, trade, params);
+
+  await observeDvpTradeNow(c.env, trade, result.signature);
+
+  return success(c, {
+    tradeId: trade.id,
+    leg: result.leg,
+    amount: result.amount,
+    signature: result.signature,
   });
+};
+
+/**
+ * Pulls one side's deposit back into the custody wallet holding its party
+ * address. The trade stays open and the leg can be funded again.
+ *
+ * @param c - Validated request context naming the side.
+ * @returns The reclaimed-leg response envelope.
+ */
+export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  const { trade, params } = await resolveLegAction(c);
+  const result = await reclaimDvpTradeLeg(c, trade, params);
 
   await observeDvpTradeNow(c.env, trade, result.signature);
 

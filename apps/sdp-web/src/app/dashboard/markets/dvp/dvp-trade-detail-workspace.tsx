@@ -300,23 +300,48 @@ function legProgressCaption(
  * tokens somewhere they bounce, and the transfer this organization sent takes
  * its place.
  */
+/**
+ * The footer's tinted box: a caption line that carries the leg's one quiet
+ * action at its right, then the value at full width, so an address never has to
+ * share its line with a button and both legs keep the same height.
+ */
+function LegFooterFrame({
+  caption,
+  children,
+  trailing,
+}: {
+  caption: string;
+  children: ReactNode;
+  trailing: ReactNode | undefined;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[11px] text-tertiary">{caption}</span>
+        {trailing}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function LegFundingFooter({
   cluster,
   leg,
   receiving,
+  reclaim,
 }: {
   cluster: SolanaCluster;
   leg: DvpTradeLeg;
   receiving: boolean;
+  /** Pull the deposit back, when the caller holds this leg and its escrow holds something. */
+  reclaim: ReactNode | undefined;
 }) {
   const t = useTranslations();
-  const frame = "mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2";
-  const caption = "text-[11px] text-tertiary";
 
   if (receiving) {
     return (
-      <div className={frame}>
-        <span className={caption}>{t("DashboardMarkets.dvp.escrowLabel")}</span>
+      <LegFooterFrame caption={t("DashboardMarkets.dvp.escrowLabel")} trailing={reclaim}>
         <span className="inline-flex items-center gap-1.5">
           <CopyableAddress
             address={leg.escrow}
@@ -333,14 +358,13 @@ function LegFundingFooter({
             <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
           </a>
         </span>
-      </div>
+      </LegFooterFrame>
     );
   }
 
   if (leg.fundingSignature) {
     return (
-      <div className={frame}>
-        <span className={caption}>{t("DashboardMarkets.dvp.txFundingSent")}</span>
+      <LegFooterFrame caption={t("DashboardMarkets.dvp.txFundingSent")} trailing={reclaim}>
         <span className="inline-flex items-center gap-1.5">
           <CopyableAddress
             address={leg.fundingSignature}
@@ -358,19 +382,18 @@ function LegFundingFooter({
             <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
           </a>
         </span>
-      </div>
+      </LegFooterFrame>
     );
   }
 
   return (
-    <div className={frame}>
-      <span className={caption}>{t("DashboardMarkets.dvp.txFunding")}</span>
+    <LegFooterFrame caption={t("DashboardMarkets.dvp.txFunding")} trailing={reclaim}>
       <span className="py-1 text-secondary text-xs">
         {leg.funding !== null && BigInt(leg.funding.observedAmount) > 0n
           ? t("DashboardMarkets.dvp.txFundingExternal")
           : t("DashboardMarkets.dvp.txFundingNone")}
       </span>
-    </div>
+    </LegFooterFrame>
   );
 }
 
@@ -381,11 +404,13 @@ function LegFundingFooter({
  */
 function LegCard({
   action,
+  reclaim,
   cluster,
   leg,
   side,
 }: {
   action: ReactNode | undefined;
+  reclaim: ReactNode | undefined;
   cluster: SolanaCluster;
   leg: DvpTradeLeg;
   side: DvpTradeSide;
@@ -468,7 +493,7 @@ function LegCard({
         <div className={cn("h-full rounded-full", status.bar)} style={{ width: `${percent}%` }} />
       </div>
 
-      <LegFundingFooter cluster={cluster} leg={leg} receiving={receiving} />
+      <LegFundingFooter cluster={cluster} leg={leg} receiving={receiving} reclaim={reclaim} />
     </section>
   );
 }
@@ -798,6 +823,28 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
 }
 
 /**
+ * Whether the caller may pull a leg's deposit back right now.
+ *
+ * Only the leg's own party can sign a reclaim, so it is offered on a leg the
+ * caller custodies, while the trade's escrows still exist and hold something.
+ * No expiry check: reclaim has none on chain, and an expired trade is where it
+ * matters most.
+ */
+function canReclaimLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
+  const open =
+    status === "created" ||
+    status === "partially_funded" ||
+    status === "funded" ||
+    status === "expired";
+  return (
+    leg.party.wallet !== null &&
+    open &&
+    leg.funding !== null &&
+    BigInt(leg.funding.observedAmount) > 0n
+  );
+}
+
+/**
  * Whether the caller may fund a leg right now.
  *
  * The API says which sides are the caller's via `party.wallet`; beyond that the
@@ -846,6 +893,24 @@ export function DvpTradeDetailWorkspace({
       </Button>
     ) : undefined;
 
+  // Small and in the footer, not beside Fund: it walks a deposit back rather
+  // than moving the trade forward, and a funded trade reads as ready to settle.
+  const reclaimActionFor = (side: DvpTradeSide): ReactNode =>
+    canReclaimLeg(trade.legs[side], trade.status) ? (
+      <button
+        className="text-[11px] text-secondary leading-4 underline-offset-2 hover:text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
+        disabled={pending.has(`reclaim:${side}`)}
+        onClick={() => act("reclaim", { side, symbol: trade.legs[side].symbol })}
+        type="button"
+      >
+        {t(
+          pending.has(`reclaim:${side}`)
+            ? "DashboardMarkets.dvp.actionReclaiming"
+            : "DashboardMarkets.dvp.actionReclaim"
+        )}
+      </button>
+    ) : undefined;
+
   // Your leg first, whichever it is. With no custodied leg (agent) or both
   // custodied (bilateral) the trade's own asset-then-cash order stays.
   const custodiedA = trade.legs.a.party.wallet !== null;
@@ -890,6 +955,7 @@ export function DvpTradeDetailWorkspace({
             {sides.map((side) => (
               <LegCard
                 action={fundActionFor(side)}
+                reclaim={reclaimActionFor(side)}
                 cluster={cluster}
                 key={side}
                 leg={trade.legs[side]}

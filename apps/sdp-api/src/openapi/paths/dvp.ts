@@ -116,6 +116,26 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "post",
+    path: "/v1/dvp/trades/{tradeId}/reclaim",
+    tags: [DVP_TAG],
+    summary: "Reclaim your leg of a DvP trade",
+    operationId: "reclaimDvpTrade",
+    description:
+      "Moves whatever your side's escrow holds back to the custody wallet at that side's party address, creating its token account first if needed. The trade stays open and the leg can be funded again. Works before and after expiry. Only the leg's own party can reclaim, so a counterparty's leg is theirs to pull back. Refuses a closed trade, an empty escrow, a leg whose funding is still in flight, and a transfer-hook mint; each refusal names its reason in error.details.reason. DvP actions are not wallet-policy gated.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: tradeIdPathParams,
+      body: { content: jsonContent(fundDvpTradeRequestSchema) },
+    },
+    responses: {
+      200: { description: "Leg reclaimed", content: jsonContent(dvpCloseResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "get",
     path: "/v1/dvp/trades/inbound",
     tags: [DVP_TAG],

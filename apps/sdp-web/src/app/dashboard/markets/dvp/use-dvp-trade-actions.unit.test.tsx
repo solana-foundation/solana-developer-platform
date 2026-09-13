@@ -205,4 +205,24 @@ describe("useDvpTradeActions", () => {
       "noopener,noreferrer"
     );
   });
+
+  it("reclaims the named leg through its own endpoint", async () => {
+    const fetchMock = respond(200, {
+      data: { tradeId: "dvp_1", leg: "b", amount: "5", signature: "sig_r" },
+    });
+    global.fetch = fetchMock as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("reclaim", { side: "b", symbol: "USDC" }));
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(url).toBe("/api/dashboard/markets/dvp/trades/dvp_1/reclaim");
+    expect(JSON.parse(init.body)).toEqual({ side: "b" });
+    expect(toast.success).toHaveBeenCalledWith(
+      "Your deposit is on its way back.",
+      expect.anything()
+    );
+  });
 });

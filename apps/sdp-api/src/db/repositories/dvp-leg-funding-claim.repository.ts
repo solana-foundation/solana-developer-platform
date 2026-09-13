@@ -99,6 +99,17 @@ export interface DvpLegFundingClaimRepository {
    * unbroadcast lock, which only `releaseExpired` may release.
    */
   deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
+  /**
+   * Clears a leg's receipt once its deposit has been reclaimed.
+   *
+   * A receipt is the row a landed funding leaves behind, and it keeps the
+   * (trade, side) key taken, so without this every later funding of the leg
+   * conflicts forever. `funding_tx IS NOT NULL` keeps it from ever removing a
+   * funding still in flight, which only its own request or the sweep may release.
+   *
+   * @returns Whether a receipt was removed.
+   */
+  deleteReceipt(tradeId: string, side: "a" | "b"): Promise<boolean>;
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
@@ -235,6 +246,18 @@ export function createPostgresDvpLegFundingClaimRepository(
         .bind(blockHeight.toString())
         .all<Record<string, unknown>>();
       return result.results.map(toDvpLegFundingClaim);
+    },
+
+    async deleteReceipt(tradeId, side) {
+      const result = await db
+        .prepare(
+          `DELETE FROM dvp_leg_funding_claims
+            WHERE trade_id = ? AND side = ? AND funding_tx IS NOT NULL
+            RETURNING trade_id`
+        )
+        .bind(tradeId, side)
+        .all<{ trade_id: string }>();
+      return result.results.length > 0;
     },
 
     async deleteBroadcastClaim(tradeId, side, signature) {

@@ -25,21 +25,25 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 
-export type DvpTradeActionName = "settle" | "cancel" | "fund";
+export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
 /**
- * Settle and cancel act on the trade; fund names the leg it moves, and that
- * leg's symbol so a refusal can name the token instead of its mint.
+ * Settle and cancel act on the trade; fund and reclaim name the leg they move,
+ * and that leg's symbol so a refusal can name the token instead of its mint.
  */
 export type DvpTradeActionCall =
   | [action: "settle" | "cancel"]
-  | [action: "fund", options: { side: DvpTradeSide; symbol: string | null }];
+  | [action: "fund" | "reclaim", options: { side: DvpTradeSide; symbol: string | null }];
 
 /**
  * One in-flight request. Funding is keyed by side, since a bilateral trade
  * funds two legs from two wallets and waiting on one must not block the other.
  */
-export type DvpPendingAction = "settle" | "cancel" | `fund:${DvpTradeSide}`;
+export type DvpPendingAction =
+  | "settle"
+  | "cancel"
+  | `fund:${DvpTradeSide}`
+  | `reclaim:${DvpTradeSide}`;
 
 export interface DvpTradeActions {
   act: (...call: DvpTradeActionCall) => Promise<void>;
@@ -57,6 +61,7 @@ const DONE_MESSAGE: Record<DvpTradeActionName, MessageKey> = {
   settle: "DashboardMarkets.dvp.toastSettled",
   cancel: "DashboardMarkets.dvp.toastCancelled",
   fund: "DashboardMarkets.dvp.toastFunded",
+  reclaim: "DashboardMarkets.dvp.toastReclaimed",
 };
 
 /**
@@ -91,6 +96,11 @@ const LEG_REFUSAL_MESSAGE: Record<
   [DVP_LEG_REFUSAL.escrowMissing]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
   [DVP_LEG_REFUSAL.escrowMismatch]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
   [DVP_LEG_REFUSAL.mintUnreadable]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.tradeNotReclaimable]: sameCopy("DashboardMarkets.dvp.reclaimRefusedClosed"),
+  [DVP_LEG_REFUSAL.nothingToReclaim]: sameCopy("DashboardMarkets.dvp.reclaimRefusedEmpty"),
+  [DVP_LEG_REFUSAL.transferHookUnsupported]: sameCopy(
+    "DashboardMarkets.dvp.reclaimRefusedTransferHook"
+  ),
 };
 
 function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: MessageKey } {
@@ -109,6 +119,17 @@ const errorEnvelopeSchema = z.object({
 
 /** Settle, cancel and fund all answer with the transaction they broadcast. */
 const broadcastEnvelopeSchema = z.object({ data: z.object({ signature: z.string() }) });
+
+/**
+ * One in-flight key per action, per leg for the two that move one leg, so a
+ * bilateral trade can fund or reclaim both legs without one blocking the other.
+ */
+function pendingKey(call: DvpTradeActionCall): DvpPendingAction {
+  if (call.length === 1) {
+    return call[0];
+  }
+  return call[0] === "fund" ? `fund:${call[1].side}` : `reclaim:${call[1].side}`;
+}
 
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
   const router = useRouter();
@@ -131,21 +152,22 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
 
   async function act(...call: DvpTradeActionCall) {
     const [action] = call;
-    const key: DvpPendingAction = call[0] === "fund" ? `fund:${call[1].side}` : call[0];
+    const key = pendingKey(call);
+    const leg = call.length === 1 ? null : call[1];
     setPending((current) => new Set(current).add(key));
     try {
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
         {
           method: "POST",
-          // Funding names the leg it moves; settle and cancel carry no body.
-          ...(call[0] === "fund" ? { body: JSON.stringify({ side: call[1].side }) } : {}),
+          // Fund and reclaim name the leg they move; settle and cancel carry no body.
+          ...(leg === null ? {} : { body: JSON.stringify({ side: leg.side }) }),
         }
       );
       // Either way the body can fail to be JSON at all, such as a proxy's error
       // page. It reads as null, and each schema below treats null as not matching.
       if (!response.ok) {
-        const symbol = call[0] === "fund" ? call[1].symbol : null;
+        const symbol = leg === null ? null : leg.symbol;
         const failure: unknown = await response.json().catch(() => null);
         toast.error(refusalMessage(failure, response.status, symbol), {
           position: "bottom-right",
