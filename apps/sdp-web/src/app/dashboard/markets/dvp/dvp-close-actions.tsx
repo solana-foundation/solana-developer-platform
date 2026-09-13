@@ -13,13 +13,18 @@
  * friction on an irreversible step.
  */
 
+import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
+import { formatTimestamp } from "../../payments/payments-overview.utils";
 import type { DvpTrade } from "./dvp-trade";
-import { canCancelDvpTrade, canSettleDvpTrade } from "./dvp-trade";
+import { canCancelDvpTrade, dvpSettleAvailability } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
+
+/** Shown in place of a button's icon while its request is out. */
+const PENDING_ICON = <Loader2Icon aria-hidden className="animate-spin" />;
 
 export function DvpCloseActions({
   onAct,
@@ -35,31 +40,53 @@ export function DvpCloseActions({
   if (!canCancelDvpTrade(trade)) {
     return null;
   }
-  const canSettle = canSettleDvpTrade(trade);
+  const settle = dvpSettleAvailability(trade, Date.now());
+  const settling = pending.has("settle");
+  const cancelling = pending.has("cancel");
 
   return (
     <div className="flex flex-col gap-3">
-      <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4">
-        <div className="min-w-0 flex-1">
-          <h3 className="font-medium text-primary text-sm">
-            {t("DashboardMarkets.dvp.actionSettle")}
-          </h3>
-          <p className="mt-0.5 text-secondary text-xs leading-relaxed">
-            {t("DashboardMarkets.dvp.settleHint")}
-            {canSettle ? null : (
-              <span className="text-tertiary"> {t("DashboardMarkets.dvp.settleBlocked")}</span>
+      {/* Past expiry the program refuses Settle for good, and the next-step line
+          already says Cancel is the way out, so a dead Settle panel only offers
+          an action that cannot happen. A settle already in flight keeps its
+          panel: the page can refresh to expired while it is still confirming. */}
+      {settle === "expired" && !settling ? null : (
+        <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-medium text-primary text-sm">
+              {t("DashboardMarkets.dvp.actionSettle")}
+            </h3>
+            <p className="mt-0.5 text-secondary text-xs leading-relaxed">
+              {t("DashboardMarkets.dvp.settleHint")}
+              {settle === "unfunded" ? (
+                <span className="text-tertiary"> {t("DashboardMarkets.dvp.settleBlocked")}</span>
+              ) : null}
+              {settle === "too_early" && trade.earliestSettlementTimestamp !== null ? (
+                <span className="text-tertiary" suppressHydrationWarning>
+                  {" "}
+                  {t("DashboardMarkets.dvp.settleTooEarly", {
+                    when: formatTimestamp(
+                      new Date(Number(trade.earliestSettlementTimestamp) * 1000).toISOString(),
+                      t
+                    ),
+                  })}
+                </span>
+              ) : null}
+            </p>
+          </div>
+          <Button
+            className="shrink-0"
+            disabled={settle !== "available" || pending.size > 0}
+            iconLeft={settling ? PENDING_ICON : undefined}
+            onClick={() => onAct("settle")}
+            type="button"
+          >
+            {t(
+              settling ? "DashboardMarkets.dvp.actionSettling" : "DashboardMarkets.dvp.actionSettle"
             )}
-          </p>
-        </div>
-        <Button
-          className="shrink-0"
-          disabled={!canSettle || pending.size > 0}
-          onClick={() => onAct("settle")}
-          type="button"
-        >
-          {t("DashboardMarkets.dvp.actionSettle")}
-        </Button>
-      </section>
+          </Button>
+        </section>
+      )}
       <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised px-5 py-4">
         <div className="min-w-0 flex-1">
           <h3 className="font-medium text-primary text-sm">
@@ -72,11 +99,16 @@ export function DvpCloseActions({
         <Button
           className="shrink-0 text-destructive"
           disabled={pending.size > 0}
+          iconLeft={cancelling ? PENDING_ICON : undefined}
           onClick={() => setConfirmingCancel(true)}
           type="button"
           variant="outline"
         >
-          {t("DashboardMarkets.dvp.actionCancel")}
+          {t(
+            cancelling
+              ? "DashboardMarkets.dvp.actionCancelling"
+              : "DashboardMarkets.dvp.actionCancel"
+          )}
         </Button>
       </section>
 

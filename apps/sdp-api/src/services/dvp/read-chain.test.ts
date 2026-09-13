@@ -27,7 +27,9 @@ vi.mock("@sdp/dvp", async (importOriginal) => ({
   verifySwapDvpAccount,
 }));
 
-const { readDvpTradeObservation, readEscrowState } = await import("./read-chain");
+const { readClusterUnixTimestamp, readDvpTradeObservation, readEscrowState } = await import(
+  "./read-chain"
+);
 
 const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
 const SWAP = "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po" as Address;
@@ -251,5 +253,55 @@ describe("readEscrowState", () => {
       // names the refusal instead of relaying the message.
       details: { reason: DVP_LEG_REFUSAL.escrowMismatch },
     });
+  });
+});
+
+describe("readClusterUnixTimestamp", () => {
+  /** An RPC answering `getAccountInfo` with one jsonParsed account value. */
+  function rpcAnswering(value: unknown): SolanaRpc {
+    // SAFETY: fetchJsonParsedAccount calls only getAccountInfo(...).send(), so
+    // this one method stands in for the whole RPC; the parsing under test is Kit's.
+    return {
+      getAccountInfo: () => ({ send: async () => ({ context: { slot: 1n }, value }) }),
+    } as unknown as SolanaRpc;
+  }
+
+  function parsedAccount(parsed: { type: string; info: unknown }, program = "sysvar") {
+    return {
+      data: { parsed, program, space: 40n },
+      executable: false,
+      lamports: 1_169_280n,
+      owner: address("Sysvar1111111111111111111111111111111111111"),
+      rentEpoch: 0n,
+      space: 40n,
+    };
+  }
+
+  it("returns the cluster clock's unix timestamp", async () => {
+    const rpc = rpcAnswering(
+      parsedAccount({
+        type: "clock",
+        info: {
+          epoch: 4n,
+          epochStartTimestamp: 1_799_990_000n,
+          leaderScheduleEpoch: 5n,
+          slot: 284_617_079n,
+          unixTimestamp: 1_800_000_000n,
+        },
+      })
+    );
+
+    await expect(readClusterUnixTimestamp(rpc)).resolves.toBe(1_800_000_000n);
+  });
+
+  // A value is only the program's clock if the RPC says it is the Clock sysvar.
+  it("refuses an account the RPC does not describe as the clock", async () => {
+    const rpc = rpcAnswering(parsedAccount({ type: "rent", info: { unixTimestamp: 1n } }));
+
+    await expect(readClusterUnixTimestamp(rpc)).rejects.toThrow();
+  });
+
+  it("refuses when the account is not there", async () => {
+    await expect(readClusterUnixTimestamp(rpcAnswering(null))).rejects.toThrow();
   });
 });

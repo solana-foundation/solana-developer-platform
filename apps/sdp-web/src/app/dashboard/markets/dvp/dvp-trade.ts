@@ -152,11 +152,33 @@ export function isDvpTradeOpen(trade: DvpTrade): boolean {
 }
 
 /**
- * Settlement needs BOTH legs funded, which is not the same as the trade being
- * worth acting on — a half-funded trade can still be cancelled.
+ * Whether settle can go out now, and when it can't, the reason to name.
+ *
+ * The program refuses Settle outside `earliest <= now <= expiry`
+ * (`settle_dvp.rs:142-146`), so time is checked here as well as the status: the
+ * status is only as fresh as the last chain reading and can say `funded` for a
+ * few seconds after the trade expired.
  */
-export function canSettleDvpTrade(trade: DvpTrade): boolean {
-  return trade.status === "funded";
+export type DvpSettleAvailability = "available" | "unfunded" | "too_early" | "expired";
+
+export function dvpSettleAvailability(
+  trade: Pick<DvpTrade, "status" | "expiryTimestamp" | "earliestSettlementTimestamp">,
+  nowMs: number
+): DvpSettleAvailability {
+  const now = BigInt(Math.floor(nowMs / 1000));
+  if (trade.status === "expired" || now > BigInt(trade.expiryTimestamp)) {
+    return "expired";
+  }
+  if (trade.status !== "funded") {
+    return "unfunded";
+  }
+  if (
+    trade.earliestSettlementTimestamp !== null &&
+    now < BigInt(trade.earliestSettlementTimestamp)
+  ) {
+    return "too_early";
+  }
+  return "available";
 }
 
 export function canCancelDvpTrade(trade: DvpTrade): boolean {

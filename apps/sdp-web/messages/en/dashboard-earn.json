@@ -230,11 +230,14 @@
     },
     "dvp": {
       "actionCancel": "Cancel Trade",
+      "actionCancelling": "Cancelling…",
       "actionFailed": "Request failed ({status}).",
       "actionFund": "Fund",
+      "actionFunding": "Funding…",
       "actionReclaim": "Reclaim",
       "actionReclaiming": "Reclaiming…",
       "actionSettle": "Settle",
+      "actionSettling": "Settling…",
       "fundRefusedAlreadyFunded": "This leg already holds its full amount.",
       "fundRefusedBalanceChanged": "A deposit landed while this was being prepared. Nothing was sent, so fund again for what is still owed.",
       "fundRefusedBalanceShort": "This wallet doesn't hold enough {symbol} to fund this leg. Nothing was sent.",
@@ -413,6 +416,7 @@
       "reviewRedirected": "One side pays out to a different address than it funds from. Check both before you create.",
       "settleHint": "Delivers each leg to the other party and closes the trade. Cannot be undone.",
       "settleBlocked": "Both legs must be funded before a trade can settle.",
+      "settleTooEarly": "This trade can settle from {when}.",
       "status": {
         "creating": "Creating",
         "create_failed": "Create failed",

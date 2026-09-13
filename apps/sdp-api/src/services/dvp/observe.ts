@@ -162,16 +162,33 @@ export function deriveDvpTradeState(
   }
 
   // The account is there, so whatever else is true, the create landed.
+  //
+  // Expiry wins over funding. Past it the program refuses Settle, so a fully
+  // funded trade can no longer do what "funded" promises and Cancel is the only
+  // way forward. The held balances still reach the page through each leg's
+  // outcome and observed amount, so calling it expired hides no money.
+  if (isPastDvpExpiry(trade.expiryTimestamp, BigInt(Math.floor(nowMs / 1000)))) {
+    return { status: "expired", ...flags };
+  }
+
   if (legAFunded && legBFunded) {
     return { status: "funded", ...flags };
   }
 
-  // Expiry is only meaningful while the trade is short: a fully funded trade
-  // past its expiry still needs unwinding rather than being written off, and
-  // the program itself decides that at settle time.
-  if (BigInt(Math.floor(nowMs / 1000)) > BigInt(trade.expiryTimestamp)) {
-    return { status: "expired", ...flags };
-  }
-
   return { status: anyDeposit ? "partially_funded" : "created", ...flags };
+}
+
+/**
+ * Whether a trade is past the last moment the program will settle it.
+ *
+ * `settle_dvp.rs:142-143` requires `now <= expiry_timestamp`, so the expiry
+ * second itself still settles. What `now` is depends on the caller: the page
+ * status uses the host clock, the settle gate uses the cluster's own.
+ *
+ * @param expiryTimestamp - The trade's expiry, Unix seconds as a string.
+ * @param nowSeconds - The clock to judge by, in Unix seconds.
+ * @returns True once Settle would fail with `DvpExpired`.
+ */
+export function isPastDvpExpiry(expiryTimestamp: string, nowSeconds: bigint): boolean {
+  return nowSeconds > BigInt(expiryTimestamp);
 }

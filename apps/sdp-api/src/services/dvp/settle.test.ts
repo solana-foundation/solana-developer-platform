@@ -36,6 +36,8 @@ const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
+// The settlement window is judged by the cluster clock, not the host's.
+const readClusterUnixTimestamp = vi.hoisted(() => vi.fn());
 const getRecentBlockhash = vi.hoisted(() =>
   vi.fn(async () => ({
     blockhash: "11111111111111111111111111111111",
@@ -60,7 +62,7 @@ vi.mock("@/services/sponsorship.service", async () => {
   };
 });
 vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
-vi.mock("./read-chain", () => ({ readDvpAccounts }));
+vi.mock("./read-chain", () => ({ readDvpAccounts, readClusterUnixTimestamp }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash,
@@ -128,6 +130,8 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 }
 
 const context = { env } as never;
+/** The cluster clock, inside the fixture's window: 3,600 s before `expiryTimestamp`. */
+const NOW_SECONDS = 1_800_000_000n;
 
 function preflightError(): SolanaError {
   return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
@@ -152,6 +156,7 @@ describe("closeDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    readClusterUnixTimestamp.mockResolvedValue(NOW_SECONDS);
     readDvpAccounts.mockResolvedValue({
       trade: { exists: true, address: trade().swapDvp },
       legA: { exists: true, amount: 1000n, frozen: false },
@@ -186,6 +191,66 @@ describe("closeDvpTrade", () => {
     );
   });
 
+  // The row lags the chain by up to one observation, so a trade that expired a
+  // moment ago can still read `funded`. The program would refuse it with
+  // DvpExpired after the fee was already spent.
+  it("refuses to settle a funded trade past its expiry, before signing anything", async () => {
+    await expect(
+      closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1n) }), "settle")
+    ).rejects.toThrow(/past its expiry and can only be cancelled/);
+    expect(getFeePayer).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // `settle_dvp.rs` checks `now <= expiry`, so the expiry second itself settles.
+  it("settles at the exact expiry second", async () => {
+    await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS) }), "settle");
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // Cancel has no expiry gate on chain, and it is the only way the money goes back.
+  it("still cancels a funded trade past its expiry", async () => {
+    await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS - 1n) }), "cancel");
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // A host clock ahead of the cluster must not close the window early: the
+  // program reads the cluster clock, and so does this check.
+  it("judges expiry by the cluster clock, not the host clock", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(NOW_SECONDS + 3_600n) * 1000 + 30_000);
+    try {
+      await closeDvpTrade(context, trade({ expiryTimestamp: String(NOW_SECONDS + 10n) }), "settle");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to settle before the trade's earliest settlement time", async () => {
+    await expect(
+      closeDvpTrade(
+        context,
+        trade({ earliestSettlementTimestamp: String(NOW_SECONDS + 1n) }),
+        "settle"
+      )
+    ).rejects.toThrow(/before its earliest settlement time/);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("settles from the earliest settlement second onwards", async () => {
+    await closeDvpTrade(
+      context,
+      trade({ earliestSettlementTimestamp: String(NOW_SECONDS) }),
+      "settle"
+    );
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses to settle a trade that is already closed", async () => {
     for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
       await expect(closeDvpTrade(context, trade({ status }), "settle")).rejects.toThrow(
@@ -193,6 +258,17 @@ describe("closeDvpTrade", () => {
       );
     }
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // The row already answers this one, so the cluster is not asked and an RPC
+  // outage cannot turn a 400 into a 500.
+  it("refuses an unfunded settle without reading the cluster clock", async () => {
+    readClusterUnixTimestamp.mockRejectedValue(new Error("rpc down"));
+
+    await expect(
+      closeDvpTrade(context, trade({ status: "partially_funded" }), "settle")
+    ).rejects.toThrow(/requires both legs funded/);
+    expect(readClusterUnixTimestamp).not.toHaveBeenCalled();
   });
 
   // Settle moves both legs, so both must be funded. Sending it on a half-funded
