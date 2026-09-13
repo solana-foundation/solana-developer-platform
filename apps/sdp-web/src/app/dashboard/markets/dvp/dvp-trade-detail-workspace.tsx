@@ -375,6 +375,40 @@ function LegFundingFooter({
 }
 
 /**
+ * The numbers and flags a leg card renders, decided outside the component so the
+ * card itself only lays them out.
+ *
+ * The chip flags the exceptional: an ordinary open or funded leg already says
+ * so through its progress bar. A delivered leg reads full and a refunded or
+ * closed one empty, whatever its escrow last held.
+ */
+function legCardFigures(leg: DvpTradeLeg): {
+  chip: boolean;
+  held: string;
+  percent: number;
+  receiving: boolean;
+  target: string;
+} {
+  const outcome = leg.outcome;
+  let ratio: number | null;
+  if (outcome === "delivered") {
+    ratio = 1;
+  } else if (outcome === "refunded" || outcome === "closed") {
+    ratio = 0;
+  } else {
+    ratio = legFundingRatio(leg);
+  }
+  const receiving = outcome === "awaiting" || outcome === "partial";
+  return {
+    chip: !receiving && outcome !== "funded",
+    held: leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0",
+    percent: ratio === null ? 0 : Math.round(Math.min(ratio, 1) * 100),
+    receiving,
+    target: formatLegAmount(leg.amount, leg.decimals),
+  };
+}
+
+/**
  * One leg as a fund manager reads it: what it is, who holds it, whether it has
  * arrived, and the transaction that brought it. No addresses; those live in the
  * on-chain details at the foot of the page.
@@ -393,25 +427,14 @@ function LegCard({
   const t = useTranslations();
   const outcome = leg.outcome;
   const status = legStatus(leg);
-  const ratio =
-    outcome === "delivered"
-      ? 1
-      : outcome === "refunded" || outcome === "closed"
-        ? 0
-        : legFundingRatio(leg);
-  const percent = ratio === null ? 0 : Math.round(Math.min(ratio, 1) * 100);
-  const receiving = outcome === "awaiting" || outcome === "partial";
-  const target = formatLegAmount(leg.amount, leg.decimals);
-  const held = leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0";
+  const { chip, held, percent, receiving, target } = legCardFigures(leg);
 
   return (
     <section className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h3 className="flex flex-wrap items-center gap-x-2 font-medium text-base text-primary leading-6">
           {t(side === "a" ? "DashboardMarkets.dvp.legA" : "DashboardMarkets.dvp.legB")}
-          {/* The chip flags the exceptional: an ordinary open or funded leg
-              already says so through its progress bar and the funding row. */}
-          {outcome === "funded" || outcome === "awaiting" || outcome === "partial" ? null : (
+          {chip ? (
             <span
               className={cn(
                 "inline-flex items-center gap-1 font-normal text-xs leading-6",
@@ -421,7 +444,7 @@ function LegCard({
               <status.Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
               {t(status.key)}
             </span>
-          )}
+          ) : null}
         </h3>
         <span className="text-sm text-tertiary">
           {leg.party.wallet || leg.party.counterparty ? (
