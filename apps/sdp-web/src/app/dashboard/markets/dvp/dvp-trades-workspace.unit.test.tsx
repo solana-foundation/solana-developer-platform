@@ -167,6 +167,36 @@ describe("DvpTradesWorkspace", () => {
     expect(html).toContain("/dashboard/markets/dvp/create");
   });
 
+  // A filter that matches nothing is not an empty project. Deciding emptiness
+  // from the filtered rows swapped the whole card for "No trades yet" and took
+  // the filters with it, so there was no way back to the other statuses.
+  it.each(["open", "ready", "closed"] as const)(
+    "keeps the filters on screen when the %s filter matches nothing",
+    (statusFilter) => {
+      const html = renderWorkspace({ trades: [], inbound: [], statusFilter });
+
+      expect(html).toContain("Filter by status");
+      expect(html).toContain("No trades match these filters.");
+      expect(html).not.toContain("No trades yet");
+    }
+  );
+
+  it("keeps the filters on screen when a search matches nothing", () => {
+    const html = renderWorkspace({ trades: [], inbound: [], searchQuery: "nothing-like-this" });
+
+    expect(html).toContain("Search trades");
+    expect(html).toContain("No trades match these filters.");
+  });
+
+  // The one-row rule is about an unfiltered list. Narrowed to one trade, the
+  // bar is the only way to widen the list again.
+  it("keeps the filters on screen when a status filter narrows the list to one trade", () => {
+    const html = renderWorkspace({ trades: [trade()], inbound: [], statusFilter: "ready" });
+
+    expect(html).toContain("Search trades");
+    expect(html).toContain("Filter by status");
+  });
+
   // An error and a table of nothing say opposite things. Showing both claims
   // the list is empty when the truth is that it could not be read.
   it("shows only the error when the list failed to load", () => {

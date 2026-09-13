@@ -284,6 +284,7 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
  * function holding the filter markup, its counts and its empty-option rule.
  */
 function TradesToolbar({
+  filtersApplied,
   inboundCount,
   onQueryChange,
   onStatusChange,
@@ -291,6 +292,8 @@ function TradesToolbar({
   status,
   tradeCount,
 }: {
+  /** A status or search is applied, so the rows below are a subset. */
+  filtersApplied: boolean;
   inboundCount: number;
   onQueryChange: (next: string) => void;
   onStatusChange: (next: StatusFilter) => void;
@@ -302,8 +305,9 @@ function TradesToolbar({
   // Only once there is enough to sift. A filter bar over three rows is
   // furniture — but an inbound trade is reachable ONLY through its option, so
   // hiding the control hides the trade with it. The create button stays either
-  // way; it is the strip's one permanent occupant.
-  const showFilters = tradeCount > 1 || inboundCount > 0;
+  // way; it is the strip's one permanent occupant. Once a filter is applied the
+  // count is of the subset, and the bar is the only way to widen it again.
+  const showFilters = filtersApplied || tradeCount > 1 || inboundCount > 0;
   // The waiting option only exists when it has something in it; an empty one
   // would be a permanent dead control. The count rides on the label, because a
   // trade waiting on this project is the one thing here with a deadline against
@@ -515,11 +519,19 @@ export function DvpTradesWorkspace({
     currentPage * TRADES_PER_PAGE
   );
 
+  // `trades` is the list the server already narrowed to the URL's status and
+  // search. So while any filter is applied, an empty or one-row answer says
+  // nothing about the project, and deciding emptiness or "too few rows to sift"
+  // from it took the filter bar away with no way back to the other statuses.
+  // The live input counts too, or typing a narrowing search unmounts the box.
+  const filtersApplied =
+    urlFilters.status !== "all" || urlFilters.query !== "" || queryInput.trim() !== "";
+
   // A project whose only DvP activity is a trade somebody else set up for it has
   // none of its own, and treating that as an empty page rendered "No trades yet"
   // over the one thing waiting on them, with no filter control on screen to
   // reach it by. Having nothing to do is what empty means here.
-  const listIsEmpty = trades.length === 0 && inbound.length === 0;
+  const listIsEmpty = !filtersApplied && trades.length === 0 && inbound.length === 0;
   // Rows shown on the current segment, from either source. The waiting segment
   // draws from `inbound` and leaves the trades table empty by design, so
   // counting only `trades` declared "no trades match" over a table that had a
@@ -559,6 +571,7 @@ export function DvpTradesWorkspace({
                   recurring): search then filters on the left, the create
                   action on the right, table flush below. */}
               <TradesToolbar
+                filtersApplied={filtersApplied}
                 inboundCount={inbound.length}
                 onQueryChange={(next) => {
                   setQueryInput(next);
