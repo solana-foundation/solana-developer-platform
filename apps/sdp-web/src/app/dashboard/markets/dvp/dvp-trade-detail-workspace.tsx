@@ -929,7 +929,9 @@ export function DvpTradeDetailWorkspace({
     canReclaimLeg(trade.legs[side], trade.status) ? (
       <button
         className="text-[11px] text-secondary leading-4 underline-offset-2 hover:text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
-        disabled={pending.has(`reclaim:${side}`)}
+        // Any action in flight, not only this leg's: a reclaim racing a settle
+        // or cancel can only make one of them fail.
+        disabled={pending.size > 0}
         onClick={() => act("reclaim", { side, symbol: trade.legs[side].symbol })}
         type="button"
       >

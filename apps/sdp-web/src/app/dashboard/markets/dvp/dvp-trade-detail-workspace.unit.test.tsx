@@ -140,6 +140,40 @@ describe("DvpTradeDetailWorkspace", () => {
     });
   });
 
+  // A reclaim racing a settle can only make one of them fail, so the quiet
+  // footer action waits while anything is in flight.
+  it("holds Reclaim while a settle is still confirming", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_800_000_000_000);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(() => new Promise<Response>(() => {}));
+    try {
+      const { container } = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DvpTradeDetailWorkspace
+            cluster="devnet"
+            trade={trade({
+              status: "funded",
+              legs: {
+                a: testLeg({ party: ownParty(), funding: FUNDED, outcome: "funded" }),
+                b: testLeg({ funding: FUNDED, outcome: "funded" }),
+              },
+            })}
+          />
+        </I18nProvider>
+      );
+      const view = within(container);
+      expect(view.getByRole("button", { name: "Reclaim" })).not.toHaveProperty("disabled", true);
+
+      fireEvent.click(view.getByRole("button", { name: "Settle" }));
+
+      expect(await view.findByRole("button", { name: "Reclaim" })).toHaveProperty("disabled", true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      vi.useRealTimers();
+    }
+  });
+
   // Position, not count: what matters is that the control falls inside OUR
   // leg's card, which renders first, and before the counterparty's.
   it("attaches funding to the leg the caller custodies", () => {
