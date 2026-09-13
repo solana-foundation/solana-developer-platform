@@ -10,7 +10,15 @@ import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
-export type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
+/** Authorities the update-authority endpoint can hand to a new wallet. */
+export type TransferableAuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
+
+/**
+ * Authorities that can be resolved to a signer. A superset of the transferable
+ * ones: the mint's confidential-transfer authority signs account approvals but
+ * is not itself transferable through the authority endpoint.
+ */
+export type AuthorityRole = TransferableAuthorityRole | "confidentialTransfer";
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 interface ParsedMintExtension {
@@ -57,7 +65,11 @@ function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
 async function fetchMintPermanentDelegate(
   rpcUrl: string,
   mintAddress: string
-): Promise<{ permanentDelegate: string | null; metadataAuthority: string | null }> {
+): Promise<{
+  permanentDelegate: string | null;
+  metadataAuthority: string | null;
+  confidentialTransferAuthority: string | null;
+}> {
   const rpcResponse = await fetch(rpcUrl, {
     method: "POST",
     headers: {
@@ -90,6 +102,9 @@ async function fetchMintPermanentDelegate(
   const metadataPointerAuthority = extensions.find(
     (extension) => extension.extension === "metadataPointer"
   )?.state?.authority;
+  const confidentialTransferAuthority = extensions.find(
+    (extension) => extension.extension === "confidentialTransferMint"
+  )?.state?.authority;
 
   return {
     permanentDelegate:
@@ -102,6 +117,10 @@ async function fetchMintPermanentDelegate(
         : typeof metadataPointerAuthority === "string" && metadataPointerAuthority.length > 0
           ? metadataPointerAuthority
           : null,
+    confidentialTransferAuthority:
+      typeof confidentialTransferAuthority === "string" && confidentialTransferAuthority.length > 0
+        ? confidentialTransferAuthority
+        : null,
   };
 }
 
@@ -171,6 +190,47 @@ export async function resolveMetadataAuthority(
   }
 }
 
+/**
+ * The mint's confidential-transfer authority — the signer that can approve
+ * accounts under the whitelist policy. On-chain wins: the templates default it
+ * to the mint authority, and a caller must never be able to name it themselves.
+ */
+export async function resolveConfidentialTransferAuthority(
+  env: Env,
+  token: TokenRecord
+): Promise<string | null> {
+  if (!token) {
+    return null;
+  }
+
+  const configured = token.extensions?.confidentialTransfers?.authority;
+  if (!token.mintAddress) {
+    return typeof configured === "string" && configured.length > 0
+      ? configured
+      : (token.mintAuthority ?? null);
+  }
+
+  try {
+    const { rpcUrl } = getSolanaConfig(env);
+    const { confidentialTransferAuthority } = await fetchMintPermanentDelegate(
+      rpcUrl,
+      token.mintAddress
+    );
+
+    return (
+      confidentialTransferAuthority ??
+      (typeof configured === "string" && configured.length > 0 ? configured : null) ??
+      token.mintAuthority ??
+      null
+    );
+  } catch (error) {
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      error instanceof Error ? error.message : "Failed to resolve confidential transfer authority"
+    );
+  }
+}
+
 export async function resolveCurrentAuthorityForRole(
   env: Env,
   tokenService: TokenService,
@@ -191,6 +251,8 @@ export async function resolveCurrentAuthorityForRole(
       return resolvePermanentDelegateAuthority(env, tokenService, token);
     case "metadata":
       return resolveMetadataAuthority(env, tokenService, token);
+    case "confidentialTransfer":
+      return resolveConfidentialTransferAuthority(env, token);
   }
 }
 

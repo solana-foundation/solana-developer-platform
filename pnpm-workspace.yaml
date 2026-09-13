@@ -9,6 +9,7 @@ catalog:
   '@solana-program/token-2022': 0.16.0
   '@solana/addresses': 7.1.1
   '@solana/codecs': 7.1.1
+  '@solana/instruction-plans': 7.1.1
   '@solana/instructions': 7.1.1
   '@solana/keys': 7.1.1
   '@solana/kit': 7.1.1

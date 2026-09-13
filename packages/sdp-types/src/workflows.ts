@@ -34,6 +34,13 @@ export const WORKFLOW_ACTION_TYPES = [
   "force_burn",
   "burn",
   "mint",
+  "confidential_configure",
+  "confidential_approve",
+  "confidential_deposit",
+  "confidential_apply_pending",
+  "confidential_transfer",
+  "confidential_withdraw",
+  "confidential_empty_account",
 ] as const;
 export type WorkflowActionType = (typeof WORKFLOW_ACTION_TYPES)[number];
 

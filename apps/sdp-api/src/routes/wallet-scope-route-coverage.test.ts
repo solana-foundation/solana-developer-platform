@@ -125,6 +125,10 @@ describe("wallet-scoped route coverage inventory", () => {
       // by the cron engine at execution time (workflows/actions/onchain.ts), which is
       // also where that effect is bound to the wallet's operation policy, since no
       // request is in scope by then.
+      // The confidential sub-surface's devnet gate: middleware only, it resolves
+      // no wallet. The operations it guards are listed as wallet-scoped below.
+      "ALL /tokens/:tokenId/confidential",
+      "ALL /tokens/:tokenId/confidential/*",
       "ALL /tokens/:tokenId/workflows",
       "ALL /tokens/:tokenId/workflows/*",
       "DELETE /tokens/:tokenId/workflows/:workflowId",
@@ -141,11 +145,21 @@ describe("wallet-scoped route coverage inventory", () => {
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      // The balance read signs nothing, but it resolves the holder's wallet to
+      // derive the decryption keys, so it is wallet-scoped like the writes.
+      "GET /tokens/:tokenId/confidential/balance",
       "GET /transactions",
       "POST /tokens/:tokenId/authority",
       "POST /tokens/:tokenId/authority/prepare",
       "POST /tokens/:tokenId/burn",
       "POST /tokens/:tokenId/burn/prepare",
+      "POST /tokens/:tokenId/confidential/apply-pending",
+      "POST /tokens/:tokenId/confidential/approve",
+      "POST /tokens/:tokenId/confidential/configure",
+      "POST /tokens/:tokenId/confidential/deposit",
+      "POST /tokens/:tokenId/confidential/empty",
+      "POST /tokens/:tokenId/confidential/transfer",
+      "POST /tokens/:tokenId/confidential/withdraw",
       "POST /tokens/:tokenId/deploy",
       "POST /tokens/:tokenId/deploy/confirm",
       "POST /tokens/:tokenId/deploy/prepare",

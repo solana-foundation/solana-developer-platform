@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -15,6 +15,19 @@ describe("HeliusRingsAssetRepository (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     repo = createPostgresHeliusRingsAssetRepository(getDb(env));
+  });
+
+  // `helius_rings_asset_allowlist` is deliberately excluded from the per-test
+  // TRUNCATE (see test/mocks/db.ts) because it is migration-seeded reference
+  // data nothing re-seeds. That makes the disabled row below permanent for the
+  // rest of the run, and 0057_helius_rings.migration.test.ts asserts the
+  // allowlist holds exactly SOL and USDC — so whichever file its worker reached
+  // second used to fail. This suite cleans up after itself instead.
+  afterEach(async () => {
+    await getDb(env)
+      .prepare("DELETE FROM helius_rings_asset_allowlist WHERE mint = ?")
+      .bind(DISABLED_MINT)
+      .run();
   });
 
   it("returns the seeded SOL and USDC rows as active", async () => {

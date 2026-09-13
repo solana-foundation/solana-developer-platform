@@ -27,11 +27,11 @@ import {
 } from "../helpers";
 import type { updateAuthoritySchema } from "../schemas";
 import {
-  type AuthorityRole,
   createResolvedAuthoritySigner,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
+  type TransferableAuthorityRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { buildIssuancePolicyCandidate } from "./policy";
@@ -48,14 +48,14 @@ interface UpdateAuthorityPolicyResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
-  role: AuthorityRole;
+  role: TransferableAuthorityRole;
   currentAuthorityRaw: string;
   walletId: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
   newAuthority: ReturnType<typeof assertValidAddress> | null;
 }
 
-const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
+const mapAuthorityRole = (role: TransferableAuthorityRole): MosaicAuthorityRole => {
   switch (role) {
     case "mint":
       return AuthorityType.MintTokens as MosaicAuthorityRole;

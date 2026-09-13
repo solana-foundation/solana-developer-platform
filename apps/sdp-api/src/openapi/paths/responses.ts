@@ -13,6 +13,8 @@ import {
   apiKeyResponseSchema,
   assetProfileFieldOptionsResponseSchema,
   assetProfileResponseSchema,
+  confidentialBalanceResponseSchema,
+  confidentialOperationResponseSchema,
   counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
@@ -213,6 +215,10 @@ export const tokenListFacetsResponse = successResponseSchema(
 );
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
 export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
+export const confidentialOperationResponse = successResponseSchema(
+  confidentialOperationResponseSchema
+);
+export const confidentialBalanceResponse = successResponseSchema(confidentialBalanceResponseSchema);
 
 const assetAuditEventSchema = z
   .object({

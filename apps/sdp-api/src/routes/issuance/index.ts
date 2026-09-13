@@ -21,6 +21,17 @@ import {
 } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
 import {
+  applyPendingConfidentialBalance,
+  approveConfidentialAccount,
+  confidentialTransfer,
+  configureConfidentialAccount,
+  depositConfidential,
+  emptyConfidentialAccount,
+  getConfidentialBalance,
+  requireConfidentialTransfersDevnet,
+  withdrawConfidential,
+} from "./handlers/confidential";
+import {
   confirmDeploy,
   deployToken,
   prepareDeploy,
@@ -56,6 +67,10 @@ import type { AppContext } from "./helpers";
 import {
   addAllowlistSchema,
   burnSchema,
+  confidentialAccountSchema,
+  confidentialAmountSchema,
+  confidentialApproveSchema,
+  confidentialTransferSchema,
   confirmDeploySchema,
   createTokenSchema,
   deployTokenSchema,
@@ -251,6 +266,63 @@ issuance.post(
   unfreezeAccount
 );
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
+
+// Confidential balances (Token-2022 encrypted balances) — devnet only, gated for
+// the whole sub-surface so a mainnet deployment cannot reach any of it.
+issuance.use("/tokens/:tokenId/confidential", requireConfidentialTransfersDevnet);
+issuance.use("/tokens/:tokenId/confidential/*", requireConfidentialTransfersDevnet);
+// `balance` is a static segment under /confidential; no :param route collides.
+issuance.get(
+  "/tokens/:tokenId/confidential/balance",
+  requirePermissions("tokens:read"),
+  getConfidentialBalance
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/configure",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAccountSchema),
+  configureConfidentialAccount
+);
+// Approve is signed by the mint's confidential authority against someone else's
+// account, so it sits at the same tier as the other authority-driven operations.
+issuance.post(
+  "/tokens/:tokenId/confidential/approve",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialApproveSchema),
+  approveConfidentialAccount
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/deposit",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAmountSchema),
+  depositConfidential
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/apply-pending",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAccountSchema),
+  applyPendingConfidentialBalance
+);
+// Transfer and withdraw move value out of the confidential balance under an
+// encrypted amount that cannot be reviewed after the fact.
+issuance.post(
+  "/tokens/:tokenId/confidential/transfer",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialTransferSchema),
+  confidentialTransfer
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/withdraw",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialAmountSchema),
+  withdrawConfidential
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/empty",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAccountSchema),
+  emptyConfidentialAccount
+);
 
 // Allowlist
 // `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`

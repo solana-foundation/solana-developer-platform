@@ -104,4 +104,57 @@ export const WORKFLOW_ACTIONS = {
     execution: "requires_approval",
     idempotent: false,
   },
+  // ── Confidential transfers: reversible account/balance state changes are
+  // "sensitive" (same tier as pause/freeze); confidential_transfer moves value to
+  // another wallet's confidential balance (counterparty risk, encrypted amount not
+  // reviewable after the fact), so it gets the same tier as seize/force_burn/mint ──
+  confidential_configure: {
+    labelKey: action("confidential_configure"),
+    descriptionKey: desc("confidential_configure"),
+    requires: { kind: "token_transaction", action: "confidential_configure" },
+    execution: "sensitive",
+    idempotent: true,
+  },
+  confidential_approve: {
+    labelKey: action("confidential_approve"),
+    descriptionKey: desc("confidential_approve"),
+    requires: { kind: "token_transaction", action: "confidential_approve" },
+    execution: "sensitive",
+    idempotent: true,
+  },
+  confidential_deposit: {
+    labelKey: action("confidential_deposit"),
+    descriptionKey: desc("confidential_deposit"),
+    requires: { kind: "token_transaction", action: "confidential_deposit" },
+    execution: "sensitive",
+    idempotent: false,
+  },
+  confidential_apply_pending: {
+    labelKey: action("confidential_apply_pending"),
+    descriptionKey: desc("confidential_apply_pending"),
+    requires: { kind: "token_transaction", action: "confidential_apply_pending" },
+    execution: "sensitive",
+    idempotent: true,
+  },
+  confidential_transfer: {
+    labelKey: action("confidential_transfer"),
+    descriptionKey: desc("confidential_transfer"),
+    requires: { kind: "token_transaction", action: "confidential_transfer" },
+    execution: "requires_approval",
+    idempotent: false,
+  },
+  confidential_withdraw: {
+    labelKey: action("confidential_withdraw"),
+    descriptionKey: desc("confidential_withdraw"),
+    requires: { kind: "token_transaction", action: "confidential_withdraw" },
+    execution: "sensitive",
+    idempotent: false,
+  },
+  confidential_empty_account: {
+    labelKey: action("confidential_empty_account"),
+    descriptionKey: desc("confidential_empty_account"),
+    requires: { kind: "token_transaction", action: "confidential_empty_account" },
+    execution: "sensitive",
+    idempotent: true,
+  },
 } as const satisfies Record<WorkflowActionType, WorkflowAction>;

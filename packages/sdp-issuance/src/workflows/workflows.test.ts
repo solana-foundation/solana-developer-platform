@@ -16,7 +16,7 @@ describe("workflow catalog", () => {
   // 6 triggers. The completeness loops below would pass trivially if a type AND its
   // entry were both deleted — the counts make that a loud failure instead.
   it("pins the net catalog size", () => {
-    assert.equal(WORKFLOW_ACTION_TYPES.length, 13);
+    assert.equal(WORKFLOW_ACTION_TYPES.length, 20);
     assert.equal(WORKFLOW_TRIGGER_TYPES.length, 6);
   });
 
@@ -40,7 +40,13 @@ describe("workflow catalog", () => {
   });
 
   it("marks destructive/irreversible actions as requires_approval and non-idempotent", () => {
-    for (const type of ["seize", "force_burn", "burn", "mint"] as WorkflowActionType[]) {
+    for (const type of [
+      "seize",
+      "force_burn",
+      "burn",
+      "mint",
+      "confidential_transfer",
+    ] as WorkflowActionType[]) {
       assert.equal(WORKFLOW_ACTIONS[type].execution, "requires_approval", type);
       assert.equal(WORKFLOW_ACTIONS[type].idempotent, false, type);
     }

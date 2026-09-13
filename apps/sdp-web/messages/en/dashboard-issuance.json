@@ -358,7 +358,14 @@
         "seize": "Seize",
         "force_burn": "Force burn",
         "burn": "Burn",
-        "mint": "Mint"
+        "mint": "Mint",
+        "confidential_configure": "Configure confidential account",
+        "confidential_approve": "Approve confidential account",
+        "confidential_deposit": "Deposit to confidential balance",
+        "confidential_apply_pending": "Apply pending confidential balance",
+        "confidential_transfer": "Confidential transfer",
+        "confidential_withdraw": "Withdraw from confidential balance",
+        "confidential_empty_account": "Empty confidential account"
       },
       "actionDescriptions": {
         "allowlist_add": "Add the wallet to this asset's allowlist so it can hold and transfer.",
@@ -373,7 +380,14 @@
         "seize": "Force-transfer a holder's balance to another wallet. Cannot be undone.",
         "force_burn": "Destroy tokens from a holder's wallet. Cannot be undone.",
         "burn": "Destroy tokens from your own treasury balance. Cannot be undone.",
-        "mint": "Issue new tokens to a wallet. Cannot be undone."
+        "mint": "Issue new tokens to a wallet. Cannot be undone.",
+        "confidential_configure": "Set up a token account for confidential (encrypted-balance) transfers.",
+        "confidential_approve": "Approve a configured account so it can transact confidentially (whitelist policy).",
+        "confidential_deposit": "Move tokens from the public balance into the confidential pending balance.",
+        "confidential_apply_pending": "Roll the confidential pending balance into the available balance.",
+        "confidential_transfer": "Transfer an encrypted amount to another wallet's confidential balance. Amount is not visible after the fact.",
+        "confidential_withdraw": "Move tokens from the confidential available balance back to the public balance.",
+        "confidential_empty_account": "Close out a confidential account's balances once they've been withdrawn to zero."
       },
       "statusLabels": {
         "awaiting_review": "Awaiting review",
@@ -1181,6 +1195,14 @@
       "transferHook": "Custom transfer rules",
       "transferHookDescription": "Route transfers through a rules program you provide for additional checks.",
       "transferHookProgramId": "Program ID",
+      "confidentialTransfers": "Confidential balances",
+      "confidentialTransfersDescription": "Encrypt holder balances and transfer amounts on-chain; only the holder (and an optional auditor) can decrypt them. Devnet only.",
+      "confidentialTransfersPolicy": "Account approval",
+      "confidentialTransfersPolicyHint": "Whitelist requires the confidential authority to approve each account before it can transact. Opt-in auto-approves.",
+      "confidentialTransfersPolicyOptIn": "Opt-in (auto-approve)",
+      "confidentialTransfersPolicyWhitelist": "Whitelist (manual approve)",
+      "confidentialTransfersAuditorElgamalPubkey": "Auditor public key",
+      "confidentialTransfersAuditorElgamalPubkeyHint": "Optional ElGamal public key that can decrypt every confidential transfer amount for compliance review.",
       "advancedSettingsTitle": "Advanced settings",
       "showTechnicalDetail": "View",
       "quickFillLabel": "Common add-ons",

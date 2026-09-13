@@ -90,6 +90,23 @@ const ACTION_PARAM_SCHEMAS = {
       amount: asString.pipe(amount),
     })
     .strict(),
+  confidential_configure: z.object({ wallet: address("wallet").optional() }).strict(),
+  confidential_approve: z.object({ wallet: address("wallet").optional() }).strict(),
+  confidential_deposit: z
+    .object({ wallet: address("wallet").optional(), amount: asString.pipe(amount) })
+    .strict(),
+  confidential_apply_pending: z.object({ wallet: address("wallet").optional() }).strict(),
+  confidential_transfer: z
+    .object({
+      source: address("source").optional(),
+      destination: address("destination"),
+      amount: asString.pipe(amount),
+    })
+    .strict(),
+  confidential_withdraw: z
+    .object({ wallet: address("wallet").optional(), amount: asString.pipe(amount) })
+    .strict(),
+  confidential_empty_account: z.object({ wallet: address("wallet").optional() }).strict(),
 } as const satisfies Record<WorkflowActionType, z.ZodType>;
 
 export type WorkflowActionParams = Record<string, string | number>;

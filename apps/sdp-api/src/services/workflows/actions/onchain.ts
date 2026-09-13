@@ -200,6 +200,39 @@ async function resolveSignerForAuthority(
   return { ok: true, signer: authoritySigner, walletId: authorityWallet.walletId };
 }
 
+// Build a signer for an arbitrary custody-held public key — the holder of a token
+// account, rather than one of the token's own authorities. Confidential-balance
+// actions need this: they are signed by the account owner, not by the mint.
+export async function resolveSignerForPublicKey(
+  env: Env,
+  execution: WorkflowExecutionRow,
+  publicKey: string
+): Promise<
+  { ok: true; signer: OrgSigner; walletId: string } | { ok: false; result: ActionExecutionResult }
+> {
+  const wallet = await lookupCustodyWallet(env, execution, publicKey);
+  if (!wallet) {
+    return { ok: false, result: permanentFail("HOLDER_NOT_IN_CUSTODY") };
+  }
+
+  let signer: OrgSigner;
+  try {
+    signer = await createOrgSigner(
+      env,
+      execution.organization_id,
+      execution.project_id,
+      wallet.walletId
+    );
+  } catch (error) {
+    return { ok: false, result: permanentFail(`SIGNER_UNAVAILABLE:${errorMessage(error)}`) };
+  }
+
+  if (signer.address !== (publicKey as Address)) {
+    return { ok: false, result: permanentFail("HOLDER_SIGNER_MISMATCH") };
+  }
+  return { ok: true, signer, walletId: wallet.walletId };
+}
+
 // The wallet an action targets: an explicit `params.wallet` wins, otherwise the
 // trigger's subject wallet (e.g. the KYC'd holder in the payload).
 export function resolveTargetWallet(

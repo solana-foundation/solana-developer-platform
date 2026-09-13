@@ -6,7 +6,7 @@
       "wallets": 19,
       "payments": 38,
       "counterparties": 13,
-      "issuance": 46
+      "issuance": 54
     }
   },
   "modules": {
@@ -477,7 +477,7 @@
       {
         "id": "check-wallet-signer",
         "operationId": "checkWalletSigner",
-        "title": "Check signer via memo transaction",
+        "title": "Check signer via simulated memo transaction",
         "method": "POST",
         "path": "/v1/wallets/signer-check",
         "pathFields": [],
@@ -499,8 +499,8 @@
             "feePayer": "So11111111111111111111111111111111111111112",
             "memo": "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
             "signature": "sig_example",
-            "slot": 123456789,
-            "blockTime": "2026-02-20T00:00:00.000Z"
+            "simulated": true,
+            "checkedAt": "2026-02-20T00:00:00.000Z"
           },
           "meta": {
             "requestId": "req_example",
@@ -7836,6 +7836,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -8038,6 +8043,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -8260,6 +8270,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -8351,6 +8366,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -8453,6 +8473,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -8535,6 +8560,34 @@
               {
                 "label": "deploy",
                 "value": "deploy"
+              },
+              {
+                "label": "confidential_configure",
+                "value": "confidential_configure"
+              },
+              {
+                "label": "confidential_approve",
+                "value": "confidential_approve"
+              },
+              {
+                "label": "confidential_deposit",
+                "value": "confidential_deposit"
+              },
+              {
+                "label": "confidential_apply_pending",
+                "value": "confidential_apply_pending"
+              },
+              {
+                "label": "confidential_transfer",
+                "value": "confidential_transfer"
+              },
+              {
+                "label": "confidential_withdraw",
+                "value": "confidential_withdraw"
+              },
+              {
+                "label": "confidential_empty_account",
+                "value": "confidential_empty_account"
               }
             ]
           },
@@ -8738,6 +8791,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -8871,6 +8929,11 @@
                 "transferHook": {
                   "programId": "So11111111111111111111111111111111111111112",
                   "authority": "So11111111111111111111111111111111111111112"
+                },
+                "confidentialTransfers": {
+                  "policy": "whitelist",
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "auditorElgamalPubkey": "So11111111111111111111111111111111111111112"
                 }
               },
               "totalSupply": "1000000",
@@ -9672,6 +9735,448 @@
               "unfrozenAt": "2025-01-10T00:00:00.000Z",
               "unfrozenBy": "example",
               "signature": "sig_example"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "configure-confidential-account",
+        "operationId": "configureConfidentialAccount",
+        "title": "Configure confidential account",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/configure",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "approve-confidential-account",
+        "operationId": "approveConfidentialAccount",
+        "title": "Approve confidential account",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/approve",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "deposit-confidential",
+        "operationId": "depositConfidential",
+        "title": "Deposit to confidential balance",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/deposit",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "apply-pending-confidential-balance",
+        "operationId": "applyPendingConfidentialBalance",
+        "title": "Apply pending confidential balance",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/apply-pending",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "confidential-transfer",
+        "operationId": "confidentialTransfer",
+        "title": "Confidential transfer",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/transfer",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"amount\": \"25\",\n  \"destination\": \"So11111111111111111111111111111111111111112\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "withdraw-confidential",
+        "operationId": "withdrawConfidential",
+        "title": "Withdraw from confidential balance",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/withdraw",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "empty-confidential-account",
+        "operationId": "emptyConfidentialAccount",
+        "title": "Empty confidential account",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/empty",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "get-confidential-balance",
+        "operationId": "getConfidentialBalance",
+        "title": "Get confidential balance",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/balance?walletAddress={walletAddress}&signingWalletId={signingWalletId}&decryptPendingBalance={decryptPendingBalance}",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "walletAddress",
+            "label": "walletAddress",
+            "description": "Holder wallet that owns the confidential token account.",
+            "defaultValue": "So11111111111111111111111111111111111111112",
+            "required": true
+          },
+          {
+            "key": "signingWalletId",
+            "label": "signingWalletId",
+            "description": "Optional custody wallet id for the holder.",
+            "defaultValue": "privy_wallet_123",
+            "required": false
+          },
+          {
+            "key": "decryptPendingBalance",
+            "label": "decryptPendingBalance",
+            "description": "Also decrypt the pending balance. This is an ElGamal discrete-log search and can be slow, so it is opt-in.",
+            "defaultValue": "false",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "confidentialBalance": {
+              "tokenAccount": "So11111111111111111111111111111111111111112",
+              "walletAddress": "So11111111111111111111111111111111111111112",
+              "approved": true,
+              "availableBalance": "400",
+              "pendingBalance": "0"
             }
           },
           "meta": {

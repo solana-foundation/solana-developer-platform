@@ -21,6 +21,9 @@ catalogs:
     '@solana/codecs':
       specifier: 7.1.1
       version: 7.1.1
+    '@solana/instruction-plans':
+      specifier: 7.1.1
+      version: 7.1.1
     '@solana/kit':
       specifier: 7.1.1
       version: 7.1.1
@@ -680,6 +683,9 @@ importers:
       '@solana-program/token-2022':
         specifier: 'catalog:'
         version: 0.16.0(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))(@solana/sysvars@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/instruction-plans':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)

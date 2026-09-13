@@ -2,6 +2,15 @@ import type { WorkflowExecutionRow } from "@/db/repositories";
 import type { Env } from "@/types/env";
 import { runAllowlistAdd } from "./allowlist";
 import { runAllowlistRemove } from "./allowlist-remove";
+import {
+  runConfidentialApplyPending,
+  runConfidentialApprove,
+  runConfidentialConfigure,
+  runConfidentialDeposit,
+  runConfidentialEmptyAccount,
+  runConfidentialTransfer,
+  runConfidentialWithdraw,
+} from "./confidential";
 import { runFreeze, runPause, runUnfreeze, runUnpause } from "./lifecycle";
 import { runNotify } from "./notify";
 import { runBurn, runForceBurn, runMint, runSeize } from "./supply";
@@ -44,6 +53,20 @@ export async function dispatchWorkflowAction(
       return runSendWebhook(env, execution, ctx);
     case "notify":
       return runNotify(env, execution, ctx);
+    case "confidential_configure":
+      return runConfidentialConfigure(env, execution, ctx);
+    case "confidential_approve":
+      return runConfidentialApprove(env, execution, ctx);
+    case "confidential_deposit":
+      return runConfidentialDeposit(env, execution, ctx);
+    case "confidential_apply_pending":
+      return runConfidentialApplyPending(env, execution, ctx);
+    case "confidential_transfer":
+      return runConfidentialTransfer(env, execution, ctx);
+    case "confidential_withdraw":
+      return runConfidentialWithdraw(env, execution, ctx);
+    case "confidential_empty_account":
+      return runConfidentialEmptyAccount(env, execution, ctx);
     case "record":
       return { status: "succeeded", retryable: false, result: { recorded: true } };
     default:
