@@ -33,7 +33,8 @@ import {
 } from "./dvp.fixtures";
 import type { DvpTrade } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
-import { DvpTradesWorkspace, resolveTradesListState } from "./dvp-trades-workspace";
+import { resolveTradesListState } from "./dvp-trades-list-state";
+import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 
 const replaceMock = vi.fn();
 

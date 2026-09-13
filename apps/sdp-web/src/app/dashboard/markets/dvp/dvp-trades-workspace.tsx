@@ -23,7 +23,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -62,6 +62,7 @@ import {
   overFundedLegs,
 } from "./dvp-trade";
 import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
+import { resolveTradesListState } from "./dvp-trades-list-state";
 import { type StatusFilter, serializeDvpTradesFilters } from "./dvp-trades-query";
 
 /** Their labels, in the order the dropdown shows them — which is the order a
@@ -437,42 +438,103 @@ function CreateTradeButton() {
 }
 
 /**
- * What the trades card should be: the empty invitation, "nothing matches", or
- * the table, and whether the filter bar has to stay.
- *
- * `trades` is what the server returned for `returned`, the filters in the URL at
- * fetch time. While any filter is applied, on those rows or on the ones just
- * chosen and still loading, an empty or one-row answer says nothing about the
- * project. Reading emptiness off those rows took the bar away with no route back
- * to the other statuses, and clearing a filter flashed "No trades yet" until the
- * refetch landed. The live search input counts too, or typing a narrowing search
- * unmounts the box.
- *
- * A project whose only DvP activity is a trade somebody else set up for it has
- * none of its own, so inbound trades also keep it from reading as empty.
+ * One page of the trades list, keyed to the rows returned for one exact URL
+ * filter state. Adopting another state through Back/Forward starts at page one,
+ * including when the old page number would happen to remain in range, and the
+ * page is clamped during render rather than reset by an effect, so shrinking the
+ * list from a later page lands on the last page that still exists.
  */
-export function resolveTradesListState(input: {
-  returned: { status: UrlStatusFilter; query: string };
-  chosen: { status: UrlStatusFilter; query: string };
-  queryInput: string;
-  tradeCount: number;
-  inboundCount: number;
-  /** Rows on the segment showing: inbound when waiting, else trades. */
-  shownCount: number;
-  showingInbound: boolean;
-}): { filtersApplied: boolean; filteredToNothing: boolean; listIsEmpty: boolean } {
-  const filtersApplied =
-    input.returned.status !== "all" ||
-    input.returned.query !== "" ||
-    input.chosen.status !== "all" ||
-    input.chosen.query !== "" ||
-    input.queryInput.trim() !== "";
-  const listIsEmpty = !filtersApplied && input.tradeCount === 0 && input.inboundCount === 0;
+function useTradesPagination(trades: DvpTrade[], resultKey: string) {
+  const [pagination, setPagination] = useState({ resultKey, page: 1 });
+  if (pagination.resultKey !== resultKey) {
+    setPagination({ resultKey, page: 1 });
+  }
+  const pageCount = Math.max(1, Math.ceil(trades.length / TRADES_PER_PAGE));
+  const currentPage = pagination.resultKey === resultKey ? Math.min(pagination.page, pageCount) : 1;
   return {
-    filtersApplied,
-    listIsEmpty,
-    filteredToNothing: !(listIsEmpty && !input.showingInbound) && input.shownCount === 0,
+    currentPage,
+    pageCount,
+    pagedTrades: trades.slice((currentPage - 1) * TRADES_PER_PAGE, currentPage * TRADES_PER_PAGE),
+    setPage: (page: number) => setPagination({ resultKey, page }),
   };
+}
+
+/**
+ * Whether the inbound "waiting" segment is showing instead of the trades list.
+ *
+ * The URL is the filter state for the trades list; `waiting` selects the inbound
+ * segment instead and lives here only, because it answers from a different
+ * endpoint the URL has no reason to name. A browser navigation that changes the
+ * URL group lands back on the trades segment.
+ */
+function useWaitingSegment(initialStatus: UrlStatusFilter, urlStatus: UrlStatusFilter) {
+  const [selection, setSelection] = useState({ status: initialStatus, active: false });
+  if (selection.status !== urlStatus) {
+    setSelection({ status: urlStatus, active: false });
+  }
+  return {
+    showingInbound: selection.status === urlStatus ? selection.active : false,
+    showWaiting: () => setSelection({ status: urlStatus, active: true }),
+    showTrades: (status: UrlStatusFilter) => setSelection({ status, active: false }),
+  };
+}
+
+/**
+ * The card's body: the first-trade invitation, "nothing matches", or the table.
+ *
+ * Its own component so the workspace keeps the state and this keeps the three
+ * answers, which are different: "you have none" invites a first trade, while
+ * "nothing matches" offers Clear, because offering "create a trade" to somebody
+ * who just over-filtered sends them to make a second one they do not need.
+ */
+function TradesCardBody({
+  filteredToNothing,
+  listIsEmpty,
+  onClearFilters,
+  table,
+  toolbar,
+}: {
+  filteredToNothing: boolean;
+  listIsEmpty: boolean;
+  onClearFilters: () => void;
+  table: ReactNode;
+  toolbar: ReactNode;
+}) {
+  const t = useTranslations();
+  if (listIsEmpty) {
+    // The strip is suppressed with the list, because the empty state already
+    // carries this exact call to action and two of the same button on one
+    // screen reads as two different actions.
+    return (
+      <ListEmptyState
+        action={<CreateTradeButton />}
+        description={t("DashboardMarkets.dvp.emptyDescription")}
+        icon={<ArrowLeftRightIcon className="size-5" />}
+        message={t("DashboardMarkets.dvp.empty")}
+      />
+    );
+  }
+  return (
+    <>
+      {/* The control strip every list page opens with (transactions,
+          recurring): search then filters on the left, the create action on
+          the right, table flush below. */}
+      {toolbar}
+      {filteredToNothing ? (
+        <ListEmptyState
+          action={
+            <Button onClick={onClearFilters} size="sm" type="button" variant="secondary">
+              {t("DashboardMarkets.dvp.filterClear")}
+            </Button>
+          }
+          icon={<ArrowLeftRightIcon className="size-5" />}
+          message={t("DashboardMarkets.dvp.filterNoMatches")}
+        />
+      ) : (
+        table
+      )}
+    </>
+  );
 }
 
 export function DvpTradesWorkspace({
@@ -505,58 +567,36 @@ export function DvpTradesWorkspace({
     query: DVP_TRADES_QUERY_ADAPTER,
   });
 
-  // Pagination belongs to the rows returned for one exact URL filter state.
-  // Adopting another state through Back/Forward therefore starts at page one,
-  // including when the old page number would happen to remain in range.
-  const [pagination, setPagination] = useState({ resultKey, page: 1 });
-  if (pagination.resultKey !== resultKey) {
-    setPagination({ resultKey, page: 1 });
-  }
-
-  // The URL is the filter state for the trades list; `waiting` selects the
-  // inbound segment instead and lives here only, because it answers from a
-  // different endpoint the URL has no reason to name. A browser navigation
-  // that changes the URL group lands back on the trades segment.
-  const [waitingSelection, setWaitingSelection] = useState({ status: statusFilter, active: false });
-  if (waitingSelection.status !== urlFilters.status) {
-    setWaitingSelection({ status: urlFilters.status, active: false });
-  }
-  const waiting = waitingSelection.status === urlFilters.status ? waitingSelection.active : false;
+  const { currentPage, pageCount, pagedTrades, setPage } = useTradesPagination(trades, resultKey);
+  const { showingInbound, showWaiting, showTrades } = useWaitingSegment(
+    statusFilter,
+    urlFilters.status
+  );
 
   const onStatusChange = (next: StatusFilter) => {
-    setPagination({ resultKey, page: 1 });
+    setPage(1);
     if (next === "waiting") {
       // The inbound segment swaps the table's rows rather than filtering the
       // trades list, so it never reaches the URL or the trades API.
-      setWaitingSelection({ status: urlFilters.status, active: true });
+      showWaiting();
       return;
     }
-    setWaitingSelection({ status: next, active: false });
+    showTrades(next);
     updateFilters({ status: next });
   };
 
   /** Clear filters resets the search, the page and the URL params — the whole filter state. */
   const clearFilters = () => {
-    setWaitingSelection({ status: "all", active: false });
-    setPagination({ resultKey, page: 1 });
+    showTrades("all");
+    setPage(1);
     resetFilters({ status: "all", query: "" });
   };
 
-  const showingInbound = waiting;
   // The inbound segment keeps its client-side sieve: that list is small and
   // complete, so the live input answers without a round trip.
-  const needle = queryInput.trim().toLowerCase();
   const visibleInbound = showingInbound
-    ? inbound.filter((trade) => matchesTradeQuery(trade, needle))
+    ? inbound.filter((trade) => matchesTradeQuery(trade, queryInput.trim().toLowerCase()))
     : [];
-  // Clamped during render rather than reset by an effect: shrinking the list
-  // from a later page lands on the last page that still exists.
-  const pageCount = Math.max(1, Math.ceil(trades.length / TRADES_PER_PAGE));
-  const currentPage = pagination.resultKey === resultKey ? Math.min(pagination.page, pageCount) : 1;
-  const pagedTrades = trades.slice(
-    (currentPage - 1) * TRADES_PER_PAGE,
-    currentPage * TRADES_PER_PAGE
-  );
 
   const { filtersApplied, filteredToNothing, listIsEmpty } = resolveTradesListState({
     returned: { status: statusFilter, query: searchQuery },
@@ -583,67 +623,42 @@ export function DvpTradesWorkspace({
         </Callout>
       ) : (
         <DashboardWorkspaceCard>
-          {listIsEmpty ? (
-            /* The strip is suppressed with the list, because the empty state
-               already carries this exact call to action and two of the same
-               button on one screen reads as two different actions. */
-            <ListEmptyState
-              action={<CreateTradeButton />}
-              description={t("DashboardMarkets.dvp.emptyDescription")}
-              icon={<ArrowLeftRightIcon className="size-5" />}
-              message={t("DashboardMarkets.dvp.empty")}
-            />
-          ) : (
-            <>
-              {/* The control strip every list page opens with (transactions,
-                  recurring): search then filters on the left, the create
-                  action on the right, table flush below. */}
+          <TradesCardBody
+            filteredToNothing={filteredToNothing}
+            listIsEmpty={listIsEmpty}
+            onClearFilters={clearFilters}
+            table={
+              <>
+                <TradesTable
+                  inbound={visibleInbound}
+                  showingInbound={showingInbound}
+                  trades={showingInbound ? [] : pagedTrades}
+                />
+                {!showingInbound && pageCount > 1 ? (
+                  <ArrowPagination
+                    className="border-border-default border-t p-3"
+                    onPageChange={setPage}
+                    page={currentPage}
+                    pageCount={pageCount}
+                  />
+                ) : null}
+              </>
+            }
+            toolbar={
               <TradesToolbar
                 filtersApplied={filtersApplied}
                 inboundCount={inbound.length}
                 onQueryChange={(next) => {
                   setQueryInput(next);
-                  setPagination({ resultKey, page: 1 });
+                  setPage(1);
                 }}
                 onStatusChange={onStatusChange}
                 query={queryInput}
-                status={waiting ? "waiting" : urlFilters.status}
+                status={showingInbound ? "waiting" : urlFilters.status}
                 tradeCount={trades.length}
               />
-
-              {/* "Nothing matches" and "you have none" are different
-                  answers, and offering "create a trade" to somebody who
-                  just over-filtered sends them to make a second one they
-                  do not need. */}
-              {filteredToNothing ? (
-                <ListEmptyState
-                  action={
-                    <Button onClick={clearFilters} size="sm" type="button" variant="secondary">
-                      {t("DashboardMarkets.dvp.filterClear")}
-                    </Button>
-                  }
-                  icon={<ArrowLeftRightIcon className="size-5" />}
-                  message={t("DashboardMarkets.dvp.filterNoMatches")}
-                />
-              ) : (
-                <>
-                  <TradesTable
-                    inbound={visibleInbound}
-                    showingInbound={showingInbound}
-                    trades={showingInbound ? [] : pagedTrades}
-                  />
-                  {!showingInbound && pageCount > 1 ? (
-                    <ArrowPagination
-                      className="border-border-default border-t p-3"
-                      onPageChange={(page) => setPagination({ resultKey, page })}
-                      page={currentPage}
-                      pageCount={pageCount}
-                    />
-                  ) : null}
-                </>
-              )}
-            </>
-          )}
+            }
+          />
         </DashboardWorkspaceCard>
       )}
 
