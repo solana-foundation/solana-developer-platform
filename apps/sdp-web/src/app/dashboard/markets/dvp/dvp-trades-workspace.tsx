@@ -436,6 +436,45 @@ function CreateTradeButton() {
   );
 }
 
+/**
+ * What the trades card should be: the empty invitation, "nothing matches", or
+ * the table, and whether the filter bar has to stay.
+ *
+ * `trades` is what the server returned for `returned`, the filters in the URL at
+ * fetch time. While any filter is applied, on those rows or on the ones just
+ * chosen and still loading, an empty or one-row answer says nothing about the
+ * project. Reading emptiness off those rows took the bar away with no route back
+ * to the other statuses, and clearing a filter flashed "No trades yet" until the
+ * refetch landed. The live search input counts too, or typing a narrowing search
+ * unmounts the box.
+ *
+ * A project whose only DvP activity is a trade somebody else set up for it has
+ * none of its own, so inbound trades also keep it from reading as empty.
+ */
+export function resolveTradesListState(input: {
+  returned: { status: UrlStatusFilter; query: string };
+  chosen: { status: UrlStatusFilter; query: string };
+  queryInput: string;
+  tradeCount: number;
+  inboundCount: number;
+  /** Rows on the segment showing: inbound when waiting, else trades. */
+  shownCount: number;
+  showingInbound: boolean;
+}): { filtersApplied: boolean; filteredToNothing: boolean; listIsEmpty: boolean } {
+  const filtersApplied =
+    input.returned.status !== "all" ||
+    input.returned.query !== "" ||
+    input.chosen.status !== "all" ||
+    input.chosen.query !== "" ||
+    input.queryInput.trim() !== "";
+  const listIsEmpty = !filtersApplied && input.tradeCount === 0 && input.inboundCount === 0;
+  return {
+    filtersApplied,
+    listIsEmpty,
+    filteredToNothing: !(listIsEmpty && !input.showingInbound) && input.shownCount === 0,
+  };
+}
+
 export function DvpTradesWorkspace({
   trades,
   inbound,
@@ -519,26 +558,15 @@ export function DvpTradesWorkspace({
     currentPage * TRADES_PER_PAGE
   );
 
-  // `trades` is the list the server already narrowed to the URL's status and
-  // search. So while any filter is applied, an empty or one-row answer says
-  // nothing about the project, and deciding emptiness or "too few rows to sift"
-  // from it took the filter bar away with no way back to the other statuses.
-  // The live input counts too, or typing a narrowing search unmounts the box.
-  const filtersApplied =
-    urlFilters.status !== "all" || urlFilters.query !== "" || queryInput.trim() !== "";
-
-  // A project whose only DvP activity is a trade somebody else set up for it has
-  // none of its own, and treating that as an empty page rendered "No trades yet"
-  // over the one thing waiting on them, with no filter control on screen to
-  // reach it by. Having nothing to do is what empty means here.
-  const listIsEmpty = !filtersApplied && trades.length === 0 && inbound.length === 0;
-  // Rows shown on the current segment, from either source. The waiting segment
-  // draws from `inbound` and leaves the trades table empty by design, so
-  // counting only `trades` declared "no trades match" over a table that had a
-  // row to render.
-  const shownCount = showingInbound ? visibleInbound.length : trades.length;
-
-  const filteredToNothing = !(listIsEmpty && !showingInbound) && shownCount === 0;
+  const { filtersApplied, filteredToNothing, listIsEmpty } = resolveTradesListState({
+    returned: { status: statusFilter, query: searchQuery },
+    chosen: urlFilters,
+    queryInput,
+    tradeCount: trades.length,
+    inboundCount: inbound.length,
+    shownCount: showingInbound ? visibleInbound.length : trades.length,
+    showingInbound,
+  });
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col gap-4">

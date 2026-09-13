@@ -33,7 +33,7 @@ import {
 } from "./dvp.fixtures";
 import type { DvpTrade } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
-import { DvpTradesWorkspace } from "./dvp-trades-workspace";
+import { DvpTradesWorkspace, resolveTradesListState } from "./dvp-trades-workspace";
 
 const replaceMock = vi.fn();
 
@@ -567,5 +567,42 @@ describe("DvpTradesWorkspace", () => {
     const html = renderList([trade()]);
 
     expect(html).not.toContain("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
+  });
+});
+
+describe("resolveTradesListState", () => {
+  const unfiltered = { status: "all" as const, query: "" };
+  const base = {
+    returned: unfiltered,
+    chosen: unfiltered,
+    queryInput: "",
+    tradeCount: 0,
+    inboundCount: 0,
+    shownCount: 0,
+    showingInbound: false,
+  };
+
+  it("reads a project with no trades and no filters as empty", () => {
+    expect(resolveTradesListState(base)).toMatchObject({
+      listIsEmpty: true,
+      filtersApplied: false,
+    });
+  });
+
+  // Clearing a filter resets the chosen state at once while the rows on screen
+  // are still the filtered, empty answer. Reading those as an empty project
+  // flashed "No trades yet" and dropped the bar until the refetch landed.
+  it("does not read stale filtered rows as an empty project while a clear is loading", () => {
+    const state = resolveTradesListState({ ...base, returned: { status: "ready", query: "" } });
+
+    expect(state).toMatchObject({
+      listIsEmpty: false,
+      filtersApplied: true,
+      filteredToNothing: true,
+    });
+  });
+
+  it("holds the filter bar while a search is still being typed", () => {
+    expect(resolveTradesListState({ ...base, queryInput: "abc" }).filtersApplied).toBe(true);
   });
 });
