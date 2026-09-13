@@ -17,6 +17,8 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
 } from "@solana/kit";
 import { generateKeyPairSigner, partiallySignTransactionWithSigners } from "@solana/signers";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
@@ -27,7 +29,6 @@ import {
 } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
-import type { DvpLegFundingClaim } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
 import { env } from "@/test/helpers/env";
 
@@ -35,8 +36,10 @@ const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
 const verifySwapDvpAccount = vi.hoisted(() => vi.fn());
-const listForTrade = vi.hoisted(() => vi.fn());
-const deleteReceipt = vi.hoisted(() => vi.fn());
+const claimForReclaim = vi.hoisted(() => vi.fn());
+const rebindSignature = vi.hoisted(() => vi.fn());
+const hasClaim = vi.hoisted(() => vi.fn());
+const releaseClaim = vi.hoisted(() => vi.fn());
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeMint = vi.hoisted(() => vi.fn());
@@ -67,7 +70,12 @@ vi.mock("@sdp/dvp", async (importOriginal) => ({
 }));
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
-  createPostgresDvpLegFundingClaimRepository: () => ({ listForTrade, deleteReceipt }),
+  createPostgresDvpLegFundingClaimRepository: () => ({
+    claimForReclaim,
+    rebindSignature,
+    hasClaim,
+    release: releaseClaim,
+  }),
 }));
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
@@ -144,20 +152,6 @@ const RECLAIMER_A = {
   projectId: "prj_a",
 };
 
-function claim(overrides: Partial<DvpLegFundingClaim> = {}): DvpLegFundingClaim {
-  return {
-    tradeId: "dvp_reclaim_test",
-    side: "a",
-    organizationId: "org_a",
-    projectId: "prj_a",
-    custodyWalletId: "cwlt_a",
-    signature: "sig_claim",
-    expiryHeight: "100",
-    fundingTx: "sig_funding_receipt",
-    ...overrides,
-  };
-}
-
 const context = { env } as never;
 
 /** The instructions of the one transaction that went out. */
@@ -187,8 +181,10 @@ describe("reclaimDvpTradeLeg", () => {
     });
     verifySwapDvpAccount.mockResolvedValue({ address: trade().swapDvp });
     fetchMaybeMint.mockResolvedValue({ exists: true, data: { extensions: { __option: "None" } } });
-    listForTrade.mockResolvedValue([claim()]);
-    deleteReceipt.mockResolvedValue(true);
+    claimForReclaim.mockResolvedValue(true);
+    rebindSignature.mockResolvedValue(true);
+    hasClaim.mockResolvedValue(true);
+    releaseClaim.mockResolvedValue(undefined);
     prepareOwnedSubmission.mockImplementation(sponsorSign);
     createProjectSponsorshipFeePayment.mockResolvedValue({
       getFeePayer: async () => sponsorSigner.address,
@@ -240,19 +236,49 @@ describe("reclaimDvpTradeLeg", () => {
     expect(reclaim.accounts[5]).toBe(TOKEN_PROGRAM_ADDRESS);
   });
 
-  // The regression this ticket exists for: the landed receipt kept (trade, side)
-  // taken, so funding the leg again after a reclaim conflicted forever.
-  it("clears the leg's receipt once the reclaim is on the wire", async () => {
-    await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+  // The leg's lock is taken before anything is sent, so a funding can't start
+  // between a check and the broadcast, and it is released once the reclaim is
+  // on the wire, which is what lets the leg be funded again.
+  it("holds the leg's lock across the send, then releases its own signature", async () => {
+    const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
 
-    expect(deleteReceipt).toHaveBeenCalledWith("dvp_reclaim_test", "a");
+    expect(claimForReclaim).toHaveBeenCalledWith(
+      expect.objectContaining({ tradeId: "dvp_reclaim_test", side: "a", expiryHeight: "100" })
+    );
+    expect(claimForReclaim.mock.invocationCallOrder[0]).toBeLessThan(
+      sendTransaction.mock.invocationCallOrder[0]
+    );
+    expect(releaseClaim).toHaveBeenCalledWith("dvp_reclaim_test", "a", result.signature);
   });
 
-  it("keeps the receipt when the reclaim never went out", async () => {
+  // It may still land, so a funding on top of it would be the race again.
+  it("keeps the lock when the send fails ambiguously", async () => {
     sendTransaction.mockRejectedValue(new Error("socket hang up"));
 
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toThrow();
-    expect(deleteReceipt).not.toHaveBeenCalled();
+    expect(releaseClaim).not.toHaveBeenCalled();
+  });
+
+  it("releases the lock when the cluster rejects the transaction in preflight", async () => {
+    sendTransaction.mockRejectedValue(
+      new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+        accounts: null,
+        fee: null,
+        loadedAccountsDataSize: null,
+        loadedAddresses: null,
+        logs: [],
+        postBalances: null,
+        postTokenBalances: null,
+        preBalances: null,
+        preTokenBalances: null,
+        replacementBlockhash: null,
+        returnData: null,
+        unitsConsumed: null,
+      })
+    );
+
+    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toThrow();
+    expect(releaseClaim).toHaveBeenCalledTimes(1);
   });
 
   // No expiry gate on chain: a deposit can always come back.
@@ -276,23 +302,15 @@ describe("reclaimDvpTradeLeg", () => {
     expect(readDvpAccounts).not.toHaveBeenCalled();
   });
 
-  // A funding landing after the reclaim would leave the leg funded again
-  // straight after somebody asked for it back.
-  it("refuses while a funding of the same leg is still in flight", async () => {
-    listForTrade.mockResolvedValue([claim({ fundingTx: null })]);
+  // A funding in flight holds the lock, and reclaiming over it is the race.
+  it("refuses, sending nothing, when the leg's lock is already held", async () => {
+    claimForReclaim.mockResolvedValue(false);
 
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
     });
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
-  });
-
-  it("is not blocked by a funding in flight on the other leg", async () => {
-    listForTrade.mockResolvedValue([claim({ side: "b", fundingTx: null })]);
-
-    await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
-
-    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(releaseClaim).not.toHaveBeenCalled();
   });
 
   // The program no-ops an empty escrow; sending one spends a sponsored fee on nothing.

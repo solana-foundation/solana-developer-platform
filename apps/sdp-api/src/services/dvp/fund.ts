@@ -435,9 +435,9 @@ export async function executeDvpFunding(
   }
 
   // On the wire, so the receipt is owed regardless of what the claim does next.
-  // The claim is released on a rejected broadcast and swept once its blockhash
-  // expires; a leg that funded correctly ends up with no claim at all, which is
-  // why this cannot be the same column.
+  // The row stays as the receipt and keeps the leg taken: a later funding of the
+  // same leg conflicts until a reclaim takes the row over (`claimForReclaim`)
+  // or the reconciler deletes a receipt whose transfer never landed.
   await plan.recordFundingTx(heldSignature);
 
   return { signature: heldSignature, leg: side, amount: outstanding.toString() };

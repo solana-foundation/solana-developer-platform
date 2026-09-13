@@ -100,16 +100,21 @@ export interface DvpLegFundingClaimRepository {
    */
   deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
   /**
-   * Clears a leg's receipt once its deposit has been reclaimed.
+   * Takes the leg's lock for a reclaim, the same lock funding takes.
    *
-   * A receipt is the row a landed funding leaves behind, and it keeps the
-   * (trade, side) key taken, so without this every later funding of the leg
-   * conflicts forever. `funding_tx IS NOT NULL` keeps it from ever removing a
-   * funding still in flight, which only its own request or the sweep may release.
+   * Reclaiming and funding one leg at once is a race either way round, so both
+   * go through this row. A landed receipt is turned into the reclaim's lock in
+   * one guarded UPDATE, which is what lets a reclaimed leg be funded again once
+   * the lock is released; with no row at all it is an ordinary claim. A funding
+   * still in flight (`funding_tx IS NULL`) is neither, and the reclaim waits.
    *
-   * @returns Whether a receipt was removed.
+   * The lock is released by signature like any claim, so a reclaim can only
+   * ever remove its own row, never a newer funding's receipt. One left behind by
+   * an ambiguous broadcast expires through `releaseExpired`.
+   *
+   * @returns Whether this call now holds the leg.
    */
-  deleteReceipt(tradeId: string, side: "a" | "b"): Promise<boolean>;
+  claimForReclaim(input: DvpLegFundingClaimInsert): Promise<boolean>;
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
@@ -129,31 +134,33 @@ function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim 
 export function createPostgresDvpLegFundingClaimRepository(
   db: RepositoryDbClient
 ): DvpLegFundingClaimRepository {
+  async function insertClaim(input: DvpLegFundingClaimInsert): Promise<boolean> {
+    // ON CONFLICT DO NOTHING rather than an upsert: a conflict means somebody
+    // else holds this leg, and overwriting their claim is exactly the
+    // double-broadcast this table exists to prevent.
+    const result = await db
+      .prepare(
+        `INSERT INTO dvp_leg_funding_claims
+           (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (trade_id, side) DO NOTHING
+         RETURNING trade_id`
+      )
+      .bind(
+        input.tradeId,
+        input.side,
+        input.organizationId,
+        input.projectId,
+        input.custodyWalletId,
+        input.signature,
+        input.expiryHeight
+      )
+      .first<{ trade_id: string }>();
+    return result !== null;
+  }
+
   return {
-    async claim(input) {
-      // ON CONFLICT DO NOTHING rather than an upsert: a conflict means somebody
-      // else holds this leg, and overwriting their claim is exactly the
-      // double-broadcast this table exists to prevent.
-      const result = await db
-        .prepare(
-          `INSERT INTO dvp_leg_funding_claims
-             (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (trade_id, side) DO NOTHING
-           RETURNING trade_id`
-        )
-        .bind(
-          input.tradeId,
-          input.side,
-          input.organizationId,
-          input.projectId,
-          input.custodyWalletId,
-          input.signature,
-          input.expiryHeight
-        )
-        .first<{ trade_id: string }>();
-      return result !== null;
-    },
+    claim: insertClaim,
 
     async release(tradeId, side, signature) {
       // Only an unbroadcast claim. Once `funding_tx` is set the transfer is on
@@ -248,16 +255,32 @@ export function createPostgresDvpLegFundingClaimRepository(
       return result.results.map(toDvpLegFundingClaim);
     },
 
-    async deleteReceipt(tradeId, side) {
-      const result = await db
+    async claimForReclaim(input) {
+      // Separate statements are safe here: the UPDATE only matches a receipt,
+      // the INSERT only lands on an empty slot, and anything a concurrent
+      // funding writes in between makes both miss, which refuses the reclaim.
+      const takenOver = await db
         .prepare(
-          `DELETE FROM dvp_leg_funding_claims
+          `UPDATE dvp_leg_funding_claims
+              SET organization_id = ?, project_id = ?, custody_wallet_id = ?,
+                  signature = ?, expiry_height = ?, funding_tx = NULL, updated_at = sdp_iso_now()
             WHERE trade_id = ? AND side = ? AND funding_tx IS NOT NULL
             RETURNING trade_id`
         )
-        .bind(tradeId, side)
-        .all<{ trade_id: string }>();
-      return result.results.length > 0;
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.custodyWalletId,
+          input.signature,
+          input.expiryHeight,
+          input.tradeId,
+          input.side
+        )
+        .first<{ trade_id: string }>();
+      if (takenOver !== null) {
+        return true;
+      }
+      return insertClaim(input);
     },
 
     async deleteBroadcastClaim(tradeId, side, signature) {

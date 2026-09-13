@@ -238,30 +238,37 @@ describe("DvpLegFundingClaimRepository", () => {
     expect(blocked).toBe(false);
   });
 
-  // After a reclaim the deposit is gone, and the receipt would otherwise keep
-  // (trade, side) taken, so every later funding of the leg conflicted.
-  it("frees a reclaimed leg for funding again by clearing its receipt", async () => {
-    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
-      await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
-      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+  // A reclaim takes the leg the way funding does, so the two can never be in
+  // flight together; releasing it is what lets a reclaimed leg be funded again.
+  describe("reclaiming a leg", () => {
+    it("turns a landed receipt into the reclaim's lock, blocking funding until released", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
 
-      expect(await repo.deleteReceipt(TRADE_ID, "a")).toBe(true);
+        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"))).toBe(true);
+        expect(await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_fund_during"))).toBe(false);
+
+        await repo.release(TRADE_ID, "a", "sig_reclaim");
+        expect(await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_fund_after"))).toBe(true);
+      });
     });
 
-    const refunded = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
-      repo.claim(claimInput(PARTY_A_ORG, "a", "sig_refund"))
-    );
-    expect(refunded).toBe(true);
-  });
+    // A funding still in flight may yet land; reclaiming over it is the race.
+    it("refuses while a funding of the leg is still in flight", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_inflight"));
 
-  // A funding still in flight is a lock, not a receipt, and only its own
-  // request or the expiry sweep may release it.
-  it("never clears a funding that is still in flight", async () => {
-    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
-      await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_inflight"));
+        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"))).toBe(false);
+        expect(await repo.hasClaim(TRADE_ID, "a", "sig_inflight")).toBe(true);
+      });
+    });
 
-      expect(await repo.deleteReceipt(TRADE_ID, "a")).toBe(false);
-      expect(await repo.hasClaim(TRADE_ID, "a", "sig_inflight")).toBe(true);
+    it("takes a leg nobody has claimed like any claim", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "b", "sig_reclaim"))).toBe(true);
+        expect(await repo.hasClaim(TRADE_ID, "b", "sig_reclaim")).toBe(true);
+      });
     });
   });
 

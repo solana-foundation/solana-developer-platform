@@ -243,7 +243,7 @@
       "fundRefusedBalanceShort": "This wallet doesn't hold enough {symbol} to fund this leg. Nothing was sent.",
       "fundRefusedBalanceShortUnnamed": "This wallet doesn't hold enough of this token to fund this leg. Nothing was sent.",
       "fundRefusedFrozen": "This leg's escrow is frozen, so a transfer into it would bounce. The token's issuer has to unfreeze it first.",
-      "fundRefusedInProgress": "This leg is already being funded. Check back in a moment.",
+      "fundRefusedInProgress": "This leg is already being moved. Check back in a moment.",
       "fundRefusedNoToken": "This wallet doesn't hold any {symbol} yet. Send it some, then fund the leg.",
       "fundRefusedNoTokenUnnamed": "This wallet doesn't hold this token yet. Send it some, then fund the leg.",
       "fundRefusedNotFundable": "This trade can no longer be funded.",
