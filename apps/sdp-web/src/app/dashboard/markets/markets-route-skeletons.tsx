@@ -64,7 +64,7 @@ export function EmbeddedYieldPortfolioSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true">
       <div
-        className="mx-auto flex w-full max-w-[63rem] flex-col gap-4 pt-3"
+        className="mx-auto flex w-full max-w-[90rem] flex-col gap-4 pt-3"
         data-embedded-yield-loading="portfolio"
       >
         <div className="flex items-center justify-between gap-4">
@@ -73,7 +73,7 @@ export function EmbeddedYieldPortfolioSkeleton() {
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           {BALANCE_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-[121px] rounded-2xl" key={`portfolio-${id}`} />
+            <SkeletonBlock className="h-44 rounded-2xl" key={`portfolio-${id}`} />
           ))}
         </div>
         <SkeletonBlock className="h-[302px] w-full rounded-2xl" />

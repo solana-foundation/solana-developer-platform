@@ -27,6 +27,7 @@ import {
 } from "@/services/private-channels/auth/gateway-auth";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env as baseEnv } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -85,13 +86,12 @@ beforeEach(async () => {
     )
     .bind(TEST_USER.id, TEST_USER.email)
     .run();
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'IT', ?, 'sandbox', 'active', ?)`
-    )
-    .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
-    .run();
+  await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
   await db
     .prepare(
       `INSERT INTO private_channel_instances

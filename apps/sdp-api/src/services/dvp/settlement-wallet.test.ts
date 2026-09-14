@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const provisionApiKeyWallet = vi.hoisted(() => vi.fn());
@@ -67,13 +68,12 @@ describe("getOrCreateDvpSettlementWallet", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
@@ -137,9 +137,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
     const reread = await getOrCreateDvpSettlementWallet(env, scope);
 
     expect(reread.address).toBe("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
-    // All three, and all different. `providerWalletId` is what a policy
-    // candidate's `walletId` means — the wallet-operations ownership check
-    // matches on it, so handing it the address refuses the operation.
+    // All three identifiers are distinct.
     expect(reread.custodyWalletId).toBe("cwlt_first");
     expect(reread.providerWalletId).toBe("provider_cwlt_first");
   });
@@ -201,7 +199,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
 
   // The authority is not an ordinary transfer wallet: it holds the only key
   // that can close any trade in the project and is a PDA seed on every one of
-  // them. Marking it lets policy and the wallets list say so.
+  // them. Marking it lets the wallets list say so.
   it("marks the wallet as a settlement authority, not a transfer wallet", async () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });

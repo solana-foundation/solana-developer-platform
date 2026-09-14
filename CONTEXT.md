@@ -88,10 +88,6 @@ _Avoid_: Provider availability, provider policy, custody configuration
 A payments v2 product flow that asks a payer to complete a payment through a Solana Pay payload or a hosted payment link.
 _Avoid_: Wallet Operation Envelope, Payment Transfer, generic email
 
-**Transactional Email**:
-An SDP-owned outbound message for a product workflow.
-_Avoid_: Raw email, Clerk organization invitation, generic notification
-
 **Managed Reconciliation Cadence**:
 The deployment-owned frequency for one pass over SDP's managed background reconcilers. It is distinct from each reconciler's self-hosted cadence and from monitoring tolerance windows.
 _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
@@ -121,7 +117,6 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - A **Policy Evaluation** may create an **Approval Request**.
 - A **Provider Control Mapping** can make provider-native controls match an SDP policy revision, partially match it, or remain inapplicable.
 - A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
-- A **Transactional Email** may deliver a **Payment Request**, but does not own payment lifecycle or settlement matching.
 - Every managed reconciler in one managed run follows the **Managed Reconciliation Cadence**, while its self-hosted equivalent may run at a different cadence.
 
 ## Example Dialogue
@@ -146,5 +141,4 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - "Wallet" in policy discussions means an SDP custody source wallet, not a **Counterparty Account** or token account.
 - "Approval" can mean an SDP **Approval Request** or a provider-native approval flow; resolved: SDP creates the **Approval Request**, while provider-native approval is reached through **Provider Control Mapping**.
 - "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
-- "Email" can mean Clerk-owned organization invitation delivery or SDP-owned **Transactional Email**; resolved: only **Transactional Email** is owned by SDP.
 - "Reconciliation cadence" previously meant either the deployment's execution schedule or Sentry's expected schedule; resolved: the **Managed Reconciliation Cadence** is deployment-owned, and managed monitoring derives from it.

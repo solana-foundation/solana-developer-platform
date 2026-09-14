@@ -3,13 +3,10 @@ import {
   type ShieldedMaterialSource,
 } from "../material.js";
 import { fetchDerivationSeed, type SignMessage } from "./seed.js";
-import { type SeedCacheConfig, withCachedSeed } from "./seed-cache.js";
 
 export interface CustodyMaterialSourceConfig {
   /** Signs raw bytes with the custody key for `owner`; base64 in, base64 out. */
   readonly signMessage: SignMessage;
-  /** Seed cache tuning. `ttlMs: 0` disables caching. */
-  readonly cache?: SeedCacheConfig;
 }
 
 /**
@@ -19,6 +16,10 @@ export interface CustodyMaterialSourceConfig {
  * the seed the shielded keys expand from. The custody secret never leaves its
  * provider, and the same key that signs the outer transaction roots the
  * shielded identity — one key, both halves of an operation.
+ *
+ * Every material use is one custody signing round trip: the seed is fetched
+ * fresh, expanded, and zeroed before this returns. Nothing holds it between
+ * uses, so the process never retains spend-capable material at rest.
  *
  * `organizationId`, `projectId` and `walletId` on the request are audit context
  * here, not derivation inputs: the seed is a function of the owner key alone.
@@ -31,11 +32,7 @@ export function createCustodyMaterialSource(
 ): ShieldedMaterialSource {
   return {
     async withMaterial(request, use) {
-      const seed = await withCachedSeed(
-        request.owner,
-        () => fetchDerivationSeed(config.signMessage, request.owner),
-        config.cache ?? {}
-      );
+      const seed = await fetchDerivationSeed(config.signMessage, request.owner);
 
       try {
         const material = await createShieldedMaterialFromDerivationSeed({
@@ -49,7 +46,6 @@ export function createCustodyMaterialSource(
           material.destroy();
         }
       } finally {
-        // Our copy, not the cache's; the cache holds and expires its own.
         seed.fill(0);
       }
     },

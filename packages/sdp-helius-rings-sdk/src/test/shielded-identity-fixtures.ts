@@ -147,9 +147,9 @@ export const testSignMessage: SignMessage = async (messageBase64, owner) => {
   return getBase64Codec().decode(await signBytes(signer.keyPair.privateKey, message));
 };
 
-/** A custody-rooted source over the test keypair, with the seed cache off. */
+/** A custody-rooted source over the test keypair. */
 export function testMaterialSource(): ShieldedMaterialSource {
-  return createCustodyMaterialSource({ signMessage: testSignMessage, cache: { ttlMs: 0 } });
+  return createCustodyMaterialSource({ signMessage: testSignMessage });
 }
 
 /** The raw seed, for suites asserting that no secret reaches an output. */

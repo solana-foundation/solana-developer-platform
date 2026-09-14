@@ -146,6 +146,29 @@ const PII_KEYS = new Set([
   "personaldata",
   "personalinfo",
   "kycdata",
+  // Raw provider payload containers (threat model EARN-025). Nothing inside a
+  // provider's response body can be vouched for by key, so a body attached
+  // whole is scrubbed whole. The earn fetch layer never attaches one: it lifts
+  // named fields onto `SdpEarnError.details` and drops the rest
+  // (`packages/sdp-earn/src/fetch.ts`). These keys are the backstop for a
+  // caller that logs the body anyway.
+  "providerbody",
+  "providerpayload",
+  "providerresponse",
+  "responsebody",
+  "rawbody",
+  "rawresponse",
+  "upstreambody",
+  // End-user wallet identity (threat model EARN-025 / EARN-028). An owner
+  // address is a Solana public key like any other, but it is the ONE address
+  // key that names an END USER rather than SDP or a customer treasury: the
+  // embedded surface reads positions per `ownerAddress`, any `earn:read` key
+  // can enumerate every owner in its project, and a log line pairing an owner
+  // with a partner is PII linkage. Exact spellings only. `walletAddress`,
+  // `destinationAddress`, `mintAddress` and bare `address` stay readable (see
+  // NEVER_REDACTED_KEYS); the ledger keeps the owner on the movement row, and
+  // an audit row's `resourceId` resolves to it.
+  "owneraddress",
   // Network identity. `userAgent` is deliberately absent: it is not
   // identifying on its own and it is how provider-specific client bugs get
   // diagnosed. The audit table stores it in a dedicated column by design.
@@ -186,8 +209,10 @@ const PII_KEY_SUFFIXES = [
  * scrubbing did not overreach.
  *
  * - `name`: provider names, wallet labels, rule names, token names.
- * - `address` and every `*Address`: Solana public keys. Public on-chain,
- *   pseudonymous, and the primary handle for tracing a payment.
+ * - `address` and every `*Address` bar one: Solana public keys. Public
+ *   on-chain, pseudonymous, and the primary handle for tracing a payment. The
+ *   exception is `ownerAddress`, the end-user key on the embedded Earn surface,
+ *   which is PII linkage and matched exactly in PII_KEYS.
  * - `countryCode` / `subdivisionCode`: needed to debug ramp corridors, and not
  *   identifying once the name, phone, DOB, and street are gone.
  * - `details`: `AppError.details` carries validation output. Its PII-bearing

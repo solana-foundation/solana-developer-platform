@@ -1325,7 +1325,7 @@ describe("Payments routes — ramps", () => {
 
   describe("session-caller environment resolution", () => {
     const SESSION_ID = "ses_ramps_environment";
-    const PRODUCTION_PROJECT_ID = "prj_payments_test_prod";
+    const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 
     /**
      * Dashboard (session) callers resolve their environment from the
@@ -1340,28 +1340,6 @@ describe("Payments routes — ramps", () => {
              VALUES (?, ?, ?, 'member', 'active')`
           )
           .bind("om_ramps_environment", TEST_ORG.id, TEST_USER.id),
-        getDb(env)
-          .prepare(
-            `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-             VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-          )
-          .bind(
-            PRODUCTION_PROJECT_ID,
-            TEST_ORG.id,
-            "Production Project",
-            "payments-test-project-prod",
-            TEST_USER.id
-          ),
-        getDb(env)
-          .prepare(
-            `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-          )
-          .bind("pm_ramps_environment_sandbox", TEST_PROJECT.id, TEST_USER.id),
-        getDb(env)
-          .prepare(
-            `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-          )
-          .bind("pm_ramps_environment_production", PRODUCTION_PROJECT_ID, TEST_USER.id),
         getDb(env)
           .prepare(
             `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)

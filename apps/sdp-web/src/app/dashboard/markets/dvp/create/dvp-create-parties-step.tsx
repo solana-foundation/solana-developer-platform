@@ -61,7 +61,6 @@ function LegRow({
           label={t(a ? "DashboardMarkets.dvp.fieldAmountA" : "DashboardMarkets.dvp.fieldAmountB")}
           onChange={leg.setAmount}
           symbol={leg.symbol}
-          tokenName={leg.name}
           value={leg.amount}
         />
         <MintField
@@ -119,15 +118,20 @@ function LegChip({ amount, mint, symbol }: { amount: string; mint: string; symbo
   );
 }
 
-/** The trade as an exchange between the two leg rows: asset pill, both-ways arrow, cash pill, divider lines out to both edges. */
+/** The trade as an exchange between the two leg rows: seller, asset pill, both-ways arrow, cash pill, buyer. */
 export function ExchangeStrip({ form }: { form: DvpCreateForm }) {
+  const t = useTranslations();
   return (
-    <div className="my-4 flex items-center gap-5">
-      <div className="flex-1 border-border-default border-t" />
+    <div className="my-4 flex items-center justify-center gap-5">
+      <span className="text-tertiary text-xs font-medium uppercase tracking-wide">
+        {t("DashboardMarkets.dvp.fieldPartyA")}
+      </span>
       <LegChip amount={form.asset.amount} mint={form.asset.mint} symbol={form.asset.symbol} />
       <ArrowLeftRightIcon aria-hidden className="h-4 w-4 shrink-0 text-tertiary" />
       <LegChip amount={form.cash.amount} mint={form.cash.mint} symbol={form.cash.symbol} />
-      <div className="flex-1 border-border-default border-t" />
+      <span className="text-tertiary text-xs font-medium uppercase tracking-wide">
+        {t("DashboardMarkets.dvp.fieldPartyB")}
+      </span>
     </div>
   );
 }
@@ -202,15 +206,15 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
       <LegRow
         context={context}
         form={form}
-        onPartyChange={(next) => changeParty("a", next)}
-        side="a"
+        onPartyChange={(next) => changeParty("b", next)}
+        side="b"
       />
       <ExchangeStrip form={form} />
       <LegRow
         context={context}
         form={form}
-        onPartyChange={(next) => changeParty("b", next)}
-        side="b"
+        onPartyChange={(next) => changeParty("a", next)}
+        side="a"
       />
 
       <div className="grid gap-4 rounded-xl border border-border-default bg-surface-raised p-4">

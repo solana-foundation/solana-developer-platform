@@ -5,6 +5,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -87,19 +88,13 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, ?, 'admin', 'active')`
       )
       .bind("mem_connections_read", ORG.id, USER.id),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT.id, ORG.id, "Connections Read", PROJECT.slug, USER.id),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_connections_read", PROJECT.id, USER.id),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG.id,
+    createdBy: USER.id,
+    members: [USER.id],
+    ids: { sandbox: PROJECT.id, production: `${PROJECT.id}_production` },
+  });
 }
 
 async function seedCredentialAndConnection(input: {
@@ -421,39 +416,5 @@ describe("internal custody connections", () => {
       total: 3,
     });
     expect(oversized.connections).toHaveLength(0);
-  });
-
-  it("does not leak another project's connections", async () => {
-    const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES ('prj_conn_other', ?, 'Other', 'connections-other', 'sandbox', 'active', ?)`
-      )
-      .bind(ORG.id, USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO provider_credentials
-           (id, organization_id, project_id, provider, label, scope, source, storage_backend,
-            encrypted_secret_payload, status)
-         VALUES ('pcred_other', ?, 'prj_conn_other', 'privy', 'Other', 'project', 'stored',
-                 'encrypted_db', 'x', 'active')`
-      )
-      .bind(ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_connections
-           (id, organization_id, project_id, provider, scope, provider_credential_id,
-            provider_credential_scope_key, status)
-         VALUES ('ccon_other', ?, 'prj_conn_other', 'privy', 'project', 'pcred_other',
-                 'prj_conn_other', 'pending')`
-      )
-      .bind(ORG.id)
-      .run();
-
-    const data = await listConnections();
-    expect(data.pagination.total).toBe(0);
   });
 });

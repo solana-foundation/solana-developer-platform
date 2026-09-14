@@ -32,8 +32,6 @@ export interface DvpLeg {
   setChoice: (next: string) => void;
   setCustom: (next: string) => void;
   symbol: string;
-  /** The token's human name ("USD Coin"), or null when no metadata names it. */
-  name: string | null;
   token: DvpCreateOption | null;
   /**
    * What was read off a pasted mint, for the field to report. Idle for a leg
@@ -122,7 +120,6 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
     // A pasted mint's own metadata beats the raw address, so a resolved paste
     // reads as its symbol everywhere the summary names the leg.
     symbol: token?.label ?? pastedMint?.symbol ?? pastedMint?.name ?? "",
-    name: token?.name ?? pastedMint?.name ?? null,
     token,
   };
 }

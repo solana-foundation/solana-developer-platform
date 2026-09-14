@@ -5,6 +5,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getBlockHeight = vi.hoisted(() => vi.fn());
@@ -148,7 +149,6 @@ describe("reconcileDvpTrades", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     env.MARKETS_ENABLED = "true";
-    env.DVP_ENABLED = "true";
     getBlockHeight.mockResolvedValue(1_000n);
     // Default: broadcast claims check out on chain as landed, so existing
     // receipt rows survive. Tests that exercise a dead broadcast override.
@@ -174,13 +174,12 @@ describe("reconcileDvpTrades", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
@@ -197,15 +196,14 @@ describe("reconcileDvpTrades", () => {
       .run();
   });
 
-  it("does nothing when the DvP flag is off", async () => {
-    env.DVP_ENABLED = undefined;
-    await seedTrade("dvp_flagged_off", "created");
+  it("does nothing when Markets is off", async () => {
+    env.MARKETS_ENABLED = undefined;
+    await seedTrade("markets_off", "created");
 
     await reconcileDvpTrades(env);
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
-    await expect(statusOf("dvp_flagged_off")).resolves.toMatchObject({ observed_at: null });
-    env.DVP_ENABLED = "true";
+    await expect(statusOf("markets_off")).resolves.toMatchObject({ observed_at: null });
   });
 
   it("records the observed balances and advances the status", async () => {

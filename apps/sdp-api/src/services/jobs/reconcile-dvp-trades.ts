@@ -16,7 +16,7 @@ import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
-import { isDvpEnabled } from "@/lib/feature-flags";
+import { isMarketsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
 import { closeIsKnown, deriveDvpTradeState } from "@/services/dvp/observe";
@@ -37,7 +37,7 @@ const MILLISECONDS_PER_MINUTE = 60_000;
  * @param env - API process environment.
  */
 export async function reconcileDvpTrades(env: Env): Promise<void> {
-  if (!isDvpEnabled(env)) {
+  if (!isMarketsEnabled(env)) {
     return;
   }
 

@@ -20,21 +20,6 @@ import { DvpCreateWorkspace } from "./dvp-create-workspace";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
-// jsdom implements no matchMedia, and the design-system SegmentedControl (the
-// party mode pills) reads it through motion's useReducedMotion.
-if (!window.matchMedia) {
-  window.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
-}
-
 const PARTY_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 
 const context: DvpCreateContext = {
@@ -77,16 +62,30 @@ function renderForm(
   );
 }
 
+const BUYER_ROW = 0;
+const SELLER_ROW = 1;
+
+/**
+ * Switches one party row's mode; the rows render buyer first.
+ *
+ * @param row - Which party row, BUYER_ROW or SELLER_ROW.
+ * @param name - The mode's label.
+ * @returns Nothing.
+ */
+function pickMode(row: number, name: RegExp): void {
+  fireEvent.click(screen.getAllByRole("radio", { name })[row]);
+}
+
 /**
  * Switches one party slot to its address mode and types an address.
  *
  * @param label - The party slot's accessible label.
- * @param index - The slot's index among the two mode controls (0 = seller, 1 = buyer).
+ * @param row - Which party row, BUYER_ROW or SELLER_ROW.
  * @param query - The address text to enter.
  * @returns Nothing.
  */
-function searchParty(label: RegExp, index: number, query: string): void {
-  fireEvent.click(screen.getAllByRole("button", { name: /paste an address/i })[index]);
+function searchParty(label: RegExp, row: number, query: string): void {
+  pickMode(row, /paste an address/i);
   fireEvent.change(screen.getByLabelText(label), {
     target: { value: query },
   });
@@ -94,7 +93,7 @@ function searchParty(label: RegExp, index: number, query: string): void {
 
 /** Fills the seller slot by picking the registered counterparty. */
 function fillPartyA(): void {
-  fireEvent.click(screen.getAllByRole("button", { name: /^counterparty$/i })[0]);
+  pickMode(SELLER_ROW, /^counterparty$/i);
   fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
   fireEvent.click(screen.getByText("Acme OTC"));
 }
@@ -106,7 +105,7 @@ function fillPartyA(): void {
  * @returns Nothing.
  */
 function fillPartyB(address: string): void {
-  searchParty(/paying the cash/i, 1, address);
+  searchParty(/paying the cash/i, BUYER_ROW, address);
 }
 
 /** Picks the issued token in the asset slot, which starts unselected. */
@@ -155,9 +154,10 @@ describe("DvpCreateWorkspace", () => {
   it("selects an SDP wallet by default and fills the slot", () => {
     renderForm();
 
-    expect(
-      screen.getAllByRole("button", { name: /^sdp wallet$/i })[0].getAttribute("aria-pressed")
-    ).toBe("true");
+    expect(screen.getAllByRole("radio", { name: /^sdp wallet$/i })[SELLER_ROW]).toHaveProperty(
+      "checked",
+      true
+    );
     fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
     expect(screen.getByText("Treasury")).toBeTruthy();
     fireEvent.click(screen.getByText("Treasury"));
@@ -169,7 +169,7 @@ describe("DvpCreateWorkspace", () => {
   it("lists registered counterparties in counterparty mode", () => {
     renderForm();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^counterparty$/i })[1]);
+    pickMode(BUYER_ROW, /^counterparty$/i);
     fireEvent.click(screen.getByRole("button", { name: /paying the cash/i }));
     expect(screen.getByText("Acme OTC")).toBeTruthy();
   });
@@ -177,7 +177,7 @@ describe("DvpCreateWorkspace", () => {
   it("accepts valid pasted addresses and rejects malformed ones", () => {
     renderForm();
 
-    searchParty(/delivering the asset/i, 0, PARTY_A);
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
     fillPartyB(PARTY_B);
     expect(screen.queryByText("Not a valid Solana address")).toBeNull();
 
@@ -207,7 +207,7 @@ describe("DvpCreateWorkspace", () => {
     fillAmounts();
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^sdp wallet$/i })[0]);
+    pickMode(SELLER_ROW, /^sdp wallet$/i);
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
@@ -236,7 +236,7 @@ describe("DvpCreateWorkspace", () => {
   it("refuses to proceed when both slots resolve to the same address", () => {
     renderForm();
 
-    searchParty(/delivering the asset/i, 0, PARTY_B);
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_B);
     fillPartyB(PARTY_B);
 
     expect(screen.getByText(/Both sides are the same address/i)).toBeTruthy();

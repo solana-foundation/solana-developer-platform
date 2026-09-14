@@ -28,8 +28,6 @@
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "playground:generate": "tsx scripts/generate-playground-catalog.ts",
     "playground:check": "tsx scripts/generate-playground-catalog.ts --check",
-    "earn:inventory": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/inventory-ground-catalogue.ts fetch",
-    "earn:inventory:render": "tsx scripts/inventory-ground-catalogue.ts render",
     "earn:inventory:kamino": "tsx scripts/inventory-kamino-catalogue.ts fetch",
     "earn:inventory:kamino:render": "tsx scripts/inventory-kamino-catalogue.ts render",
     "earn:inventory:veda": "tsx scripts/inventory-veda-catalogue.ts fetch",
@@ -47,8 +45,6 @@
     "@clerk/backend": "3.16.12",
     "@coinbase/cdp-sdk": "1.55.0",
     "@hono/node-server": "2.1.1",
-    "@react-email/components": "1.0.12",
-    "@react-email/render": "2.1.0",
     "@sdp/custody": "workspace:*",
     "@sdp/dvp": "workspace:*",
     "@sdp/earn": "workspace:*",
@@ -58,6 +54,7 @@
     "@sdp/issuance": "workspace:*",
     "@sdp/kamino": "workspace:*",
     "@sdp/jupiter-lend": "workspace:*",
+    "@sdp/ondo": "workspace:*",
     "@sdp/payments": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
@@ -97,7 +94,6 @@
     "pg": "8.23.0",
     "pino": "10.3.1",
     "react": "19.2.8",
-    "resend": "6.24.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -7,6 +7,7 @@ import {
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getBlockHeight = vi.hoisted(() => vi.fn());
@@ -55,13 +56,13 @@ beforeEach(async () => {
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "split-swap@example.com"),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Split Swap', 'split-swap', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
   // The swap's blockhash is long expired by default; judgement is on.
   getBlockHeight.mockResolvedValue(10_000n);
 });

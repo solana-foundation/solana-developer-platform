@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -48,13 +49,14 @@ async function seedActor(): Promise<void> {
          VALUES (?, ?, 1, 'active')`
       )
       .bind(USER_ID, "privy-byok-admission@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, "Privy BYOK Admission", "privy-byok-admission", USER_ID),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys (

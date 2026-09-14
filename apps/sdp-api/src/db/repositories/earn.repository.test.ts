@@ -8,6 +8,11 @@ import {
 } from "@/services/earn-withdrawal-ledger.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   EarnProviderWalletRow,
@@ -27,7 +32,6 @@ import {
 } from "./earn-movements.repository";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
-const OTHER_PROJECT_ID = "prj_earn_repo_test_other";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const DESTINATION = "4Nd1mYzL3T2fLGV1kZQcQq5o5FQMYuu1v6oCTKW6PYt5";
 // Bulk catalogue syncs land many rows on one sdp_iso_now() value, so every
@@ -37,6 +41,7 @@ const SHARED_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
 describe("EarnRepository (postgres)", () => {
   let repo: EarnRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -70,15 +75,12 @@ describe("EarnRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     repo = createPostgresEarnRepository(db);
   });
@@ -184,7 +186,7 @@ describe("EarnRepository (postgres)", () => {
       expect(await repo.updateStrategyMetrics(metricsInput({ environment: "production" }))).toBe(
         false
       );
-      expect(await repo.updateStrategyMetrics(metricsInput({ provider: "ground" }))).toBe(false);
+      expect(await repo.updateStrategyMetrics(metricsInput({ provider: "upshift" }))).toBe(false);
 
       expect((await repo.getStrategyById(seeded.id))?.current_apy).toBe("0.052");
     });
@@ -398,7 +400,7 @@ describe("EarnRepository (postgres)", () => {
             `INSERT INTO earn_strategies
                (id, provider, provider_reference, name, source_kind, deposit_mints,
                 apy_type, current_apy, liquidity_term, risk_metadata, status, environment)
-             VALUES (?, 'ground', ?, 'Legacy Ground Vault', 'defi', ?::jsonb,
+             VALUES (?, 'upshift', ?, 'Legacy Upshift Vault', 'defi', ?::jsonb,
                      'variable', '0.041', 'instant', '{}'::jsonb, 'active', ?)`
           )
           .bind(id, `${id}-ref`, JSON.stringify([USDC_MINT]), environment)
@@ -432,11 +434,11 @@ describe("EarnRepository (postgres)", () => {
   describe("deleteUnlistedStrategies", () => {
     it("deletes only active rows the provider no longer lists, scoped to (provider, environment)", async () => {
       const kept = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "kamino-allez-usdc",
       });
       const stale = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "morpho-gauntlet-usdc",
       });
       const otherEnvironment = await seedStrategy({
@@ -445,7 +447,7 @@ describe("EarnRepository (postgres)", () => {
       });
 
       const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: ["kamino-allez-usdc"],
       });
@@ -463,10 +465,10 @@ describe("EarnRepository (postgres)", () => {
         providerReference: "morpho-smokehouse-usdc",
         status: "paused",
       });
-      await seedStrategy({ provider: "ground", providerReference: "aave-v3-usdc" });
+      await seedStrategy({ provider: "upshift", providerReference: "aave-v3-usdc" });
 
       const first = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: ["kamino-allez-usdc"],
       });
@@ -475,7 +477,7 @@ describe("EarnRepository (postgres)", () => {
       expect((await repo.getStrategyById(paused.id))?.status).toBe("paused");
 
       const second = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: ["kamino-allez-usdc"],
       });
@@ -486,12 +488,12 @@ describe("EarnRepository (postgres)", () => {
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account, so it can never tear down a catalogue.
       const row = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "kamino-allez-usdc",
       });
 
       const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: [],
       });
@@ -506,23 +508,23 @@ describe("EarnRepository (postgres)", () => {
       // empties rather than serving orphaned rows forever. The devnet shelf and
       // operator-stopped rows stay untouched.
       const devnetRow = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "devnet-vault",
       });
       const mirroredMainnet = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "orphaned-mainnet-vault",
         hostCluster: "mainnet-beta",
       });
       const pausedMainnet = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "paused-mainnet-vault",
         hostCluster: "mainnet-beta",
         status: "paused",
       });
 
       const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: [],
@@ -539,7 +541,7 @@ describe("EarnRepository (postgres)", () => {
       // An empty keep set may tear down one sub-shelf, never an environment.
       await expect(
         repo.deleteUnlistedStrategies({
-          provider: "ground",
+          provider: "upshift",
           environment: "sandbox",
           listedProviderReferences: [],
           allowEmptyKeepSet: true,
@@ -551,15 +553,15 @@ describe("EarnRepository (postgres)", () => {
       // The PRO-1742 shape: a sandbox environment holds its own devnet shelf
       // plus the mirrored mainnet one, each converged by its own lane.
       const devnetKept = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "devnet-kept",
       });
       const devnetStale = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "devnet-stale",
       });
       const mirroredMainnet = await seedStrategy({
-        provider: "ground",
+        provider: "upshift",
         providerReference: "mainnet-vault",
         hostCluster: "mainnet-beta",
       });
@@ -571,7 +573,7 @@ describe("EarnRepository (postgres)", () => {
         .run();
 
       const deleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         hostCluster: "devnet",
         listedProviderReferences: ["devnet-kept"],
@@ -585,7 +587,7 @@ describe("EarnRepository (postgres)", () => {
 
       // And the mirror lane converges its own shelf without touching devnet.
       const mirrorDeleted = await repo.deleteUnlistedStrategies({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: ["a-mainnet-ref-still-listed"],
@@ -835,9 +837,9 @@ describe("EarnRepository (postgres)", () => {
 
       const { rows, total } = await repo.listStrategies({
         environment: "sandbox",
-        // `veda` is this suite's default seed provider — deliberately not Ground,
-        // so the curation is proven against the canonical contract, not one
-        // provider's quirks.
+        // `veda` is this suite's default seed provider — deliberately not the
+        // provider under test, so the curation is proven against the canonical
+        // contract, not one provider's quirks.
         excludeProviderKeys: ["veda:vault-denied"],
         limit: 10,
         offset: 0,
@@ -849,25 +851,28 @@ describe("EarnRepository (postgres)", () => {
 
     it("scopes the denylist to its provider, so a shared reference is not collateral", async () => {
       // Same reference under two providers: only the keyed one may disappear.
-      const ground = await seedStrategy({ provider: "ground", providerReference: "shared-ref" });
+      const upshift = await seedStrategy({ provider: "upshift", providerReference: "shared-ref" });
       const kamino = await seedStrategy({ provider: "kamino", providerReference: "shared-ref" });
 
       const { rows } = await repo.listStrategies({
         environment: "sandbox",
-        excludeProviderKeys: ["ground:shared-ref"],
+        excludeProviderKeys: ["upshift:shared-ref"],
         limit: 10,
         offset: 0,
       });
 
       expect(rows.map((row) => row.id)).toEqual([kamino.id]);
-      expect(rows.map((row) => row.id)).not.toContain(ground.id);
+      expect(rows.map((row) => row.id)).not.toContain(upshift.id);
     });
 
     it("shows only the allowlisted references for a curated provider", async () => {
       const picked = await seedStrategy({ provider: "kamino", providerReference: "kv-picked" });
       await seedStrategy({ provider: "kamino", providerReference: "kv-other" });
       // An uncurated provider passes through untouched.
-      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+      const uncurated = await seedStrategy({
+        provider: "upshift",
+        providerReference: "upshift-vault",
+      });
 
       const { rows, total } = await repo.listStrategies({
         environment: "sandbox",
@@ -877,12 +882,15 @@ describe("EarnRepository (postgres)", () => {
       });
 
       expect(total).toBe(2);
-      expect(rows.map((row) => row.id).sort()).toEqual([ground.id, picked.id].sort());
+      expect(rows.map((row) => row.id).sort()).toEqual([uncurated.id, picked.id].sort());
     });
 
     it("reads an EMPTY allowlist literally — that provider shows nothing", async () => {
       await seedStrategy({ provider: "kamino", providerReference: "kv-any" });
-      const ground = await seedStrategy({ provider: "ground", providerReference: "ground-vault" });
+      const uncurated = await seedStrategy({
+        provider: "upshift",
+        providerReference: "upshift-vault",
+      });
 
       const { rows, total } = await repo.listStrategies({
         environment: "sandbox",
@@ -892,12 +900,12 @@ describe("EarnRepository (postgres)", () => {
       });
 
       expect(total).toBe(1);
-      expect(rows.map((row) => row.id)).toEqual([ground.id]);
+      expect(rows.map((row) => row.id)).toEqual([uncurated.id]);
     });
   });
 
   describe("provider wallets (earn_provider_wallets)", () => {
-    const GROUND_WALLET_REF = "1b6d5a1e-8f4c-4c1a-9e2b-3d7f6a8c9e01";
+    const WALLET_REF = "1b6d5a1e-8f4c-4c1a-9e2b-3d7f6a8c9e01";
     const OTHER_ORG = {
       id: "org_earn_repo_other",
       name: "Sibling Org",
@@ -912,7 +920,7 @@ describe("EarnRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         environment: "sandbox",
-        provider: "ground",
+        provider: "upshift",
         // A FRESH ref per call by default. (provider, provider_wallet_ref) is
         // globally unique since migration 0056, so a shared default would make
         // every test that seeds a second program fail on the unique instead of
@@ -936,13 +944,15 @@ describe("EarnRepository (postgres)", () => {
         )
         .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
         .run();
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Sibling Org Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(OTHER_ORG_PROJECT_ID, OTHER_ORG.id, OTHER_ORG_PROJECT_ID, TEST_USER.id)
-        .run();
+      await seedDefaultProjects(db, {
+        organizationId: OTHER_ORG.id,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: {
+          sandbox: OTHER_ORG_PROJECT_ID,
+          production: `${OTHER_ORG_PROJECT_ID}_production`,
+        },
+      });
     }
 
     function listPrograms(
@@ -961,8 +971,8 @@ describe("EarnRepository (postgres)", () => {
     describe("getProviderWalletById", () => {
       it("round-trips a program by its own id, scoped to (organization, environment)", async () => {
         const inserted = await seedProviderWallet({
-          providerWalletRef: GROUND_WALLET_REF,
-          label: "Shared Ground portfolio",
+          providerWalletRef: WALLET_REF,
+          label: "Shared Upshift portfolio",
         });
         expect(inserted.id).toMatch(/^earn_provider_wallet_/);
 
@@ -973,8 +983,8 @@ describe("EarnRepository (postgres)", () => {
         });
 
         expect(fetched).toEqual(inserted);
-        expect(fetched?.provider_wallet_ref).toBe(GROUND_WALLET_REF);
-        expect(fetched?.label).toBe("Shared Ground portfolio");
+        expect(fetched?.provider_wallet_ref).toBe(WALLET_REF);
+        expect(fetched?.label).toBe("Shared Upshift portfolio");
         expect(fetched?.project_id).toBe(TEST_PROJECT_ID);
         expect(fetched?.created_by).toBe(TEST_USER.id);
       });
@@ -1089,8 +1099,8 @@ describe("EarnRepository (postgres)", () => {
 
       it("filters by provider and excludes sibling orgs and the sibling environment", async () => {
         await seedSiblingOrg();
-        const groundA = await seedProviderWallet();
-        const groundB = await seedProviderWallet();
+        const upshiftA = await seedProviderWallet();
+        const upshiftB = await seedProviderWallet();
         const veda = await seedProviderWallet({ provider: "veda" });
         const production = await seedProviderWallet({ environment: "production" });
         const sibling = await seedProviderWallet({
@@ -1102,16 +1112,16 @@ describe("EarnRepository (postgres)", () => {
         const all = await listPrograms();
         expect(all.total).toBe(3);
         expect(new Set(all.rows.map((row) => row.id))).toEqual(
-          new Set([groundA.id, groundB.id, veda.id])
+          new Set([upshiftA.id, upshiftB.id, veda.id])
         );
         expect(all.rows.map((row) => row.id)).not.toContain(production.id);
         expect(all.rows.map((row) => row.id)).not.toContain(sibling.id);
 
         // The optional filter narrows rows AND total together.
-        const ground = await listPrograms({ provider: "ground" });
-        expect(ground.total).toBe(2);
-        expect(new Set(ground.rows.map((row) => row.id))).toEqual(
-          new Set([groundA.id, groundB.id])
+        const upshift = await listPrograms({ provider: "upshift" });
+        expect(upshift.total).toBe(2);
+        expect(new Set(upshift.rows.map((row) => row.id))).toEqual(
+          new Set([upshiftA.id, upshiftB.id])
         );
 
         // The sibling environment and the sibling org each see only their own.
@@ -1138,30 +1148,30 @@ describe("EarnRepository (postgres)", () => {
         const theirs = await seedProviderWallet({
           organizationId: OTHER_ORG.id,
           projectId: OTHER_ORG_PROJECT_ID,
-          providerWalletRef: GROUND_WALLET_REF,
+          providerWalletRef: WALLET_REF,
         });
 
         // No organization to scope by: the create path resolves a provider
         // replay before it knows whose row the insert collided with, and asserts
         // ownership afterwards (which is what turns THIS case into a 409).
         await expect(
-          repo.getProviderWalletByRef({ provider: "ground", providerWalletRef: GROUND_WALLET_REF })
+          repo.getProviderWalletByRef({ provider: "upshift", providerWalletRef: WALLET_REF })
         ).resolves.toMatchObject({ id: theirs.id, organization_id: OTHER_ORG.id });
       });
 
       it("returns null for an unknown ref and for the same ref under another provider", async () => {
-        await seedProviderWallet({ providerWalletRef: GROUND_WALLET_REF });
+        await seedProviderWallet({ providerWalletRef: WALLET_REF });
 
         await expect(
           repo.getProviderWalletByRef({
-            provider: "ground",
+            provider: "upshift",
             providerWalletRef: "44f0f6a1-0000-4000-8000-000000000000",
           })
         ).resolves.toBeNull();
         // Keyed on the PAIR: provider ids namespace refs, so one provider's
         // wallet id can never resolve another provider's program.
         await expect(
-          repo.getProviderWalletByRef({ provider: "veda", providerWalletRef: GROUND_WALLET_REF })
+          repo.getProviderWalletByRef({ provider: "veda", providerWalletRef: WALLET_REF })
         ).resolves.toBeNull();
       });
     });
@@ -1182,28 +1192,27 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      // A sibling project may hold its own program, but it belongs to THAT
-      // project's collection: the project is a boundary on the list exactly as
-      // it is on every per-program route (HOO-1563).
-      await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        project_id: OTHER_PROJECT_ID,
-      });
-      await expect(listPrograms({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        total: 1,
-      });
+      const { total } = await listPrograms({ provider: "upshift" });
+      expect(total).toBe(2);
+    });
 
-      const { total } = await listPrograms();
-      expect(total).toBe(3);
+    it("lists programs only for their project", async () => {
+      await seedProviderWallet();
+      await expectProjectScoped(
+        (projectId) => listPrograms({ projectId }),
+        { own: projects.sandbox, other: projects.production },
+        ({ total }) => total === 0
+      );
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {
       // The uniqueness did not disappear, it MOVED: a provider-side wallet holds
       // real funds, so exactly one link row may claim it platform-wide. Two rows
-      // pointing at one Ground wallet would each read the other's balance.
+      // pointing at one provider wallet would each read the other's balance.
       await seedSiblingOrg();
-      await seedProviderWallet({ providerWalletRef: GROUND_WALLET_REF });
+      await seedProviderWallet({ providerWalletRef: WALLET_REF });
 
-      await expect(seedProviderWallet({ providerWalletRef: GROUND_WALLET_REF })).rejects.toSatisfy(
+      await expect(seedProviderWallet({ providerWalletRef: WALLET_REF })).rejects.toSatisfy(
         (err: unknown) => isPostgresUniqueViolation(err)
       );
 
@@ -1213,25 +1222,25 @@ describe("EarnRepository (postgres)", () => {
         seedProviderWallet({
           organizationId: OTHER_ORG.id,
           projectId: OTHER_ORG_PROJECT_ID,
-          providerWalletRef: GROUND_WALLET_REF,
+          providerWalletRef: WALLET_REF,
         })
       ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
 
       // …and across ENVIRONMENTS, for the same reason: the provider wallet is
       // one object, whatever SDP environment reached for it.
       await expect(
-        seedProviderWallet({ environment: "production", providerWalletRef: GROUND_WALLET_REF })
+        seedProviderWallet({ environment: "production", providerWalletRef: WALLET_REF })
       ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
 
       // The pair is (provider, ref): the same string under a DIFFERENT provider
       // names a different provider's wallet and stays insertable.
       await expect(
-        seedProviderWallet({ provider: "veda", providerWalletRef: GROUND_WALLET_REF })
-      ).resolves.toMatchObject({ provider: "veda", provider_wallet_ref: GROUND_WALLET_REF });
+        seedProviderWallet({ provider: "veda", providerWalletRef: WALLET_REF })
+      ).resolves.toMatchObject({ provider: "veda", provider_wallet_ref: WALLET_REF });
     });
   });
 
-  // The whole ledger suite runs against a NON-Ground stub provider on purpose:
+  // The whole ledger suite runs against a stub provider on purpose:
   // the ledger consumes only the canonical contract, so any registered
   // provider id must exercise it identically (ADR 0002 pluggability).
   describe("custodial movement ledger (earn_movements)", () => {
@@ -1339,7 +1348,7 @@ describe("EarnRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         environment: "sandbox",
-        provider: "ground",
+        provider: "upshift",
         providerWalletRef: "bb8e6b2f-9a5d-4d2b-8f3c-4e8a7b9d0f13",
         label: null,
         createdBy: TEST_USER.id,
@@ -1350,7 +1359,7 @@ describe("EarnRepository (postgres)", () => {
       const sibling = await seedWithdrawal({
         requestId,
         providerWalletId: otherWallet?.id,
-        provider: "ground",
+        provider: "upshift",
       });
       await expect(
         ledger.getPositionById({

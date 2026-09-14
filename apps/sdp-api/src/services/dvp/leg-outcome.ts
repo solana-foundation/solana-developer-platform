@@ -3,6 +3,25 @@ import type { DvpTradeRow, DvpTradeSide } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
 
 /**
+ * Whether the stored escrow readings were taken after the trade closed.
+ *
+ * `recordClose` moves the status on the strength of a broadcast and leaves the
+ * escrow balances as they were before it; the post-close reading lands only
+ * once the transaction confirms. Until then a closed trade with tokens in its
+ * escrow is a stale reading, not a late deposit. An open trade has no close
+ * to predate.
+ *
+ * @param trade - The persisted trade.
+ * @returns True when the readings describe the escrows after the close.
+ */
+export function observedAfterClose(trade: Pick<DvpTradeRow, "closedAt" | "observedAt">): boolean {
+  if (trade.closedAt === null) {
+    return true;
+  }
+  return trade.observedAt !== null && Date.parse(trade.observedAt) >= Date.parse(trade.closedAt);
+}
+
+/**
  * Derives the current outcome of one DvP leg from persisted chain observations.
  *
  * @param trade - The persisted trade and its latest escrow observations.
@@ -19,7 +38,7 @@ export function deriveDvpLegOutcome(trade: DvpTradeRow, side: DvpTradeSide): Dvp
   // close the escrow, so a balance under a closed trade can only be a deposit
   // that landed afterwards into a re-created account, and only RecoverDvp can
   // move it. Reporting the leg as delivered or refunded would hide those funds.
-  const holdsTokens = amount !== null && BigInt(amount) > 0n;
+  const holdsTokens = amount !== null && BigInt(amount) > 0n && observedAfterClose(trade);
   switch (trade.status) {
     case "settled":
       return holdsTokens ? "recoverable" : "delivered";

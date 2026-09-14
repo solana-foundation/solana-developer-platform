@@ -5,6 +5,7 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import DashboardLoading from "@/app/dashboard/(home)/loading";
 import {
   ApiKeyAuthoringSkeleton,
   ApiKeysListSkeleton,
@@ -13,6 +14,7 @@ import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
+import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
@@ -21,7 +23,6 @@ import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/priva
 import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
 import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
 import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
-import DashboardLoading from "@/app/dashboard/loading";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
@@ -204,6 +205,8 @@ function resolvePageLoadingComponent(
       return ApprovalDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
+    case "helius-rings":
+      return HeliusRingsSkeleton;
     case "allowlist":
       return AllowlistLoading;
   }
@@ -566,8 +569,7 @@ export function DashboardShell({
     privateChannelsEnabled,
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled,
-    dvpEnabled
+    policiesEnabled
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
@@ -889,7 +891,6 @@ export function DashboardShell({
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
-                  showNotifications={assetProfilesEnabled && issuanceEnabled}
                 />
               </div>
 

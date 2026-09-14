@@ -93,7 +93,7 @@ export function useModalFocus({
       if (content && contentDataKey) {
         content.dataset[contentDataKey] = focusKey;
       }
-      content?.querySelector<HTMLElement>(initialFocusSelector)?.focus();
+      content?.querySelector<HTMLElement>(initialFocusSelector)?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [contentDataKey, focusKey, initialFocusSelector]);

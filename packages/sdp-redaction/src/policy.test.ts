@@ -113,6 +113,43 @@ describe("isPiiKey", () => {
     }
   });
 
+  it("treats the end-user owner address as PII and every other address as a handle", () => {
+    // EARN-025 / EARN-028: `ownerAddress` names an end user on the embedded
+    // surface. The treasury, destination and mint addresses are how a payment
+    // is traced and must keep surviving.
+    for (const key of ["ownerAddress", "owner_address", "OWNER-ADDRESS"]) {
+      assert.equal(isPiiKey(key), true, key);
+    }
+    for (const key of [
+      "address",
+      "walletAddress",
+      "destinationAddress",
+      "mintAddress",
+      "feePayer",
+    ]) {
+      assert.equal(isPiiKey(key), false, key);
+    }
+  });
+
+  it("scrubs a raw provider body attached whole, under any of its usual names", () => {
+    for (const key of [
+      "providerBody",
+      "provider_payload",
+      "providerResponse",
+      "responseBody",
+      "rawBody",
+      "rawResponse",
+      "upstreamBody",
+    ]) {
+      assert.equal(isPiiKey(key), true, key);
+    }
+    // `providerStatus` and `provider` are this layer's own facts on
+    // `SdpEarnError.details` and stay readable.
+    for (const key of ["provider", "providerStatus", "providerReference"]) {
+      assert.equal(isPiiKey(key), false, key);
+    }
+  });
+
   it("still exempts crypto addresses that read like postal keys", () => {
     // BVNK's `beneficiaryAddress` carries `destinationWalletAddress` — a crypto
     // address. This is why there is no `*Address` suffix rule.

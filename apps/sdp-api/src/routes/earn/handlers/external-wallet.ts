@@ -147,7 +147,9 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
     })
   );
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+    ownerKind: "external-wallet",
+  });
   const summary = summarizeExternalWalletPositions(holdings, live, {
     includeOwnerAddresses,
     includePositions,
@@ -208,7 +210,9 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
     before,
   });
   const holdings = page.rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+    ownerKind: "external-wallet",
+  });
   const last = holdings.at(-1);
   const response: EarnExternalWalletPositionsPage = {
     ownerAddress,
@@ -404,7 +408,9 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
     repo.aggregateExternalWalletMovements({ ...scope, ownerAddress }),
   ]);
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+    ownerKind: "external-wallet",
+  });
 
   const response: EarnExternalWalletEarningsResponse = {
     earnings: summarizeExternalWalletEarnings(ownerAddress, holdings, live, movementTotals),

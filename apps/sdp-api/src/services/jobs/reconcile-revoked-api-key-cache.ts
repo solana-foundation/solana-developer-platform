@@ -25,11 +25,18 @@
  * that same window, reads each one's cache entry, and rewrites any that
  * diverge. Divergence therefore heals within about a minute of Redis
  * recovering, no matter how the original request ended.
+ *
+ * A third pass starts from the cache instead of Postgres: every cached entry
+ * whose key row is gone, or whose project is no longer active, is rewritten
+ * to the authoritative state (a revoked tombstone when the row is gone). This
+ * is the eviction path for keys removed underneath the cache — a project
+ * dropped by migration, a row deleted by hand — which no Postgres scan can
+ * find because there is no row left to list.
  */
 
 import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
 import { getDb } from "@/db";
-import { apiKeyCacheKey, refreshApiKeyCache } from "@/lib/api-key-cache";
+import { apiKeyCacheKey, apiKeyHashFromCacheKey, refreshApiKeyCache } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -45,6 +52,9 @@ const DEFAULT_SCAN_LIMIT = 10_000;
 
 /** Cache reads/repairs in flight at once — bounds Redis and pool pressure. */
 const SWEEP_CONCURRENCY = 25;
+
+/** Key hashes per `IN (...)` query when checking cached entries against Postgres. */
+const LIVE_LOOKUP_CHUNK = 500;
 
 const TERMINAL_STATUSES: ReadonlySet<ApiKeyStatus> = new Set(["revoked", "deactivated", "expired"]);
 
@@ -125,14 +135,15 @@ export async function reconcileRevokedApiKeyCache(
 
   const recentlyRevoked = rows.results ?? [];
   const recentlyRotated = rotatedRows.results ?? [];
+  const orphaned = await listOrphanedCacheEntries(db, kv, scanLimit);
 
-  // One pass over both scans rather than one pass each: the two row sets are
-  // disjoint (status != 'active' versus status = 'active'), so a single work
-  // list covers them without processing any key twice — and it holds the
-  // whole sweep to one SWEEP_CONCURRENCY budget instead of letting two
-  // passes overlap into double the cache round-trips. Revoked targets lead,
-  // so the freshest revocations are still repaired first under a truncating
-  // backlog.
+  // One pass over all scans rather than one pass each: the two Postgres row
+  // sets are disjoint (status != 'active' versus status = 'active') and the
+  // orphan set has no live row at all, so a single work list covers them
+  // without processing any key twice — and it holds the whole sweep to one
+  // SWEEP_CONCURRENCY budget instead of letting passes overlap into multiples
+  // of the cache round-trips. Revoked targets lead, so the freshest
+  // revocations are still repaired first under a truncating backlog.
   const repairedTargets = await repairDivergentEntries(db, kv, [
     ...recentlyRevoked.map(
       (row): SweepTarget => ({
@@ -155,21 +166,33 @@ export async function reconcileRevokedApiKeyCache(
             cached.rotationDeadline === row.rotation_deadline),
       })
     ),
+    ...orphaned.map(
+      (keyHash): SweepTarget => ({
+        keyHash,
+        kind: "orphaned",
+        isConverged: (cached) => cached !== null && TERMINAL_STATUSES.has(cached.status),
+      })
+    ),
   ]);
 
   const repairedRevoked = repairedTargets.filter((target) => target.kind === "revoked").length;
-  const repairedRotated = repairedTargets.length - repairedRevoked;
+  const repairedOrphaned = repairedTargets.filter((target) => target.kind === "orphaned").length;
+  const repairedRotated = repairedTargets.length - repairedRevoked - repairedOrphaned;
   const repaired = repairedTargets.length;
-  const scanned = recentlyRevoked.length + recentlyRotated.length;
+  const scanned = recentlyRevoked.length + recentlyRotated.length + orphaned.length;
 
   if (repaired > 0) {
     getLogger().warn(
-      { repaired, repairedRevoked, repairedRotated, scanned },
-      "Repaired stale cache entries for revoked or rotated API keys"
+      { repaired, repairedRevoked, repairedRotated, repairedOrphaned, scanned },
+      "Repaired stale cache entries for revoked, rotated or orphaned API keys"
     );
   }
 
-  if (recentlyRevoked.length === scanLimit || recentlyRotated.length === scanLimit) {
+  if (
+    recentlyRevoked.length === scanLimit ||
+    recentlyRotated.length === scanLimit ||
+    orphaned.length === scanLimit
+  ) {
     // Never let a truncated sweep read as full coverage.
     getLogger().warn(
       { scanLimit },
@@ -180,10 +203,49 @@ export async function reconcileRevokedApiKeyCache(
   return { scanned, repaired };
 }
 
+/**
+ * Cached key hashes with no live backing: the api_keys row is gone, or its
+ * project is no longer active. Bounded by `scanLimit` entries per tick.
+ *
+ * @param db - Database client for the liveness lookup.
+ * @param kv - API-key cache namespace to enumerate.
+ * @param scanLimit - Maximum cached entries examined this tick.
+ * @returns Key hashes whose cached entry must be rewritten.
+ */
+async function listOrphanedCacheEntries(
+  db: ReturnType<typeof getDb>,
+  kv: ReturnType<typeof createKVStoreSet>["apiKeys"],
+  scanLimit: number
+): Promise<string[]> {
+  const cached = (await kv.list()).keys
+    .map((key) => apiKeyHashFromCacheKey(key.name))
+    .filter((hash): hash is string => hash !== null)
+    .slice(0, scanLimit);
+
+  const live = new Set<string>();
+  for (let offset = 0; offset < cached.length; offset += LIVE_LOOKUP_CHUNK) {
+    const chunk = cached.slice(offset, offset + LIVE_LOOKUP_CHUNK);
+    const rows = await db
+      .prepare(
+        `SELECT ak.key_hash FROM api_keys ak
+         JOIN projects p ON p.id = ak.project_id
+         WHERE p.status = 'active'
+           AND ak.key_hash IN (${chunk.map(() => "?").join(", ")})`
+      )
+      .bind(...chunk)
+      .all<{ key_hash: string }>();
+    for (const row of rows.results) {
+      live.add(row.key_hash);
+    }
+  }
+
+  return cached.filter((hash) => !live.has(hash));
+}
+
 /** One key to check, and what "already converged" means for it. */
 interface SweepTarget {
   keyHash: string;
-  kind: "revoked" | "rotated";
+  kind: "revoked" | "rotated" | "orphaned";
   /** A null `cached` means the slot held a payload that did not parse. */
   isConverged: (cached: CachedApiKey | null) => boolean;
 }

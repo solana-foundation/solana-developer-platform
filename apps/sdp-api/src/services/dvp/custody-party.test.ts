@@ -5,11 +5,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { custodyWalletForParty } from "./custody-party";
 
 const PROJECT_ID = "prj_custody_party_test";
-const OTHER_PROJECT_ID = "prj_custody_party_other";
 const OTHER_ORG_ID = "org_custody_party_other";
 const CUSTODY_CONFIG_ID = "cust_custody_party_test";
 const OTHER_ORG_CONFIG_ID = "cust_custody_party_other_org";
@@ -18,6 +22,7 @@ const PARTY_ADDRESS = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 const UNKNOWN_ADDRESS = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
 
 describe("custodyWalletForParty", () => {
+  let projects: SeededDefaultProjects;
   beforeEach(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     const db = getDb(env);
@@ -43,22 +48,18 @@ describe("custodyWalletForParty", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Other Org Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind("prj_other_org", OTHER_ORG_ID, "prj_other_org", TEST_USER.id)
-      .run();
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
+    await seedDefaultProjects(db, {
+      organizationId: OTHER_ORG_ID,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: "prj_other_org", production: "prj_other_org_production" },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
@@ -116,14 +117,17 @@ describe("custodyWalletForParty", () => {
   });
 
   it("returns null when the address is in the wrong project", async () => {
-    const result = await custodyWalletForParty(
-      env,
-      { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
-      address(PARTY_ADDRESS),
-      null
+    await expectProjectScoped(
+      (projectId) =>
+        custodyWalletForParty(
+          env,
+          { organizationId: TEST_ORG.id, projectId },
+          address(PARTY_ADDRESS),
+          null
+        ),
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
     );
-
-    expect(result).toBeNull();
   });
 
   describe("duplicate active records for one address", () => {

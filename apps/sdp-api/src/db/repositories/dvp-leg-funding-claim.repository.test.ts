@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   createPostgresDvpLegFundingClaimRepository,
@@ -58,13 +59,12 @@ async function seed(): Promise<void> {
       )
       .bind(org, org, org)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'p', ?, 'sandbox', 'active', ?) ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(`prj_${org}`, org, `prj_${org}`, USER_ID)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: org,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: `prj_${org}`, production: `prj_${org}_production` },
+    });
     if (address === null) {
       continue;
     }
@@ -201,6 +201,26 @@ describe("DvpLegFundingClaimRepository", () => {
       repo.claim(claimInput(PARTY_A_ORG, "a", "sig_other"))
     );
     expect(blocked).toBe(false);
+  });
+
+  it("rebinds an unbroadcast claim to the sponsored signature", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "wallet_sig"));
+
+      expect(await repo.rebindSignature(TRADE_ID, "a", "wallet_sig", "sponsor_sig")).toBe(true);
+      expect(await repo.hasClaim(TRADE_ID, "a", "wallet_sig")).toBe(false);
+      expect(await repo.hasClaim(TRADE_ID, "a", "sponsor_sig")).toBe(true);
+    });
+  });
+
+  it("does not rebind a claim whose signature does not match", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "wallet_sig"));
+
+      expect(await repo.rebindSignature(TRADE_ID, "a", "stale_sig", "sponsor_sig")).toBe(false);
+      expect(await repo.hasClaim(TRADE_ID, "a", "wallet_sig")).toBe(true);
+      expect(await repo.hasClaim(TRADE_ID, "a", "sponsor_sig")).toBe(false);
+    });
   });
 
   // Once the transfer is on the wire the row is a receipt, and releasing it

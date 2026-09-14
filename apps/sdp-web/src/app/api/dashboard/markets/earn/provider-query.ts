@@ -2,7 +2,7 @@ import { EARN_PROVIDERS } from "@sdp/types";
 
 const PROVIDERS = new Set<string>(EARN_PROVIDERS);
 
-/** Longest cursor we will forward — Ground cursors are short opaque tokens. */
+/** Longest cursor we will forward — provider cursors are short opaque tokens. */
 const MAX_CURSOR_LENGTH = 512;
 
 export type ProxyQueryValidation = { ok: true; query: string } | { ok: false; message: string };

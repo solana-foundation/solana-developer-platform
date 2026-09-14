@@ -19,9 +19,6 @@ export const API_LOCAL_ENV_KEYS = [
   "CREDENTIAL_FINGERPRINT_PEPPER",
   "CUSTODY_ENCRYPTION_KEY",
   "SPC_CREDENTIAL_ENCRYPTION_KEY",
-  "EMAIL_PROVIDER",
-  "EMAIL_FROM",
-  "RESEND_API_KEY",
   "FRONTEND_URL",
   "CLERK_ISSUER",
   "CLERK_JWKS_URL",
@@ -174,8 +171,9 @@ export const API_LOCAL_ENV_KEYS = [
   "UPSHIFT_SANDBOX_API_KEY",
   "PERENA_API_KEY",
   "PERENA_SANDBOX_API_KEY",
-  "GROUND_API_KEY",
-  "GROUND_SANDBOX_API_KEY",
+  // Platform Jupiter swap key: swap-funded deposits and the Ondo provider's
+  // readiness gate both read it.
+  "JUPITER_SWAP_API_KEY",
   "GOOGLE_ADDRESS_COMPLETION_API_KEY",
 ];
 

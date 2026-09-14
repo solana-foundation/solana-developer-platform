@@ -1,11 +1,10 @@
 # @sdp/earn — agent notes
 
 Provider-integration layer for SDP Earn, **and the canonical local-dev runbook
-for the whole Earn stack** (API + web + DB + provider). Ground is the first live
-provider; the design is multi-provider — keep every provider-specific detail
-behind the provider-neutral seams below. Read `README.md` here for the full
-architecture (including Ground's on-chain flow and the custody boundary);
-ADR 0002 (`docs/decisions/`) for the invariants.
+for the whole Earn stack** (API + web + DB + provider). The design is
+multi-provider — keep every provider-specific detail behind the provider-neutral
+seams below. Read `README.md` here for the full architecture (including the
+custody boundary); ADR 0002 (`docs/decisions/`) for the invariants.
 
 ## Local development — the whole Earn stack
 
@@ -41,13 +40,6 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 ```
 
 ### 2. Secrets and flags
-
-- **Ground sandbox key** → `apps/sdp-api/.env.local` (gitignored; the Doppler
-  wrapper overlays `apps/*/.env.local` on top of Doppler values):
-
-  ```
-  GROUND_SANDBOX_API_KEY=<sandbox token>
-  ```
 
 - **Module flags** must be set explicitly — both default to `false` and there is
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
@@ -106,10 +98,11 @@ one vault. Migration 0056 replaced the old per-org cap with the global
 `UNIQUE (provider, provider_wallet_ref)`, so a provider wallet can belong to
 exactly one SDP link row.
 
-Ground has no concept of an SDP organization: one provider account holds many
-portfolio wallets, while SDP returns only the wallets linked to the current
-organization. That is why the Ground console total and the SDP organization
-total can legitimately differ.
+A custodial provider has no concept of an SDP organization: one provider
+account holds many portfolio wallets, while SDP returns only the wallets linked
+to the current organization — which is why a provider console total and the SDP
+organization total can legitimately differ. (No shipped provider uses this flow
+today; the Ground integration that did was removed. See §5b.)
 
 Practical notes:
 
@@ -121,9 +114,6 @@ Practical notes:
 - Fund a sandbox program by sending devnet USDC to its Solana deposit address.
   Circle's faucet (<https://faucet.circle.com/>, USDC + Solana Devnet) mints the
   official devnet USDC used by the provider flow.
-- Ground enforces asset and network lanes. If a withdrawal has no quoted Solana
-  USDC availability, do not substitute a wallet-level balance from another lane.
-
 ### 5. The last gate: org entitlement
 
 Flags control *visibility*; earn access is **override-only per organization**
@@ -133,43 +123,40 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
 ### 5b. The gate BEFORE that one: is the provider even offered?
 
-**Kamino and Veda are the offered providers; Ground is un-surfaced. Locally the
-sandbox catalogue shows Kamino's devnet shelf plus Veda's devnet Test Vault,
-and there is no way to create a program — that is the shipped state, not a
-broken setup** (production has no Veda rows: `VEDA_DEPLOYMENTS` is devnet-only
-until Veda names a production vault, and Ground's rows are hidden everywhere).
+**Kamino and Veda are the offered providers. Locally the sandbox catalogue
+shows Kamino's devnet shelf plus Veda's devnet Test Vault, and there is no way
+to create a program — that is the shipped state, not a broken setup**
+(production has no Veda rows: `VEDA_DEPLOYMENTS` is devnet-only until Veda
+names a production vault). The Ground integration that previously served the
+custodial program flow was REMOVED (client, credentials, catalogue rows), so no
+registered provider is portfolio-capable today; the program routes stay and
+answer 503 for any id that does not resolve.
 `EARN_PROVIDER_SURFACING`
 (`packages/sdp-types/src/provider-access.ts`) declares which registered
 providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
-flip. Ground's client, credentials and catalogue sync all still run — only the
-public reads and `POST /programs` refuse it.
-
-To work on the Ground flow locally, set `ground: true` there and do not commit
-it. The full rationale, the exit-safety rules it must never break, and the test
-pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 0002's
-2026-08-14 addendum.
+flip. The full rationale, the exit-safety rules it must never break, and the
+test pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and
+ADR 0002's 2026-08-14 addendum.
 
 ### Troubleshooting
 
 | Symptom | Cause |
 |---|---|
 | Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
-| Sandbox shows mainnet vaults, badged "Mainnet only" | correct — the PRO-1742 mirror: the Treasury strategies card's cluster toggle opted into the mirrored production shelf. Rows are browse-only (`fundable: false`); the default view stays devnet |
-| Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
-| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
+| Sandbox shows mainnet vaults, badged "Mainnet only" | correct — the PRO-1742 mirror: the Treasury strategies card always lists the mirrored production shelf above its devnet shelf. Rows are browse-only (`fundable: false`); only devnet rows deposit, and a failed mirror read hides nothing but itself (PRO-1961) |
+| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | correct today: no registered provider is portfolio-capable, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
 | `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
 | `/dashboard/markets/embedded-yield` → 404 | same flags, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here |
-| Dashboard "provider not configured" (503) | no `GROUND_SANDBOX_API_KEY` |
+| Dashboard "provider not configured" (503) | the named provider has no credentials in this environment |
 | "requires manual activation" | org lacks the earn provider override |
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
 | Web typecheck fails in `.next/dev/types` | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types` |
 | Dashboard shows empty onboarding, but a program exists in the DB | the selected Clerk organization or environment does not own that program; verify both scopes |
 | `GET /v1/earn/programs` → `programs: []` with the dev API key | that key is the test org's, which has no program by design (§4b) |
-| A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive Ground's **production** API from a laptop. |
+| A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive a provider's **production** API from a laptop. |
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
-| Local total ≠ Ground console total | Ground sums the whole shared account; SDP shows only the wallets your org holds (§4b) |
 | Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
 | Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; production Kamino remains `environment_unavailable` in the provider-scoped deposit-environment map |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
@@ -177,13 +164,39 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 | No Veda rows in the PRODUCTION catalogue | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row |
-| A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino and Veda are both offered). The gate still exists and still answers this for upshift/perena/ground, and no org override lifts it (§5b) |
+| A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b) |
+| No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below |
+| No Ondo row in the sandbox MIRROR either, on a devnet deployment | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which a devnet deployment fails the genesis proof on (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
 
-## Two provider shapes — read this before assuming Ground's model
+## Ondo — a TOKEN-HOLDING strategy, no vault program at all
 
-Ground is **custodial**: SDP provisions an omnibus portfolio wallet, the
-customer funds it, Ground spreads it across yield sources. Programs,
-withdrawals and the deposit wizard all assume that shape.
+Registered 2026-09-02 (PRO-1803), surfaced 2026-09-14 (PRO-1832). USDY is a
+plain SPL token whose price accrues Treasury yield, so the strategy is HOLDING
+it: deposit =
+Jupiter-routed USDC→USDY swap, position = the owner's USDY balance, exit = the
+reverse swap. Mainnet-only — Ondo has NO devnet deployment (verified on-chain;
+even their staging environment runs on mainnet with different mints), so the
+sandbox shelf carries the row only through the PRO-1742 browse-only mirror.
+The catalogue read (`providers/ondo/client.ts`) genesis-proves the RPC and
+verifies the mint account before reporting the one-row shelf, and the row is
+its `sourceKind: "rwa"`: the classification traces to the
+issuer's own published mint address in `ONDO_DEPLOYMENTS`
+(`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. No
+`currentApy` — Ondo's rate API is credentialed and SDP holds no key yet
+(PRO-1833). The row's `riskMetadata` carries the eligibility constraints an
+integrator asks about (Reg S non-US-person restriction, issuer freeze
+authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
+Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
+primary mint/redeem facility is deliberately unused (Reg S lockup) and how the
+Jupiter trust boundary stays single-owner in the API.
+
+## Two provider shapes — read this before assuming either model
+
+The **custodial** shape (the retired Ground integration): SDP provisions an
+omnibus portfolio wallet, the customer funds it, the provider spreads it across
+yield sources. Programs, withdrawals and the deposit wizard all assume that
+shape. No shipped provider uses it today, but the routes, ledger and
+`EarnPortfolioWalletProvider` capability stay — they are provider-neutral.
 
 Kamino and Veda are **non-custodial**: the vault is an on-chain account the
 customer's own wallet deposits into, so there is no wallet for SDP to provision
@@ -254,6 +267,17 @@ page it links is fetchable as raw markdown):
   404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` there and
   sandbox rows render no rate. Computing one would mean blending devnet Klend
   reserve rates (an SDK-sized job) for a number that is ≈0 anyway.
+- **The shelf quotes the TRAILING 7d rate, never the spot rate.** The metrics
+  row carries both: `apy` is the instantaneous blended rate and tracks Klend
+  reserve utilization minute to minute, `apy7d` is the trailing week. On
+  2026-09-10 the Main Market USDC reserve hit ~97% utilization and `apy` read
+  18-23% on six USDC vaults whose `apy7d` sat at 3-7%, which fired the
+  PRO-1867 anomaly alert 15 times on a number that was true for the hour and
+  useless as a yield quote. So `currentApy` is `apy7d` at both call sites
+  (`distillKaminoVault` and `listStrategyMetrics`), the spot figure rides along
+  as `riskMetadata.spotApy` for a future "current" column, and a missing
+  `apy7d` is "no rate", not a fallback to `apy` (PRO-1922). Kamino's own vault
+  page headline is a trailing figure too; do not quote hotter than the provider.
 - **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
   everything ever created — 173 vaults, of which ~90 stablecoin ones are dust or
   literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)
@@ -274,9 +298,8 @@ page it links is fetchable as raw markdown):
   anyone mint "Steakhouse USDC Prime" or "RWA USDC", clear the floor for one
   sync, and borrow a real house's name or the `sourceKind=rwa` filter. The floor
   is a cost, not an authorization. Populating either field needs verified
-  authority/address data or an audited vault-address allowlist — this is the one
-  place Ground's `deriveCurator` precedent does NOT transfer, because Ground's
-  yield-source ids come from Ground, not from the public.
+  authority/address data or an audited vault-address allowlist — free-text
+  vault names must never feed a curator or source-kind classification.
 
 ## Veda — an ALLOWLIST shelf, and currently an empty one
 
@@ -325,22 +348,18 @@ itself and what that turned into on the shelf.
 ## `hostCluster` — catalogued is not the same as fundable
 
 Every `ProviderStrategySnapshot` states the cluster from which its INSTRUMENT is
-reachable, and it is not implied by the environment. Ground answers with the
-environment's own cluster because its deposit is Solana-side there — the row
-carries that cluster's mint, and Ground bridges internally to wherever it hosts
-the source (#1299 removed the old `not_solana_hosted` gate, so off-Solana
-sources are indexed again; the deposit rail is what makes the cluster true, not
-the host chain). Kamino answers per data source — `mainnet-beta` from the REST
-shelf in production, `devnet` from the on-chain read elsewhere — and the second
-is MEASURED (genesis hash) before a single vault is returned, not inferred from
-the environment.
+reachable, and it is not implied by the environment. Kamino answers per data
+source — `mainnet-beta` from the REST shelf in production, `devnet` from the
+on-chain read elsewhere — and the second is MEASURED (genesis hash) before a
+single vault is returned, not inferred from the environment.
 
 Since PRO-1742 a sandbox catalogue holds BOTH kinds of row on purpose: its own
 cluster's shelf (fundable) plus a browse-only MIRROR of the production mainnet
 shelf, written by the sync as two cluster-scoped lanes so each sub-shelf
 converges independently (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`). List
 reads default to the environment's own cluster; the mirrored shelf is an
-explicit `?cluster=` opt-in (the Treasury strategies card's toggle). A mirrored
+explicit `?cluster=` opt-in (the Treasury strategies card requests it beside
+the default shelf in sandbox). A mirrored
 row names a live mainnet vault and a mainnet mint — everything about it true,
 none of it fundable from devnet — so ONE predicate decides —
 `isClusterFundableInEnvironment` (src/support.ts) — and
@@ -363,7 +382,7 @@ doc comment in `@sdp/types`.
 `status` cannot express this: it is the operator's stop switch, and reusing it
 would misstate the reason AND collide with the repository's refusal to overwrite
 an operator pause. Migration 0057 added the column and backfilled from
-`environment` (correct for every pre-existing row, all Ground's).
+`environment`.
 
 ## Rates are refreshed on their own cadence
 
@@ -397,9 +416,9 @@ same guarantee; `providerFetchJson` does no schema validation, so a 200 carrying
 
 It refreshes into the DB rather than reading live at request time because the
 strategies route reads exactly ONE source for the state it reports (ADR 0002
-addendum). Freshness is cadence, not blending. A provider needing one request
-per vault should NOT implement the capability — Ground does not, because its
-rates come from the same paged endpoint the catalogue uses.
+addendum). Freshness is cadence, not blending. A provider whose rates come from
+the same paged endpoint its catalogue uses should NOT implement the capability —
+the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 
 ## Contracts
 
@@ -439,14 +458,14 @@ rates come from the same paged endpoint the catalogue uses.
 
 - **Money out beats money off**: nothing in this package may make withdrawals
   depend on availability/enablement — only on configured credentials.
-- Catalogue mapping must exclude anything that would trap funds (Ground:
-  `mode === "buy_only"` sources are skipped, only `active` is listed).
-- **Persistence and visibility are separate.** `distillGroundYieldSource`
-  indexes every active source Ground can fund and exit through SDP's Solana USDC
-  rail, regardless of the source's host chain. The catalogue sync deletes only
-  rows Ground no longer lists or that stop satisfying those safety gates. The
-  Earn strategy API separately hides Aave- and Morpho-related rows from list and
-  detail reads; do not move that product policy into this provider client.
+- Catalogue mapping must exclude anything that would trap funds: a source that
+  cannot be exited through SDP's rails must never be listed.
+- **Persistence and visibility are separate.** A provider's distillation indexes
+  every source it can fund and exit through SDP's rails. The catalogue sync
+  deletes only rows the provider no longer lists or that stop satisfying those
+  safety gates. The Earn strategy API separately hides Aave- and Morpho-related
+  rows from list and detail reads; do not move that product policy into a
+  provider client.
 - Missing API key ⇒ throw `PROVIDER_NOT_CONFIGURED` **before** any network call.
 
 ## Conventions
@@ -458,37 +477,27 @@ rates come from the same paged endpoint the catalogue uses.
 - All HTTP goes through `providerFetch`/`providerFetchJson` (src/fetch.ts) —
   never raw `fetch` in a client.
 - **`error` on a failure body is read as BOTH an object and a bare string**
-  (`extractProviderErrorMessage`). Measured 2026-08-14: Ground rejects a request
-  with `{"error":"Invalid query params: unknown parameter(s)","code":
+  (`extractProviderErrorMessage`). Measured 2026-08-14: a provider rejects a
+  request with `{"error":"Invalid query params: unknown parameter(s)","code":
   "unknown_parameters",…}` — `error` is a STRING. Reading only `error.message`
-  made every Ground 4xx fall back to `"<provider> request failed with status
+  made every such 4xx fall back to `"<provider> request failed with status
   <n>"`, which names the status and explains nothing, so a refused write reached
   the dashboard with its reason stripped. Do not narrow these shapes again; the
   provider's own sentence is the most useful thing on this path. It picks the
   first NON-BLANK of `error` / `message` / `reason` — the first *present* one
   would let `error: ""` beside a real `message` select the blank and fall back,
   discarding an explanation the body did carry.
-- **Chain keys are HARD-SET in `GROUND_SOLANA_CHAINS`**
-  (providers/ground/client.ts): sandbox = `solana_devnet`, production =
-  `solana`. Ground confirmed (2026-08-05) sandbox supports both Ethereum
-  Sepolia and Solana devnet — Solana flows in sandbox use the `solana_devnet`
-  key. Every wallet flow sends `config.chain` from the constant; no SDP flow
-  may ever take a caller-supplied chain. SDP only cares about Solana. Sandbox
-  mock USDT and Ground's sandbox faucet (`POST /v2/sandbox/faucets/usdt`) are
-  Sepolia-only, so exercising the Solana lane locally means devnet USDC to the
-  wallet's deposit address (§4b).
 - **The withdrawal preview takes an OPTIONAL amount** (PRO-1675).
   `EarnPortfolioWithdrawalPreviewInput.amountUsd` may be omitted to ask the
   liquidity question; a provider client must then OMIT the field from its wire
-  call, never send `null` or `0`. Two Ground sandbox behaviours were measured on
-  2026-08-13 and **neither matches its published contract** — do not "fix" them
+  call, never send `null` or `0`. Two provider behaviours were measured on
+  2026-08-13 and **neither matches the published contract** — do not "fix" them
   without re-measuring:
-  1. The docs say omitting `amountUsd` returns the maximum withdrawable. Sandbox
-     instead answers **409** — but carries the lane's `balance` breakdown, so
-     the number still arrives, on the error path. That is why
-     `groundWithdrawalLiquidityDetails` lifts it onto `SdpEarnError.details` and
-     why the dashboard treats a 409-with-balance as a resolved read rather than
-     a failure.
+  1. The docs say omitting `amountUsd` returns the maximum withdrawable. A live
+     provider instead answers **409** — but carries the lane's `balance`
+     breakdown, so the number still arrives, on the error path. That is why
+     `errorDetails` lifts it onto `SdpEarnError.details` and why the dashboard
+     treats a 409-with-balance as a resolved read rather than a failure.
   2. `withdrawableUsd` is a **balance, not a fillable amount**. A lane reporting
      `20.001241` answers 200 for `20.00` and **409 for `20.001241` itself**.
      Anything offering a one-click max must floor to whole cents; the dashboard
@@ -499,25 +508,12 @@ rates come from the same paged endpoint the catalogue uses.
   status, never as indefinite `processing`; the approval surface is the
   optional capability behind `supportsWithdrawalApprovals` (capabilities.ts).
 - Tests: node:test (`pnpm --filter @sdp/earn test`), **no network** — stub
-  global fetch per the canonical pattern in src/fetch.test.ts and
-  providers/ground/client.test.ts. Every new client method needs mapping +
-  error-taxonomy coverage.
-- Ground specifics (base URLs, endpoint shapes, apyBps/liquidity/curator
-  mapping decisions) are documented in providers/ground/client.ts doc comments
-  and README.md — update both when the mapping changes.
-- Catalogue coverage questions (what Ground offers vs what distillation
-  drops, and why): `pnpm --filter @sdp/api earn:inventory` pulls the raw
-  catalogue and regenerates `docs/earn/ground-catalogue-inventory.md` using
-  the same `distillGroundYieldSource` the sync uses. Sandbox only from a
-  laptop; the production variant is gated behind `--confirm-production`.
-  `earn:inventory:render` only re-formats the committed JSON (outcomes are baked
-  into the snapshot) — after changing a distillation gate you must re-`fetch`, not
-  re-render. If `doppler run` fails for want of a project scope, the fetch also
-  works from `apps/sdp-api/.env.local`:
-  `cd apps/sdp-api && set -a && . ./.env.local && set +a && npx tsx scripts/inventory-ground-catalogue.ts fetch`.
-  NOTE: `deriveCurator` and `GROUND_CURATOR_HOUSES` still carry EVM vocabulary
-  (e.g. `morpho`) on purpose — they parse Ground's RAW 18-source response so the
-  inventory can attribute what we DROP. Do not "clean" those.
+  global fetch per the canonical pattern in src/fetch.test.ts. Every new client
+  method needs mapping + error-taxonomy coverage.
+- Catalogue coverage questions (what a provider offers vs what distillation
+  drops, and why) are answered per provider by the `earn:inventory:*` scripts in
+  apps/sdp-api (e.g. `earn:inventory:kamino` regenerates
+  `docs/earn/kamino-catalogue-inventory.md`).
 
 ## Registered is not the same as offered
 

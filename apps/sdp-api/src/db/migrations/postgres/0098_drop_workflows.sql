@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS workflow_executions;
+DROP TABLE IF EXISTS asset_workflows;
+ALTER TABLE workflow_action_secret_retirements RENAME TO secret_retirements;
+ALTER TABLE secret_retirements RENAME COLUMN workflow_id TO source_id;
+ALTER INDEX idx_workflow_action_secret_retirements_due RENAME TO idx_secret_retirements_due;
+ALTER TABLE secret_retirements RENAME CONSTRAINT workflow_action_secret_retirements_pkey TO secret_retirements_pkey;
+ALTER TABLE secret_retirements RENAME CONSTRAINT workflow_action_secret_retirements_secret_version_ref_key TO secret_retirements_secret_version_ref_key;

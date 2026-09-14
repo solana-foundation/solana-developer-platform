@@ -1835,12 +1835,6 @@ describe("Payments routes — transfers", () => {
           `INSERT INTO project_members (id, project_id, user_id, role)
            VALUES (?, ?, ?, 'admin')`
         )
-        .bind("pm_payment_approver", TEST_PROJECT.id, TEST_USER.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO project_members (id, project_id, user_id, role)
-           VALUES (?, ?, ?, 'admin')`
-        )
         .bind("pm_payment_separate_approver", TEST_PROJECT.id, approverUserId),
       getDb(env)
         .prepare(

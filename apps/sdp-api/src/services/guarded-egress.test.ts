@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createGuardedFetch,
   EgressBlockedError,
+  EgressResponseTooLargeError,
   guardedFetch,
   guardedLookup,
   headersForRedirect,
@@ -246,6 +247,55 @@ describe("guardedFetch", () => {
           approvedPlaintextDestination: true,
         })
       ).rejects.toBeInstanceOf(EgressBlockedError);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("refuses an oversize response when the caller asked for that", async () => {
+    // A relay hands the body back to its caller, so a truncated payload under
+    // a 2xx would be silent corruption; the byte cap must surface as an error
+    // instead of a shorter body.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("x".repeat(2048));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      await expect(
+        guardedFetch(`http://127.0.0.1:${port}/`, {
+          method: "POST",
+          headers: {},
+          body: "{}",
+          approvedInsecureDestination: true,
+          maxResponseBytes: 1024,
+          rejectOversizeResponse: true,
+        })
+      ).rejects.toBeInstanceOf(EgressResponseTooLargeError);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("still truncates silently when the caller only bounds the read", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200);
+      res.end("x".repeat(2048));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      const response = await guardedFetch(`http://127.0.0.1:${port}/`, {
+        method: "POST",
+        headers: {},
+        body: "{}",
+        approvedInsecureDestination: true,
+        maxResponseBytes: 1024,
+      });
+      expect((await response.text()).length).toBe(1024);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

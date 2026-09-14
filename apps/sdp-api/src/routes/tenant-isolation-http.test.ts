@@ -12,6 +12,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TENANTS = [
@@ -65,19 +66,20 @@ describe("tenant isolation through the HTTP stack", () => {
       .run();
 
     for (const tenant of TENANTS) {
+      await db
+        .prepare(
+          `INSERT INTO organizations (id, name, slug, tier, status)
+           VALUES (?, ?, ?, 'individual', 'active')`
+        )
+        .bind(tenant.org, tenant.org, tenant.org.replaceAll("_", "-"))
+        .run();
+      await seedDefaultProjects(db, {
+        organizationId: tenant.org,
+        createdBy: USER_ID,
+        members: [],
+        ids: { sandbox: tenant.project, production: `${tenant.project}_production` },
+      });
       await db.batch([
-        db
-          .prepare(
-            `INSERT INTO organizations (id, name, slug, tier, status)
-             VALUES (?, ?, ?, 'individual', 'active')`
-          )
-          .bind(tenant.org, tenant.org, tenant.org.replaceAll("_", "-")),
-        db
-          .prepare(
-            `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-             VALUES (?, ?, 'HTTP isolation', ?, 'sandbox', 'active', ?)`
-          )
-          .bind(tenant.project, tenant.org, tenant.project.replaceAll("_", "-"), USER_ID),
         db
           .prepare(
             `INSERT INTO api_keys
