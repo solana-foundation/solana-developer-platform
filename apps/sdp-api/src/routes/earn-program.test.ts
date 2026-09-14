@@ -1,3 +1,4 @@
+import type { EarnPortfolioWalletProvider } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
 import type {
   CachedApiKey,
@@ -37,24 +38,32 @@ vi.mock("@sdp/types", async (importOriginal) => {
  * (`supportsPortfolioWallets`) is all-or-nothing on method presence, so the
  * double implements every portfolio method; tests spy per case. Route dispatch
  * resolves through this record via `@/services/earn-provider-registry`.
+ *
+ * Typed as the real contract (`EarnPortfolioWalletProvider`) so per-case spies
+ * get the provider signatures — `mockResolvedValue`/`mock.calls` see the real
+ * result and input types. The literal itself is unchecked (`unknown` cast):
+ * the no-op bases below are never awaited, every interesting call is mocked.
  */
-const portfolioClient = vi.hoisted(() => ({
-  provider: "upshift",
-  declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
-  // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
-  // `restoreAllMocks` puts the no-op back, so no call history can leak
-  // between tests through the shared double.
-  listStrategies: async () => [],
-  createPortfolioWallet: async () => {},
-  getPortfolioWallet: async () => {},
-  updatePortfolioStrategy: async () => {},
-  getPortfolioYield: async () => {},
-  listPortfolioDeposits: async () => {},
-  previewPortfolioWithdrawal: async () => {},
-  createPortfolioWithdrawal: async () => {},
-  getPortfolioWithdrawal: async () => {},
-  createPortfolioAddressBookEntry: async () => {},
-}));
+const portfolioClient = vi.hoisted(
+  () =>
+    ({
+      provider: "upshift",
+      declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
+      // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
+      // `restoreAllMocks` puts the no-op back, so no call history can leak
+      // between tests through the shared double.
+      listStrategies: async () => [],
+      createPortfolioWallet: async () => {},
+      getPortfolioWallet: async () => {},
+      updatePortfolioStrategy: async () => {},
+      getPortfolioYield: async () => {},
+      listPortfolioDeposits: async () => {},
+      previewPortfolioWithdrawal: async () => {},
+      createPortfolioWithdrawal: async () => {},
+      getPortfolioWithdrawal: async () => {},
+      createPortfolioAddressBookEntry: async () => {},
+    }) as unknown as EarnPortfolioWalletProvider
+);
 
 vi.mock("@sdp/earn", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/earn")>();

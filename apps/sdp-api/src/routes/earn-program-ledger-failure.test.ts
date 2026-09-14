@@ -1,3 +1,4 @@
+import type { EarnPortfolioWalletProvider } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,25 +14,29 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 /**
  * Portfolio-capable test double installed under `upshift`, a registered stub id
  * the API composition root never overrides — same pattern as
- * `earn-program.test.ts`.
+ * `earn-program.test.ts`: typed as the real contract so per-case spies see the
+ * provider signatures, with the no-op literal itself unchecked.
  */
-const portfolioClient = vi.hoisted(() => ({
-  provider: "upshift",
-  declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
-  // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
-  // `restoreAllMocks` puts the no-op back, so no call history can leak
-  // between tests through the shared double.
-  listStrategies: async () => [],
-  createPortfolioWallet: async () => {},
-  getPortfolioWallet: async () => {},
-  updatePortfolioStrategy: async () => {},
-  getPortfolioYield: async () => {},
-  listPortfolioDeposits: async () => {},
-  previewPortfolioWithdrawal: async () => {},
-  createPortfolioWithdrawal: async () => {},
-  getPortfolioWithdrawal: async () => {},
-  createPortfolioAddressBookEntry: async () => {},
-}));
+const portfolioClient = vi.hoisted(
+  () =>
+    ({
+      provider: "upshift",
+      declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
+      // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
+      // `restoreAllMocks` puts the no-op back, so no call history can leak
+      // between tests through the shared double.
+      listStrategies: async () => [],
+      createPortfolioWallet: async () => {},
+      getPortfolioWallet: async () => {},
+      updatePortfolioStrategy: async () => {},
+      getPortfolioYield: async () => {},
+      listPortfolioDeposits: async () => {},
+      previewPortfolioWithdrawal: async () => {},
+      createPortfolioWithdrawal: async () => {},
+      getPortfolioWithdrawal: async () => {},
+      createPortfolioAddressBookEntry: async () => {},
+    }) as unknown as EarnPortfolioWalletProvider
+);
 
 vi.mock("@sdp/earn", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/earn")>();
@@ -175,9 +180,7 @@ afterEach(async () => {
 
 describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () => {
   it("still returns 201 with the provider's withdrawal when every ledger write fails", async () => {
-    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const res = await app.request(
       `/v1/earn/programs/${program.id}/withdrawals`,
