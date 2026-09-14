@@ -6,7 +6,12 @@ import {
   ondoDepositMints,
 } from "@sdp/types/ondo-programs";
 import { internalError, providerNotConfigured } from "../../errors";
-import { assertRpcServesCluster, fromBase64, solanaRpcCall } from "../../solana-rpc";
+import {
+  assertRpcServesCluster,
+  fromBase64,
+  resolveCatalogueRpcUrl,
+  solanaRpcCall,
+} from "../../solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
@@ -123,6 +128,13 @@ export class OndoEarnClient extends StubEarnClient {
    * mirror. The cluster is MEASURED (genesis hash) before the mint is read,
    * and the mint account itself is verified, so a row here is an observation
    * about a live instrument rather than a restatement of this file.
+   *
+   * The RPC is resolved PER CLUSTER (`resolveCatalogueRpcUrl`): a devnet
+   * deployment reaches mainnet through `SOLANA_MAINNET_RPC_URL`, which is what
+   * lets its production pass succeed and the sandbox mirror carry the row.
+   * Without the override the process endpoint is tried and the genesis proof
+   * refuses it, so the pass skips as PROVIDER_NOT_CONFIGURED rather than
+   * reading the wrong chain.
    */
   async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
@@ -134,7 +146,7 @@ export class OndoEarnClient extends StubEarnClient {
       );
     }
 
-    return this._listUsdyStrategy(ctx.env.SOLANA_RPC_URL ?? "", cluster, deployment);
+    return this._listUsdyStrategy(resolveCatalogueRpcUrl(ctx.env, cluster), cluster, deployment);
   }
 
   /**
@@ -184,6 +196,13 @@ export class OndoEarnClient extends StubEarnClient {
           // the issuer's own published mint address, the same bar Veda's
           // allowlist clears.
           curator: "ondo",
+          // What an integrator's compliance team asks before offering a Reg S
+          // instrument, stated on the row itself (PRO-1832). Neither constraint
+          // is enforced on-chain by SDP: the offering party screens its end
+          // users, and the issuer can freeze any USDY token account. The longer
+          // record is docs/earn/ondo-catalogue-inventory.md.
+          eligibility: "Reg S: non-US persons only; not enforced on-chain",
+          issuerControls: "Ondo holds the USDY mint and freeze authority",
         },
       },
     ];

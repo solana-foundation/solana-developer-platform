@@ -177,13 +177,15 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
 | Need devnet USDC to fund a program | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b) |
 | No Veda rows in the PRODUCTION catalogue | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row |
-| A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino and Veda are both offered). The gate still exists and still answers this for upshift/perena/ground/ondo, and no org override lifts it (§5b) |
+| A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena/ground, and no org override lifts it (§5b) |
 | No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below |
+| No Ondo row in the sandbox MIRROR either, on a devnet deployment | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which a devnet deployment fails the genesis proof on (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
 
-Registered 2026-09-02 (PRO-1803), un-surfaced. USDY is a plain SPL token whose
-price accrues Treasury yield, so the strategy is HOLDING it: deposit =
+Registered 2026-09-02 (PRO-1803), surfaced 2026-09-14 (PRO-1832). USDY is a
+plain SPL token whose price accrues Treasury yield, so the strategy is HOLDING
+it: deposit =
 Jupiter-routed USDC→USDY swap, position = the owner's USDY balance, exit = the
 reverse swap. Mainnet-only — Ondo has NO devnet deployment (verified on-chain;
 even their staging environment runs on mainnet with different mints), so the
@@ -193,7 +195,10 @@ verifies the mint account before reporting the one-row shelf, and the row is
 the first non-Ground `sourceKind: "rwa"`: the classification traces to the
 issuer's own published mint address in `ONDO_DEPLOYMENTS`
 (`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. No
-`currentApy` — Ondo's rate API is credentialed and SDP holds no key yet.
+`currentApy` — Ondo's rate API is credentialed and SDP holds no key yet
+(PRO-1833). The row's `riskMetadata` carries the eligibility constraints an
+integrator asks about (Reg S non-US-person restriction, issuer freeze
+authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
 Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
 primary mint/redeem facility is deliberately unused (Reg S lockup) and how the
 Jupiter trust boundary stays single-owner in the API.

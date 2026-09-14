@@ -134,11 +134,13 @@ export const EARN_PROVIDER_SURFACING = {
   // visible in both product catalogues; the sandbox copy is browse-only while
   // production projects may execute against the mainnet program.
   jupiter_lend: true,
-  // Registered dormant while the integration is evaluated (PRO-1803): the
-  // client catalogues USDY from `ONDO_DEPLOYMENTS` and the execution half
-  // builds secondary-market swaps, but nothing reaches customers until this
-  // flips after the Earn V2 review.
-  ondo: false,
+  // Surfaced 2026-09-14 (PRO-1832), registered dormant 2026-09-02 (PRO-1803).
+  // Mainnet-only like Jupiter Lend: the production catalogue carries the USDY
+  // row and production projects may execute against it (the deposit is a
+  // Jupiter-routed USDC→USDY swap, `@sdp/ondo`); the sandbox copy arrives
+  // through the PRO-1742 mirror, browse-only. No `currentApy` until a rate
+  // source lands (PRO-1833) — the row renders "—" rather than a derived figure.
+  ondo: true,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -315,8 +317,7 @@ export const EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS = {
   kamino: ["sandbox"],
   jupiter_lend: ["production"],
   // USDY exists on mainnet only (`ONDO_DEPLOYMENTS` devnet is null), so the
-  // sandbox mirror is browse-only. Inert until `EARN_PROVIDER_SURFACING.ondo`
-  // flips (PRO-1803).
+  // sandbox mirror is browse-only and only a production project may deposit.
   ondo: ["production"],
 } as const satisfies Record<EarnProviderId, readonly SdpEnvironment[]>;
 

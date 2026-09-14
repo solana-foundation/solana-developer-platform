@@ -34,7 +34,8 @@ describe("Earn display formatting", () => {
     expect(formatTokenQuantity("0.009001", "en-US", "USDC")).toBe("0.009001 USDC");
   });
 
-  it("renders the Jupiter Lend provider name in both Markets product tables", () => {
+  it("renders the mainnet-only provider names in both Markets product tables", () => {
     expect(earnProviderLabel("jupiter_lend")).toBe("Jupiter Lend");
+    expect(earnProviderLabel("ondo")).toBe("Ondo");
   });
 });

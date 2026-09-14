@@ -60,6 +60,37 @@ function stubRpc(
   });
 }
 
+/**
+ * A process whose default endpoint serves DEVNET (every non-production
+ * deployment), with a second endpoint that serves mainnet: genesis is answered
+ * by URL, and the mint read only ever succeeds on the mainnet one.
+ */
+function stubTwoClusterRpc(urls: { devnet: string; mainnet: string }) {
+  mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
+    const onMainnet = String(url) === urls.mainnet;
+    if (body.method === "getGenesisHash") {
+      return Response.json({
+        jsonrpc: "2.0",
+        id: 1,
+        result: GENESIS_HASH_BY_CLUSTER[onMainnet ? "mainnet-beta" : "devnet"],
+      });
+    }
+    if (body.method === "getAccountInfo") {
+      return Response.json({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          value: onMainnet
+            ? { owner: SPL_TOKEN_PROGRAM, data: [mintAccountData(ONDO_USDY_DECIMALS), "base64"] }
+            : null,
+        },
+      });
+    }
+    throw new Error(`unexpected RPC method ${body.method}`);
+  });
+}
+
 afterEach(() => {
   mock.restoreAll();
 });
@@ -75,6 +106,29 @@ describe("OndoEarnClient.listStrategies", () => {
   it("reports PROVIDER_NOT_CONFIGURED for sandbox (devnet has no deployment)", async () => {
     await assert.rejects(
       client.listStrategies({ env: {}, environment: "sandbox" }),
+      (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED"
+    );
+  });
+
+  /**
+   * The production pass runs in EVERY deployment (it feeds the sandbox mirror),
+   * and in a devnet deployment the process endpoint serves the wrong chain. The
+   * per-cluster override is what lets that pass succeed; without it the genesis
+   * proof refuses the default rather than reading devnet as if it were mainnet.
+   */
+  it("reads mainnet through SOLANA_MAINNET_RPC_URL when the process endpoint serves devnet", async () => {
+    const urls = { devnet: "https://devnet.rpc.test", mainnet: "https://mainnet.rpc.test" };
+    stubTwoClusterRpc(urls);
+
+    const snapshots = await client.listStrategies({
+      env: { SOLANA_RPC_URL: urls.devnet, SOLANA_MAINNET_RPC_URL: urls.mainnet },
+      environment: "production",
+    });
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0]?.hostCluster, "mainnet-beta");
+
+    await assert.rejects(
+      client.listStrategies({ env: { SOLANA_RPC_URL: urls.devnet }, environment: "production" }),
       (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED"
     );
   });
@@ -95,6 +149,10 @@ describe("OndoEarnClient.listStrategies", () => {
     assert.equal(snapshot.redemptionDelayDays, undefined);
     assert.equal(snapshot.currentApy, undefined);
     assert.equal(snapshot.riskMetadata?.curator, "ondo");
+    // The eligibility constraints ride the row (PRO-1832): an integrator reads
+    // them from the catalogue, not from a doc they have to know exists.
+    assert.match(String(snapshot.riskMetadata?.eligibility), /Reg S/);
+    assert.match(String(snapshot.riskMetadata?.issuerControls), /freeze authority/);
     // The row must sit inside the envelope the sync validates against.
     assert.equal(isStrategyWithinDeclaredSupport(client.declaredSupport, snapshot), true);
   });

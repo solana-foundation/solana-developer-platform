@@ -164,6 +164,8 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   // renders their metadata.
   kamino: "Kamino",
   jupiter: "Jupiter",
+  // The USDY issuer; `providers/ondo/client.ts` reports it as the row's curator.
+  ondo: "Ondo",
   aave_v3: "Aave V3",
   gustb: "Superstate USTB",
   guscc: "Superstate USCC",

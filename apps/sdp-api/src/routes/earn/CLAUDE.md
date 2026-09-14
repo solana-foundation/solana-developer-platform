@@ -128,10 +128,11 @@ balance with a live one.
     `handlers/curation.ts` so route tests can mock today's picks away — the
     same rule the surfacing mock in `earn-program.test.ts` follows).
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
-    not currently OFFER — Ground today, while Kamino and Jupiter Lend are
-    surfaced; `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho-related rows.
-    Jupiter Lend is admitted through its dedicated provider, which validates the
-    canonical USDT asset and jlUSDT receipt mints. The list
+    not currently OFFER — Ground, Upshift and Perena today, while Kamino, Veda,
+    Jupiter Lend and Ondo are surfaced; `HIDDEN_STRATEGY_TERMS` hides individual
+    Aave/Morpho-related rows. Jupiter Lend is admitted through its dedicated
+    provider, which validates the canonical USDT asset and jlUSDT receipt mints;
+    Ondo's one USDY row passes uncurated (no `CURATED_VAULTS` pin). The list
     pushes both into SQL (`providers: SURFACED_EARN_PROVIDERS` +
     `excludeRelatedTerms`) so `total` and the page window describe the rows the
     caller can see; `isHiddenStrategy` applies the same two rules to the detail
