@@ -23,7 +23,7 @@
   "devDependencies": {
     "@codama/renderers-js": "2.4.0",
     "codama": "1.10.2",
-    "tsx": "4.23.12",
+    "tsx": "4.23.13",
     "vitest": "4.1.11"
   }
 }
