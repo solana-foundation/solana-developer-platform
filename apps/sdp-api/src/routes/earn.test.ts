@@ -836,7 +836,13 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       depositMints: [wellKnownMint("USDC", "mainnet-beta") as string],
       shareMint: usdyMint,
       currentApy: null,
-      riskMetadata: { curator: "ondo" },
+      // The compliance disclosure the catalogue client writes (PRO-1832); the
+      // assertions below pin that it reaches the public list AND detail reads.
+      riskMetadata: {
+        curator: "ondo",
+        eligibility: "Reg S: non-US persons only; not enforced on-chain",
+        issuerControls: "Ondo holds the USDY mint and freeze authority",
+      },
       hostCluster: "mainnet-beta",
     });
 
@@ -857,21 +863,34 @@ describe("Earn strategy reads — shipped V1 curation", () => {
           sourceKind: string;
           fundable: boolean;
           currentApy?: string;
+          riskMetadata: Record<string, unknown>;
           depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
           withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
         }>;
       };
+    };
+    const disclosure = {
+      curator: "ondo",
+      eligibility: "Reg S: non-US persons only; not enforced on-chain",
+      issuerControls: "Ondo holds the USDY mint and freeze authority",
     };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([ondo.id]);
     expect(body.data.strategies[0]).toMatchObject({
       provider: "ondo",
       sourceKind: "rwa",
       fundable: false,
+      riskMetadata: disclosure,
       depositSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
     });
     // No rate source yet (PRO-1833): the field is absent, never a derived figure.
     expect(body.data.strategies[0]?.currentApy).toBeUndefined();
-    expect((await getEarn(`/v1/earn/strategies/${ondo.id}`)).status).toBe(200);
+
+    const detail = await getEarn(`/v1/earn/strategies/${ondo.id}`);
+    expect(detail.status).toBe(200);
+    const detailBody = (await detail.json()) as {
+      data: { strategy: { riskMetadata: Record<string, unknown> } };
+    };
+    expect(detailBody.data.strategy.riskMetadata).toEqual(disclosure);
   });
 });

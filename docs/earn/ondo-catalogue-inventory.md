@@ -52,8 +52,10 @@ depend on finding this file.
   wallet-pays: the custody wallet needs SOL for fees and for its USDY token
   account's rent, and USDC to swap.
 - **Platform prerequisites**: `JUPITER_SWAP_API_KEY` (shared with swap-funded
-  deposits) in the deployment, and a mainnet RPC the catalogue can reach. A
-  devnet deployment gets that through `SOLANA_MAINNET_RPC_URL`
+  deposits) in the deployment, and a mainnet RPC the catalogue can reach.
+  Ondo's availability gates on the Jupiter key, so without it the provider
+  reports `configured: false` and no deposit action is offered. A devnet
+  deployment reaches mainnet through `SOLANA_MAINNET_RPC_URL`
   (`resolveCatalogueRpcUrl` in `@sdp/earn`); without it the production pass
   skips and the sandbox mirror stays empty.
 - **Per-org**: `providerOverrides.earn.ondo` in the organization's Clerk

@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { EARN_PROVIDER_CLIENTS, supportsPortfolioWallets } from "@sdp/earn";
 import { EARN_PROVIDER_DEPOSIT_STYLE, EARN_PROVIDERS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { EARN_CREDENTIAL_ENV_KEYS } from "./provider-availability.service";
+import {
+  EARN_CREDENTIAL_ENV_KEYS,
+  EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER,
+} from "./provider-availability.service";
 
 const repoRoot = join(process.cwd(), "..", "..");
 
@@ -45,16 +48,33 @@ describe("earn provider credential key drift", () => {
    * declaring none. Only providers deliberately reached over a public API may
    * carry an empty key set, so adding one here is a decision someone makes on
    * purpose.
+   *
+   * Read per provider rather than by `<ID>_` prefix: Ondo's readiness key is
+   * the platform `JUPITER_SWAP_API_KEY`, which a prefix match would misread as
+   * "declares nothing" and wave through.
    */
   it("declares credential keys for every earn provider except the known keyless ones", () => {
-    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend", "ondo"]);
+    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend"]);
     const undeclared = EARN_PROVIDERS.filter(
       (provider) =>
         !KEYLESS_EARN_PROVIDERS.has(provider) &&
-        !EARN_CREDENTIAL_ENV_KEYS.some((key) => key.startsWith(`${provider.toUpperCase()}_`))
+        EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER[provider].length === 0
     );
 
     expect(undeclared).toEqual([]);
+  });
+
+  /**
+   * And the mirror image: a provider named keyless must really declare nothing,
+   * so the set above cannot quietly carry a provider that grew a credential.
+   */
+  it("declares no credential keys for the known keyless providers", () => {
+    for (const provider of ["kamino", "veda", "jupiter_lend"] as const) {
+      expect({ provider, keys: EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER[provider] }).toEqual({
+        provider,
+        keys: [],
+      });
+    }
   });
 });
 

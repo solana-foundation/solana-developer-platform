@@ -66,6 +66,7 @@ const providerEnvKeys = [
   "PERENA_SANDBOX_API_KEY",
   "GROUND_API_KEY",
   "GROUND_SANDBOX_API_KEY",
+  "JUPITER_SWAP_API_KEY",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -748,6 +749,40 @@ describe("provider-availability.service", () => {
       configured: true,
       enabled: true,
     });
+  });
+
+  /**
+   * Ondo holds no credential of its own, but every deposit and exit it builds
+   * is a Jupiter swap, so readiness follows the PLATFORM swap key. Reporting
+   * `configured: true` without it would offer an entitled organization a
+   * deposit action that fails at build time (Greptile on #1810).
+   */
+  it("reports Ondo configured only when the platform Jupiter swap key is set", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { ondo: true } } }), TEST_ORG_ID)
+      .run();
+
+    env.JUPITER_SWAP_API_KEY = undefined;
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(without.providers.earn.ondo).toEqual({
+      entitled: true,
+      configured: false,
+      enabled: false,
+    });
+    expect(() => assertEarnProviderConfigured(env, "ondo", false)).toThrow(
+      "Ondo is not configured for production mode."
+    );
+
+    env.JUPITER_SWAP_API_KEY = "jup_test_key";
+    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(withKey.providers.earn.ondo).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    // One key serves both modes: Jupiter has no sandbox tenant to select.
+    expect(() => assertEarnProviderConfigured(env, "ondo", true)).not.toThrow();
   });
 
   it("re-checks earn credentials for the requested mode like ramps", async () => {

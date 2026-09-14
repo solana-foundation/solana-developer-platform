@@ -340,27 +340,50 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     ground: keyPairCredentialDefinition("Ground", "GROUND"),
     kamino: publicApiDefinition("Kamino"),
     jupiter_lend: publicApiDefinition("Jupiter Lend"),
-    // Keyless: the catalogue reads the chain and the execution half swaps on
-    // the open market. The Jupiter swap credential it uses is PLATFORM
-    // configuration (JUPITER_SWAP_API_KEY, shared with swap-funded deposits),
-    // not an Ondo tenant to select, so there is no per-provider key to gate
-    // on — a missing Jupiter key fails the build closed at request time.
-    ondo: publicApiDefinition("Ondo"),
+    // No Ondo credential: the catalogue reads the chain and the execution half
+    // swaps on the open market. What that execution DOES need is the platform
+    // Jupiter swap key (shared with swap-funded deposits), so readiness gates
+    // on it here rather than reporting `configured: true` and failing at build
+    // time — an entitled organization must not be offered a deposit action the
+    // provider cannot honour. One key for both modes: Jupiter has no sandbox
+    // tenant, and USDY exists on mainnet only anyway.
+    ondo: {
+      label: "Ondo",
+      credentialEnvKeys: ["JUPITER_SWAP_API_KEY"],
+      isConfigured: (env) => hasEnv(env, "JUPITER_SWAP_API_KEY"),
+    },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 
 /**
- * Every env key an earn availability definition actually reads — the drift
- * guard's source of truth (provider-availability.drift.test.ts), which checks
- * these against turbo.json globalEnv and scripts/secret-keys.mjs.
+ * The env keys each earn availability definition actually reads, per provider
+ * — the drift guard's source of truth (provider-availability.drift.test.ts).
+ *
+ * Keyed by provider so the guard can tell "declares no credential" (a keyless
+ * provider, named on purpose) from "declares one that does not follow the
+ * `<ID>_API_KEY` convention" (Ondo, which gates on the platform Jupiter key).
+ * A prefix match would misread the second as the first.
+ */
+export const EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER: Readonly<
+  Record<EarnProviderId, readonly string[]>
+> = Object.fromEntries(
+  Object.entries(PROVIDER_AVAILABILITY_DEFINITIONS.earn).map(([provider, definition]) => [
+    provider,
+    (definition as ProviderAvailabilityDefinition).credentialEnvKeys ?? [],
+  ])
+) as Record<EarnProviderId, readonly string[]>;
+
+/**
+ * Every env key an earn availability definition actually reads, flattened —
+ * checked against turbo.json globalEnv and scripts/secret-keys.mjs.
  *
  * Derived from the definitions rather than from `EARN_PROVIDERS` by naming
  * convention, so it stays correct for a provider that needs no credential and
  * for any future one whose credential is not a key pair.
  */
 export const EARN_CREDENTIAL_ENV_KEYS: readonly string[] = Object.values(
-  PROVIDER_AVAILABILITY_DEFINITIONS.earn
-).flatMap((definition) => definition.credentialEnvKeys ?? []);
+  EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER
+).flat();
 
 /**
  * Reuse the deployment configuration checks without exposing credential values.

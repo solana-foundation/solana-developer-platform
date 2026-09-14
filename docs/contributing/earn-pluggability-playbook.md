@@ -230,17 +230,20 @@ holds the money and who signs:
   Vault and a deliberately null mainnet entry. Both builders require explicit
   quote-derived floors, declared through the deposit and withdrawal slippage
   maps. Copy this when a provider's SDK refuses implicit slippage.
-- **Ondo: no vault program — the instrument IS the position.** `ondo` id,
-  keyless like Kamino, executing like Veda, registered dormant (PRO-1803) and
+- **Ondo: no vault program — the instrument IS the position.** `ondo` id, no
+  Ondo credential, executing like Veda, registered dormant (PRO-1803) and
   surfaced on 2026-09-14 (PRO-1832). The strategy is holding USDY: deposits
   and exits are Jupiter-routed swaps built through a port the API injects, so
   the Jupiter instruction trust boundary stays single-owner in
   `services/earn/jupiter-swap.service.ts` and `packages/sdp-ondo` carries no
-  chain SDK at all. Copy this when a provider's product is a yield-bearing
-  TOKEN rather than a vault — and note its mainnet-only registry
-  (`@sdp/types/ondo-programs`) leaves the sandbox shelf to the PRO-1742
-  mirror, which in a devnet deployment only fills when the catalogue can reach
-  mainnet (`SOLANA_MAINNET_RPC_URL`, below).
+  chain SDK at all. Its availability definition is neither the key-pair shape
+  nor `publicApiDefinition`: it gates on the PLATFORM `JUPITER_SWAP_API_KEY`
+  (one key, both modes), so a deployment without it reports `configured:
+  false` instead of offering a deposit that fails at build. Copy this when a
+  provider's product is a yield-bearing TOKEN rather than a vault — and note
+  its mainnet-only registry (`@sdp/types/ondo-programs`) leaves the sandbox
+  shelf to the PRO-1742 mirror, which in a devnet deployment only fills when
+  the catalogue can reach mainnet (`SOLANA_MAINNET_RPC_URL`, below).
 
 Steps 5–8 below are the **credentialed** path; a provider on a public API
 skips most of them (see the keyless variant under the table). Step 10 and §4d
