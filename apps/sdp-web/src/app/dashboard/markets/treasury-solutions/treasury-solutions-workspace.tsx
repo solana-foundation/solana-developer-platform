@@ -1670,6 +1670,38 @@ function mergeStrategyCatalogues(
   return combined;
 }
 
+/**
+ * The strategy list the treasury page renders. Production shows its own
+ * shelf; Sandbox shows the mirrored mainnet shelf above the depositable
+ * devnet shelf. Each Sandbox shelf drops its rows behind its own failed read,
+ * so a stale list never outlives the error that should have replaced it, and
+ * neither shelf's failure or slow load takes the other's rows off the screen.
+ */
+function combinedCatalogueStrategies({
+  sandboxCatalogue,
+  baseCatalogueStrategies,
+  baseCatalogueError,
+  strategies,
+  strategiesError,
+}: {
+  sandboxCatalogue: boolean;
+  baseCatalogueStrategies: readonly EarnStrategy[] | undefined;
+  baseCatalogueError: unknown;
+  strategies: readonly EarnStrategy[] | undefined;
+  strategiesError: unknown;
+}): readonly EarnStrategy[] | undefined {
+  if (!sandboxCatalogue) return baseCatalogueStrategies;
+  const mainnetShelf = baseCatalogueError ? undefined : baseCatalogueStrategies;
+  return mergeStrategyCatalogues(
+    mainnetShelf,
+    // The devnet rows show only where the mainnet shelf actually offers the
+    // recorded counterpart (see `devnet-mainnet-intersection.ts`); the
+    // allocation summary and the share-mint vocabulary keep the unfiltered
+    // shelf, because this is a browse decision and never a money gate.
+    strategiesError ? undefined : filterSandboxDevnetStrategies(strategies, mainnetShelf)
+  );
+}
+
 export function TreasurySolutionsWorkspace({
   providerAccess,
 }: {
@@ -1700,24 +1732,15 @@ export function TreasurySolutionsWorkspace({
     isLoading: baseCatalogueLoading,
     refresh: refreshCatalogue,
   } = useEarnStrategies({ cluster: catalogueCluster });
-  // Each Sandbox shelf drops its rows behind its own failed read, so a stale
-  // list never outlives the error that should have replaced it, and neither
-  // shelf's failure or slow load takes the other's rows off the screen. The
-  // devnet rows are the only ones Sandbox can deposit into, so they must
-  // survive a mainnet mirror outage in particular (PRO-1961). Those devnet
-  // rows show only where a mainnet counterpart exists — the rough-name
-  // intersection, Veda excepted — so the Sandbox shelf mirrors production
-  // (see `devnet-mainnet-intersection.ts`); the allocation summary and the
-  // share-mint vocabulary above keep the unfiltered shelf, because this is a
-  // browse decision and never a money gate.
   const catalogueStrategies = useMemo(
     () =>
-      sandboxCatalogue
-        ? mergeStrategyCatalogues(
-            baseCatalogueError ? undefined : baseCatalogueStrategies,
-            strategiesError ? undefined : filterSandboxDevnetStrategies(strategies)
-          )
-        : baseCatalogueStrategies,
+      combinedCatalogueStrategies({
+        sandboxCatalogue,
+        baseCatalogueStrategies,
+        baseCatalogueError,
+        strategies,
+        strategiesError,
+      }),
     [baseCatalogueError, baseCatalogueStrategies, sandboxCatalogue, strategies, strategiesError]
   );
   // Sandbox reserves the full-card error for both shelves failing; a single

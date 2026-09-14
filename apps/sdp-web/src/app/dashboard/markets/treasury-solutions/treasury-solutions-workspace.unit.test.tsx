@@ -246,6 +246,46 @@ vi.mock("../earn/earn-program-data", () => ({
                 createdAt: "2026-08-18T00:00:00.000Z",
                 updatedAt: "2026-08-18T00:00:00.000Z",
               },
+              // The mainnet counterparts the intersection filter demands: the
+              // devnet rows may only advertise names this shelf actually
+              // offers, from the same provider. RockawayX is deliberately
+              // absent — the devnet vault mapping to it must stay hidden.
+              {
+                id: "earn_strategy_mainnet_steakhouse",
+                provider: "kamino",
+                providerReference: "KvaultMainnetSteakhouse1111111111111111111",
+                name: "Steakhouse USDC",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnetSteakhouse111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.058",
+                riskMetadata: { tvlUsd: 40_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
+              {
+                id: "earn_strategy_mainnet_allez",
+                provider: "kamino",
+                providerReference: "KvaultMainnetAllez1111111111111111111111",
+                name: "Allez USDC",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnetAllez111111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.045",
+                riskMetadata: { tvlUsd: 18_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
             ],
       };
     }
@@ -312,6 +352,27 @@ vi.mock("../earn/earn-program-data", () => ({
               apyType: "variable",
               currentApy: "0.055",
               riskMetadata: { tvlUsd: 5_000_000 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+            // A mapped name whose mainnet counterpart the loaded mainnet shelf
+            // never lists: the catalogue check must veto the mapping, so this
+            // row stays off the Sandbox shelf too (the RockawayX case).
+            {
+              id: "earn_strategy_rockaway_devnet",
+              provider: "kamino",
+              providerReference: "KvaultRockaway11111111111111111111111111",
+              name: "RockawayX RWA USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareRockaway111111111111111111111111111111",
+              apyType: "variable",
+              currentApy: "0.048",
+              riskMetadata: { tvlUsd: 8_000_000 },
               liquidityTerm: "instant",
               status: "active",
               hostCluster: "devnet",
@@ -586,6 +647,15 @@ function renderWorkspace() {
   );
 }
 
+// The devnet strategy rows carry the cluster badge, and a name can exist on
+// both shelves once the intersection filter is satisfied — the badge is what
+// distinguishes the depositable devnet row from its mainnet mirror.
+const devnetStrategyRow = (name: string) =>
+  screen
+    .queryAllByText(name)
+    .map((element) => element.closest("tr"))
+    .find((row) => row?.textContent?.includes("Devnet"));
+
 beforeEach(() => {
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
@@ -781,10 +851,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
 
     const view = renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected the deposit strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -886,10 +953,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
     renderWorkspace();
 
-    const strategyRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -917,10 +981,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const user = userEvent.setup();
     const movementId = "earn_vault_movement_balance_projection";
     const view = renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -976,10 +1037,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const movementId = "earn_vault_movement_first_position";
     mocks.positionsEmpty = true;
     const view = renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -1053,10 +1111,7 @@ describe("TreasurySolutionsWorkspace", () => {
   it("combines concurrent confirmed movements without dropping either projection", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -1339,6 +1394,8 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(tvlHeader.getAttribute("aria-sort")).toBe("none");
     expect(firstColumn(strategiesTable)).toEqual([
       "Kamino JLP VaultKamino",
+      "Steakhouse USDCKamino",
+      "Allez USDCKamino",
       "Steakhouse USDCDevnetKamino",
       "Allez USDCDevnetKamino",
       "Veda Treasury FundDevnetVeda",
@@ -1347,6 +1404,8 @@ describe("TreasurySolutionsWorkspace", () => {
     await user.click(within(strategiesTable).getByRole("button", { name: "APY" }));
     expect(apyHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
+      "Allez USDCKamino",
+      "Steakhouse USDCKamino",
       "Kamino JLP VaultKamino",
       "Allez USDCDevnetKamino",
       "Steakhouse USDCDevnetKamino",
@@ -1357,7 +1416,9 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(apyHeader.getAttribute("aria-sort")).toBe("none");
     expect(tvlHeader.getAttribute("aria-sort")).toBe("descending");
     expect(firstColumn(strategiesTable)).toEqual([
+      "Steakhouse USDCKamino",
       "Kamino JLP VaultKamino",
+      "Allez USDCKamino",
       "Allez USDCDevnetKamino",
       "Steakhouse USDCDevnetKamino",
       "Veda Treasury FundDevnetVeda",
@@ -1366,7 +1427,9 @@ describe("TreasurySolutionsWorkspace", () => {
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
     expect(tvlHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
+      "Allez USDCKamino",
       "Kamino JLP VaultKamino",
+      "Steakhouse USDCKamino",
       "Steakhouse USDCDevnetKamino",
       "Allez USDCDevnetKamino",
       "Veda Treasury FundDevnetVeda",
@@ -1580,7 +1643,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByText("100.0%")).toBeNull();
 
     // The strategy row must not contradict them with "No active position".
-    const catalogueOnlyRow = screen.getByText("Allez USDC").closest("tr");
+    const catalogueOnlyRow = devnetStrategyRow("Allez USDC");
     if (!catalogueOnlyRow) throw new Error("Expected the catalogue-only strategy row");
     expect(catalogueOnlyRow.textContent).toContain("Live value unavailable");
     expect(catalogueOnlyRow.textContent).not.toContain("No active position");
@@ -1835,9 +1898,9 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(catalogue.queryByRole("switch")).toBeNull();
 
     const mainnetRow = catalogue.getByText("Kamino JLP Vault").closest("tr");
-    const devnetRow = catalogue.getByText("Steakhouse USDC").closest("tr");
+    const devnetRow = devnetStrategyRow("Steakhouse USDC");
     expect(mainnetRow).not.toBeNull();
-    expect(devnetRow).not.toBeNull();
+    expect(devnetRow).toBeDefined();
     const mainnetCells = within(mainnetRow as HTMLTableRowElement);
     expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
     expect(mainnetCells.queryByText("Devnet")).toBeNull();
@@ -1874,13 +1937,18 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
       .closest("section");
     if (!section) throw new Error("Expected the strategy catalogue");
     const catalogue = within(section);
-    // Matched to a mainnet counterpart by the hardcoded table.
-    expect(catalogue.getByText("Steakhouse USDC")).toBeTruthy();
-    expect(catalogue.getByText("Allez USDC")).toBeTruthy();
+    // Matched to a mainnet counterpart the loaded mainnet shelf actually
+    // offers, from the same provider.
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeDefined();
+    expect(devnetStrategyRow("Allez USDC")).toBeDefined();
     // Veda is devnet-only, so its strategies skip the intersection entirely.
     expect(catalogue.getByText("Veda Treasury Fund")).toBeTruthy();
     // A devnet vault with no mainnet counterpart stays off the shelf.
     expect(catalogue.queryByText("Kamino Vault USDC")).toBeNull();
+    // And so does a mapped name the mainnet shelf never lists: the recorded
+    // RockawayX pair is vetoed by the catalogue check, so the Sandbox shelf
+    // cannot advertise what Production does not offer.
+    expect(devnetStrategyRow("RockawayX RWA USDC")).toBeUndefined();
   });
 
   it("keeps mainnet strategies visible while the Devnet catalogue loads", () => {
@@ -1893,7 +1961,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     if (!section) throw new Error("Expected the strategy catalogue");
     const catalogue = within(section);
     expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
-    expect(catalogue.queryByText("Steakhouse USDC")).toBeNull();
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
     expect(
       catalogue.getByText("Loading Devnet strategies. Mainnet strategies remain available.")
     ).toBeTruthy();
@@ -1909,7 +1977,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     if (!section) throw new Error("Expected the strategy catalogue");
     const catalogue = within(section);
     expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
-    expect(catalogue.queryByText("Steakhouse USDC")).toBeNull();
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
     expect(
       catalogue.getByText(
         "Devnet strategies could not be loaded. Mainnet strategies remain available."
