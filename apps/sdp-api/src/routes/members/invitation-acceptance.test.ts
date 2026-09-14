@@ -10,6 +10,7 @@ import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -55,20 +56,12 @@ async function seedCaller(email = CALLER_EMAIL): Promise<string> {
     )
     .bind(HOME_ORG_ID, CALLER_USER_ID)
     .run();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Home', 'acceptance-home', 'sandbox', 'active', ?)`
-    )
-    .bind(HOME_PROJECT_ID, HOME_ORG_ID, CALLER_USER_ID)
-    .run();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_acceptance_home', ?, ?, 'developer')`
-    )
-    .bind(HOME_PROJECT_ID, CALLER_USER_ID)
-    .run();
+  await seedDefaultProjects(getDb(env), {
+    organizationId: HOME_ORG_ID,
+    createdBy: CALLER_USER_ID,
+    members: [CALLER_USER_ID],
+    ids: { sandbox: HOME_PROJECT_ID, production: `${HOME_PROJECT_ID}_production` },
+  });
 
   const session = await new SessionService(getDb(env)).createSession(
     CALLER_USER_ID,

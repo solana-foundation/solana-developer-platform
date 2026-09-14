@@ -14,7 +14,6 @@ import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
-import { registerNotificationPaths } from "./paths/notifications";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
@@ -182,7 +181,6 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
-  registerNotificationPaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 }

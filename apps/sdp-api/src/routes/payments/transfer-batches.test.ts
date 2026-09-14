@@ -45,6 +45,7 @@ import {
   sendTransactionMock,
   sendTransactionPreflightError,
 } from "@/test/helpers/payments-routes";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -198,20 +199,14 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Batch Payments Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys

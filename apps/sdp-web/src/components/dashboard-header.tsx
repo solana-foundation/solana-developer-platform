@@ -8,7 +8,6 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NotificationBell } from "@/components/notification-bell";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
@@ -33,6 +32,8 @@ type DashboardPageConfig = {
   };
 };
 
+const TRAILING_CONTENT = <LanguagePicker />;
+
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
@@ -41,8 +42,6 @@ type DashboardTopBarProps = {
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  // Notifications ship with the asset-profiles feature (its only producer today).
-  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -182,17 +181,10 @@ export function DashboardTopBar({
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
-  const trailingContent = (
-    <>
-      <LanguagePicker />
-      {showNotifications ? <NotificationBell /> : null}
-    </>
-  );
 
   if (centersPageTitle) {
     return (
@@ -208,7 +200,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={TRAILING_CONTENT}
       />
     );
   }
@@ -227,7 +219,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={TRAILING_CONTENT}
     />
   );
 }
@@ -844,7 +836,11 @@ export function getDashboardPageConfig(
   if (integrationsConfig) {
     return integrationsConfig;
   }
-  if (pathname.startsWith("/dashboard/settings")) {
+  if (pathname === "/dashboard/helius-rings") {
+    return { title: t("Shared.dashboardShell.heliusRings") };
+  }
+  // Members only redirects into Settings, so its loading frame carries the Settings title.
+  if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
     // the members table and the RPC form are label/value rows, and letting them span

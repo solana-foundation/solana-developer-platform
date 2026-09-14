@@ -87,6 +87,7 @@
       "createWalletPlaceholder": "Select a custody wallet",
       "creating": "Provisioning…",
       "createFailed": "The wallet could not be created. Check the details and try again.",
+      "retry": "Retry provision",
       "noCustodyWallets": "No custody wallets available. Create a wallet under Wallets first.",
       "allCustodyWalletsBound": "Every custody wallet already backs a private wallet.",
       "copyShieldedAddress": "Copy shielded address",

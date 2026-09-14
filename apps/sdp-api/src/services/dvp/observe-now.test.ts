@@ -56,6 +56,7 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
     escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
     closeResolutionAttempts: 0,
     closeResolutionAfter: null,
+    closedAt: null,
     tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     observedAt: new Date(NOW - 60_000).toISOString(),

@@ -43,7 +43,6 @@ const LEGACY_TAB_MAP: Record<string, AssetManagementTab> = {
   "public-info": "settings",
   extensions: "settings",
   compliance: "operations",
-  workflows: "overview",
 };
 
 function resolveTab(value: string | null): AssetManagementTab {

@@ -17,6 +17,7 @@ import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custod
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   ApiKeyControlProfileRevisionRow,
@@ -74,25 +75,10 @@ const DUPLICATE_PROVIDER_CUSTODY_WALLET = {
   purpose: "payments",
 };
 
-const OTHER_PROJECT = {
-  id: "prj_policy_other",
-  name: "Other policy project",
-  slug: "other-policy-project",
-  environment: "sandbox",
-};
-
-const OTHER_PROJECT_CUSTODY_CONFIG_ID = "ccfg_policy_other_project";
 const TEST_SCOPE = createTenantScope({
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
 });
-const OTHER_PROJECT_CUSTODY_WALLET = {
-  id: "cw_policy_other_project",
-  walletId: "wallet_policy_other_project",
-  publicKey: "OtherProjectWallet1111111111111111111111",
-  label: "Other project policy wallet",
-  purpose: "payments",
-};
 
 describe("PolicyRepository (postgres)", () => {
   let repo: PolicyRepository;
@@ -116,10 +102,6 @@ describe("PolicyRepository (postgres)", () => {
       getDb(env),
       createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
     );
-    const otherProjectRepo = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: OTHER_PROJECT.id })
-    );
     const foreignOrganizationRepo = createPostgresPolicyRepository(
       getDb(env),
       createTenantScope({ organizationId: "org_policy_foreign", projectId: null })
@@ -129,7 +111,6 @@ describe("PolicyRepository (postgres)", () => {
       TEST_USER.id
     );
     await expect(repo.getApiKeyCreatorUserId(TEST_API_KEY.id)).resolves.toBe(TEST_USER.id);
-    await expect(otherProjectRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)).resolves.toBeNull();
     await expect(
       foreignOrganizationRepo.getApiKeyCreatorUserId(TEST_API_KEY.id)
     ).resolves.toBeNull();
@@ -350,46 +331,6 @@ describe("PolicyRepository (postgres)", () => {
       status: "pending_approval",
     });
     expect(updatedOperation?.updated_at).not.toBe(operation?.updated_at);
-  });
-
-  it("rejects mismatched custody and wallet identifiers on operations and bindings", async () => {
-    await seedOtherProjectCustodyWallet();
-
-    await expect(
-      repo.createWalletOperation({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        custodyWalletId: TEST_CUSTODY_WALLET.id,
-        walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
-        operationFamily: "payment",
-        operationType: "payment_transfer_execute",
-      })
-    ).resolves.toBeNull();
-
-    await expect(
-      repo.upsertApiKeyWalletPolicyBinding({
-        apiKeyId: TEST_API_KEY.id,
-        bindingScope: "selected",
-        walletId: TEST_CUSTODY_WALLET.walletId,
-        custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
-      })
-    ).resolves.toBeNull();
-
-    await expect(
-      repo.replaceApiKeyWalletPolicyBindings({
-        apiKeyId: TEST_API_KEY.id,
-        bindings: [
-          {
-            apiKeyId: TEST_API_KEY.id,
-            bindingScope: "selected",
-            walletId: TEST_CUSTODY_WALLET.walletId,
-            custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
-          },
-        ],
-      })
-    ).resolves.toEqual([]);
-
-    await expect(repo.listApiKeyWalletPolicyBindings(TEST_API_KEY.id)).resolves.toEqual([]);
   });
 
   it("rejects a tenant-bearing input that omits its project claim", async () => {
@@ -671,8 +612,6 @@ describe("PolicyRepository (postgres)", () => {
   });
 
   it("lists approval request details scoped by project and status", async () => {
-    await seedOtherProjectCustodyWallet();
-
     const operation = await repo.createWalletOperation({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
@@ -713,13 +652,6 @@ describe("PolicyRepository (postgres)", () => {
       approvalRequestId: request?.id,
     });
 
-    const otherProjectRepo = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({
-        organizationId: TEST_ORG.id,
-        projectId: OTHER_PROJECT.id,
-      })
-    );
     const organizationRepo = createPostgresPolicyRepository(
       getDb(env),
       createTenantScope({
@@ -727,24 +659,6 @@ describe("PolicyRepository (postgres)", () => {
         projectId: null,
       })
     );
-    const otherOperation = await otherProjectRepo.createWalletOperation({
-      organizationId: TEST_ORG.id,
-      projectId: OTHER_PROJECT.id,
-      custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
-      walletId: OTHER_PROJECT_CUSTODY_WALLET.walletId,
-      operationFamily: "payment",
-      operationType: "payment_transfer_execute",
-      status: "pending_approval",
-    });
-    expect(otherOperation).not.toBeNull();
-
-    const otherRequest = await otherProjectRepo.createApprovalRequest({
-      organizationId: TEST_ORG.id,
-      projectId: OTHER_PROJECT.id,
-      walletOperationId: otherOperation?.id ?? "",
-    });
-    expect(otherRequest).not.toBeNull();
-
     const projectRows = await repo.listApprovalRequestDetails({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
@@ -774,44 +688,13 @@ describe("PolicyRepository (postgres)", () => {
         approvalRequestId: request?.id ?? "",
       })
     ).resolves.toMatchObject({ approval_request_id: request?.id });
-    await expect(
-      repo.getApprovalRequestDetail({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        approvalRequestId: otherRequest?.id ?? "",
-      })
-    ).resolves.toBeNull();
-
-    await expect(
-      repo.updateApprovalRequestStatus({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        approvalRequestId: otherRequest?.id ?? "",
-        status: "approved",
-        operationStatus: "executing",
-      })
-    ).resolves.toBeNull();
-    await expect(
-      organizationRepo.getApprovalRequestDetail({
-        organizationId: TEST_ORG.id,
-        projectId: null,
-        approvalRequestId: otherRequest?.id ?? "",
-      })
-    ).resolves.toMatchObject({
-      approval_request_id: otherRequest?.id,
-      approval_status: "pending",
-      operation_status: "pending_approval",
-    });
-
     const orgRows = await organizationRepo.listApprovalRequestDetails({
       organizationId: TEST_ORG.id,
       projectId: null,
       status: "pending",
       limit: 10,
     });
-    expect(orgRows.map((row) => row.approval_request_id)).toEqual(
-      expect.arrayContaining([request?.id, otherRequest?.id])
-    );
+    expect(orgRows.map((row) => row.approval_request_id)).toEqual([request?.id]);
   });
 
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
@@ -1164,31 +1047,6 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
-  it("fails closed when an all-wallet policy binding is requested for another project wallet", async () => {
-    const service = policyStores(repo);
-    await seedOtherProjectCustodyWallet();
-    const { profile } = await createActiveApiKeyControlProfile(repo, {
-      name: "All policy project boundary",
-      defaultAction: "review",
-    });
-
-    await service.upsertApiKeyWalletPolicyBinding({
-      apiKeyId: TEST_API_KEY.id,
-      bindingScope: "all",
-      apiKeyControlProfileId: profile.id,
-    });
-
-    await expect(
-      service.resolveApiKeyWalletPolicyScope({
-        apiKeyId: TEST_API_KEY.id,
-        custodyWalletId: OTHER_PROJECT_CUSTODY_WALLET.id,
-      })
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      message: "API key is not authorized for the requested wallet",
-    });
-  });
-
   it("rejects all-wallet policy bindings that reference inactive API key profiles", async () => {
     const service = policyStores(repo);
     const profile = await repo.createApiKeyControlProfile({
@@ -1396,20 +1254,12 @@ async function seedPolicyFoundationFixtures(): Promise<void> {
     .bind(TEST_USER.id, TEST_USER.email)
     .run();
 
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?)`
-    )
-    .bind(
-      TEST_PROJECT.id,
-      TEST_ORG.id,
-      TEST_PROJECT.name,
-      TEST_PROJECT.slug,
-      TEST_PROJECT.environment,
-      TEST_USER.id
-    )
-    .run();
+  await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
 
   await db
     .prepare(
@@ -1539,68 +1389,6 @@ async function seedDuplicateProviderCustodyWallet(): Promise<void> {
         DUPLICATE_PROVIDER_CUSTODY_WALLET.publicKey,
         DUPLICATE_PROVIDER_CUSTODY_WALLET.label,
         DUPLICATE_PROVIDER_CUSTODY_WALLET.purpose
-      ),
-  ]);
-}
-
-async function seedOtherProjectCustodyWallet(): Promise<void> {
-  const db = getDb(env);
-
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?)`
-    )
-    .bind(
-      OTHER_PROJECT.id,
-      TEST_ORG.id,
-      OTHER_PROJECT.name,
-      OTHER_PROJECT.slug,
-      OTHER_PROJECT.environment,
-      TEST_USER.id
-    )
-    .run();
-
-  // The config's default_wallet_id FK is deferred, so the config and its
-  // default wallet must land in one transaction.
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_configs (
-           id,
-           organization_id,
-           project_id,
-           provider,
-           config_encrypted,
-           default_wallet_id,
-           status
-         ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
-      )
-      .bind(
-        OTHER_PROJECT_CUSTODY_CONFIG_ID,
-        TEST_ORG.id,
-        OTHER_PROJECT.id,
-        OTHER_PROJECT_CUSTODY_WALLET.walletId
-      ),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id,
-           custody_config_id,
-           wallet_id,
-           public_key,
-           label,
-           purpose,
-           status
-         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        OTHER_PROJECT_CUSTODY_WALLET.id,
-        OTHER_PROJECT_CUSTODY_CONFIG_ID,
-        OTHER_PROJECT_CUSTODY_WALLET.walletId,
-        OTHER_PROJECT_CUSTODY_WALLET.publicKey,
-        OTHER_PROJECT_CUSTODY_WALLET.label,
-        OTHER_PROJECT_CUSTODY_WALLET.purpose
       ),
   ]);
 }

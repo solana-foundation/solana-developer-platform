@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   CreateWithdrawalInput,
@@ -10,6 +11,7 @@ import type {
 import { createPostgresPrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_pcw_repo_test";
+const TEST_PRODUCTION_PROJECT_ID = "prj_pcw_repo_production";
 const TEST_INSTANCE_ID = "inst_pcw_1";
 
 /** Fresh reservation per call; the idempotency test below pins the key. */
@@ -67,13 +69,12 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: TEST_PRODUCTION_PROJECT_ID },
+    });
     await seedInstance(TEST_INSTANCE_ID);
 
     repo = createPostgresPrivateChannelWithdrawalRepository(db);
@@ -89,16 +90,6 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
            'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
       )
       .bind(instanceId, TEST_ORG.id, projectId, `https://gateway.example/${instanceId}`)
-      .run();
-  }
-
-  async function seedProject(projectId: string) {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(projectId, TEST_ORG.id, projectId, projectId, TEST_USER.id)
       .run();
   }
 
@@ -213,13 +204,12 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
   });
 
   it("countNonTerminalByInstance counts only in-flight rows for the instance", async () => {
-    await seedProject("prj_pcw_a");
-    await seedProject("prj_pcw_b");
-    await seedInstance("inst_A", "prj_pcw_a");
-    await seedInstance("inst_B", "prj_pcw_b");
-    const inFlight = await repo.createWithdrawal(makeInput({ instanceId: "inst_A" }));
-    const other = await seed({ instanceId: "inst_A" });
-    await repo.createWithdrawal(makeInput({ instanceId: "inst_B" }));
+    await seedInstance("inst_B", TEST_PRODUCTION_PROJECT_ID);
+    const inFlight = await repo.createWithdrawal(makeInput({ instanceId: TEST_INSTANCE_ID }));
+    const other = await seed({ instanceId: TEST_INSTANCE_ID });
+    await repo.createWithdrawal(
+      makeInput({ instanceId: "inst_B", projectId: TEST_PRODUCTION_PROJECT_ID })
+    );
     // Drive one to terminal.
     await repo.updateWithdrawal({ id: other.id, status: "submitted", expectedStatus: "pending" });
     await repo.updateWithdrawal({
@@ -234,7 +224,7 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       expectedStatus: "confirmed",
     });
 
-    expect(await repo.countNonTerminalByInstance("inst_A")).toBe(1);
+    expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(1);
     expect(await repo.countNonTerminalByInstance("inst_B")).toBe(1);
     void inFlight;
   });

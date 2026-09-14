@@ -1,9 +1,8 @@
 import { type Context, Hono, type Next } from "hono";
-import { AppError } from "@/lib/errors";
-import { isDvpEnabled } from "@/lib/feature-flags";
+import { forbidden } from "@/lib/errors";
+import { isMarketsEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
-import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -17,22 +16,18 @@ import {
   listTrades,
   settleTrade,
 } from "./handlers";
-import { extractDvpFundPolicyCandidate, extractDvpTradeActionPolicyCandidate } from "./policy";
 import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
 
 const dvp = new Hono<{ Bindings: Env }>();
 
 /**
- * Router-wide gate: 403 unless both the Markets parent flag and the DvP flag are
- * on. Applied once as middleware so every current and future route inherits it.
+ * Gates every DvP route behind the Markets module flag.
  *
- * Worth knowing when enabling this: the DvP swap program is deployed on devnet
- * only. Turning the flag on against a mainnet cluster produces trades that
- * cannot be created at all, because the program does not exist there (PRO-1798).
+ * The DvP swap program exists on devnet only (PRO-1798).
  */
 async function requireDvpFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isDvpEnabled(c.env)) {
-    throw new AppError("FORBIDDEN", "DvP settlement is not enabled for this environment.");
+  if (!isMarketsEnabled(c.env)) {
+    throw forbidden("Markets is not enabled for this environment.");
   }
   await next();
 }
@@ -71,34 +66,28 @@ dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"),
 
 // Funding ONE side — creator and party funding are the same operation: the
 // right to fund side X is holding a custody wallet whose public key equals
-// that side's party address. Validation precedes policy, and quota follows it:
-// malformed bodies, approval-pending 202s, and policy refusals must not consume
-// the execution quota reserved for an approved attempt.
+// that side's party address. Validation precedes quota so malformed bodies do
+// not consume the execution quota.
 dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(fundDvpTradeSchema),
-  policyGate({ extract: (c) => extractDvpFundPolicyCandidate(c) }),
   meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   fundTrade
 );
 // Settle and cancel are the only two actions the settlement authority can take,
 // and both are irreversible: settle delivers both legs and closes the trade,
-// cancel refunds both and closes it. They go through the policy gate like any
-// other custody spend, so an organization can require approval on a transaction
-// that moves both sides of a trade at once. They are separate operation types
-// because allowing an unwind is not the same as allowing a settlement.
+// cancel refunds both and closes it. DvP actions currently resolve their inputs
+// and execute directly without wallet-policy evaluation.
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),
-  policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "settle") }),
   meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
   requirePermissions("payments:write", "wallets:read"),
-  policyGate({ extract: (c) => extractDvpTradeActionPolicyCandidate(c, "cancel") }),
   meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );

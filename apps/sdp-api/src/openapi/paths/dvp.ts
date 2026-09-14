@@ -2,10 +2,9 @@
  * DvP trade routes.
  *
  * Registered on the INTERNAL document only, deliberately. The routes are real
- * and mounted, but the whole family is behind `MARKETS_ENABLED` + `DVP_ENABLED`
- * and the swap program is deployed on devnet only (PRO-1798), so every
- * environment a customer can reach answers 403. Publishing them would document
- * an endpoint nobody can call. Promoting the family is one line in
+ * and mounted, but the whole family is behind `MARKETS_ENABLED` and the swap
+ * program is deployed on devnet only (PRO-1798). Publishing them would expose
+ * an unsupported public surface. Promoting the family is one line in
  * `registerPublicPaths` plus a `"dvp"` slug in
  * `apps/sdp-docs/scripts/lib/public-openapi.mjs`, and it is a product-policy
  * decision rather than a code one.
@@ -103,7 +102,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     summary: "Fund your leg of a DvP trade",
     operationId: "fundDvpTrade",
     description:
-      "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce. Subject to wallet policy: a request needing approval returns 202.",
+      "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce. DvP actions are not wallet-policy gated.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -112,7 +111,6 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
-      202: { description: "Awaiting policy approval", content: jsonContent(errorResponseSchema) },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
@@ -145,16 +143,12 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
       operationId: action === "settle" ? "settleDvpTrade" : "cancelDvpTrade",
       description:
         action === "settle"
-          ? "Delivers each leg to the other party, refunds any surplus to its depositor, and closes the trade. Requires both legs funded. Only the project's settlement authority can do this, and the action is irreversible. Creates any token accounts settlement requires that do not yet exist — including the surplus-refund accounts, which the program demands even when there is no surplus, because anyone can send tokens to an escrow. Subject to wallet policy: a trade needing approval returns 202 with an approval request rather than settling."
-          : "Refunds each leg to whoever deposited it and closes the trade. Unlike settlement this does not require the trade to be funded — unwinding a half-funded or abandoned trade is what it is for. Only the project's settlement authority can do this, and the action is irreversible. Subject to wallet policy: a cancel needing approval returns 202 rather than executing.",
+          ? "Delivers each leg to the other party, refunds any surplus to its depositor, and closes the trade. Requires both legs funded. Only the project's settlement authority can do this, and the action is irreversible. Creates any token accounts settlement requires that do not yet exist — including the surplus-refund accounts, which the program demands even when there is no surplus, because anyone can send tokens to an escrow. DvP actions are not wallet-policy gated."
+          : "Refunds each leg to whoever deposited it and closes the trade. Unlike settlement this does not require the trade to be funded — unwinding a half-funded or abandoned trade is what it is for. Only the project's settlement authority can do this, and the action is irreversible. DvP actions are not wallet-policy gated.",
       security: [{ apiKeyAuth: [] }],
       request: { headers: projectScopeHeaders, params: tradeIdPathParams },
       responses: {
         200: { description: "Trade closed", content: jsonContent(dvpCloseResponse) },
-        202: {
-          description: "Awaiting policy approval",
-          content: jsonContent(errorResponseSchema),
-        },
         ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
       },
     });

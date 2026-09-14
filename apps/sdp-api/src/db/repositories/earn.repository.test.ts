@@ -8,6 +8,11 @@ import {
 } from "@/services/earn-withdrawal-ledger.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   EarnProviderWalletRow,
@@ -27,7 +32,6 @@ import {
 } from "./earn-movements.repository";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
-const OTHER_PROJECT_ID = "prj_earn_repo_test_other";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const DESTINATION = "4Nd1mYzL3T2fLGV1kZQcQq5o5FQMYuu1v6oCTKW6PYt5";
 // Bulk catalogue syncs land many rows on one sdp_iso_now() value, so every
@@ -37,6 +41,7 @@ const SHARED_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
 describe("EarnRepository (postgres)", () => {
   let repo: EarnRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -70,15 +75,12 @@ describe("EarnRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     repo = createPostgresEarnRepository(db);
   });
@@ -936,13 +938,15 @@ describe("EarnRepository (postgres)", () => {
         )
         .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
         .run();
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Sibling Org Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(OTHER_ORG_PROJECT_ID, OTHER_ORG.id, OTHER_ORG_PROJECT_ID, TEST_USER.id)
-        .run();
+      await seedDefaultProjects(db, {
+        organizationId: OTHER_ORG.id,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: {
+          sandbox: OTHER_ORG_PROJECT_ID,
+          production: `${OTHER_ORG_PROJECT_ID}_production`,
+        },
+      });
     }
 
     function listPrograms(
@@ -1182,18 +1186,17 @@ describe("EarnRepository (postgres)", () => {
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
-      // A sibling project may hold its own program, but it belongs to THAT
-      // project's collection: the project is a boundary on the list exactly as
-      // it is on every per-program route (HOO-1563).
-      await expect(seedProviderWallet({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        project_id: OTHER_PROJECT_ID,
-      });
-      await expect(listPrograms({ projectId: OTHER_PROJECT_ID })).resolves.toMatchObject({
-        total: 1,
-      });
+      const { total } = await listPrograms({ provider: "ground" });
+      expect(total).toBe(2);
+    });
 
-      const { total } = await listPrograms();
-      expect(total).toBe(3);
+    it("lists programs only for their project", async () => {
+      await seedProviderWallet();
+      await expectProjectScoped(
+        (projectId) => listPrograms({ projectId }),
+        { own: projects.sandbox, other: projects.production },
+        ({ total }) => total === 0
+      );
     });
 
     it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {

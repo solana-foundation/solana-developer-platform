@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { MuralWebhookProcessor } from "./mural";
 import type { AppContext } from "./processor";
@@ -156,20 +157,14 @@ describe("MuralWebhookProcessor.process", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(userId, "mural-webhook@example.com", 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          projectId,
-          organizationId,
-          "Mural Webhook Project",
-          "mural-webhook-project",
-          "sandbox",
-          "active",
-          userId
-        ),
+    ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId,
+      createdBy: userId,
+      members: [],
+      ids: { sandbox: projectId, production: `${projectId}_production` },
+    });
+    await getDb(env).batch([
       getDb(env)
         .prepare(
           `INSERT INTO counterparties (

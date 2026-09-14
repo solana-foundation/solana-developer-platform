@@ -52,6 +52,10 @@ export interface DvpLegFundingClaimRepository {
    * there is no read-then-write window to lose.
    */
   claim(input: DvpLegFundingClaimInsert): Promise<boolean>;
+  /** Replaces an unbroadcast claim's signature after sponsorship. */
+  rebindSignature(tradeId: string, side: "a" | "b", from: string, to: string): Promise<boolean>;
+  /** Checks whether an exact claim is still held. */
+  hasClaim(tradeId: string, side: "a" | "b", signature: string): Promise<boolean>;
   /**
    * Releases a claim whose broadcast was definitively rejected.
    *
@@ -150,6 +154,31 @@ export function createPostgresDvpLegFundingClaimRepository(
         )
         .bind(tradeId, side, signature)
         .run();
+    },
+
+    async rebindSignature(tradeId, side, from, to) {
+      const result = await db
+        .prepare(
+          `UPDATE dvp_leg_funding_claims
+              SET signature = ?, updated_at = sdp_iso_now()
+            WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NULL
+            RETURNING trade_id`
+        )
+        .bind(to, tradeId, side, from)
+        .first<{ trade_id: string }>();
+      return result !== null;
+    },
+
+    async hasClaim(tradeId, side, signature) {
+      const result = await db
+        .prepare(
+          `SELECT 1 AS present
+             FROM dvp_leg_funding_claims
+            WHERE trade_id = ? AND side = ? AND signature = ?`
+        )
+        .bind(tradeId, side, signature)
+        .first<{ present: number }>();
+      return result !== null;
     },
 
     async recordFundingTx(tradeId, side, signature) {

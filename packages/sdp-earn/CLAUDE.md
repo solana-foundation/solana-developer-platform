@@ -254,6 +254,17 @@ page it links is fetchable as raw markdown):
   404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` there and
   sandbox rows render no rate. Computing one would mean blending devnet Klend
   reserve rates (an SDK-sized job) for a number that is ≈0 anyway.
+- **The shelf quotes the TRAILING 7d rate, never the spot rate.** The metrics
+  row carries both: `apy` is the instantaneous blended rate and tracks Klend
+  reserve utilization minute to minute, `apy7d` is the trailing week. On
+  2026-09-10 the Main Market USDC reserve hit ~97% utilization and `apy` read
+  18-23% on six USDC vaults whose `apy7d` sat at 3-7%, which fired the
+  PRO-1867 anomaly alert 15 times on a number that was true for the hour and
+  useless as a yield quote. So `currentApy` is `apy7d` at both call sites
+  (`distillKaminoVault` and `listStrategyMetrics`), the spot figure rides along
+  as `riskMetadata.spotApy` for a future "current" column, and a missing
+  `apy7d` is "no rate", not a fallback to `apy` (PRO-1922). Kamino's own vault
+  page headline is a trailing figure too; do not quote hotter than the provider.
 - **The registry is permissionless**, so `GET /kvaults/vaults` is a census of
   everything ever created — 173 vaults, of which ~90 stablecoin ones are dust or
   literal test vaults (`testfail4`, `vkjm_test`). `KAMINO_MIN_TVL_USD` ($100k)

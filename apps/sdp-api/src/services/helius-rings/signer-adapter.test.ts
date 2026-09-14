@@ -196,13 +196,17 @@ describe("signRingsOuterTransaction", () => {
     });
 
     /**
-     * Structural type guards are not capability guards: `utila` has a
+     * Two refusal classes, one gate. Cannot sign the bytes: `utila` has a
      * `signMessages` that throws, so it satisfies `isMessagePartialSigner` and
-     * would surface as a *retryable* failure and retry forever. `coinbase_cdp`
-     * UTF-8-decodes the payload, and the derivation envelope starts with 0xff.
+     * would surface as a *retryable* failure and retry forever; `coinbase_cdp`
+     * UTF-8-decodes the payload, and the derivation envelope starts with 0xff;
+     * `anchorage` does no signing. Cannot sign them reproducibly: `fireblocks`,
+     * `para` and `dfns` are MPC signers whose EdDSA nonce is random by design
+     * (RFC 9591), so the signature-rooted shielded keys change on every call;
+     * `ibm_haven` is unverified.
      */
-    it.each(["coinbase_cdp", "utila", "anchorage"])(
-      "refuses %s, which cannot sign raw messages",
+    it.each(["coinbase_cdp", "utila", "anchorage", "fireblocks", "para", "dfns", "ibm_haven"])(
+      "refuses %s, which cannot reproducibly sign raw messages",
       async (provider) => {
         findActiveWalletByPublicKey.mockResolvedValue({
           id: "cw_owner",
@@ -212,10 +216,43 @@ describe("signRingsOuterTransaction", () => {
 
         const error = await rejection(signRingsOuterTransaction(signInput()));
 
-        // Non-retryable: no retry teaches a provider to sign raw bytes.
-        expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
-        expect((error as Error).message).toContain(provider);
+        // Its own code, not signer_failed: nothing signed and nothing broke, so
+        // this must not read as an outage. Non-retryable, because no retry
+        // changes how a provider signs.
+        expect(error).toMatchObject({ failureCode: "provider_unsupported", retryable: false });
         expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+
+        // The message is the remedy: an operator has to move the wallet, so it
+        // names the provider refused and the ones that would work.
+        const message = (error as Error).message;
+        expect(message).toContain(provider);
+        for (const supported of ["local", "privy", "turnkey"]) {
+          expect(message).toContain(supported);
+        }
+      }
+    );
+
+    // The allowlist's other half: the providers verified to sign the derivation
+    // message reproducibly (privy/turnkey by live probe, local by RFC 8032)
+    // must keep resolving a signer.
+    it.each(["local", "privy", "turnkey"])(
+      "signs through a %s custody wallet",
+      async (provider) => {
+        const signature = new Uint8Array(64).fill(3) as SignatureBytes;
+        findActiveWalletByPublicKey.mockResolvedValue({
+          id: "cw_owner",
+          publicKey: FEE_PAYER,
+          provider,
+        });
+        createOrgSignerForCustodyWallet.mockResolvedValue(
+          partialSigner(async () => [{ [FEE_PAYER]: signature }])
+        );
+
+        const signed = await signRingsOuterTransaction(signInput());
+
+        expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(
+          signature
+        );
       }
     );
 
@@ -305,7 +342,10 @@ describe("signRingsMessage", () => {
     expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
   });
 
-  it("refuses a provider that cannot sign raw messages", async () => {
+  // The gate on the path that actually roots the keys: this is the call whose
+  // signature becomes the shielded identity, so a provider that cannot serve it
+  // has to be refused here and not only on the transaction path.
+  it("refuses a provider that cannot reproducibly sign raw messages", async () => {
     findActiveWalletByPublicKey.mockResolvedValue({
       id: "cw_owner",
       publicKey: FEE_PAYER,
@@ -314,7 +354,8 @@ describe("signRingsMessage", () => {
 
     const error = await rejection(signRingsMessage(messageInput()));
 
-    expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+    expect(error).toMatchObject({ failureCode: "provider_unsupported", retryable: false });
+    expect((error as Error).message).toContain("coinbase_cdp");
   });
 });
 

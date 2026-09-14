@@ -3,6 +3,7 @@ import { runWithSystemDatabaseIdentity } from "@/db";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -49,21 +50,6 @@ import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
-import {
-  approveWorkflowExecution,
-  cancelWorkflowExecution,
-  listWorkflowExecutions,
-  retryWorkflowExecution,
-} from "./handlers/workflow-executions";
-import {
-  createWorkflow,
-  createWorkflowSchema,
-  deleteWorkflow,
-  listWorkflowCatalog,
-  listWorkflows,
-  updateWorkflow,
-  updateWorkflowSchema,
-} from "./handlers/workflows";
 import type { AppContext } from "./helpers";
 import {
   addAllowlistSchema,
@@ -81,6 +67,9 @@ import {
   updateAuthoritySchema,
   updateTokenSchema,
 } from "./schemas";
+
+export const ISSUANCE_SUPPLY_QUOTA = { name: "issuance-supply", actorMax: 10, orgMax: 40 };
+export const ISSUANCE_PREPARE_QUOTA = { name: "issuance-prepare", actorMax: 30, orgMax: 120 };
 
 const issuance = new Hono<{ Bindings: Env }>();
 
@@ -123,6 +112,7 @@ issuance.get("/tokens/:tokenId/audit", requirePermissions("tokens:read"), getAss
 issuance.post(
   "/tokens/:tokenId/supply/refresh",
   requirePermissions("tokens:read"),
+  meteredQuota(ISSUANCE_SUPPLY_QUOTA),
   refreshTokenSupply
 );
 issuance.patch(
@@ -143,6 +133,7 @@ issuance.post(
   "/tokens/:tokenId/deploy/prepare",
   requirePermissions("tokens:write"),
   validateBody(legacyDeployTokenSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeploy
 );
 // Confirmation step for the non-custodial deploy flow: records the mint after
@@ -161,6 +152,7 @@ issuance.post(
   "/tokens/:tokenId/deploy/prepare-metadata",
   requirePermissions("tokens:write"),
   validateBody(legacyDeployTokenSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeployMetadata
 );
 
@@ -169,6 +161,7 @@ issuance.post(
   "/tokens/:tokenId/mint/prepare",
   requirePermissions("tokens:write"),
   validateBody(mintSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareMint
 );
 issuance.post(
@@ -188,6 +181,7 @@ issuance.post(
   "/tokens/:tokenId/burn/prepare",
   requirePermissions("tokens:write"),
   validateBody(burnSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareBurn
 );
 issuance.post(
@@ -203,6 +197,7 @@ issuance.post(
   "/tokens/:tokenId/seize/prepare",
   requirePermissions("tokens:admin"),
   validateBody(seizeSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareSeize
 );
 issuance.post(
@@ -218,6 +213,7 @@ issuance.post(
   "/tokens/:tokenId/force-burn/prepare",
   requirePermissions("tokens:admin"),
   validateBody(forceBurnSchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareForceBurn
 );
 issuance.post(
@@ -233,6 +229,7 @@ issuance.post(
   "/tokens/:tokenId/authority/prepare",
   requirePermissions("tokens:admin"),
   validateBody(updateAuthoritySchema),
+  meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareUpdateAuthority
 );
 issuance.post(
@@ -297,10 +294,7 @@ issuance.delete(
   removeAllowlistEntry
 );
 
-// Holders + workflows are the asset-profiles feature surface, and the cron that drains
-// workflow executions is itself flag-gated. Leaving the enqueue side open while the
-// drain side is off would let a flag-off deployment silently accumulate a backlog that
-// detonates against weeks-old payloads the moment the flag flips.
+// Holders are the asset-profiles feature surface.
 async function requireAssetProfilesFeature(c: AppContext, next: Next) {
   if (!isAssetProfilesEnabled(c.env)) {
     throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");
@@ -321,58 +315,6 @@ issuance.post(
   requirePermissions("tokens:write"),
   validateBody(enrollHolderSchema),
   enrollHolder
-);
-
-issuance.use("/tokens/:tokenId/workflows", requireAssetProfilesFeature);
-issuance.use("/tokens/:tokenId/workflows/*", requireAssetProfilesFeature);
-
-// Workflow builder — catalog + rules (register static paths before :workflowId)
-issuance.get(
-  "/tokens/:tokenId/workflows/catalog",
-  requirePermissions("tokens:read"),
-  listWorkflowCatalog
-);
-issuance.get(
-  "/tokens/:tokenId/workflows/executions",
-  requirePermissions("tokens:read"),
-  listWorkflowExecutions
-);
-// Decisions and rule writes carry `tokens:write` as the floor; the handler then raises
-// the bar to `tokens:admin` for any rule whose action tier is sensitive or irreversible
-// (see workflow-authz.ts). Without that second check, workflows would be a way around
-// the `tokens:admin` the direct seize/freeze/pause routes require.
-issuance.post(
-  "/tokens/:tokenId/workflows/executions/:executionId/approve",
-  requirePermissions("tokens:write"),
-  approveWorkflowExecution
-);
-issuance.post(
-  "/tokens/:tokenId/workflows/executions/:executionId/retry",
-  requirePermissions("tokens:write"),
-  retryWorkflowExecution
-);
-issuance.post(
-  "/tokens/:tokenId/workflows/executions/:executionId/reject",
-  requirePermissions("tokens:write"),
-  cancelWorkflowExecution
-);
-issuance.get("/tokens/:tokenId/workflows", requirePermissions("tokens:read"), listWorkflows);
-issuance.post(
-  "/tokens/:tokenId/workflows",
-  requirePermissions("tokens:write"),
-  validateBody(createWorkflowSchema),
-  createWorkflow
-);
-issuance.patch(
-  "/tokens/:tokenId/workflows/:workflowId",
-  requirePermissions("tokens:write"),
-  validateBody(updateWorkflowSchema),
-  updateWorkflow
-);
-issuance.delete(
-  "/tokens/:tokenId/workflows/:workflowId",
-  requirePermissions("tokens:write"),
-  deleteWorkflow
 );
 
 export default issuance;

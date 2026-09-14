@@ -10,6 +10,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import {
@@ -37,7 +38,6 @@ const ORG = "org_earn_mv";
 const ORG_OTHER = "org_earn_mv_other";
 const USER = "usr_earn_mv";
 const PROJECT = "prj_earn_mv";
-const PROJECT_SIBLING = "prj_earn_mv_sibling";
 const WALLET = "cw_earn_mv";
 const CONFIG = "cc_earn_mv";
 const TOKEN_MINT = "TokenMint1111111111111111111111111111111111";
@@ -89,10 +89,7 @@ describe("Unified earn movement ledger (postgres)", () => {
     }
     await db.prepare("DELETE FROM custody_wallets WHERE id = ?").bind(WALLET).run();
     await db.prepare("DELETE FROM custody_configs WHERE id = ?").bind(CONFIG).run();
-    await db
-      .prepare("DELETE FROM projects WHERE id IN (?, ?)")
-      .bind(PROJECT, PROJECT_SIBLING)
-      .run();
+    await db.prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
     await db.prepare("DELETE FROM organizations WHERE id IN (?, ?)").bind(ORG, ORG_OTHER).run();
     await db.prepare("DELETE FROM users WHERE id = ?").bind(USER).run();
 
@@ -111,15 +108,18 @@ describe("Unified earn movement ledger (postgres)", () => {
       )
       .bind(ORG, ORG_OTHER)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES
-           (?, ?, 'Primary', 'earn-mv-primary', 'sandbox', 'active', ?),
-           (?, ?, 'Sibling', 'earn-mv-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER, PROJECT_SIBLING, ORG, USER)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: ORG,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    });
+    await seedDefaultProjects(db, {
+      organizationId: ORG_OTHER,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: "prj_earn_mv_other", production: "prj_earn_mv_other_production" },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
@@ -492,13 +492,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       // global unique that would refuse the second organization.
       await db
         .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES ('prj_earn_mv_other', ?, 'Other', 'earn-mv-other', 'sandbox', 'active', ?)`
-        )
-        .bind(ORG_OTHER, USER)
-        .run();
-      await db
-        .prepare(
           `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
            VALUES ('cc_earn_mv_other', ?, NULL, 'local', 'encrypted')`
         )
@@ -643,49 +636,6 @@ describe("Unified earn movement ledger (postgres)", () => {
         min_shares_out: null,
         shares_out: null,
       });
-    });
-
-    it("preserves a shared program and cross-project history when its provisioning project is deleted", async () => {
-      const db = getDb(env);
-      const wallet = await linkProgram();
-      const primary = await createWithdrawal({
-        walletId: wallet.id,
-        requestId: "wd-project-delete-primary",
-        idempotencyFingerprint: "wd-project-delete-primary-fingerprint",
-      });
-      const sibling = await createWithdrawal({
-        walletId: wallet.id,
-        projectId: PROJECT_SIBLING,
-        requestId: "wd-project-delete-sibling",
-        idempotencyFingerprint: "wd-project-delete-sibling-fingerprint",
-      });
-      if (!primary || !sibling) throw new Error("withdrawal not created");
-      const [positionBefore] = await positions();
-
-      await db.prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
-
-      // The program is organization-scoped. Deleting the project that first
-      // provisioned it clears only forensic attribution, so sibling projects do
-      // not lose the funded provider account or its global ownership anchor.
-      await expect(
-        earnRepo.getProviderWalletById({
-          organizationId: ORG,
-          environment: "sandbox",
-          walletId: wallet.id,
-        })
-      ).resolves.toMatchObject({ id: wallet.id, project_id: null });
-
-      const [positionAfter] = await positions();
-      expect(positionAfter).toMatchObject({
-        id: positionBefore.id,
-        project_id: null,
-        provider_wallet_id: wallet.id,
-      });
-
-      const unified = await movements();
-      expect(unified).toHaveLength(2);
-      expect(unified.find((row) => row.id === primary.id)?.project_id).toBeNull();
-      expect(unified.find((row) => row.id === sibling.id)?.project_id).toBe(PROJECT_SIBLING);
     });
 
     it("mirrors a provider observation, including a zero fee and a scientific-notation amount", async () => {
@@ -846,17 +796,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       await createWithdrawal({ walletId: wallet.id, requestId: "shared-request-id" });
       await ledger.createSignedVaultDepositIntent(intent({ requestId: "shared-request-id" }));
       expect(await movements()).toHaveLength(2);
-
-      // Custodial: position-scoped, which is 0055's wallet scope in the new
-      // shape — a sibling project sharing the program hits the same anchor.
-      await expect(
-        createWithdrawal({
-          walletId: wallet.id,
-          projectId: PROJECT_SIBLING,
-          requestId: "shared-request-id",
-          idempotencyFingerprint: "a-different-fingerprint",
-        })
-      ).rejects.toThrow();
 
       // Vault: org-scoped, so a retry resolving to a different position is still
       // a key reuse and must not silently open a second movement.

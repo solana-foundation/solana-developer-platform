@@ -33,6 +33,7 @@ import {
 } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -98,20 +99,14 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -147,28 +142,6 @@ async function seedSessionAuth(): Promise<void> {
          VALUES (?, ?, ?, 'member', 'active')`
       )
       .bind("om_earn_routes_session", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_routes_sandbox", TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_routes_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
     getDb(env)
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)

@@ -2086,6 +2086,11 @@ const GATEWAY_FAILURES: Record<HeliusRingsErrorCode, { code: FailureCode; retrya
   // The caller asked to move more than the wallet holds. Their input, and a
   // second attempt with the same amount fails the same way.
   insufficient_balance: { code: "insufficient_balance", retryable: false },
+  // Kept as itself rather than folded into invalid_input: an operation on a
+  // wallet whose provider left the allowlist fails at material derivation,
+  // which is a gateway failure, so this is the only place the row can learn
+  // that custody is the reason. Nothing recovers it but moving the wallet.
+  provider_unsupported: { code: "provider_unsupported", retryable: false },
   // Reserved for post-sign recovery, where persisted signed bytes may already
   // have settled and a fresh operation could pay twice.
   manual_reconciliation_required: {

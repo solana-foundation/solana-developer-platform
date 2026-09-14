@@ -143,13 +143,29 @@ const ADAPTER_FAILURE_MESSAGES = {
   // provisioning can proceed.
   manual_reconciliation_required:
     "the Rings registration transaction was rejected by simulation and never broadcast; verify the wallet owner's balance and reprovision",
-} as const satisfies Record<RingsAdapterError["failureCode"], string>;
+  // `provider_unsupported` is deliberately absent: it is the one adapter
+  // failure whose own message is written for the operator, and replacing it
+  // with a fixed string here would drop the provider name and the remedy.
+} as const satisfies Record<
+  Exclude<RingsAdapterError["failureCode"], "provider_unsupported">,
+  string
+>;
 
 async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
     if (!(error instanceof RingsAdapterError)) throw error;
+    if (error.failureCode === "provider_unsupported") {
+      // Code and message both pass through. The message, because a caller
+      // cannot act on "custody could not sign" without being told which
+      // provider and what it lacks — and this text is built in this codebase
+      // and redacted by the error constructor, so no upstream string escapes.
+      // The code, because derivation failures reach the operation row through
+      // this boundary, and collapsing to invalid_input would file a custody
+      // problem as a malformed request.
+      throw new HeliusRingsError("provider_unsupported", error.message);
+    }
     throw new HeliusRingsError(
       error.retryable ? "gateway_unavailable" : "invalid_input",
       ADAPTER_FAILURE_MESSAGES[error.failureCode]

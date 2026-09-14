@@ -395,7 +395,7 @@
       "columnActorType": "Type",
       "columnStatus": "Status",
       "columnTime": "Time",
-      "actorWorkflow": "Workflow",
+      "actorSystem": "System",
       "actorApiKey": "API key",
       "actorUser": "Team member",
       "statusSuccess": "Success",

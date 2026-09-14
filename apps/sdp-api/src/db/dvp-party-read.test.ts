@@ -23,6 +23,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithoutDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const AGENT_ORG = "org_dvp_party_agent";
@@ -67,14 +68,12 @@ async function seed(): Promise<void> {
       )
       .bind(org, slug, slug)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'p', ?, 'sandbox', 'active', ?)
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(project, org, project, USER_ID)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: org,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: project, production: `${project}_production` },
+    });
   }
 
   // A wallet is reachable from its organization through its custody config,

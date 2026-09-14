@@ -7,6 +7,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -109,25 +110,6 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
   return { app, token };
 }
 
-async function seedProject(projectId: string, slug: string): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(projectId, ORGANIZATION_ID, slug, slug, USER_ID),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind(`pm_${slug}`, projectId, USER_ID),
-  ]);
-}
-
 async function seedActor(): Promise<void> {
   const db = getDb(env);
   await db.batch([
@@ -179,7 +161,12 @@ async function seedActor(): Promise<void> {
       )
       .bind("mem_provider_credential_installation", ORGANIZATION_ID, USER_ID),
   ]);
-  await seedProject(PROJECT_ID, "provider-credential-installation");
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 async function seedPendingInstallation(
@@ -1429,8 +1416,7 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("allows the same Privy account fingerprint in another Project", async () => {
-    const otherProjectId = "prj_provider_credential_installation_other";
-    await seedProject(otherProjectId, "provider-credential-installation-other");
+    const otherProjectId = `${PROJECT_ID}_production`;
     await seedActiveFingerprintConnection({
       projectId: otherProjectId,
       credentialId: "pcred_existing_privy_other_project",
@@ -1505,9 +1491,8 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("does not enumerate Connections across Projects or before authentication", async () => {
-    const otherProjectId = "prj_provider_credential_installation_hidden";
+    const otherProjectId = `${PROJECT_ID}_production`;
     const otherConnectionId = "cconn_provider_credential_installation_hidden";
-    await seedProject(otherProjectId, "provider-credential-installation-hidden");
     await seedPendingInstallation({
       projectId: otherProjectId,
       credentialId: "pcred_provider_credential_installation_hidden",

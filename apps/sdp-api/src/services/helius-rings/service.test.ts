@@ -44,6 +44,7 @@ import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
 import { type RingsOuterTransactionPolicyInput, UnconfiguredRingsGateway } from "./gateway";
@@ -274,13 +275,12 @@ describe("HeliusRingsService", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     const credentialId = "pcred_hrs_service_test";
     const credential = await new ProviderCredentialStore(db).insertCredential({
@@ -1079,6 +1079,30 @@ describe("HeliusRingsService", () => {
       // `gateway_unavailable` it had to borrow before 0067 added this one.
       expect(operation.failure).toMatchObject({ code: "config_error", retryable: false });
       expect(operation.failure?.message).toContain("Helius Rings setup is required");
+    });
+
+    // A wallet provisioned before its custody provider left the raw-message
+    // allowlist fails here, at material derivation — which is a gateway
+    // failure, so this boundary is the only place the row can learn that
+    // custody is the reason. Folded into `invalid_input` it would read as a
+    // malformed request and send an operator to rewrite the amount.
+    it("records an unsupported custody provider as itself, not as bad input", async () => {
+      const gateway = new InMemoryRingsGateway();
+      const reason =
+        "custody provider para cannot back a Rings private wallet: providers that do: local, privy, turnkey.";
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("provider_unsupported", reason));
+
+      const operation = await service({ gateway }).prepareOperation(
+        operationInput({ clientNonce: "nonce-provider-unsupported" }),
+        actorContext
+      );
+
+      expect(operation.failure).toMatchObject({
+        code: "provider_unsupported",
+        retryable: false,
+      });
+      expect(operation.failure?.message).toBe(reason);
     });
 
     it("resends the persisted bytes when resumed in submitted", async () => {

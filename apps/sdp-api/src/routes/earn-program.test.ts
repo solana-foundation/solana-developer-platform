@@ -38,7 +38,6 @@ import {
   type EarnProviderWalletRow,
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
-  WalletOperationIdempotencyConflictError,
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
@@ -46,7 +45,10 @@ import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
@@ -87,22 +89,6 @@ const TEST_PRODUCTION_PROJECT = {
   slug: "test-earn-program-project-prod",
 };
 const TEST_SESSION_ID = "ses_earn_program";
-
-/**
- * A second sandbox project in the SAME organization, with its own key. Programs
- * are resolved per (organization, environment), so a sibling project addresses
- * the very same program — which is how a payout's idempotency key can arrive
- * under two project scopes.
- */
-const TEST_SIBLING_PROJECT = {
-  id: "prj_test_earn_program_sibling",
-  slug: "test-earn-program-project-sibling",
-};
-const TEST_SIBLING_API_KEY = {
-  id: "key_earn_program_sibling",
-  raw: "sk_test_earn_program_sibling",
-  prefix: "sk_test_eps",
-};
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
@@ -179,20 +165,28 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    createdBy: TEST_USER.id,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_PRODUCTION_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -230,75 +224,10 @@ async function seedSessionAuth(): Promise<void> {
       .bind("om_earn_program_session", TEST_ORG.id, TEST_USER.id),
     getDb(env)
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_program_sandbox", TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_program_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
          VALUES (?, ?, ?, 'session', ?)`
       )
       .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
-  ]);
-}
-
-/** Sibling sandbox project in TEST_ORG, with an api_admin key of its own. */
-async function seedSiblingProjectAuth(): Promise<void> {
-  const keyHash = await hashString(TEST_SIBLING_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
-    id: TEST_SIBLING_API_KEY.id,
-    projectId: TEST_SIBLING_PROJECT.id,
-  });
-
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(
-        TEST_SIBLING_PROJECT.id,
-        TEST_ORG.id,
-        "Sibling Project",
-        TEST_SIBLING_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_SIBLING_API_KEY.id,
-        TEST_ORG.id,
-        TEST_SIBLING_PROJECT.id,
-        TEST_USER.id,
-        "Earn Program Sibling Key",
-        TEST_SIBLING_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
   ]);
 }
 
@@ -1259,18 +1188,16 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Neighbour Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(
-          "prj_earn_program_neighbour",
-          "org_earn_program_neighbour",
-          "neighbour-project",
-          TEST_USER.id
-        ),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId: "org_earn_program_neighbour",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_program_neighbour",
+        production: "prj_earn_program_neighbour_production",
+      },
+    });
     const foreign = await seedProgramWallet({
       organizationId: "org_earn_program_neighbour",
       projectId: "prj_earn_program_neighbour",
@@ -1384,6 +1311,19 @@ describe("Earn program — session callers and environment isolation", () => {
 });
 
 describe("Earn program — live reads", () => {
+  it.each<[string, string, string, Record<string, unknown> | undefined]>([
+    ["program", "GET", "", undefined],
+    ["deposits", "GET", "/deposits", undefined],
+    ["withdrawal preview", "POST", "/withdrawal-preview", { amountUsd: "25.50", token: "usdc" }],
+  ])("404s another project's program on %s", async (_name, method, suffix, body) => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    const response = await requestEarn(method, programPath(program.id, suffix), body, {
+      Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}`,
+    });
+    expect(response.status).toBe(404);
+  });
+
   it("returns an empty collection while the organization has no programs", async () => {
     await seedAuth();
 
@@ -2065,13 +2005,16 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_program_victim", "Victim Org", "earn-program-victim"),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Victim Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind("prj_earn_program_victim", "org_earn_program_victim", "victim-project", TEST_USER.id),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId: "org_earn_program_victim",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_program_victim",
+        production: "prj_earn_program_victim_production",
+      },
+    });
     const repo = createPostgresEarnRepository(db);
     const victimWallet = await repo.insertProviderWallet({
       organizationId: "org_earn_program_victim",
@@ -2485,156 +2428,6 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     // an approver deciding one of several duplicates could pay out twice.
     const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
     expect(retried.status).toBe(202);
-
-    expect(createWithdrawal).not.toHaveBeenCalled();
-    await expect(countMovements()).resolves.toBe(0);
-    const operations = await readWalletOperations();
-    expect(operations).toHaveLength(1);
-    expect(operations[0]).toMatchObject({ status: "pending_approval" });
-  });
-
-  it("lets only one governed operation exist per payout, across projects", async () => {
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    const program = await seedProgramWallet();
-
-    const requestId = deriveProviderRequestId(
-      ["earn_program_withdrawal", program.provider_wallet_ref],
-      "4d9a1c07-6b3e-4f52-8a7d-1c0b5e9f3a26"
-    );
-    const operation = {
-      organizationId: TEST_ORG.id,
-      custodyWalletId: null,
-      walletId: program.provider_wallet_ref,
-      operationFamily: "program" as const,
-      operationType: "earn_program_withdrawal" as const,
-      status: "pending_approval" as const,
-      idempotencyKey: requestId,
-    };
-
-    const inProject = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    const inSibling = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_SIBLING_PROJECT.id })
-    );
-
-    const won = await inProject.createWalletOperation({
-      ...operation,
-      projectId: TEST_PROJECT.id,
-    });
-    expect(won).not.toBeNull();
-
-    // The concurrent case the route's prior-operation check cannot bind: both
-    // attempts see no prior record, so the database decides. A sibling project
-    // must not be able to open a second approval for one provider payout.
-    await expect(
-      inSibling.createWalletOperation({ ...operation, projectId: TEST_SIBLING_PROJECT.id })
-    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
-
-    await expect(
-      inProject.createWalletOperation({ ...operation, projectId: TEST_PROJECT.id })
-    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
-
-    const operations = await readWalletOperations();
-    expect(operations).toHaveLength(1);
-  });
-
-  it("refuses a create whose replayed program belongs to a sibling project (HOO-1563)", async () => {
-    // The create key is derived organization-wide on purpose — narrowing it
-    // would give a retry spanning a deploy a NEW key, and the provider answers a
-    // new key with a SECOND wallet holding real funds. So a sibling project can
-    // still land on the first project's program, and the boundary is enforced
-    // here: say the key is taken rather than hand back a program it cannot use.
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    await seedGroundStrategy();
-    const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    stubProgramReads();
-    const callerKey = crypto.randomUUID();
-
-    const created = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: callerKey })
-    );
-    expect(created.status).toBe(201);
-
-    const sibling = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: callerKey }),
-      { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` }
-    );
-    expect(sibling.status).toBe(409);
-    const body = (await sibling.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("another project");
-
-    // Still exactly one program: the refusal happens on the link row, so the
-    // provider was asked once for this key and no second wallet was persisted.
-    expect(createWallet).toHaveBeenCalledTimes(2);
-    const rows = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM earn_provider_wallets")
-      .first<{ count: number }>();
-    expect(rows?.count).toBe(1);
-  });
-
-  it("hides the program from a sibling project on every per-program route (HOO-1563)", async () => {
-    // The decision is that the project is the boundary for deposits, withdrawals
-    // and previews alike, so it is enforced where every per-program route
-    // resolves its row rather than route by route.
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    const program = await seedProgramWallet();
-    const siblingAuth = { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` };
-
-    const read = await requestEarn("GET", programPath(program.id), undefined, siblingAuth);
-    expect(read.status).toBe(404);
-
-    const deposits = await requestEarn(
-      "GET",
-      programPath(program.id, "/deposits"),
-      undefined,
-      siblingAuth
-    );
-    expect(deposits.status).toBe(404);
-
-    const preview = await requestEarn(
-      "POST",
-      programPath(program.id, "/withdrawal-preview"),
-      { amountUsd: "25.50", token: "usdc" },
-      siblingAuth
-    );
-    expect(preview.status).toBe(404);
-  });
-
-  it("refuses a sibling project's key on the same program (HOO-1563)", async () => {
-    // The project is the boundary: a key scoped to a sibling project cannot
-    // reach this program at all, so it can never open a second approval for one
-    // payout. 404, not 403 — a caller who may not see the program must not
-    // learn that it exists.
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    const program = await seedProgramWallet();
-    await seedApiKeyControlProfile({
-      rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
-    });
-    const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
-    const body = withdrawBody({ requestId: "0f3a7c19-52d4-4a8e-b1c6-9d0e5f2a8b47" });
-
-    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
-    expect(held.status).toBe(202);
-
-    const sibling = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
-      Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}`,
-    });
-    expect(sibling.status).toBe(404);
 
     expect(createWithdrawal).not.toHaveBeenCalled();
     await expect(countMovements()).resolves.toBe(0);

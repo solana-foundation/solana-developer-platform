@@ -44,6 +44,7 @@ const dvpTradeRowSchema = z.object({
   counterparty_account_id_b: z.string().nullable(),
   status: z.enum(DVP_TRADE_STATUSES),
   observed_at: z.string().nullable(),
+  closed_at: z.string().nullable(),
   idempotency_key: z.string().nullable(),
   idempotency_fingerprint: z.string().nullable(),
   create_signature: z.string().nullable(),
@@ -110,6 +111,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
 
     status: parsed.status,
     observedAt: parsed.observed_at,
+    closedAt: parsed.closed_at,
     idempotencyKey: parsed.idempotency_key,
     idempotencyFingerprint: parsed.idempotency_fingerprint,
     createSignature: parsed.create_signature === null ? null : signature(parsed.create_signature),
@@ -132,7 +134,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
-         status, observed_at,
+         status, observed_at, closed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
          close_resolution_attempts, close_resolution_after,
@@ -344,7 +346,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
                   close_resolution_attempts = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN 0 ELSE close_resolution_attempts END,
                   close_resolution_after = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN NULL ELSE close_resolution_after END,
-                  closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN sdp_iso_now() ELSE closed_at END,
+                  closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN ?::text ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND status = ?
@@ -368,6 +370,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.closeSignature,
           input.status,
           input.status,
+          input.observedAt,
           input.observedAt,
           input.id,
           input.expectedStatus

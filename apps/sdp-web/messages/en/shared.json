@@ -476,27 +476,5 @@
     "rpcByokTest": "Test key",
     "rpcByokTestPassed": "Reached the provider just now.",
     "rpcByokTestFailed": "Could not reach the provider."
-  },
-  "notifications": {
-    "ariaLabel": "Notifications",
-    "ariaLabelUnread": "Notifications, {count} unread",
-    "title": "Notifications",
-    "markAllRead": "Mark all read",
-    "loading": "Loading…",
-    "empty": "You're all caught up.",
-    "error": "Couldn't load notifications.",
-    "retry": "Try again",
-    "showMore": "Show more",
-    "types": {
-      "workflow_execution": "Automation ran: {trigger}"
-    },
-    "triggerLabels": {
-      "kyc_approved": "KYC approved",
-      "kyc_rejected": "KYC rejected",
-      "onramp_settled": "Onramp settled",
-      "offramp_settled": "Offramp settled",
-      "recurring_payment_failed": "Recurring payment failed",
-      "token_operation_completed": "Token operation completed"
-    }
   }
 }

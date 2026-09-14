@@ -9,7 +9,9 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -32,6 +34,11 @@ const ORG = "org_external_position_reads";
 const PROJECT = "prj_external_position_reads";
 const USER = "usr_external_position_reads";
 const KEY = { id: "key_external_position_reads", raw: "sk_test_external_position_reads" };
+const PRODUCTION_KEY = {
+  id: "key_external_position_reads_production",
+  raw: "sk_live_external_position_reads",
+  prefix: "sk_live_ext",
+};
 const OWNER_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const OWNER_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -64,13 +71,28 @@ async function seedScope() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "external-positions@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'External positions', 'external-positions', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PRODUCTION_KEY,
+    organizationId: ORG,
+    projectId: `${PROJECT}_production`,
+    createdBy: USER,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: PRODUCTION_KEY.id,
+    projectId: `${PROJECT}_production`,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -144,6 +166,10 @@ function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${KEY.raw}` } }, env);
 }
 
+function getAsProduction(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${PRODUCTION_KEY.raw}` } }, env);
+}
+
 beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
@@ -168,6 +194,20 @@ beforeEach(async () => {
 });
 
 describe("external-wallet position reads", () => {
+  it("summary excludes another project's positions and owner addresses", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    const response = await getAsProduction("/v1/earn/external-wallet/positions/summary");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { summary: { walletCount: 0, positionCount: 0, totalsByStrategy: [] } },
+    });
+  });
+
   it("returns complete exact-decimal totals across wallets by strategy and token", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
@@ -364,68 +404,19 @@ describe("external-wallet position reads", () => {
     expect(response.status).toBe(400);
   });
 
-  it("summary excludes a sibling project's positions and never leaks their owner addresses (EARN-028)", async () => {
-    // The summary is project-wide, and totalsByStrategy.ownerAddresses returns
-    // raw end-user addresses to any earn:read key in the project. Its only
-    // tenant boundary is the project_id predicate, so a same-org SIBLING
-    // project's owners must never appear in this key's summary.
-    const siblingProject = "prj_external_position_sibling";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Sibling', 'external-positions-sibling', 'sandbox', 'active', ?)`
-      )
-      .bind(siblingProject, ORG, USER)
-      .run();
-
-    await seedPosition({
-      ownerAddress: OWNER_A,
-      vaultAddress: "vault-usdc",
-      tokenMint: USDC,
-      label: "USDC vault",
-    });
-    // OWNER_B holds a position only in the sibling project.
-    await seedPosition({
-      ownerAddress: OWNER_B,
-      vaultAddress: "vault-usdc",
-      tokenMint: USDC,
-      label: "USDC vault",
-      projectId: siblingProject,
-    });
-
-    const body = (await (await get("/v1/earn/external-wallet/positions/summary")).json()) as {
-      data: {
-        summary: {
-          walletCount: number;
-          positionCount: number;
-          totalsByStrategy: Array<{ ownerAddresses: string[] }>;
-        };
-      };
-    };
-
-    expect(body.data.summary.walletCount).toBe(1);
-    expect(body.data.summary.positionCount).toBe(1);
-    const allOwners = body.data.summary.totalsByStrategy.flatMap((s) => s.ownerAddresses);
-    expect(allOwners).toContain(OWNER_A);
-    expect(allOwners).not.toContain(OWNER_B);
-  });
-
   it("404s an owner whose claim belongs to another organization", async () => {
     const foreignOrg = "org_external_position_foreign";
     const foreignProject = "prj_external_position_foreign";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(foreignOrg, "Foreign", "external-position-foreign", "enterprise", "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Foreign', 'external-position-foreign', 'sandbox', 'active', ?)`
-        )
-        .bind(foreignProject, foreignOrg, USER),
-    ]);
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(foreignOrg, "Foreign", "external-position-foreign", "enterprise", "active")
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: foreignOrg,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: foreignProject, production: `${foreignProject}_production` },
+    });
     await seedPosition({
       ownerAddress: OWNER_B,
       vaultAddress: "vault-foreign",

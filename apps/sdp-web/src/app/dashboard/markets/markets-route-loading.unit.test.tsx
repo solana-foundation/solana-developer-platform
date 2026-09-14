@@ -10,8 +10,8 @@ describe("Markets route loading states", () => {
 
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain('data-embedded-yield-loading="portfolio"');
-    expect(markup).toContain("max-w-[63rem]");
-    expect(markup).toContain("h-[121px]");
+    expect(markup).toContain("max-w-[90rem]");
+    expect(markup).toContain("h-44");
   });
 
   it("matches the unified strategy and code guide while configuration loads", () => {
