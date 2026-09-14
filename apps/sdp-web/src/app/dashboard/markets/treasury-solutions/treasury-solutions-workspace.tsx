@@ -1702,30 +1702,20 @@ function combinedCatalogueStrategies({
   );
 }
 
-export function TreasurySolutionsWorkspace({
-  providerAccess,
-}: {
-  providerAccess: EarnProviderAccess | null;
-}) {
-  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
-  const {
-    wallets,
-    error: walletsError,
-    isLoading: walletsLoading,
-    refreshBalances: refreshWalletBalances,
-  } = useEarnFundingWallets();
+// The allocation summary reads the environment's actionable shelf, so the
+// shelves a workspace needs depend on the environment. Sandbox automatically
+// combines the devnet shelf with the mirrored mainnet catalogue, preserving
+// the API's `fundable: false` response on mainnet rows. Production's default
+// shelf is already mainnet.
+function useTreasuryCatalogueShelves(sdpEnvironment: SdpEnvironment) {
+  const sandboxCatalogue = sdpEnvironment === "sandbox";
+  const catalogueCluster = sandboxCatalogue ? "mainnet-beta" : undefined;
   const {
     strategies,
     error: strategiesError,
     isLoading: strategiesLoading,
     refresh: refreshStrategies,
   } = useEarnStrategies();
-  // The allocation summary still reads the environment's actionable shelf.
-  // Sandbox automatically combines that devnet shelf with the mirrored
-  // mainnet catalogue, preserving the API's `fundable: false` response on
-  // mainnet rows. Production's default shelf is already mainnet.
-  const sandboxCatalogue = sdpEnvironment === "sandbox";
-  const catalogueCluster = sandboxCatalogue ? "mainnet-beta" : undefined;
   const {
     strategies: baseCatalogueStrategies,
     error: baseCatalogueError,
@@ -1752,6 +1742,50 @@ export function TreasurySolutionsWorkspace({
   const devnetCatalogueError = sandboxCatalogue ? strategiesError : undefined;
   const devnetCatalogueLoading = sandboxCatalogue && strategiesLoading;
   const catalogueLoading = baseCatalogueLoading || (sandboxCatalogue && strategiesLoading);
+  return {
+    catalogueCluster,
+    catalogueStrategies,
+    catalogueError,
+    catalogueLoading,
+    mainnetCatalogueError,
+    mainnetCatalogueLoading,
+    devnetCatalogueError,
+    devnetCatalogueLoading,
+    refreshCatalogue,
+    refreshStrategies,
+    strategies,
+    strategiesError,
+    strategiesLoading,
+  };
+}
+
+export function TreasurySolutionsWorkspace({
+  providerAccess,
+}: {
+  providerAccess: EarnProviderAccess | null;
+}) {
+  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
+  const {
+    wallets,
+    error: walletsError,
+    isLoading: walletsLoading,
+    refreshBalances: refreshWalletBalances,
+  } = useEarnFundingWallets();
+  const {
+    catalogueCluster,
+    catalogueStrategies,
+    catalogueError,
+    catalogueLoading,
+    mainnetCatalogueError,
+    mainnetCatalogueLoading,
+    devnetCatalogueError,
+    devnetCatalogueLoading,
+    refreshCatalogue,
+    refreshStrategies,
+    strategies,
+    strategiesError,
+    strategiesLoading,
+  } = useTreasuryCatalogueShelves(sdpEnvironment);
   const {
     positions,
     error: positionsError,
