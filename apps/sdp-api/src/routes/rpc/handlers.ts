@@ -13,12 +13,12 @@ import { AppError, badRequestQuery } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertFaucetDestinationsOwned } from "@/services/faucet-destination-guard";
+import { EgressResponseTooLargeError } from "@/services/guarded-egress";
 import {
   checkResolvedRpcTargetConnection,
   getProviderSetupDefinition,
 } from "@/services/provider-setup-registry";
 import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
-import { EgressResponseTooLargeError } from "@/services/guarded-egress";
 import { fetchRpcRelayTarget } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { rpcProjectQuerySchema, type rpcRelayPayloadSchema } from "./schemas";
@@ -118,7 +118,6 @@ function buildRelayResponse(
     response: upstreamBody,
   };
 }
-
 
 // `AbortSignal.timeout` rejects with a DOMException, which Node does not put
 // on Error's prototype chain — matched by name, not instanceof.

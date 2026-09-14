@@ -930,7 +930,6 @@ describe("RPC Relay Routes", () => {
       expect(response.status).toBe(400);
     });
 
-
     it("answers a distinct code when the upstream times out", async () => {
       const db = getDb(env);
       await db
@@ -998,11 +997,7 @@ describe("RPC Relay Routes", () => {
     it("charges the quota by batch size", async () => {
       // One admitted batch of N is N node calls; the pool must see N, or the
       // per-minute ceiling is really ceiling × batch cap.
-      await seedRateLimit(
-        env,
-        `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`,
-        299
-      );
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 299);
 
       const batch = await app.request(
         "/v1/rpc/proxy",

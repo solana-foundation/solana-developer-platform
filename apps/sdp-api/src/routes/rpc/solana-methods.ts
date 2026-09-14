@@ -59,6 +59,8 @@ const METHODS = [
   "requestAirdrop",
   "sendTransaction",
   "simulateTransaction",
-] as const;
+] as const satisfies readonly string[];
 
-export const SOLANA_RPC_METHODS: ReadonlySet<(typeof METHODS)[number] | string> = new Set(METHODS);
+export type SolanaRpcMethod = (typeof METHODS)[number];
+
+export const SOLANA_RPC_METHODS: ReadonlySet<string> = new Set(METHODS);

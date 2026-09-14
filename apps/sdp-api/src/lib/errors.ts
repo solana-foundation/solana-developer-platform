@@ -151,9 +151,9 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   ACCOUNT_NOT_FROZEN: "Account is not frozen",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
-  SOLANA_RPC_TIMEOUT:
-    "The RPC upstream did not answer in time; the request's outcome is unknown",
-  UPSTREAM_RESPONSE_TOO_LARGE: "The RPC upstream answered with a body larger than the relay returns",
+  SOLANA_RPC_TIMEOUT: "The RPC upstream did not answer in time; the request's outcome is unknown",
+  UPSTREAM_RESPONSE_TOO_LARGE:
+    "The RPC upstream answered with a body larger than the relay returns",
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
