@@ -37,6 +37,11 @@ test("deployment mode is emitted as the self_hosted constant", () => {
   assert.match(env, /^SDP_DEPLOYMENT_MODE=self_hosted$/m);
 });
 
+test("forwarded proxy headers are untrusted by default", () => {
+  const env = generateEnv(defaultValues());
+  assert.match(env, /^TRUST_PROXY_HEADERS=false$/m);
+});
+
 test("invisible conditional fields are skipped", () => {
   const env = generateEnv({
     ...defaultValues(),
