@@ -28,8 +28,6 @@
     "openapi:generate": "tsx scripts/generate-openapi.ts",
     "playground:generate": "tsx scripts/generate-playground-catalog.ts",
     "playground:check": "tsx scripts/generate-playground-catalog.ts --check",
-    "earn:inventory": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/inventory-ground-catalogue.ts fetch",
-    "earn:inventory:render": "tsx scripts/inventory-ground-catalogue.ts render",
     "earn:inventory:kamino": "tsx scripts/inventory-kamino-catalogue.ts fetch",
     "earn:inventory:kamino:render": "tsx scripts/inventory-kamino-catalogue.ts render",
     "earn:inventory:veda": "tsx scripts/inventory-veda-catalogue.ts fetch",

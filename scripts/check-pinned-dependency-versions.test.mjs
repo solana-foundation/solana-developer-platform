@@ -41,7 +41,7 @@ test("requires Solana Earn packages to come from immutable registry versions", (
         "@solana/earn-test-utils": "catalog:solana-earn",
       },
       peerDependencies: {
-        "@solana/earn-provider-ground": "0.1.0-beta.1",
+        "@solana/earn-provider-acme": "0.1.0-beta.1",
         "@solana/earn-provider-kamino": "catalog:solana-earn",
         react: "^19",
       },

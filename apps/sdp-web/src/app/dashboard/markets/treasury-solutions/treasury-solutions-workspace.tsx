@@ -1227,7 +1227,7 @@ function ExistingProgramsCard({
         </div>
         <div className="flex items-start gap-2 bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary">
           <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          {/* Ground can require customer-side approval, but SDP has no
+          {/* A provider can require customer-side approval, but SDP has no
            * provider-approval route or signer UI yet. Never imply the
            * dashboard can release a withdrawal that is parked there. */}
           <p>{t("DashboardMarkets.treasury.withdrawalApprovalUnavailable")}</p>

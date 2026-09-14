@@ -337,7 +337,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     veda: publicApiDefinition("Veda"),
     upshift: keyPairCredentialDefinition("Upshift", "UPSHIFT"),
     perena: keyPairCredentialDefinition("Perena", "PERENA"),
-    ground: keyPairCredentialDefinition("Ground", "GROUND"),
     kamino: publicApiDefinition("Kamino"),
     jupiter_lend: publicApiDefinition("Jupiter Lend"),
     // No Ondo credential: the catalogue reads the chain and the execution half

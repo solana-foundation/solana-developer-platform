@@ -141,10 +141,9 @@ describe("refreshEarnStrategyMetrics", () => {
   });
 
   it("skips providers without the live-metrics capability", async () => {
-    // Capability, not a provider list. Ground opts out because its rates come
-    // from the same paged endpoint the catalogue uses — a five-minute pass
-    // would re-pay the whole catalogue cost for the rate alone.
-    mocks.providerClients.ground = catalogueOnlyProvider("ground");
+    // Capability, not a provider list. Upshift has no client at all — a
+    // five-minute pass must not re-pay a catalogue cost for the rate alone.
+    mocks.providerClients.upshift = catalogueOnlyProvider("upshift");
 
     await refreshEarnStrategyMetrics(env);
 

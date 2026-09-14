@@ -25,7 +25,7 @@ if (!window.matchMedia) {
 const mocks = vi.hoisted(() => ({
   canManageCustody: true,
   environment: "sandbox" as "sandbox" | "production",
-  programProvider: "ground",
+  programProvider: "upshift",
   // Every cluster value useEarnStrategies was asked for, across renders.
   strategiesClusterRequests: [] as Array<"devnet" | "mainnet-beta" | undefined>,
   refreshStrategies: vi.fn(),
@@ -568,7 +568,7 @@ function renderWorkspace() {
 beforeEach(() => {
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
-  mocks.programProvider = "ground";
+  mocks.programProvider = "upshift";
   mocks.strategiesClusterRequests = [];
   mocks.withdrawalsByProgram = {};
   mocks.vaultDeposits = [];
@@ -687,7 +687,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByRole("dialog").textContent).toBe("Deposit into Kamino USDC Vault");
 
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
-    if (!legacyRow) throw new Error("Expected existing Ground program row");
+    if (!legacyRow) throw new Error("Expected existing legacy program row");
     expect(legacyRow.textContent).toContain("900.50 USD");
   });
 

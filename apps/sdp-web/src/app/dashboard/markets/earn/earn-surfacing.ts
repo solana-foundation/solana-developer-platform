@@ -42,8 +42,8 @@ export type EarnVaultDepositAvailability =
  *
  * A list, not a pin, and DERIVED from two declarations in `@sdp/types` rather
  * than hand-set: surfacing says what is offered, `earnDepositStyle` says which
- * of those have a program model. It is `["ground"]` when Ground is surfaced and
- * `[]` today. Nothing here may hardcode a provider id — that is what let an
+ * of those have a program model — `[]` today, since the one custodial provider
+ * was retired. Nothing here may hardcode a provider id — that is what let an
  * earlier revision filter the org's own positions down to one provider and hide
  * the rest.
  */

@@ -72,7 +72,7 @@ export interface EarnProviderWalletRow {
   environment: SdpEnvironment;
   /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
   provider: string;
-  /** Provider-side wallet identifier (e.g. Ground wallet UUID). */
+  /** Provider-side wallet identifier. */
   provider_wallet_ref: string;
   label: string | null;
   created_by: string;

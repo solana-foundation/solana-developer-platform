@@ -185,17 +185,17 @@ async function seedStrategy(
 
 /**
  * A real `earn_provider_wallets` row, so the `:programId` probes below ride an
- * id the handler actually resolves. Provider "ground" on purpose: it is NOT the
- * entitled provider here (seedAuth entitles only "veda") and this file sets no
- * GROUND credentials, which is exactly why the probe uses the one per-program
- * route that takes no provider gate at all.
+ * id the handler actually resolves. Provider "upshift" on purpose: it is NOT
+ * the entitled provider here (seedAuth entitles only "veda") and this file sets
+ * no UPSHIFT credentials, which is exactly why the probe uses the one
+ * per-program route that takes no provider gate at all.
  */
 async function seedProgram(): Promise<EarnProviderWalletRow> {
   const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
     environment: "sandbox",
-    provider: "ground",
+    provider: "upshift",
     providerWalletRef: crypto.randomUUID(),
     label: null,
     createdBy: TEST_USER.id,
@@ -357,7 +357,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
   // Both tests PAIR the 404s with a live probe of the replacement, because a 404
   // for a URL that was never registered passes even if the replacement is
   // broken — the same trap the /nav case above avoids by riding a real strategy
-  // id. This file's seedAuth entitles only "veda" and sets no GROUND
+  // id. This file's seedAuth entitles only "veda" and sets no UPSHIFT
   // credentials, so the probes are deliberately the two program routes that
   // answer without any provider call: the UNFILTERED collection (no provider
   // named ⇒ no credential gate) and the withdrawal LEDGER list (no provider gate
@@ -369,7 +369,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
 
     for (const path of [
       "/v1/earn/program",
-      "/v1/earn/program?provider=ground",
+      "/v1/earn/program?provider=upshift",
       "/v1/earn/program/deposits",
       "/v1/earn/program/withdrawals",
       "/v1/earn/program/withdrawals/wd_x",
@@ -692,16 +692,16 @@ describe("Earn routes — strategy catalogue", () => {
    * Asserted against the stored row so the two halves stay honest: the sync
    * keeps writing an un-surfaced provider's catalogue — which is what makes
    * re-surfacing a deploy rather than an hour's wait — and only the read hides
-   * it. Ground is the un-surfaced provider today; if that flips, this test
+   * it. Upshift is an un-surfaced provider today; if that flips, this test
    * should move to whichever provider is off rather than be deleted.
    */
   it("stores an un-surfaced provider's rows but never returns them from strategy reads", async () => {
     await seedAuth();
     const surfaced = await seedStrategy({ providerReference: "kamino-visible-usdc" });
     const unsurfaced = await seedStrategy({
-      provider: "ground",
-      providerReference: "ground-hidden-usdc",
-      name: "Ground Institutional USDC",
+      provider: "upshift",
+      providerReference: "upshift-hidden-usdc",
+      name: "Upshift Institutional USDC",
       underlyingSource: "centrifuge",
     });
 

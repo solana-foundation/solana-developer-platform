@@ -11,8 +11,8 @@ import type { EarnProviderId, SolanaCluster } from "@sdp/types";
 /**
  * Indexed for catalogue completeness, intentionally absent from every public
  * strategy read. Keep the terms here at the API policy boundary rather than in
- * Ground's client or the sync, so the DB continues to reflect what Ground
- * reports and pagination can exclude the rows before applying its window.
+ * a provider client or the sync, so the DB continues to reflect what providers
+ * report and pagination can exclude the rows before applying its window.
  *
  * Note this is a different question from `fundable`, and the two must
  * stay separate: this hides rows SDP has decided not to SHOW, while `fundable`

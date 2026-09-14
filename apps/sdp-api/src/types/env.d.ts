@@ -322,8 +322,6 @@ export interface Env {
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
   PERENA_SANDBOX_API_KEY?: string;
-  GROUND_API_KEY?: string;
-  GROUND_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings
