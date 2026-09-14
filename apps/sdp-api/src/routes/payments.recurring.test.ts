@@ -44,7 +44,7 @@ import {
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
-  TEST_KORA_FEE_PAYER,
+  TEST_MOCK_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -790,7 +790,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1055,7 +1055,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(updatePlanSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1180,7 +1180,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(oldCancelSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1428,7 +1428,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1562,7 +1562,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1662,7 +1662,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1749,7 +1749,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(authorizationSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1871,7 +1871,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -1928,7 +1928,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(cancelSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2043,7 +2043,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(resumeSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2126,7 +2126,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2225,7 +2225,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(cancelSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2329,7 +2329,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2441,7 +2441,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2508,7 +2508,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(cancelSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2653,7 +2653,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,
@@ -2806,7 +2806,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -2894,7 +2894,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -3028,7 +3028,7 @@ describe("Payments routes — recurring", () => {
     mockRecurringActivationRpc();
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi
@@ -3092,7 +3092,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -3309,7 +3309,7 @@ describe("Payments routes — recurring", () => {
         );
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
@@ -3627,7 +3627,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -3828,7 +3828,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4046,7 +4046,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4150,7 +4150,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4311,7 +4311,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4495,7 +4495,7 @@ describe("Payments routes — recurring", () => {
         );
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
@@ -4667,7 +4667,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4716,7 +4716,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4798,7 +4798,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4878,7 +4878,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -4994,7 +4994,7 @@ describe("Payments routes — recurring", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -5089,7 +5089,7 @@ describe("Payments routes — recurring", () => {
     const signAndSendMock = vi.fn().mockResolvedValue(authorizationSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -5277,7 +5277,7 @@ describe("Payments routes — recurring", () => {
     const signAndSendMock = vi.fn();
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -5447,7 +5447,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(authorizationSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -5579,7 +5579,7 @@ describe("Payments routes — recurring", () => {
       .mockResolvedValueOnce(retryAuthorizationSignature);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -6100,7 +6100,7 @@ describe("Payments routes — recurring", () => {
     expect(preparePlanBody.data.subscriptionPlan.planPda).toBe(preparePlanBody.data.planPda);
     expectPreparedSubscriptionTransaction(preparePlanBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet1,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const activePlansRes = await app.request(
@@ -6237,7 +6237,7 @@ describe("Payments routes — recurring", () => {
     });
     expectPreparedSubscriptionTransaction(prepareAuthorizationBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const activateSubscriptionRes = await app.request(
@@ -6314,7 +6314,7 @@ describe("Payments routes — recurring", () => {
     expect(prepareCancelBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareCancelBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const prepareResumeRes = await app.request(
@@ -6341,7 +6341,7 @@ describe("Payments routes — recurring", () => {
     expect(prepareResumeBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareResumeBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const amountOverrideRes = await app.request(
@@ -6384,7 +6384,7 @@ describe("Payments routes — recurring", () => {
     expect(prepareCollectionBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareCollectionBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet1,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const attemptRes = await app.request(

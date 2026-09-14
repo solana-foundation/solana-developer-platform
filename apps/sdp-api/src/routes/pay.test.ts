@@ -1,11 +1,19 @@
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types";
-import { address } from "@solana/kit";
+import {
+  address,
+  generateKeyPair,
+  getAddressFromPublicKey,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+} from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { AuditService } from "@/services/audit.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -56,15 +64,24 @@ describe("Public payment request routes", () => {
   }
 
   function stubSponsorship() {
-    return vi
+    const sponsorKeyPair = generateKeyPair();
+    const getFeePayer = async () => getAddressFromPublicKey((await sponsorKeyPair).publicKey);
+    const spy = vi
       .spyOn(sponsorshipService, "createProjectSponsorshipFeePayment")
       .mockImplementation(async () => ({
         providerId: "test",
-        getFeePayer: async () => address(TEST_KORA_FEE_PAYER),
-        signAsFeePayer: async (transaction: Uint8Array) => transaction,
+        getFeePayer,
+        signAsFeePayer: async (transaction: Uint8Array) => {
+          const signed = await partiallySignTransaction(
+            [await sponsorKeyPair],
+            getTransactionDecoder().decode(transaction)
+          );
+          return new Uint8Array(getTransactionEncoder().encode(signed));
+        },
         signAndSend: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
       }));
+    return Object.assign(spy, { getFeePayer });
   }
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
@@ -183,7 +200,7 @@ describe("Public payment request routes", () => {
       const sponsorship = stubSponsorship();
       sponsorship.mockImplementationOnce(async () => ({
         providerId: "test",
-        getFeePayer: async () => address(TEST_KORA_FEE_PAYER),
+        getFeePayer: sponsorship.getFeePayer,
         signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
         signAndSend: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
@@ -194,6 +211,69 @@ describe("Public payment request routes", () => {
       const retried = await postTransaction(request.public_token);
       expect(retried.status).toBe(200);
       expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses sponsor bytes that do not carry the sponsor's signature over the built message", async () => {
+      vi.spyOn(sponsorshipService, "createProjectSponsorshipFeePayment").mockImplementation(
+        async () => ({
+          providerId: "test",
+          getFeePayer: async () => address(TEST_KORA_FEE_PAYER),
+          signAsFeePayer: async (transaction: Uint8Array) => transaction,
+          signAndSend: () => Promise.reject(new Error("not used")),
+          prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+        })
+      );
+      const request = await createAwaitingPaymentRequest();
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(500);
+      const claim = await getDb(env)
+        .prepare("SELECT sponsored_tx_signed FROM payment_requests WHERE id = ?")
+        .bind(request.id)
+        .first();
+      expect(claim?.sponsored_tx_signed ?? null).toBeNull();
+    });
+
+    it("writes a fail-closed audit entry for every sponsored transaction it hands out", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const rows = await getDb(env)
+        .prepare(
+          "SELECT action, organization_id, metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? ORDER BY created_at"
+        )
+        .bind(request.id)
+        .all();
+      expect(rows.results).toHaveLength(2);
+      for (const row of rows.results as Array<Record<string, unknown>>) {
+        expect(row.action).toBe("sign");
+        expect(row.organization_id).toBe(TEST_ORG.id);
+        const metadata = JSON.parse(String(row.metadata));
+        expect(metadata.sponsoredAccount).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+      }
+      const sources = (rows.results as Array<Record<string, unknown>>).map(
+        (row) => JSON.parse(String(row.metadata)).source
+      );
+      expect(sources).toEqual(["fresh", "replayed"]);
+    });
+
+    it("refuses the sponsored transaction when its audit entry cannot be persisted", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+      const failure = vi
+        .spyOn(AuditService.prototype, "log")
+        .mockRejectedValueOnce(new Error("checkpoint store down"));
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(500);
+      expect(failure).toHaveBeenCalledTimes(1);
+      const body = (await response.json()) as { transaction?: string };
+      expect(body.transaction).toBeUndefined();
     });
 
     it("does not open a claim for a payload it cannot build a transaction from", async () => {

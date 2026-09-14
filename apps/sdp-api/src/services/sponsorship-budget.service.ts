@@ -28,6 +28,7 @@ import {
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
+import { assertSponsorReturnedSameMessage } from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
 import type {
   OwnedSignedSubmission,
@@ -190,14 +191,30 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     this.now = dependencies.now ?? (() => new Date());
   }
 
+  private feePayer: Promise<Address> | undefined;
+
   getFeePayer(): Promise<Address> {
-    return this.provider.getFeePayer();
+    this.feePayer ??= this.provider.getFeePayer();
+    return this.feePayer;
+  }
+
+  private async assertSponsorIntegrity(
+    requested: Uint8Array,
+    sponsorSigned: Uint8Array
+  ): Promise<void> {
+    assertSponsorReturnedSameMessage({
+      requested,
+      sponsorSigned,
+      sponsor: await this.getFeePayer(),
+    });
   }
 
   async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
     const reservation = await this.admit(transaction, "sign");
     if (reservation.replay?.signedTransaction) {
-      return decodeBase64(reservation.replay.signedTransaction);
+      const replayed = decodeBase64(reservation.replay.signedTransaction);
+      await this.assertSponsorIntegrity(transaction, replayed);
+      return replayed;
     }
     let signed: Uint8Array;
     try {
@@ -213,6 +230,14 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       // Otherwise, once custody has been asked to sign, no error proves that a
       // usable signature was not produced before the response was lost.
       // Retain the full reservation and block an unsafe replay.
+      await this.markAmbiguous(reservation, error);
+      throw error;
+    }
+    try {
+      await this.assertSponsorIntegrity(transaction, signed);
+    } catch (error) {
+      // The sponsor produced bytes SDP refuses to use, but its signature may
+      // still ride a different, sendable message. Retain the reservation.
       await this.markAmbiguous(reservation, error);
       throw error;
     }
@@ -276,9 +301,23 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         "PROVIDER_NOT_AVAILABLE"
       );
     }
+    let signedTransaction: Uint8Array;
+    try {
+      signedTransaction = await this.provider.signAsFeePayer(transaction);
+    } catch (error) {
+      await this.releaseDeterministic(reservation, error);
+      throw error;
+    }
+    try {
+      await this.assertSponsorIntegrity(transaction, signedTransaction);
+    } catch (error) {
+      // The sponsor produced bytes SDP refuses to use, but its signature may
+      // still ride a different, sendable message. Retain the reservation.
+      await this.markAmbiguous(reservation, error);
+      throw error;
+    }
     let submission: PreparedOwnedSubmission;
     try {
-      const signedTransaction = await this.provider.signAsFeePayer(transaction);
       submission = {
         ...getFullySignedSubmission(signedTransaction),
         releaseDefinitelyUnbroadcast: (error) =>

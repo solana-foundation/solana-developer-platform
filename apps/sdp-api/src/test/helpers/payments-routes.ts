@@ -7,9 +7,12 @@ import { getBase58Codec } from "@solana/codecs";
 import {
   address,
   createNoopSigner,
+  generateKeyPair,
+  getAddressFromPublicKey,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
+  partiallySignTransaction,
   type Signature,
   type SignatureBytes,
   SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
@@ -134,8 +137,16 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
   });
 }
 
-export function fullySignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
-  const transaction = getTransactionDecoder().decode(transactionBytes);
+export const TEST_MOCK_FEE_PAYER_KEY_PAIR = await generateKeyPair();
+export const TEST_MOCK_FEE_PAYER = await getAddressFromPublicKey(
+  TEST_MOCK_FEE_PAYER_KEY_PAIR.publicKey
+);
+
+export async function fullySignTestTransaction(transactionBytes: Uint8Array): Promise<Uint8Array> {
+  let transaction = getTransactionDecoder().decode(transactionBytes);
+  if (TEST_MOCK_FEE_PAYER in transaction.signatures) {
+    transaction = await partiallySignTransaction([TEST_MOCK_FEE_PAYER_KEY_PAIR], transaction);
+  }
   const signatureSeed = createHash("sha512")
     .update(new Uint8Array(transaction.messageBytes))
     .digest();
@@ -598,10 +609,10 @@ export function installPaymentsRouteTestHooks(): void {
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi

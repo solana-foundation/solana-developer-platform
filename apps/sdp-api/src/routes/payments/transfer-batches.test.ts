@@ -44,6 +44,7 @@ import {
   fullySignTestTransaction,
   sendTransactionMock,
   sendTransactionPreflightError,
+  TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -113,12 +114,12 @@ function ownedSubmissionAdapter(
 ): ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter> {
   return {
     providerId: "mock",
-    getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+    getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
     getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
     signAsFeePayer: vi.fn(async (transactionBytes: Uint8Array) => {
       const requestedSignature = await signingOutcome(transactionBytes);
       const transaction = getTransactionDecoder().decode(
-        fullySignTestTransaction(transactionBytes)
+        await fullySignTestTransaction(transactionBytes)
       );
       const feePayer = Object.keys(transaction.signatures)[0];
       let signatureBytes: Uint8Array;
@@ -1097,7 +1098,7 @@ describe("payment transfer batches", () => {
     const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend,
@@ -1170,7 +1171,7 @@ describe("payment transfer batches", () => {
     const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend,
@@ -1252,7 +1253,7 @@ describe("payment transfer batches", () => {
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
