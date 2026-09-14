@@ -8,13 +8,11 @@ import {
   type SignatureBytes,
 } from "@solana/kit";
 
-/** The one sponsor identity every fee-payment mock signs with. */
 export const TEST_MOCK_FEE_PAYER_KEY_PAIR = await generateKeyPair();
 export const TEST_MOCK_FEE_PAYER = await getAddressFromPublicKey(
   TEST_MOCK_FEE_PAYER_KEY_PAIR.publicKey
 );
 
-/** Attach a real sponsor signature when the message names the mock fee payer. */
 export async function sponsorSignTestTransaction(
   transactionBytes: Uint8Array
 ): Promise<Uint8Array> {
@@ -26,10 +24,6 @@ export async function sponsorSignTestTransaction(
   return new Uint8Array(getTransactionEncoder().encode(signed));
 }
 
-/**
- * Sponsor slot gets a real signature; every other missing slot is filled with
- * deterministic fake bytes so the result decodes as fully signed.
- */
 export async function fullySignTestTransaction(transactionBytes: Uint8Array): Promise<Uint8Array> {
   const transaction = getTransactionDecoder().decode(
     await sponsorSignTestTransaction(transactionBytes)

@@ -26,7 +26,6 @@ import {
   partiallySignTransaction,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
-  signature,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,9 +85,6 @@ const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 // expiry, so two tradeInput() calls straddling a second boundary would be
 // different requests and 409 a replay the test meant to be identical.
 const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
-const _TEST_SIGNATURE = signature(
-  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-);
 
 /**
  * Configures RPC acceptance with the signature encoded in the submitted bytes.
@@ -828,10 +824,6 @@ describe("createDvpTrade", () => {
       actor: { type: "wallet", id: "cwlt_settlement" },
     });
   });
-
-  // A filled slot is not a signature. Kora is trusted to sign, not to be
-  // infallible: bytes that fail Ed25519 against the sponsor's key must fail the
-  // claim here, not be persisted in flight for the RPC to reject later.
 
   it("fails the claim when Kora denies and frees the key on replay", async () => {
     const denial = new FeePaymentError("Kora rate limit", "RATE_LIMITED");

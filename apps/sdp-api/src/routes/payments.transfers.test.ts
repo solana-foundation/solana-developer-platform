@@ -31,7 +31,6 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  fullySignTestTransaction,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
@@ -41,7 +40,6 @@ import {
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
-  TEST_MOCK_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -49,6 +47,7 @@ import {
   TEST_WALLET_ID,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_payments_duplicate_test";
 

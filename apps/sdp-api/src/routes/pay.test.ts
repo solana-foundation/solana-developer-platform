@@ -15,14 +15,13 @@ import {
   createRpcMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
-  sponsorSignTestTransaction,
   TEST_CUSTODY_WALLET_ID,
-  TEST_MOCK_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();

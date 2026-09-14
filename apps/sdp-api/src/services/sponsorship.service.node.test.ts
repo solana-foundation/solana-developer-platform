@@ -6,6 +6,7 @@ import {
   compileTransaction,
   createTransactionMessage,
   getBase58Codec,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayer,
@@ -38,6 +39,19 @@ function buildTransaction(): Uint8Array {
     (current) =>
       setTransactionMessageLifetimeUsingBlockhash(
         { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
+        current
+      )
+  );
+  return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+}
+
+function otherTransaction(): Uint8Array {
+  const message = pipe(
+    createTransactionMessage({ version: "legacy" }),
+    (current) => setTransactionMessageFeePayer(FEE_PAYER, current),
+    (current) =>
+      setTransactionMessageLifetimeUsingBlockhash(
+        { blockhash: BLOCKHASH, lastValidBlockHeight: 200n },
         current
       )
   );
@@ -100,6 +114,58 @@ describe("sponsorship identity boundary", () => {
       env,
       "sdp:v1:sandbox:org_1:project:project_1:user:user_1"
     );
+  });
+
+  function selfHostedFeePayment(signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>) {
+    const provider: FeePaymentPort = {
+      providerId: "kora",
+      getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
+      signAsFeePayer: vi.fn().mockImplementation(signAsFeePayer),
+      signAndSend: vi.fn(),
+    };
+    vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
+    return createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      environment: "sandbox",
+      organizationId: "org_1",
+      projectId: "project_1",
+      actor: { type: "user", id: "user_1" },
+    });
+  }
+
+  it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
+    const feePayment = selfHostedFeePayment(async (transaction) => transaction);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "missing the sponsor fee-payer signature"
+    );
+  });
+
+  it("refuses self-hosted sponsor bytes whose signature does not verify", async () => {
+    const feePayment = selfHostedFeePayment(async (transaction) => {
+      const decoded = getTransactionDecoder().decode(transaction);
+      const signatures = Object.fromEntries(
+        Object.keys(decoded.signatures).map((signer) => [signer, new Uint8Array(64).fill(5)])
+      ) as typeof decoded.signatures;
+      return new Uint8Array(getTransactionEncoder().encode({ ...decoded, signatures }));
+    });
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "invalid sponsor fee-payer signature"
+    );
+  });
+
+  it("refuses self-hosted sponsor bytes returned over a different message", async () => {
+    const feePayment = selfHostedFeePayment(() => sponsorSignTestTransaction(otherTransaction()));
+    const lifecycle = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "came back over a different message"
+    );
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
   });
 
   it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {

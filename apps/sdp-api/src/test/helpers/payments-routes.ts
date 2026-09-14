@@ -3,15 +3,6 @@ import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
-import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-
-export {
-  fullySignTestTransaction,
-  sponsorSignTestTransaction,
-  TEST_MOCK_FEE_PAYER,
-  TEST_MOCK_FEE_PAYER_KEY_PAIR,
-} from "@/test/helpers/sponsor-signing";
-
 import {
   address,
   createNoopSigner,
@@ -31,6 +22,7 @@ import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 

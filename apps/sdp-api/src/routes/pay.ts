@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -157,12 +158,6 @@ pay.post(
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
       const signedBase64 = getBase64Decoder().decode(sponsored);
-      // The ledger entry is the only durable attribution this unauthenticated
-      // surface produces. It is written fail-closed BEFORE the signature is
-      // stored or served, so a fresh grant can never exist without its audit
-      // row; replay polls serve stored bytes without touching the serialized
-      // ledger. The sponsorship reservation stays keyed to the destination
-      // wallet; the anonymous caller lives here.
       await new AuditService(getDb(c.env)).log(c, {
         organizationId: request.organization_id,
         action: "sign",
@@ -175,6 +170,7 @@ pay.post(
           destination: request.destination_address,
           walletId: request.wallet_id,
           signature: getSignatureFromTransaction(getTransactionDecoder().decode(sponsored)),
+          claimHash: createHash("sha256").update(unsignedBase64).digest("hex"),
         },
       });
       const stored = await repository.storeSponsoredTransactionSignature({

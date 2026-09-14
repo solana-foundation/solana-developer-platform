@@ -4,6 +4,7 @@ import {
   compileTransaction,
   createTransactionMessage,
   getBase58Codec,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -25,6 +26,14 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 }));
 
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
+
+function garbageSign(requested: Uint8Array): Uint8Array {
+  const transaction = getTransactionDecoder().decode(requested);
+  const signatures = Object.fromEntries(
+    Object.keys(transaction.signatures).map((signer) => [signer, new Uint8Array(64).fill(3)])
+  ) as typeof transaction.signatures;
+  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
+}
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 const SCOPE: SponsorshipScope = {
   environment: "sandbox",
@@ -605,24 +614,53 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 
-  it("releases a signing reservation when the sponsor signature does not verify", async () => {
+  it("retains a signing reservation as ambiguous when the sponsor signature does not verify", async () => {
     const { feePayment, provider, repository } = harness();
     const requested = buildTransaction();
-    const garbageSigned = await (async () => {
-      const { getTransactionDecoder, getTransactionEncoder: encode } = await import("@solana/kit");
-      const transaction = getTransactionDecoder().decode(requested);
-      const signatures = Object.fromEntries(
-        Object.keys(transaction.signatures).map((signer) => [signer, new Uint8Array(64).fill(3)])
-      ) as typeof transaction.signatures;
-      return new Uint8Array(encode().encode({ ...transaction, signatures }));
-    })();
-    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(garbageSigned);
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(garbageSign(requested));
 
     await expect(feePayment.signAsFeePayer(requested)).rejects.toThrow(
       "invalid sponsor fee-payer signature"
     );
 
-    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  it("replays stored bytes untouched when they carry the requested message", async () => {
+    const { feePayment, provider, repository } = harness();
+    const requested = buildTransaction();
+    const stored = await sponsorSignTestTransaction(requested);
+    repository.createReservation.mockResolvedValueOnce(false);
+    repository.getReservation.mockResolvedValueOnce({
+      status: "signed",
+      attempt: 1,
+      signedTransaction: Buffer.from(stored).toString("base64"),
+    });
+
+    await expect(feePayment.signAsFeePayer(requested)).resolves.toEqual(stored);
+
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(provider.getFeePayer).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stored replay whose bytes do not carry the requested message", async () => {
+    const { feePayment, provider, repository } = harness();
+    const requested = buildTransaction();
+    const foreign = await sponsorSignTestTransaction(buildTransaction("legacy"));
+    repository.createReservation.mockResolvedValueOnce(false);
+    repository.getReservation.mockResolvedValueOnce({
+      status: "signed",
+      attempt: 1,
+      signedTransaction: Buffer.from(foreign).toString("base64"),
+    });
+
+    await expect(feePayment.signAsFeePayer(requested)).rejects.toThrow(
+      "Stored sponsored transaction does not match the requested message"
+    );
+
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.markReleased).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 

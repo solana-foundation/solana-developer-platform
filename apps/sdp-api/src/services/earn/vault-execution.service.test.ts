@@ -549,21 +549,6 @@ describe("vault signing lifecycle", () => {
     expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
-  /**
-   * A paymaster hands back BYTES, so nothing about the call constrains it to
-   * return the message SDP signed. Both cases below have to fail before
-   * persistence: past that point the row is durable, and a sigverify rejection
-   * at broadcast is indistinguishable from a lost response, so the movement
-   * parks reconcilable until its blockhash expires.
-   */
-
-  /**
-   * The case nothing caught before: the owner slot still carries a signature
-   * (over the OLD message) and a SUBSTITUTED fee payer still satisfies
-   * `getSignatureFromTransaction`, which reads whatever sits in slot zero.
-   * Message equality is the only check that sees it.
-   */
-
   it("signs wallet-paid bytes without broadcasting before durable persistence", async () => {
     const owner = await generateKeyPairSigner();
 

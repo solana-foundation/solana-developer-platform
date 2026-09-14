@@ -37,12 +37,12 @@ import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
-  fullySignTestTransaction,
   sendTransactionMock,
   sendTransactionPreflightError,
-  TEST_MOCK_FEE_PAYER,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -92,27 +92,20 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
-const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
-const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
-  signerAddress: address(TEST_KORA_FEE_PAYER),
-  maxAllowedLamports: 0n,
-  feePayerMayTransferLamports: false,
-  feePayerPolicy: { test: "zero-outflow" },
-} satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
 const FIRST_SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
 
-// Sponsor signatures are real ed25519 now, so their values are only known
-// after signing. Tests pick stable labels (FIRST_SIGNATURE/SECOND_SIGNATURE)
-// through `signingOutcome`; the adapter records which actual signature each
-// label produced and `actualSignature` resolves labels in assertions.
 const labeledSignatures = new Map<string, string>();
 
 function actualSignature(label: string): string {
-  return labeledSignatures.get(label) ?? label;
+  const signature = labeledSignatures.get(label);
+  if (signature === undefined) {
+    throw new Error(`No sponsored signature was recorded for label ${label}`);
+  }
+  return signature;
 }
 
 function ownedSubmissionAdapter(
@@ -519,6 +512,7 @@ async function seedBatchApproverSession(): Promise<Record<string, string>> {
 describe("payment transfer batches", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    labeledSignatures.clear();
 
     createRpcMock.mockReturnValue({
       getFeeForMessage: () => ({
@@ -535,14 +529,14 @@ describe("payment transfer batches", () => {
       >["blockhash"],
       lastValidBlockHeight: 1000n,
     });
-    confirmTransactionMock.mockResolvedValue({
-      signature: actualSignature(FIRST_SIGNATURE) as Awaited<
+    confirmTransactionMock.mockImplementation(async () => ({
+      signature: (labeledSignatures.get(FIRST_SIGNATURE) ?? FIRST_SIGNATURE) as Awaited<
         ReturnType<typeof solanaRpc.confirmTransaction>
       >["signature"],
       slot: 100n,
       confirmationStatus: "confirmed",
       err: null,
-    });
+    }));
     createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter());
     sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
@@ -2620,11 +2614,13 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .all<{ status: string; error: string | null; signature: string }>();
-    expect(recipientRows.results).toMatchObject(
+    const bySignature = (left: { signature: string }, right: { signature: string }) =>
+      left.signature < right.signature ? -1 : left.signature > right.signature ? 1 : 0;
+    expect([...recipientRows.results].sort(bySignature)).toMatchObject(
       [
         { status: "confirmed", error: null, signature: actualSignature(FIRST_SIGNATURE) },
         { status: "failed", signature: actualSignature(SECOND_SIGNATURE) },
-      ].sort((left, right) => left.signature.localeCompare(right.signature))
+      ].sort(bySignature)
     );
     const failedRow = recipientRows.results.find((row) => row.status === "failed");
     expect(failedRow?.error).toContain("InstructionError");

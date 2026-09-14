@@ -9,12 +9,14 @@ import {
   type Address,
   assertIsFullySignedTransaction,
   assertIsSignature,
+  bytesEqual,
   getBase64Decoder,
   getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   type Signature,
+  type Transaction,
 } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -30,7 +32,7 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
   assertSponsorSignedSameMessage,
-  SponsorMessageMismatchError,
+  SponsorResponseUnusableError,
 } from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
 import type {
@@ -59,8 +61,10 @@ type BudgetRepository = Pick<
   | "tripGlobalBreaker"
 >;
 
-export function getFullySignedSubmission(signedTransaction: Uint8Array): OwnedSignedSubmission {
-  const decoded = getTransactionDecoder().decode(signedTransaction);
+export function getFullySignedSubmission(
+  signedTransaction: Uint8Array,
+  decoded = getTransactionDecoder().decode(signedTransaction)
+): OwnedSignedSubmission {
   try {
     assertIsFullySignedTransaction(decoded);
   } catch {
@@ -198,32 +202,45 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     return this.provider.getFeePayer();
   }
 
-  /**
-   * A mismatched-but-valid sponsor signature is sendable, so the reservation
-   * stays charged-unknown; an unusable response provably spent nothing, so
-   * the reservation is refunded and the operation can retry.
-   */
   private async verifySponsorResponse(
     requested: Uint8Array,
     sponsorSigned: Uint8Array,
     reservation: AdmissionResult
-  ): Promise<void> {
+  ): Promise<Transaction> {
     try {
-      await assertSponsorSignedSameMessage({ requested, sponsorSigned });
+      return await assertSponsorSignedSameMessage({ requested, sponsorSigned });
     } catch (error) {
-      if (error instanceof SponsorMessageMismatchError) {
-        await this.markAmbiguous(reservation, error);
-      } else {
+      if (error instanceof SponsorResponseUnusableError) {
         await this.releaseDeterministic(reservation, error);
+      } else {
+        await this.markAmbiguous(reservation, error);
       }
       throw error;
     }
   }
 
+  private replayedSponsorTransaction(requested: Uint8Array, stored: string): Uint8Array {
+    const replayed = decodeBase64(stored);
+    const requestedTransaction = getTransactionDecoder().decode(requested);
+    const storedTransaction = getTransactionDecoder().decode(replayed);
+    const sponsorSignature = Object.values(storedTransaction.signatures)[0];
+    if (
+      !bytesEqual(storedTransaction.messageBytes, requestedTransaction.messageBytes) ||
+      sponsorSignature === null ||
+      sponsorSignature === undefined
+    ) {
+      throw new FeePaymentError(
+        "Stored sponsored transaction does not match the requested message",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    return replayed;
+  }
+
   async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
     const reservation = await this.admit(transaction, "sign");
     if (reservation.replay?.signedTransaction) {
-      return decodeBase64(reservation.replay.signedTransaction);
+      return this.replayedSponsorTransaction(transaction, reservation.replay.signedTransaction);
     }
     let signed: Uint8Array;
     try {
@@ -242,18 +259,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       await this.markAmbiguous(reservation, error);
       throw error;
     }
-    await this.verifySponsorResponse(transaction, signed, reservation);
-    let signature: Signature;
-    try {
-      signature = getSignatureFromTransaction(getTransactionDecoder().decode(signed));
-    } catch (error) {
-      return this.accountingUnavailable(
-        resolveNetwork(this.env),
-        "Signed sponsorship result could not be reconstructed",
-        "Signed sponsorship signature extraction failed",
-        error
-      );
-    }
+    const signedTransaction = await this.verifySponsorResponse(transaction, signed, reservation);
+    const signature = getSignatureFromTransaction(signedTransaction);
     let result: SignaturePersistResult;
     try {
       result = await this.repository.markSigned(
@@ -310,11 +317,11 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       await this.releaseDeterministic(reservation, error);
       throw error;
     }
-    await this.verifySponsorResponse(transaction, signedTransaction, reservation);
+    const decoded = await this.verifySponsorResponse(transaction, signedTransaction, reservation);
     let submission: PreparedOwnedSubmission;
     try {
       submission = {
-        ...getFullySignedSubmission(signedTransaction),
+        ...getFullySignedSubmission(signedTransaction, decoded),
         releaseDefinitelyUnbroadcast: (error) =>
           this.releaseDeterministic(reservation, error, "after_submission"),
       };
