@@ -1435,7 +1435,11 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByRole("columnheader", { name: "Weight" })).toBeTruthy();
     expect(screen.getByText("SOL/BTC Market")).toBeTruthy();
     expect(screen.getByText("Unallocated")).toBeTruthy();
-    expect(screen.getByText("4.5%")).toBeTruthy();
+    // The reserve APY renders inside the disclosure only — the strategies
+    // table's own APY column may show the same figure on another row.
+    const disclosureTable = screen.getByRole("columnheader", { name: "Weight" }).closest("table");
+    if (!disclosureTable) throw new Error("Expected the allocations disclosure table");
+    expect(within(disclosureTable).getByText("4.5%")).toBeTruthy();
   });
 
   it("keeps the disclosure when the deployed weight cannot be certified", async () => {
@@ -1485,8 +1489,10 @@ describe("TreasurySolutionsWorkspace", () => {
   it("renders the Information placeholder for devnet Kamino rows without requesting", () => {
     renderWorkspace();
 
+    // The devnet shelf's instant row shares the mainnet mirror's name: pick
+    // the devnet row by its own observed APY.
     const instantRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
@@ -1497,6 +1503,9 @@ describe("TreasurySolutionsWorkspace", () => {
     if (!informationCell) throw new Error("Expected the Information cell");
     expect(within(informationCell).queryByRole("button")).toBeNull();
     expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
+    // The devnet-only vault has no mainnet counterpart: the rough-name
+    // intersection hides the whole row, so no cell of it can render at all.
+    expect(screen.queryByText("Kamino Vault USDC")).toBeNull();
   });
 
   it("renders the Information placeholder for a non-Kamino strategy", () => {
