@@ -32,6 +32,7 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
   assertSponsorSignedSameMessage,
+  SponsorMessageMismatchError,
   SponsorResponseUndecodableError,
   SponsorResponseUnusableError,
 } from "@/services/sponsorship-integrity";
@@ -247,6 +248,21 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         sponsor: reservation.feePayer,
       });
     } catch (error) {
+      logEvent("error", {
+        event: "sdp_api_sponsorship_replay_integrity_failure",
+        reservation_id: reservation.id,
+        failure_class:
+          error instanceof SponsorMessageMismatchError
+            ? "mismatch"
+            : error instanceof SponsorResponseUnusableError
+              ? "unusable"
+              : error instanceof SponsorResponseUndecodableError
+                ? "undecodable"
+                : "invalid_signature",
+        organization_id: this.scope.organizationId,
+        project_id: this.scope.projectId,
+        reason: describeError(error),
+      });
       throw new FeePaymentError(
         "Stored sponsored transaction does not match the requested message",
         "PROVIDER_NOT_AVAILABLE",

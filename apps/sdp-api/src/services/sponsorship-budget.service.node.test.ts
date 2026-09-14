@@ -682,6 +682,13 @@ describe("BudgetedFeePayment", () => {
     expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_replay_integrity_failure",
+        failure_class: "mismatch",
+      })
+    );
   });
 
   it("retains a signing reservation as ambiguous when the sponsor signs a different message", async () => {
