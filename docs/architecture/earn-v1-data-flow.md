@@ -145,9 +145,11 @@ The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
 records one share-mint-denominated signed movement before broadcasting it, and
 the treasury dashboard's exit action drives it. The shared vault reconciliation
 sweep finishes an ambiguous or interrupted submission. Production vault
-deposits remain closed until PRO-1703 surfaces vault positions on the Active
-tab (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`); the exit route itself takes no
-environment gate — money out beats money off.
+deposits open PER PROVIDER (`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`
+in `@sdp/types`): the two mainnet-only providers, Jupiter Lend and Ondo, accept
+production deposits, while Kamino and Veda stay sandbox-only until PRO-1635's
+launch checklist opens them; the exit route itself takes no environment gate —
+money out beats money off.
 
 The removed pre-PRO-1634 execution sketch is not a contract. New providers must
 implement today's `EarnVaultDirectProvider` plan and quote capabilities, then

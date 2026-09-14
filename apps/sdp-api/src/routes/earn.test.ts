@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import { type CachedApiKey, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
+import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -812,5 +813,65 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
     });
     expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(200);
+  });
+
+  /**
+   * Ondo (PRO-1832): surfaced, uncurated (no `CURATED_VAULTS` pin, so the
+   * provider's whole shelf — one USDY row — passes), and mainnet-only. From a
+   * sandbox project the row is the PRO-1742 mirror: listed on the explicit
+   * `?cluster=` opt-in, `fundable: false`, and honest about having no rate.
+   * Both slippage policies are the swap builder's 50 bps, not Veda's 10.
+   */
+  it("shows the Ondo USDY row uncurated, with the swap builder's 50 bps floors", async () => {
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    const usdyMint = ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint;
+    if (!usdyMint) throw new Error("test premise: Ondo's mainnet deployment is filled in");
+    const ondo = await seedStrategy({
+      provider: "ondo",
+      providerReference: usdyMint,
+      name: "Ondo USDY",
+      sourceKind: "rwa",
+      underlyingSource: "ondo-usdy",
+      depositMints: [wellKnownMint("USDC", "mainnet-beta") as string],
+      shareMint: usdyMint,
+      currentApy: null,
+      riskMetadata: { curator: "ondo" },
+      hostCluster: "mainnet-beta",
+    });
+
+    // Not on the sandbox default view: that shelf is devnet.
+    const own = await getEarn("/v1/earn/strategies");
+    expect(own.status).toBe(200);
+    expect(
+      ((await own.json()) as { data: { strategies: Array<{ id: string }> } }).data.strategies
+    ).toEqual([]);
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          provider: string;
+          sourceKind: string;
+          fundable: boolean;
+          currentApy?: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([ondo.id]);
+    expect(body.data.strategies[0]).toMatchObject({
+      provider: "ondo",
+      sourceKind: "rwa",
+      fundable: false,
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
+      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
+    });
+    // No rate source yet (PRO-1833): the field is absent, never a derived figure.
+    expect(body.data.strategies[0]?.currentApy).toBeUndefined();
+    expect((await getEarn(`/v1/earn/strategies/${ondo.id}`)).status).toBe(200);
   });
 });

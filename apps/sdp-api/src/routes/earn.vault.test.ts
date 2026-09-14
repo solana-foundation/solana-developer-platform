@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
+import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -123,6 +124,10 @@ const PROD_CACHED_API_KEY: CachedApiKey = {
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
+// Ondo's USDY mint (mainnet-only): the instrument is both the strategy's
+// reference and its share mint, because holding it IS the position.
+const USDY_MINT = ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint ?? "";
+if (USDY_MINT === "") throw new Error("test premise: Ondo's mainnet deployment is filled in");
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
 let originalMarketsEnabled: string | undefined;
@@ -275,7 +280,9 @@ async function seedAuth(): Promise<void> {
         "enterprise",
         "active",
         JSON.stringify({
-          providerOverrides: { earn: { kamino: true, veda: true, jupiter_lend: true } },
+          providerOverrides: {
+            earn: { kamino: true, veda: true, jupiter_lend: true, ondo: true },
+          },
         })
       ),
     getDb(env)
@@ -604,6 +611,67 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
         environment: "production",
         provider: "jupiter_lend",
         minSharesOut: "9.99",
+      }),
+      expect.anything()
+    );
+  });
+
+  /**
+   * Same posture as Jupiter Lend, second mainnet-only provider (PRO-1832): the
+   * USDY row is production-only in the deposit-environment map, and its swap
+   * builder refuses an implicit floor, so the route demands `minSharesOut`
+   * before the provider is ever called.
+   */
+  it("opens Ondo USDY only from production and requires the caller's minSharesOut", async () => {
+    await seedAuth();
+    await seedWallet({
+      configId: "cfg_earn_vault_ondo",
+      custodyWalletId: "cwlt_earn_vault_ondo",
+      providerWalletId: "privy_earn_vault_ondo",
+      projectId: TEST_PRODUCTION_PROJECT.id,
+    });
+    const strategy = await seedStrategy({
+      provider: "ondo",
+      providerReference: USDY_MINT,
+      name: "Ondo USDY",
+      sourceKind: "rwa",
+      underlyingSource: "ondo-usdy",
+      depositMints: [USDC_MINT],
+      shareMint: USDY_MINT,
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+
+    const missingFloor = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_ondo",
+        amount: "10",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_ondo",
+        amount: "10",
+        minSharesOut: "9.9",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environment: "production",
+        provider: "ondo",
+        minSharesOut: "9.9",
       }),
       expect.anything()
     );

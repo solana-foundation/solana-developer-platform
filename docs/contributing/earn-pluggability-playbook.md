@@ -231,14 +231,16 @@ holds the money and who signs:
   quote-derived floors, declared through the deposit and withdrawal slippage
   maps. Copy this when a provider's SDK refuses implicit slippage.
 - **Ondo: no vault program — the instrument IS the position.** `ondo` id,
-  keyless like Kamino, executing like Veda, and un-surfaced (PRO-1803). The
-  strategy is holding USDY: deposits and exits are Jupiter-routed swaps built
-  through a port the API injects, so the Jupiter instruction trust boundary
-  stays single-owner in `services/earn/jupiter-swap.service.ts` and
-  `packages/sdp-ondo` carries no chain SDK at all. Copy this when a provider's
-  product is a yield-bearing TOKEN rather than a vault — and note its
-  mainnet-only registry (`@sdp/types/ondo-programs`) leaves the sandbox shelf
-  to the PRO-1742 mirror.
+  keyless like Kamino, executing like Veda, registered dormant (PRO-1803) and
+  surfaced on 2026-09-14 (PRO-1832). The strategy is holding USDY: deposits
+  and exits are Jupiter-routed swaps built through a port the API injects, so
+  the Jupiter instruction trust boundary stays single-owner in
+  `services/earn/jupiter-swap.service.ts` and `packages/sdp-ondo` carries no
+  chain SDK at all. Copy this when a provider's product is a yield-bearing
+  TOKEN rather than a vault — and note its mainnet-only registry
+  (`@sdp/types/ondo-programs`) leaves the sandbox shelf to the PRO-1742
+  mirror, which in a devnet deployment only fills when the catalogue can reach
+  mainnet (`SOLANA_MAINNET_RPC_URL`, below).
 
 Steps 5–8 below are the **credentialed** path; a provider on a public API
 skips most of them (see the keyless variant under the table). Step 10 and §4d
@@ -315,6 +317,19 @@ browsable and never fundable. One requirement to inherit the mirror fully:
 references must be cluster-distinct (address-keyed). A slug shared by both of
 your catalogues collides with the environment's own shelf and stays own-lane
 only (ADR 0002, PRO-1742 addendum).
+
+**And the mirror needs a mainnet RPC in every deployment that is not one.** The
+sync walks both environments in one process, and `SOLANA_RPC_URL` serves only
+the cluster that process is configured for. A provider whose catalogue is an
+HTTP API (Kamino, Jupiter Lend) does not care; one that reads the chain does.
+Ondo's production pass in a devnet deployment fails its genesis proof, the sync
+treats that as a steady-state skip, and the mirror converges to EMPTY — so the
+row never appears on smoky, even surfaced. Resolve the endpoint per cluster with
+`resolveCatalogueRpcUrl` (`packages/sdp-earn/src/solana-rpc.ts`), which reads
+`SOLANA_MAINNET_RPC_URL` / `SOLANA_DEVNET_RPC_URL` — the same overrides the
+execution path uses — and falls back to the process endpoint. Provision the
+override in sdp-infra's dev `app_secret_keys` (+ Doppler) for the mirror to
+fill; every URL is still genesis-checked before anything is read from it.
 
 ### A new catalogue column is EXPAND-ONLY in the release that adds it
 
