@@ -790,7 +790,9 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     // same rule the curated-shelf tests above follow. Every configured entry
     // gets a seeded row and its own list and detail assertions, so a rule that
     // only hid the FIRST vault — or lost a later one — fails here rather than
-    // shipping untested.
+    // shipping untested. Each configured cluster must also still carry at
+    // least one entry: an emptied cluster would seed no rows and pass its
+    // list assertions trivially, silently un-hiding that environment's shelf.
     const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
       "@/routes/earn/handlers/curation"
     );
@@ -798,7 +800,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       cluster: cluster as SolanaCluster,
       keys: keys ?? [],
     }));
-    if (hiddenClusters.every(({ keys }) => keys.length === 0)) {
+    if (hiddenClusters.some(({ keys }) => keys.length === 0)) {
       throw new Error("Expected shipped HIDDEN_VAULTS entries in every configured cluster");
     }
 
