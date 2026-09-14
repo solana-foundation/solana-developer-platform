@@ -15,16 +15,25 @@ let client: Client;
 
 /**
  * Minimal temp-table stand-ins shaped like the live earn tables (the columns
- * the migration's deletes can touch). No FK wiring: the migration's delete
- * order is exercised by running it as-is and checking what survived, which
- * also keeps the fixture honest about the open-TEXT provider columns.
+ * the migration's deletes can touch), with the live FK graph recreated so the
+ * migration's child-before-parent delete order is actually exercised: deleting
+ * wallets before positions, or strategies before their dependents, fails here
+ * exactly as it would on the migrated schema. The open-TEXT provider columns
+ * are kept faithful to the live tables (ADR 0001/0002).
  */
 async function createFixture(): Promise<void> {
   await client.query(`
-    CREATE TEMP TABLE earn_strategies (id TEXT, provider TEXT);
-    CREATE TEMP TABLE earn_provider_wallets (id TEXT, provider TEXT);
-    CREATE TEMP TABLE earn_positions (id TEXT, provider TEXT, provider_wallet_id TEXT);
-    CREATE TEMP TABLE earn_movements (id TEXT, provider TEXT, position_id TEXT);
+    CREATE TEMP TABLE earn_strategies (id TEXT PRIMARY KEY, provider TEXT);
+    CREATE TEMP TABLE earn_provider_wallets (id TEXT PRIMARY KEY, provider TEXT);
+    CREATE TEMP TABLE earn_positions (
+      id TEXT PRIMARY KEY, provider TEXT, provider_wallet_id TEXT, strategy_id TEXT,
+      FOREIGN KEY (provider_wallet_id) REFERENCES earn_provider_wallets(id),
+      FOREIGN KEY (strategy_id) REFERENCES earn_strategies(id)
+    );
+    CREATE TEMP TABLE earn_movements (
+      id TEXT PRIMARY KEY, provider TEXT, position_id TEXT,
+      FOREIGN KEY (position_id) REFERENCES earn_positions(id)
+    );
   `);
 }
 
@@ -39,9 +48,9 @@ async function seedGroundAndNeighbors(): Promise<void> {
       ('wallet_ground_1', 'ground'),
       ('wallet_kamino', 'kamino');
 
-    INSERT INTO earn_positions (id, provider, provider_wallet_id) VALUES
-      ('position_ground_1', 'ground', 'wallet_ground_1'),
-      ('position_kamino', 'kamino', 'wallet_kamino');
+    INSERT INTO earn_positions (id, provider, provider_wallet_id, strategy_id) VALUES
+      ('position_ground_1', 'ground', 'wallet_ground_1', 'strategy_ground_1'),
+      ('position_kamino', 'kamino', 'wallet_kamino', 'strategy_kamino');
 
     INSERT INTO earn_movements (id, provider, position_id) VALUES
       ('movement_ground_1', 'ground', 'position_ground_1'),
@@ -92,6 +101,14 @@ describe("0099 drop Ground earn provider", () => {
       "SELECT id FROM earn_movements ORDER BY id"
     );
     expect(movements.rows).toEqual([{ id: "movement_kamino" }]);
+  });
+
+  it("rejects out-of-order parent deletes via the recreated FK graph", async () => {
+    // Deleting a wallet that a live position still references must fail, or
+    // the delete-order coverage above would be vacuous.
+    await expect(
+      client.query("DELETE FROM earn_provider_wallets WHERE provider = 'ground'")
+    ).rejects.toThrow(/violates foreign key/i);
   });
 
   it("is a no-op when no Ground rows exist", async () => {
