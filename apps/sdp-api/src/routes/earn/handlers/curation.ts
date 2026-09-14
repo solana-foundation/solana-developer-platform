@@ -74,10 +74,21 @@ export const HIDDEN_VAULTS: Partial<
   Record<SolanaCluster, readonly `${EarnProviderId}:${string}`[]>
 > = {
   "mainnet-beta": [
-    // "kamino:8F2mL9wLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
+    // Ethena PYUSD lane, hidden (2026-09-14): Ethena PYUSD Prime and Sentora
+    // PYUSD stay stored and stay catalogued by the sync, but are absent from
+    // every public strategy read. Both were also dropped from the curated
+    // shelf below; this denylist is what keeps them hidden even if the shelf
+    // is ever relaxed wholesale rather than re-picked vault by vault.
+    // biome-ignore lint/security/noSecrets: vault address constant, not a secret
+    "kamino:4TwKA9JXEGeLEpAPLoarhSQoQwoiu12dkDCjSuVvHQUf",
+    // biome-ignore lint/security/noSecrets: vault address constant, not a secret
+    "kamino:A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
   ],
   devnet: [
-    // "kamino:9K3nQ7rLbYcQ1t2WcTgAsD5nDgQ1XjqK8kY7z4Q9example",
+    // PyUSDC — the devnet PYUSD coverage vault, hidden with the lane above so
+    // no environment keeps a PYUSD door the other lost.
+    // biome-ignore lint/security/noSecrets: vault address constant, not a secret
+    "kamino:EHW185wryv6BrQX2bmEyMTRN9GjxcqszU6DjeJuFhf11",
   ],
 };
 
@@ -97,21 +108,14 @@ export const HIDDEN_VAULTS: Partial<
  * Near-name traps, so un-curating stays a decision rather than a guess: the
  * commodity vault has a same-named USDG twin at
  * `DM5ECR3UY28yFhnqvGu7RTducR9k9oVgYXJ7foB3PydK` (under $1 of AUM, dropped by
- * the TVL floor), and "Ethena Prime" (USDG) is NOT the Ethena pick.
+ * the TVL floor), and "Ethena Prime" (USDG) is NOT the Ethena PYUSD pick —
+ * that lane was un-surfaced wholesale and now lives in `HIDDEN_VAULTS`.
  */
 export const CURATED_VAULTS: Partial<
   Record<SolanaCluster, Partial<Record<EarnProviderId, readonly string[]>>>
 > = {
   "mainnet-beta": {
     kamino: [
-      // Ethena PYUSD Prime — Sentora-curated, PYUSD, $251M: the largest PYUSD
-      // vault on the shelf and the anchor of the PYUSD lane.
-      // biome-ignore lint/security/noSecrets: vault address constant, not a secret
-      "4TwKA9JXEGeLEpAPLoarhSQoQwoiu12dkDCjSuVvHQUf",
-      // Sentora PYUSD — Sentora-curated, PYUSD, $109M: second PYUSD pick from
-      // the same house, so the lane does not hang off one vault.
-      // biome-ignore lint/security/noSecrets: vault address constant, not a secret
-      "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
       // Steakhouse High Yield USDG — Steakhouse-curated, USDG, $45M: the USDG
       // lane's pick from a house payments BD has a relationship with.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
@@ -135,7 +139,8 @@ export const CURATED_VAULTS: Partial<
   // kvault program (`packages/sdp-earn/src/providers/kamino/devnet.ts`,
   // verified 2026-08-31). Devnet has no Sentora deployment and no USDG vaults,
   // so the picks mirror the production shelf's SHAPE — the recognizable-house
-  // mirrors plus PYUSD coverage — rather than its exact rows.
+  // mirrors — rather than its exact rows. The devnet PYUSD coverage vault went
+  // with the hidden lane; see `HIDDEN_VAULTS`.
   devnet: {
     kamino: [
       // Steakhouse USDC — devnet mirror of the production Steakhouse pick.
@@ -144,10 +149,6 @@ export const CURATED_VAULTS: Partial<
       // Kamino Vault USDC — the first-party Kamino devnet vault.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
-      // PyUSDC — the one devnet vault denominated in real devnet PYUSD;
-      // exercises the PYUSD deposit-token admission end to end in sandbox.
-      // biome-ignore lint/security/noSecrets: vault address constant, not a secret
-      "EHW185wryv6BrQX2bmEyMTRN9GjxcqszU6DjeJuFhf11",
       // Allez USDC — recognizable-house devnet mirror.
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",

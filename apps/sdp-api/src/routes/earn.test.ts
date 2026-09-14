@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import { type CachedApiKey, wellKnownMint } from "@sdp/types";
+import { type CachedApiKey, type SolanaCluster, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -781,6 +781,79 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     };
     expect(body.data.strategies.map((s) => s.id)).toEqual([curated.id]);
     expect(body.data.total).toBe(1);
+  });
+
+  it("keeps the hidden Ethena PYUSD vaults off every strategy read", async () => {
+    await seedAuth();
+    // Addresses read from the shipped HIDDEN_VAULTS so a re-pick of the hidden
+    // set moves this test with it instead of breaking it on a literal — the
+    // same rule the curated-shelf tests above follow. Every configured entry
+    // gets a seeded row and its own list and detail assertions, so a rule that
+    // only hid the FIRST vault — or lost a later one — fails here rather than
+    // shipping untested. Each configured cluster must also still carry at
+    // least one entry: an emptied cluster would seed no rows and pass its
+    // list assertions trivially, silently un-hiding that environment's shelf.
+    const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
+      "@/routes/earn/handlers/curation"
+    );
+    const hiddenClusters = Object.entries(actual.HIDDEN_VAULTS).map(([cluster, keys]) => ({
+      cluster: cluster as SolanaCluster,
+      keys: keys ?? [],
+    }));
+    if (hiddenClusters.some(({ keys }) => keys.length === 0)) {
+      throw new Error("Expected shipped HIDDEN_VAULTS entries in every configured cluster");
+    }
+
+    const hidden: EarnStrategyRow[] = [];
+    for (const { cluster, keys } of hiddenClusters) {
+      for (const key of keys) {
+        const reference = key.split(":")[1];
+        if (!reference) {
+          throw new Error(`Expected a provider-reference key in HIDDEN_VAULTS, got ${key}`);
+        }
+        hidden.push(await seedStrategy({ providerReference: reference, hostCluster: cluster }));
+      }
+    }
+
+    const assertAllHidden = async () => {
+      for (const { cluster } of hiddenClusters) {
+        // The seeded rows are the only ones on their cluster shelf, and all
+        // are hidden — so the list is empty and `total` must agree at zero
+        // rather than count rows the page then drops. Devnet rides the
+        // sandbox default view; the mirrored mainnet shelf is the explicit
+        // `?cluster=` opt-in.
+        const path =
+          cluster === "devnet" ? "/v1/earn/strategies" : `/v1/earn/strategies?cluster=${cluster}`;
+        const list = await getEarn(path);
+        expect(list.status).toBe(200);
+        const body = (await list.json()) as {
+          data: { strategies: Array<{ id: string }>; total: number };
+        };
+        expect(body.data.strategies).toEqual([]);
+        expect(body.data.total).toBe(0);
+      }
+      for (const strategy of hidden) {
+        expect((await getEarn(`/v1/earn/strategies/${strategy.id}`)).status).toBe(404);
+      }
+    };
+
+    // Direct denylist coverage first: the shipped HIDDEN_VAULTS must hide
+    // every configured entry ON ITS OWN, with the curated allowlist bypassed —
+    // otherwise a denylist regression for any one vault hides behind the shelf
+    // and neither list nor detail would notice.
+    curation.bypassCuratedVaults = true;
+    await assertAllHidden();
+
+    // The full shipped policy agrees: the real curated shelf plus the
+    // denylist, as production serves it.
+    curation.bypassCuratedVaults = false;
+    await assertAllHidden();
+
+    // Still stored — hiding is a read-time policy, never a refusal to persist.
+    const repository = createPostgresEarnRepository(getDb(env));
+    for (const strategy of hidden) {
+      expect(await repository.getStrategyById(strategy.id)).not.toBeNull();
+    }
   });
 
   it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
