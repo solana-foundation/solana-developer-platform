@@ -1,12 +1,46 @@
-import type {
-  CustodyProvider,
-  CustodyWalletAggregate,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
+import {
+  CUSTODY_PROVIDERS,
+  type CustodyWalletAggregate,
+  type PaymentsDashboardWallet,
+  type PaymentTransferSummary,
 } from "@sdp/types";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parsePaymentApiErrorText } from "./payment-api-errors";
+
+const paymentsWalletSchema = z
+  .object({
+    id: z.string().min(1),
+    walletId: z.string().min(1),
+    publicKey: z.string().min(1),
+    label: z.string().nullable().default(null),
+    provider: z.enum(CUSTODY_PROVIDERS).optional(),
+    custodyConfigId: z.string().min(1).optional(),
+    custodyConnectionId: z.string().min(1).optional(),
+    isRuntimeExecutionAllowed: z.boolean(),
+    balances: z
+      .array(
+        z.object({
+          token: z.string(),
+          mint: z.string(),
+          amount: z.string(),
+          uiAmount: z.string(),
+          decimals: z.number(),
+          usdPrice: z.number().optional(),
+          usdValue: z.number().optional(),
+        })
+      )
+      .optional(),
+  })
+  .refine(
+    (wallet) =>
+      (wallet.custodyConfigId !== undefined) !== (wallet.custodyConnectionId !== undefined),
+    { message: "Wallet must have exactly one custody owner" }
+  );
+
+const paymentsWalletsResponseSchema = z.object({
+  data: z.object({ wallets: z.array(paymentsWalletSchema) }),
+});
 
 const paymentTransferRequiredFieldsSchema = z.object({
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
@@ -54,49 +88,12 @@ export async function fetchPaymentsWallets(
       };
     }
 
-    const json = (await response.json()) as {
-      data?: {
-        wallets?: Array<{
-          id?: string;
-          walletId?: string;
-          publicKey?: string;
-          label?: string | null;
-          provider?: string;
-          custodyConfigId?: string;
-          custodyConnectionId?: string;
-          isRuntimeExecutionAllowed?: boolean;
-          balances?: PaymentsDashboardWallet["balances"];
-        }>;
-      };
-    };
+    const parsed = paymentsWalletsResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      return { ok: false, error: "Invalid custody wallet response" };
+    }
 
-    type WalletSummary = NonNullable<NonNullable<typeof json.data>["wallets"]>[number];
-    type ValidWalletSummary = WalletSummary & {
-      id: string;
-      walletId: string;
-      publicKey: string;
-    };
-
-    const wallets = (json?.data?.wallets ?? [])
-      .filter(
-        (wallet): wallet is ValidWalletSummary =>
-          typeof wallet?.id === "string" &&
-          typeof wallet.walletId === "string" &&
-          typeof wallet.publicKey === "string"
-      )
-      .map((wallet) => ({
-        id: wallet.id,
-        walletId: wallet.walletId,
-        publicKey: wallet.publicKey,
-        label: wallet.label ?? null,
-        isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed === true,
-        ...(wallet.custodyConfigId ? { custodyConfigId: wallet.custodyConfigId } : {}),
-        ...(wallet.custodyConnectionId ? { custodyConnectionId: wallet.custodyConnectionId } : {}),
-        ...(wallet.provider ? { provider: wallet.provider as CustodyProvider } : {}),
-        ...(Array.isArray(wallet.balances) ? { balances: wallet.balances } : {}),
-      }));
-
-    return { ok: true, data: wallets };
+    return { ok: true, data: parsed.data.data.wallets };
   } catch (error) {
     return {
       ok: false,

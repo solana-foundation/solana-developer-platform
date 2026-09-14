@@ -1,6 +1,7 @@
 "use client";
 
 import { useSWRConfig } from "swr";
+import { issuanceQueryKeys } from "@/app/dashboard/issuance/issuance-query-key";
 import { earnQueryKeys } from "@/app/dashboard/markets/earn/earn-query-key";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 
@@ -12,9 +13,7 @@ export function useWalletInventoryRefresh() {
       (key) =>
         key === paymentsQueryKeys.actionWallets() ||
         key === earnQueryKeys.fundingWallets() ||
-        (Array.isArray(key) &&
-          (key[0] === "token-management-authority-wallets" ||
-            key[0] === "token-management-supporting-data")),
+        issuanceQueryKeys.isWalletInventoryKey(key),
       undefined,
       { revalidate: true }
     );

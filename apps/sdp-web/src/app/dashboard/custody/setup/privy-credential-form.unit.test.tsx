@@ -8,6 +8,9 @@ import {
   recheckPrivyCredentialAction,
   submitPrivyCredentialAction,
 } from "@/app/dashboard/custody/byok-actions";
+import { issuanceQueryKeys } from "@/app/dashboard/issuance/issuance-query-key";
+import { earnQueryKeys } from "@/app/dashboard/markets/earn/earn-query-key";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { PrivyCredentialForm } from "./privy-credential-form";
@@ -101,18 +104,31 @@ describe("PrivyCredentialForm", () => {
       <I18nProvider locale="en" messages={getMessages("en")}>
         <SWRConfig value={{ provider: () => new Map() }}>
           <PrivyCredentialForm formId="byok-test-form" />
-          <Inventory cacheKey="payments-action-wallets" name="payments" fetcher={walletRead} />
-          <Inventory cacheKey="dashboard-earn-funding-wallets" name="earn" fetcher={walletRead} />
           <Inventory
-            cacheKey={["token-management-authority-wallets", "token"]}
+            cacheKey={paymentsQueryKeys.actionWallets()}
+            name="payments"
+            fetcher={walletRead}
+          />
+          <Inventory cacheKey={earnQueryKeys.fundingWallets()} name="earn" fetcher={walletRead} />
+          <Inventory
+            cacheKey={issuanceQueryKeys.authorityWallets({ tokenId: "token" })}
             name="issuance"
             fetcher={walletRead}
           />
-          <Inventory cacheKey="payments-create-transfer" name="command" fetcher={command} />
+          <Inventory
+            cacheKey={issuanceQueryKeys.supportingData({ tokenId: "token" })}
+            name="issuance-supporting"
+            fetcher={walletRead}
+          />
+          <Inventory
+            cacheKey={paymentsQueryKeys.createTransfer()}
+            name="command"
+            fetcher={command}
+          />
         </SWRConfig>
         <SWRConfig value={{ provider: () => new Map() }}>
           <Inventory
-            cacheKey="payments-action-wallets"
+            cacheKey={paymentsQueryKeys.actionWallets()}
             name="other-project"
             fetcher={otherProjectRead}
           />
@@ -127,6 +143,7 @@ describe("PrivyCredentialForm", () => {
     );
     expect(screen.getByTestId("earn").textContent).toBe("New Connection wallet");
     expect(screen.getByTestId("issuance").textContent).toBe("New Connection wallet");
+    expect(screen.getByTestId("issuance-supporting").textContent).toBe("New Connection wallet");
     expect(screen.getByTestId("other-project").textContent).toBe("Previous data");
     expect(screen.getByTestId("command").textContent).toBe("Previous data");
     expect(otherProjectRead).not.toHaveBeenCalled();

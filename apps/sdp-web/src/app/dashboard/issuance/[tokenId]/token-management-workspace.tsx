@@ -11,6 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../access-control.utils";
+import { issuanceQueryKeys } from "../issuance-query-key";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
@@ -292,7 +293,7 @@ export function TokenManagementWorkspace({
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
-    shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
+    shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
     {
       fallbackData:
@@ -316,7 +317,7 @@ export function TokenManagementWorkspace({
     error: supportingDataRequestError,
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
-    shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
+    shouldLoadSupportingData ? issuanceQueryKeys.supportingData({ tokenId: token.id }) : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId, t),
     {
       fallbackData: hasInitialSupportingData ? initialSupportingData : undefined,
