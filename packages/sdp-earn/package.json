@@ -68,6 +68,11 @@
       "types": "./src/providers/jupiter-lend/client.ts",
       "import": "./src/providers/jupiter-lend/client.ts",
       "default": "./src/providers/jupiter-lend/client.ts"
+    },
+    "./providers/ondo/client": {
+      "types": "./src/providers/ondo/client.ts",
+      "import": "./src/providers/ondo/client.ts",
+      "default": "./src/providers/ondo/client.ts"
     }
   },
   "scripts": {

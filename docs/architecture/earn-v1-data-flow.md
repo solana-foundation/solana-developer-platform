@@ -21,13 +21,13 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["provider clients<br/>(Ground portfolio · Kamino/Veda vault-direct)"]
+        SVC["@sdp/earn provider clients<br/>(Ground portfolio · Kamino/Veda/Jupiter Lend/Ondo vault-direct; Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
         CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Ground · Kamino · Veda (+ future providers)"]
+        VAULT["Vault-infra APIs<br/>Ground · Kamino · Jupiter Lend · Jupiter swap (Ondo)<br/>+ on-chain reads (Veda, Ondo)"]
         CHAIN["Solana<br/>(provider-managed wallet or direct vault transaction)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
@@ -174,10 +174,12 @@ per-provider movement endpoints or status polling types from git history.
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
 | OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public strategy catalogue, deposit quote, and external-wallet build/submit/read surfaces | ✅ published; regenerate after contract changes |
 
-**Net-new (Earn-only) components:** the catalogue clients in `@sdp/earn`
-(Ground, Kamino, and Veda are implemented; Upshift and Perena remain
-`StubEarnClient` subclasses), the vault-direct execution packages
-`@sdp/kamino` and `@sdp/veda`, the
+**Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
+(Ground, Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads — see
+below for Ground's flow; Upshift/Perena remain `StubEarnClient` subclasses
+carrying `provider` + `declaredSupport`, filled in method-by-method), the
+vault-direct execution packages `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`
+and `@sdp/ondo`, the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
