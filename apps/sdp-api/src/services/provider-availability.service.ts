@@ -643,7 +643,8 @@ export async function assertCustodyProviderEntitled(
         "custody",
         provider,
         entry ?? { entitled: false, configured: false, enabled: false }
-      )
+      ),
+      { reason: "provider_not_entitled" }
     );
   }
 }
