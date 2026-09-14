@@ -7,6 +7,13 @@
 -- api_keys (RESTRICT), whose rows go first and whose own dependents cascade.
 -- Pre-mainnet, no production funds; anything worth keeping is moved onto the
 -- default projects before this runs, never reconciled here.
+-- wallet_operations.project_id and .api_key_id are ON DELETE SET NULL, and
+-- the family check (rebuilt NOT VALID in 0058/0060) re-fires on those updates,
+-- so historical rows carrying retired families abort either DELETE below.
+-- Lift the check first and restore it NOT VALID, exactly as 0060 left it.
+ALTER TABLE wallet_operations
+    DROP CONSTRAINT wallet_operations_family_check;
+
 DELETE FROM api_keys
  WHERE project_id IN (
    SELECT id FROM projects
@@ -23,6 +30,11 @@ DELETE FROM projects
                          WHEN 'sandbox' THEN 'default-sandbox'
                          ELSE 'default-production'
                        END);
+
+ALTER TABLE wallet_operations
+    ADD CONSTRAINT wallet_operations_family_check
+        CHECK (operation_family IN ('transfer', 'payment', 'ramp', 'issuance', 'program'))
+        NOT VALID;
 
 -- Every organization with an active member gets both defaults; an organization
 -- with none is provisioned on its first authenticated request, as today.
