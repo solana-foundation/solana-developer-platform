@@ -49,6 +49,7 @@ export type ErrorCode =
   // Transaction errors
   | "TRANSACTION_FAILED"
   | "SIGNING_FAILED"
+  | "SIGNING_REJECTED"
   | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
@@ -107,6 +108,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   // Transaction errors
   TRANSACTION_FAILED: 400,
   SIGNING_FAILED: 400,
+  SIGNING_REJECTED: 422,
   SIGNING_PENDING: 202,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
@@ -158,6 +160,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
   SIGNING_FAILED: "Transaction signing failed",
+  SIGNING_REJECTED: "The signing provider rejected this transaction",
   SIGNING_PENDING: "Signing request pending approval",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",

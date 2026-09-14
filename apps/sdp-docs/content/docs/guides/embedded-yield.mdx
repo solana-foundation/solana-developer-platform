@@ -258,7 +258,7 @@ Recovery across that split is yours: persist the swap signature and the `followU
 | Builds | No key. A build moves no money and expires with its blockhash. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
 
-A `400` means the request or current vault state must change before retrying. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
+A `400` means the request or current vault state must change before retrying. A `422 SIGNING_REJECTED` means the fee sponsor refused the transaction by policy; the same transaction will be refused again, so do not retry it unchanged. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
 
 ## Before production
 
