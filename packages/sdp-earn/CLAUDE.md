@@ -154,7 +154,7 @@ pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and ADR 000
 | Symptom | Cause |
 |---|---|
 | Sandbox Kamino rows name devnet vaults you do not recognise | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names |
-| Sandbox shows mainnet vaults, badged "Mainnet only" | correct — the PRO-1742 mirror: the Treasury strategies card's cluster toggle opted into the mirrored production shelf. Rows are browse-only (`fundable: false`); the default view stays devnet |
+| Sandbox shows mainnet vaults, badged "Mainnet only" | correct — the PRO-1742 mirror: the Treasury strategies card always lists the mirrored production shelf above its devnet shelf. Rows are browse-only (`fundable: false`); only devnet rows deposit, and a failed mirror read hides nothing but itself (PRO-1961) |
 | Catalogue shows only Kamino rows; no Ground strategies anywhere | correct — Ground is un-surfaced (`EARN_PROVIDER_SURFACING`, §5b). The rows are still in the DB; only the reads hide them |
 | No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | same cause: no surfaced provider can hold a program, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
@@ -351,7 +351,8 @@ cluster's shelf (fundable) plus a browse-only MIRROR of the production mainnet
 shelf, written by the sync as two cluster-scoped lanes so each sub-shelf
 converges independently (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`). List
 reads default to the environment's own cluster; the mirrored shelf is an
-explicit `?cluster=` opt-in (the Treasury strategies card's toggle). A mirrored
+explicit `?cluster=` opt-in (the Treasury strategies card requests it beside
+the default shelf in sandbox). A mirrored
 row names a live mainnet vault and a mainnet mint — everything about it true,
 none of it fundable from devnet — so ONE predicate decides —
 `isClusterFundableInEnvironment` (src/support.ts) — and
