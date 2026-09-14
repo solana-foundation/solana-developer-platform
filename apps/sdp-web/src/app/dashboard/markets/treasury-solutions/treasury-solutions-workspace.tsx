@@ -95,6 +95,7 @@ import {
   EarnVaultWithdrawModal,
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
+import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import {
   availableTreasuryCashForWallet,
   estimatedTreasuryApy,
@@ -1703,13 +1704,18 @@ export function TreasurySolutionsWorkspace({
   // list never outlives the error that should have replaced it, and neither
   // shelf's failure or slow load takes the other's rows off the screen. The
   // devnet rows are the only ones Sandbox can deposit into, so they must
-  // survive a mainnet mirror outage in particular (PRO-1961).
+  // survive a mainnet mirror outage in particular (PRO-1961). Those devnet
+  // rows show only where a mainnet counterpart exists — the rough-name
+  // intersection, Veda excepted — so the Sandbox shelf mirrors production
+  // (see `devnet-mainnet-intersection.ts`); the allocation summary and the
+  // share-mint vocabulary above keep the unfiltered shelf, because this is a
+  // browse decision and never a money gate.
   const catalogueStrategies = useMemo(
     () =>
       sandboxCatalogue
         ? mergeStrategyCatalogues(
             baseCatalogueError ? undefined : baseCatalogueStrategies,
-            strategiesError ? undefined : strategies
+            strategiesError ? undefined : filterSandboxDevnetStrategies(strategies)
           )
         : baseCatalogueStrategies,
     [baseCatalogueError, baseCatalogueStrategies, sandboxCatalogue, strategies, strategiesError]
