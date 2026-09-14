@@ -33,6 +33,7 @@ import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -823,6 +824,17 @@ describe("createDvpTrade", () => {
       projectId: TEST_PROJECT_ID,
       actor: { type: "wallet", id: "cwlt_settlement" },
     });
+  });
+
+  it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {
+    const refusal = new SponsorMessageMismatchError();
+    prepareOwnedSubmission.mockRejectedValueOnce(refusal);
+
+    const input = { ...tradeInput(), idempotencyKey: "key-port-integrity" };
+    await expect(createDvpTrade(env, input)).rejects.toBe(refusal);
+    await expect(rowsInDb()).resolves.toMatchObject([
+      { status: "create_failed", create_signature: null },
+    ]);
   });
 
   it("fails the claim when Kora denies and frees the key on replay", async () => {

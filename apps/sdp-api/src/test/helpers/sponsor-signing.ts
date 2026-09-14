@@ -39,3 +39,11 @@ export async function fullySignTestTransaction(transactionBytes: Uint8Array): Pr
   ) as typeof transaction.signatures;
   return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
 }
+
+export function garbageSignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
+  const transaction = getTransactionDecoder().decode(transactionBytes);
+  const signatures = Object.fromEntries(
+    Object.keys(transaction.signatures).map((signer) => [signer, new Uint8Array(64).fill(3)])
+  ) as typeof transaction.signatures;
+  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
+}

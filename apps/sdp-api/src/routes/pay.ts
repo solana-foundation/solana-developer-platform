@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hashString } from "@sdp/payments/hash";
 import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -157,6 +157,8 @@ pay.post(
       const feePayment = await getFeePayment();
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
+      // /pay bytes are partially signed by design: the payer signs client-side.
+      const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
       const signedBase64 = getBase64Decoder().decode(sponsored);
       await new AuditService(getDb(c.env)).log(c, {
         organizationId: request.organization_id,
@@ -169,8 +171,8 @@ pay.post(
           token: request.token,
           destination: request.destination_address,
           walletId: request.wallet_id,
-          signature: getSignatureFromTransaction(getTransactionDecoder().decode(sponsored)),
-          claimHash: createHash("sha256").update(unsignedBase64).digest("hex"),
+          signature,
+          claimHash: await hashString(unsignedBase64),
         },
       });
       const stored = await repository.storeSponsoredTransactionSignature({

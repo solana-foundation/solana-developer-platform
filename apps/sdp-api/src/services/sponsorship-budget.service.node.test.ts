@@ -4,7 +4,6 @@ import {
   compileTransaction,
   createTransactionMessage,
   getBase58Codec,
-  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -13,7 +12,11 @@ import {
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
-import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import {
+  garbageSignTestTransaction,
+  sponsorSignTestTransaction,
+  TEST_MOCK_FEE_PAYER,
+} from "@/test/helpers/sponsor-signing";
 import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
@@ -26,14 +29,6 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 }));
 
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
-
-function garbageSign(requested: Uint8Array): Uint8Array {
-  const transaction = getTransactionDecoder().decode(requested);
-  const signatures = Object.fromEntries(
-    Object.keys(transaction.signatures).map((signer) => [signer, new Uint8Array(64).fill(3)])
-  ) as typeof transaction.signatures;
-  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
-}
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 const SCOPE: SponsorshipScope = {
   environment: "sandbox",
@@ -400,8 +395,8 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.reserve).toHaveBeenCalledOnce();
   });
 
-  it("releases an owned submission when sign-only custody fails", async () => {
-    const { feePayment, provider, repository, budgetRedis } = harness();
+  it("retains an owned submission as ambiguous when sign-only custody fails", async () => {
+    const { feePayment, provider, repository } = harness();
     vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
       new FeePaymentError("KMS response timed out after signing", "SIGNING_FAILED")
     );
@@ -415,11 +410,8 @@ describe("BudgetedFeePayment", () => {
       "timed out"
     );
 
-    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
-    expect(repository.markReleased).toHaveBeenCalledOnce();
-    expect(budgetRedis.settle).toHaveBeenCalledWith(
-      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
-    );
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
     expect(lifecycle.persistSigned).not.toHaveBeenCalled();
     expect(lifecycle.markStarted).not.toHaveBeenCalled();
   });
@@ -596,7 +588,7 @@ describe("BudgetedFeePayment", () => {
   });
 
   it("releases an owned submission that is not fully signed", async () => {
-    const { feePayment, provider, repository } = harness();
+    const { feePayment, provider, repository, budgetRedis } = harness();
     vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(buildTransaction());
     const lifecycle = {
       persistSigned: vi.fn(),
@@ -612,12 +604,40 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markSigned).not.toHaveBeenCalled();
     expect(repository.markReleased).toHaveBeenCalledOnce();
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
+  });
+
+  it("treats a substituted message without the sponsor signature as ambiguous", async () => {
+    const { feePayment, provider, repository } = harness();
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(buildTransaction("legacy"));
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "came back over a different message"
+    );
+
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  it("trips the accounting breaker when the sponsor response cannot be decoded", async () => {
+    const { feePayment, provider, repository } = harness();
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "Signed sponsorship result could not be reconstructed"
+    );
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 
   it("retains a signing reservation as ambiguous when the sponsor signature does not verify", async () => {
     const { feePayment, provider, repository } = harness();
     const requested = buildTransaction();
-    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(garbageSign(requested));
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(garbageSignTestTransaction(requested));
 
     await expect(feePayment.signAsFeePayer(requested)).rejects.toThrow(
       "invalid sponsor fee-payer signature"

@@ -6,7 +6,7 @@ import {
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
-import type { Signature } from "@solana/kit";
+import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -56,11 +56,22 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
 
 function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
+  let feePayer: Promise<Address> | undefined;
+  const sponsor = () => {
+    if (!feePayer) {
+      feePayer = provider.getFeePayer();
+      feePayer.catch(() => {
+        feePayer = undefined;
+      });
+    }
+    return feePayer;
+  };
   const signVerified = async (transaction: Uint8Array) => {
     const signedTransaction = await provider.signAsFeePayer(transaction);
     const decoded = await assertSponsorSignedSameMessage({
       requested: transaction,
       sponsorSigned: signedTransaction,
+      sponsor: await sponsor(),
     });
     return { signedTransaction, decoded };
   };
@@ -75,9 +86,9 @@ function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeeP
         }
       : {}),
     async prepareOwnedSubmission(transaction, lifecycle) {
-      const { signedTransaction, decoded } = await signVerified(transaction);
+      const { decoded } = await signVerified(transaction);
       const submission = {
-        ...getFullySignedSubmission(signedTransaction, decoded),
+        ...getFullySignedSubmission(decoded),
         releaseDefinitelyUnbroadcast: async () => {},
       };
       await lifecycle.persistSigned(submission);

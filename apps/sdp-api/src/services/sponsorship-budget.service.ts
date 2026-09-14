@@ -9,12 +9,12 @@ import {
   type Address,
   assertIsFullySignedTransaction,
   assertIsSignature,
-  bytesEqual,
   getBase64Decoder,
   getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
+  getTransactionEncoder,
   type Signature,
   type Transaction,
 } from "@solana/kit";
@@ -32,6 +32,7 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
   assertSponsorSignedSameMessage,
+  SponsorResponseUndecodableError,
   SponsorResponseUnusableError,
 } from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
@@ -61,17 +62,14 @@ type BudgetRepository = Pick<
   | "tripGlobalBreaker"
 >;
 
-export function getFullySignedSubmission(
-  signedTransaction: Uint8Array,
-  decoded = getTransactionDecoder().decode(signedTransaction)
-): OwnedSignedSubmission {
+export function getFullySignedSubmission(decoded: Transaction): OwnedSignedSubmission {
   try {
     assertIsFullySignedTransaction(decoded);
   } catch {
     throw new Error("Sponsored transaction is not fully signed");
   }
   return {
-    signedTransaction,
+    signedTransaction: new Uint8Array(getTransactionEncoder().encode(decoded)),
     signature: getSignatureFromTransaction(decoded),
   };
 }
@@ -94,6 +92,8 @@ type AdmissionResult = {
   replay: SponsorshipReservation | null;
   cancel: AdmissionCancel | null;
   settlement: AdmissionSettlement | null;
+  feePayer: Address;
+  requested: Transaction;
 };
 type DurableAdmission =
   | { kind: "owned" | "replay"; result: AdmissionResult }
@@ -101,6 +101,7 @@ type DurableAdmission =
 type AdmissionContext = {
   id: string;
   network: SponsorshipNetwork;
+  decoded: Transaction;
   amount: number;
   transactionDigest: string;
   feePayer: string;
@@ -203,13 +204,24 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   private async verifySponsorResponse(
-    requested: Uint8Array,
     sponsorSigned: Uint8Array,
     reservation: AdmissionResult
   ): Promise<Transaction> {
     try {
-      return await assertSponsorSignedSameMessage({ requested, sponsorSigned });
+      return await assertSponsorSignedSameMessage({
+        requested: reservation.requested,
+        sponsorSigned,
+        sponsor: reservation.feePayer,
+      });
     } catch (error) {
+      if (error instanceof SponsorResponseUndecodableError) {
+        return this.accountingUnavailable(
+          resolveNetwork(this.env),
+          "Signed sponsorship result could not be reconstructed",
+          "Sponsor response bytes were undecodable",
+          error
+        );
+      }
       if (error instanceof SponsorResponseUnusableError) {
         await this.releaseDeterministic(reservation, error);
       } else {
@@ -219,19 +231,26 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
   }
 
-  private replayedSponsorTransaction(requested: Uint8Array, stored: string): Uint8Array {
-    const replayed = decodeBase64(stored);
-    const requestedTransaction = getTransactionDecoder().decode(requested);
-    const storedTransaction = getTransactionDecoder().decode(replayed);
-    const sponsorSignature = Object.values(storedTransaction.signatures)[0];
-    if (
-      !bytesEqual(storedTransaction.messageBytes, requestedTransaction.messageBytes) ||
-      sponsorSignature === null ||
-      sponsorSignature === undefined
-    ) {
+  private async replayedSponsorTransaction(reservation: AdmissionResult): Promise<Uint8Array> {
+    const stored = reservation.replay?.signedTransaction;
+    if (!stored) {
       throw new FeePaymentError(
         "Stored sponsored transaction does not match the requested message",
         "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    const replayed = decodeBase64(stored);
+    try {
+      await assertSponsorSignedSameMessage({
+        requested: reservation.requested,
+        sponsorSigned: replayed,
+        sponsor: reservation.feePayer,
+      });
+    } catch (error) {
+      throw new FeePaymentError(
+        "Stored sponsored transaction does not match the requested message",
+        "PROVIDER_NOT_AVAILABLE",
+        error instanceof Error ? error : undefined
       );
     }
     return replayed;
@@ -240,7 +259,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
     const reservation = await this.admit(transaction, "sign");
     if (reservation.replay?.signedTransaction) {
-      return this.replayedSponsorTransaction(transaction, reservation.replay.signedTransaction);
+      return this.replayedSponsorTransaction(reservation);
     }
     let signed: Uint8Array;
     try {
@@ -259,7 +278,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       await this.markAmbiguous(reservation, error);
       throw error;
     }
-    const signedTransaction = await this.verifySponsorResponse(transaction, signed, reservation);
+    const signedTransaction = await this.verifySponsorResponse(signed, reservation);
     const signature = getSignatureFromTransaction(signedTransaction);
     let result: SignaturePersistResult;
     try {
@@ -314,14 +333,14 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       signedTransaction = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
-      await this.releaseDeterministic(reservation, error);
+      await this.markAmbiguous(reservation, error);
       throw error;
     }
-    const decoded = await this.verifySponsorResponse(transaction, signedTransaction, reservation);
+    const decoded = await this.verifySponsorResponse(signedTransaction, reservation);
     let submission: PreparedOwnedSubmission;
     try {
       submission = {
-        ...getFullySignedSubmission(signedTransaction, decoded),
+        ...getFullySignedSubmission(decoded),
         releaseDefinitelyUnbroadcast: (error) =>
           this.releaseDeterministic(reservation, error, "after_submission"),
       };
@@ -514,6 +533,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     return {
       id,
       network,
+      decoded: decodedTransaction,
       amount,
       transactionDigest,
       feePayer: providerConfig.signerAddress,
@@ -543,6 +563,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         replay: durableReplay,
         cancel: null,
         settlement: null,
+        feePayer: context.feePayer as Address,
+        requested: context.decoded,
       };
     }
     if (durableReplay?.status === "charged_unknown") {
@@ -724,6 +746,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         replay: null,
         cancel,
         settlement: this.settlementInput(context, attempt),
+        feePayer: context.feePayer as Address,
+        requested: context.decoded,
       },
     });
     try {
@@ -753,6 +777,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
             replay: existing,
             cancel: null,
             settlement: null,
+            feePayer: context.feePayer as Address,
+            requested: context.decoded,
           },
         };
       }

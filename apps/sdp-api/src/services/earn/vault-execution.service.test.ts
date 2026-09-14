@@ -17,6 +17,7 @@ import {
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeePaymentPort } from "@/services/ports";
+import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
 import { resetClusterEndpointProofs } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
@@ -546,6 +547,32 @@ describe("vault signing lifecycle", () => {
     expect(result.signature).toBe(getSignatureFromTransaction(decoded));
     expect(signAsFeePayer).toHaveBeenCalledOnce();
     expect(signAndSend).not.toHaveBeenCalled();
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the port's sponsor-response refusal without broadcasting", async () => {
+    const owner = await generateKeyPairSigner();
+    const sponsor = await generateKeyPairSigner();
+    const refusal = new SponsorMessageMismatchError();
+    const signAsFeePayer = vi.fn().mockRejectedValue(refusal);
+    const fee = feePayment({
+      getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
+      signAsFeePayer,
+      signAndSend: vi.fn(),
+    });
+
+    await expect(
+      signVaultPlan(env, {
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: plan.assetIdentity,
+        plan: planForOwner(owner.address),
+        owner,
+        rpcUrl,
+        fee: { kind: "sponsored", feePayment: fee, sponsor: sponsor.address },
+      })
+    ).rejects.toBe(refusal);
+
     expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
