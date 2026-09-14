@@ -316,9 +316,11 @@ program create still sends the body `requestId` form.
   versioned `sessionStorage` key.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
-  mint's scale, floored, one-atom minimum), `isSlippageExceededRefusal` (the
-  API's `details.reason` seam), the debounced quote hook and (in
-  `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
+  mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
+  malformed response and answers `null`, while `isZeroQuote` reads it `false` —
+  not provably zero — so both fail closed like an unavailable quote),
+  `isSlippageExceededRefusal` (the API's `details.reason` seam), the debounced
+  quote hook and (in `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
   purpose — two copies of a funds-protection rule is how one drifts, the same
   reasoning as the idempotency-key store. The floor is derived from a LIVE
   provider quote, never from the caller's own input; an unavailable quote
