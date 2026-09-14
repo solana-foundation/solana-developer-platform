@@ -345,12 +345,15 @@ refresh is update-only.
   cron run reads error; the job's own query failing emits no tick at all.
 - **Cadence:** `EARN_SPLIT_SWAPS_CRON` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
-  rows absent from that provider's live catalogue are deleted, scoped to the
-  cluster sub-shelf the responding lane is the truth for. Operator-paused or
-  deprecated rows remain so a later sync cannot silently reactivate them. The
-  mirror lane additionally converges to EMPTY on a reliable "nothing is
-  listed" answer (an empty accepted mainnet shelf, or a steady-state
-  production skip), so orphaned mirror rows never outlive their truth source;
+  rows absent from that provider's live catalogue become deprecated metadata
+  tombstones, scoped to the cluster sub-shelf the responding lane is the truth
+  for. They disappear from browse and deposit admission while preserving the
+  stable vault and mint identity an anonymous holder needs to exit. A provider
+  relist reactivates only a sync-owned tombstone; operator-paused or deprecated
+  rows remain sticky. The mirror lane additionally converges to EMPTY on a
+  reliable "nothing is listed" answer (an empty accepted mainnet shelf, or a
+  steady-state production skip), so orphaned mirror rows never outlive their
+  truth source;
   fundable own shelves keep the absolute empty-keep-set refusal.
 
 ### Figure anomaly check (`services/earn/catalogue-anomaly.ts`)

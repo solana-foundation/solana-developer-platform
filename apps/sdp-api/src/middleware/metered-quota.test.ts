@@ -20,6 +20,7 @@ const ANONYMOUS_QUOTA = {
 };
 const ANONYMOUS_IP = "203.0.113.19";
 const ANONYMOUS_SCOPE = `metered:${ANONYMOUS_QUOTA.name}:anonymous:ip:${ANONYMOUS_IP}`;
+const UNTRUSTED_ANONYMOUS_SCOPE = `metered:${ANONYMOUS_QUOTA.name}:anonymous:ip:unknown`;
 
 type Actor = { kind: "key"; id: string } | { kind: "user"; id: string };
 
@@ -195,6 +196,20 @@ describe("meteredQuota", () => {
     expect(res.status).toBe(429);
     expect(handler).not.toHaveBeenCalled();
     expect(res.headers.get("X-RateLimit-Limit")).toBe("2");
+  });
+
+  it("cannot rotate forwarded addresses to bypass the budget without trusted proxy config", async () => {
+    await seedRateLimit(env, UNTRUSTED_ANONYMOUS_SCOPE, ANONYMOUS_QUOTA.maxRequests());
+    const handler = vi.fn();
+
+    const res = await createAnonymousQuotaApp(handler).request(
+      "/op",
+      { headers: { "x-forwarded-for": "198.51.100.77" } },
+      { ...env, TRUST_PROXY_HEADERS: undefined }
+    );
+
+    expect(res.status).toBe(429);
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it("does not charge the anonymous budget for an authenticated request", async () => {

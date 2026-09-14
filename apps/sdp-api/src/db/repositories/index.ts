@@ -62,7 +62,7 @@ export type {
 } from "./dvp-trade.repository";
 export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 export type {
-  DeleteUnlistedEarnStrategiesInput,
+  DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,

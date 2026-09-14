@@ -1023,7 +1023,10 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
   exit's own gates only. An authenticated caller supplies `positionId`, which
   is 404-scoped to its organization and exact project. An anonymous caller
   supplies `{strategyId, ownerAddress, shares}`, which resolves only global
-  catalogue metadata and never looks up a tenant position.
+  catalogue metadata and never looks up a tenant position. The sync retains a
+  deprecated metadata tombstone when a provider delists a strategy, so that
+  stable id continues to resolve the vault and mints needed for an exit while
+  remaining absent from catalogue lists and deposit admission.
 - `POST /external-wallet/withdrawal-transactions`: the exit build, with the
   same locator split and ADR 0002 exit safety. It works while a provider is
   disabled for new deposits. Keyed builds may name `feePayer` and persist the
@@ -1160,6 +1163,10 @@ every preview an exit derives its floor from stay unmetered. Money-IN carries
 no such rule, which is why the deposit quote is metered and the exit quote is
 not. Pinned by the "metered quotas" describe in `../earn-program.test.ts`,
 whose second test exhausts both counters and asserts the payout still lands.
+Anonymous paid-upstream counters use a verified Cloud Run client address. A
+self-hosted deployment ignores forwarded addresses by default and shares the
+fail-closed unidentified bucket; `TRUST_PROXY_HEADERS=true` is safe only when
+its ingress replaces caller-supplied `X-Forwarded-For` values.
 
 ## Audit-ledger parity (PRO-1866)
 

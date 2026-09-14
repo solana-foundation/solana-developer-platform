@@ -431,8 +431,8 @@ describe("EarnRepository (postgres)", () => {
     });
   });
 
-  describe("deleteUnlistedStrategies", () => {
-    it("deletes only active rows the provider no longer lists, scoped to (provider, environment)", async () => {
+  describe("deprecateUnlistedStrategies", () => {
+    it("deprecates only active rows the provider no longer lists, scoped to (provider, environment)", async () => {
       const kept = await seedStrategy({
         provider: "upshift",
         providerReference: "kamino-allez-usdc",
@@ -446,18 +446,41 @@ describe("EarnRepository (postgres)", () => {
         environment: "production",
       });
 
-      const deleted = await repo.deleteUnlistedStrategies({
+      const delisted = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: ["kamino-allez-usdc"],
       });
 
-      expect(deleted).toEqual(["morpho-gauntlet-usdc"]);
+      expect(delisted).toEqual(["morpho-gauntlet-usdc"]);
       expect((await repo.getStrategyById(kept.id))?.status).toBe("active");
-      expect(await repo.getStrategyById(stale.id)).toBeNull();
+      expect(await repo.getStrategyById(stale.id)).toMatchObject({
+        id: stale.id,
+        status: "deprecated",
+        catalogue_delisted_at: expect.any(String),
+      });
       // Environment scope is load-bearing: a sandbox pass must never touch
       // production rows carrying the same provider reference.
       expect((await repo.getStrategyById(otherEnvironment.id))?.status).toBe("active");
+    });
+
+    it("reactivates a sync-owned tombstone with the same stable id when the provider relists it", async () => {
+      const stale = await seedStrategy({ providerReference: "relisted-vault" });
+      await repo.deprecateUnlistedStrategies({
+        provider: "upshift",
+        environment: "sandbox",
+        listedProviderReferences: ["another-vault"],
+      });
+
+      const relisted = await repo.upsertStrategy(
+        strategyInput({ providerReference: "relisted-vault", status: "active" })
+      );
+
+      expect(relisted).toMatchObject({
+        id: stale.id,
+        status: "active",
+        catalogue_delisted_at: null,
+      });
     });
 
     it("is idempotent and leaves operator-paused rows alone", async () => {
@@ -467,7 +490,7 @@ describe("EarnRepository (postgres)", () => {
       });
       await seedStrategy({ provider: "upshift", providerReference: "aave-v3-usdc" });
 
-      const first = await repo.deleteUnlistedStrategies({
+      const first = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: ["kamino-allez-usdc"],
@@ -476,7 +499,7 @@ describe("EarnRepository (postgres)", () => {
       // An operator pause outranks the catalogue, exactly as in upsertStrategy.
       expect((await repo.getStrategyById(paused.id))?.status).toBe("paused");
 
-      const second = await repo.deleteUnlistedStrategies({
+      const second = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: ["kamino-allez-usdc"],
@@ -484,25 +507,25 @@ describe("EarnRepository (postgres)", () => {
       expect(second).toEqual([]);
     });
 
-    it("refuses an empty keep set rather than deleting the whole shelf", async () => {
+    it("refuses an empty keep set rather than deprecating the whole shelf", async () => {
       // "The provider listed nothing" is indistinguishable from a misconfigured
-      // account, so it can never tear down a catalogue.
+      // account, so it can never deprecate a whole catalogue.
       const row = await seedStrategy({
         provider: "upshift",
         providerReference: "kamino-allez-usdc",
       });
 
-      const deleted = await repo.deleteUnlistedStrategies({
+      const delisted = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         listedProviderReferences: [],
       });
 
-      expect(deleted).toEqual([]);
+      expect(delisted).toEqual([]);
       expect((await repo.getStrategyById(row.id))?.status).toBe("active");
     });
 
-    it("tears down exactly one cluster sub-shelf on an AUTHORIZED empty keep set", async () => {
+    it("deprecates exactly one cluster sub-shelf on an AUTHORIZED empty keep set", async () => {
       // The mirror lane's convergence path (PRO-1742): when its truth source
       // reliably answers "nothing is listed", the browse-only mainnet sub-shelf
       // empties rather than serving orphaned rows forever. The devnet shelf and
@@ -523,7 +546,7 @@ describe("EarnRepository (postgres)", () => {
         status: "paused",
       });
 
-      const deleted = await repo.deleteUnlistedStrategies({
+      const delisted = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -531,16 +554,19 @@ describe("EarnRepository (postgres)", () => {
         allowEmptyKeepSet: true,
       });
 
-      expect(deleted).toEqual(["orphaned-mainnet-vault"]);
-      expect(await repo.getStrategyById(mirroredMainnet.id)).toBeNull();
+      expect(delisted).toEqual(["orphaned-mainnet-vault"]);
+      expect(await repo.getStrategyById(mirroredMainnet.id)).toMatchObject({
+        status: "deprecated",
+        catalogue_delisted_at: expect.any(String),
+      });
       expect((await repo.getStrategyById(devnetRow.id))?.status).toBe("active");
       expect((await repo.getStrategyById(pausedMainnet.id))?.status).toBe("paused");
     });
 
     it("refuses an authorized-empty delist without a cluster scope", async () => {
-      // An empty keep set may tear down one sub-shelf, never an environment.
+      // An empty keep set may deprecate one sub-shelf, never an environment.
       await expect(
-        repo.deleteUnlistedStrategies({
+        repo.deprecateUnlistedStrategies({
           provider: "upshift",
           environment: "sandbox",
           listedProviderReferences: [],
@@ -572,27 +598,35 @@ describe("EarnRepository (postgres)", () => {
         .bind(devnetStale.id)
         .run();
 
-      const deleted = await repo.deleteUnlistedStrategies({
+      const delisted = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         hostCluster: "devnet",
         listedProviderReferences: ["devnet-kept"],
       });
 
-      // The devnet lane deletes its own stale row — the NULL one included —
+      // The devnet lane deprecates its own stale row, including the NULL one,
       // and never reaches the mirrored shelf its keep set knows nothing about.
-      expect(deleted).toEqual(["devnet-stale"]);
+      expect(delisted).toEqual(["devnet-stale"]);
+      expect(await repo.getStrategyById(devnetStale.id)).toMatchObject({
+        status: "deprecated",
+        catalogue_delisted_at: expect.any(String),
+      });
       expect((await repo.getStrategyById(devnetKept.id))?.status).toBe("active");
       expect((await repo.getStrategyById(mirroredMainnet.id))?.status).toBe("active");
 
       // And the mirror lane converges its own shelf without touching devnet.
-      const mirrorDeleted = await repo.deleteUnlistedStrategies({
+      const mirrorDelisted = await repo.deprecateUnlistedStrategies({
         provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: ["a-mainnet-ref-still-listed"],
       });
-      expect(mirrorDeleted).toEqual(["mainnet-vault"]);
+      expect(mirrorDelisted).toEqual(["mainnet-vault"]);
+      expect(await repo.getStrategyById(mirroredMainnet.id)).toMatchObject({
+        status: "deprecated",
+        catalogue_delisted_at: expect.any(String),
+      });
       expect((await repo.getStrategyById(devnetKept.id))?.status).toBe("active");
     });
   });

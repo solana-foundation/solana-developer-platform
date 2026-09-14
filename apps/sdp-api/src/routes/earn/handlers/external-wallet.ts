@@ -572,7 +572,9 @@ type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
 /**
  * Resolve one exit without ever crossing the tier boundary. Authenticated
  * requests resolve their tenant position exactly as before. Anonymous requests
- * resolve only the global strategy metadata supplied in the public body.
+ * resolve only global strategy metadata supplied in the public body. The
+ * catalogue sync retains that immutable identity as a deprecated tombstone, so
+ * delisting closes deposits without closing exits.
  */
 async function resolveExternalWalletExit(
   c: AppContext,

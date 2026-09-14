@@ -925,17 +925,25 @@ the own-lane foreign-cluster drop: a provider's non-production source reporting
 mainnet instruments is still drift, warned and skipped.
 
 **Each lane delists only the cluster sub-shelf it is the truth for**
-(`deleteUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
+(`deprecateUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
 set can never tear down the other lane's rows. The mirror lane additionally
 converges to EMPTY on a reliable "nothing is listed" answer: a successful
 production fetch with no accepted mainnet rows, or a steady-state skip (stub
 provider, production credentials absent or revoked). The usual empty-keep-set
-refusal stays absolute for fundable own shelves, where a wrong delete costs a
-customer a vault mid-deposit; the asymmetry flips for the mirror because its
-rows are browse-only and re-mirrored hourly, while refusing would serve
-orphaned "production catalogue" rows forever after production stopped vouching
-for them. The repository enforces that an authorized-empty delist is
+refusal stays absolute for fundable own shelves, where a wrong delist hides a
+vault a customer may be mid-deposit into; the asymmetry flips for the mirror
+because its rows are browse-only and re-mirrored hourly, while refusing would
+serve orphaned "production catalogue" rows forever after production stopped
+vouching for them. The repository enforces that an authorized-empty delist is
 cluster-scoped, never environment-wide.
+
+PRO-1943 changed the storage half of delisting without changing that active-set
+contract. An unlisted active row is now marked `deprecated` with a
+`catalogue_delisted_at` tombstone instead of being deleted. It remains absent
+from catalogue lists and deposit admission, but preserves the stable provider,
+vault, and mint identity required to build an anonymous exit. A later provider
+relist clears only this sync-owned marker and reactivates the same id; an
+operator pause or deprecation has no marker and remains sticky.
 
 **Accepted cap: the mirror is faithful only for cluster-distinct references.**
 The upsert key stays (provider, provider_reference, environment) with no

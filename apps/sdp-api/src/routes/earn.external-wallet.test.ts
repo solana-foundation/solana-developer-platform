@@ -739,9 +739,8 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   });
 
   it("refuses a deprecated strategy (catalogue admission)", async () => {
-    // "Delisted" in the threat model (EARN-012/020) is `deprecated` in code:
-    // the delist pass leaves the row behind so it stays addressable by id,
-    // which is exactly why the admission gate must refuse it here too.
+    // `deprecated` stays addressable by id for exit safety, which is exactly
+    // why the admission gate must refuse it here too.
     await seedAuth();
     const strategy = await seedStrategy({ status: "deprecated" });
     const res = await post("deposit-transactions", {
@@ -987,6 +986,38 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
       providerReference: strategy.provider_reference,
       shares: "10",
     });
+  });
+
+  it("keeps anonymous previews and exits available after catalogue delisting", async () => {
+    const strategy = await seedStrategy();
+    await createPostgresEarnRepository(getDb(env)).deprecateUnlistedStrategies({
+      provider: "kamino",
+      environment: "sandbox",
+      listedProviderReferences: ["another-vault"],
+    });
+
+    const preview = await post(
+      "withdrawal-previews",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+    const exit = await post(
+      "withdrawal-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(preview.status).toBe(200);
+    expect(exit.status).toBe(200);
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        vaultAddress: strategy.provider_reference,
+        tokenMint: USDC_MINT,
+        shareMint: SHARE_MINT,
+        ownerAddress: OWNER,
+      })
+    );
   });
 
   it("does not let an anonymous caller resolve a tenant position id", async () => {
