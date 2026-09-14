@@ -78,7 +78,7 @@ export function formatTokenQuantity(
 }
 
 /**
- * Compact human range from two ISO-8601 durations (Ground reports processing
+ * Compact human range from two ISO-8601 durations (providers report processing
  * estimates as e.g. "PT21M" / "P2D"). Unparseable inputs render verbatim so a
  * provider format change degrades to raw text instead of hiding the estimate.
  */
@@ -113,7 +113,6 @@ function formatIsoDuration(duration: string): string {
  * hidden or renamed.
  */
 const EARN_PROVIDER_LABELS = {
-  ground: "Ground",
   kamino: "Kamino",
   jupiter_lend: "Jupiter Lend",
   ondo: "Ondo",

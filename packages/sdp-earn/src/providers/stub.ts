@@ -10,8 +10,7 @@ import type {
  * Scaffold base for vault-infra clients: every `EarnVaultProvider` operation
  * throws NOT_IMPLEMENTED until the concrete integration lands. Subclasses
  * exist so the registry, availability gating, and route dispatch are all real
- * today; an integration lands method-by-method by overriding here (Ground
- * overrides `listStrategies` and adds the portfolio/approval capabilities).
+ * today; an integration lands method-by-method by overriding here.
  */
 export abstract class StubEarnClient implements EarnVaultProvider {
   abstract readonly provider: EarnVaultProvider["provider"];

@@ -12,7 +12,7 @@ import {
  * `EarnStrategy` catalogue rows — callers fetch the rows from the strategies
  * BFF and pass them in; nothing here holds module-level data.
  *
- * Every value is read from a field the provider actually publishes. Ground
+ * Every value is read from a field the provider actually publishes. The
  * reports **no** risk tier, rating, or grade on a yield source (its own docs:
  * "No risk classifications, tiers, or ratings are included in this catalog"),
  * so nothing here invents one — the observable facts are the rate, what backs

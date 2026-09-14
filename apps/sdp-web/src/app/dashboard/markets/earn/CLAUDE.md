@@ -421,8 +421,8 @@ to `EarnProviderId`; an unknown value has already failed closed as
 
 ## Withdrawal rules
 
-Measured against Ground sandbox 2026-08-13 (see `packages/sdp-earn/CLAUDE.md` →
-Conventions). All still hold:
+Measured against a live provider sandbox 2026-08-13 (see
+`packages/sdp-earn/CLAUDE.md` → Conventions). All still hold:
 
 - **A 409 can be the answer.** The amount-less preview may refuse while still
   reporting the lane balance, so a 409 carrying
@@ -438,13 +438,13 @@ Conventions). All still hold:
   `earnProgramSolanaPayoutTokens(provider)` from `@sdp/types` — the same
   registry the provider client gates on, so the button and the server cannot
   disagree. A token the provider never routes to Solana is NOT OFFERED at all.
-  Do not reintroduce a module-level Ground-only constant here.
+  Do not reintroduce a module-level per-provider constant here.
 - **Never disable a money verb on status.** Withdraw gates on `withdrawableUsd`
   alone: the provider already reserves an in-flight amount out of that figure,
   so the balance expresses the constraint without a status lock that could trap
   an exit.
 - Preview failures render TRANSLATED copy naming the per-lane reality — never
-  the provider's wire text ("ground request failed with status 409" explains
+  the provider's wire text ("provider request failed with status 409" explains
   nothing).
 
 ## Money is a decimal STRING, end to end

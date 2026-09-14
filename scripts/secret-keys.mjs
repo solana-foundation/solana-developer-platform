@@ -170,8 +170,6 @@ export const API_LOCAL_ENV_KEYS = [
   "UPSHIFT_SANDBOX_API_KEY",
   "PERENA_API_KEY",
   "PERENA_SANDBOX_API_KEY",
-  "GROUND_API_KEY",
-  "GROUND_SANDBOX_API_KEY",
   // Platform Jupiter swap key: swap-funded deposits and the Ondo provider's
   // readiness gate both read it.
   "JUPITER_SWAP_API_KEY",

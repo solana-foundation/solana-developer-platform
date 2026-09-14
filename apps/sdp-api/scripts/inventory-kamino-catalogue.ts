@@ -12,7 +12,7 @@
  * (`distillKaminoVault` — shared code, not a reimplementation), and reports
  * both sides: what enters the catalogue, and what was dropped and why.
  *
- * Layout mirrors inventory-ground-catalogue.ts:
+ * Layout mirrors the shared catalogue-inventory script shape:
  *   - inventory snapshot   apps/sdp-api/.earn-catalogue/kamino.inventory.json (committed)
  *   - rendered report      docs/earn/kamino-catalogue-inventory.md (committed)
  *

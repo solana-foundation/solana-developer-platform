@@ -67,9 +67,10 @@ longer reporting it.
 **Where the id may come from.** A curator attribution is SDP vouching for who
 runs a vault, so it must trace to something the PROVIDER establishes: a curator
 field, verified authority/address data, or an audited vault-address allowlist.
-It may never be parsed out of a label the public can choose. Ground's
-`deriveCurator` reads Ground's own yield-source ids, which is why that precedent
-is safe and does not generalise: Kamino's registry is permissionless, so its
+It may never be parsed out of a label the public can choose. The removed
+Ground integration derived curators from its own yield-source ids, which was
+safe precisely because those ids came from the provider, not the public — the
+precedent does not generalise: Kamino's registry is permissionless, so its
 vault names carry no authority and its snapshots carry no curator at all (see
 `packages/sdp-earn/CLAUDE.md`). The same test applies to `sourceKind` — an `rwa`
 classification asserts real-world backing, and an integrator filters on it.
@@ -211,10 +212,10 @@ compiler can't see.
 **Three worked examples**, and which one you copy depends on how the provider
 holds the money and who signs:
 
-- **Ground: custodial portfolio.** `ground` id, `GroundEarnClient`,
-  `GROUND_API_KEY` / `GROUND_SANDBOX_API_KEY`; a live `listStrategies` plus the
-  portfolio-wallet capability (§4b). Copy this when SDP provisions a wallet and
-  moves funds through the provider.
+- **Custodial portfolio** (no live example — the Ground integration was
+  removed; see ADR 0002's 2026-09 addendum): a live `listStrategies` plus the
+  portfolio-wallet capability (§4b) and a credential key pair. Copy this when
+  SDP provisions a wallet and moves funds through the provider.
 - **Kamino: executing vault-direct, and keyless.** `kamino` id,
   `KaminoEarnClient` (catalogue, no credential), the live-metrics capability
   (§4c), and *none* of the portfolio-wallet surface: the vaults are
@@ -249,7 +250,7 @@ Steps 5–8 below are the **credentialed** path; a provider on a public API
 skips most of them (see the keyless variant under the table). Step 10 and §4d
 apply only to providers SDP executes for.
 
-| Step | File | What you add (Ground precedent) |
+| Step | File | What you add |
 |---|---|---|
 | 1. Declare the id | `packages/sdp-types/src/provider-access.ts` | Append to `EARN_PROVIDERS`. Earn entitlements are override-only (`createBooleanRecord(EARN_PROVIDERS, [])`): every org gets the provider disabled until an explicit `providerOverrides.earn.<id>` — there is no tier-default list to join. |
 | 1b. Decide if it is OFFERED | `packages/sdp-types/src/provider-access.ts` | Add the id to `EARN_PROVIDER_SURFACING` — it is exhaustive over `EarnProviderId`, so step 1 does not compile without it. `true` = customers see its strategies and may open programs with it; `false` = fully integrated but not offered (§6). Start a work-in-progress integration at `false`. |
@@ -425,7 +426,7 @@ single-vault targets until weights are re-enabled post-V1.
 2. **Speak the shared DTOs.** Wire shapes live in `@sdp/types/earn`
    (`EarnPortfolioWalletSnapshot`, `EarnPortfolioDeposit(sPage)`,
    `EarnPortfolioWithdrawal(Preview)`, statuses, tokens). Map provider
-   statuses into the neutral unions (Ground: `idle` → `ready`, any
+   statuses into the neutral unions (`idle` → `ready`, any
    `*_active`/unknown → `busy`); all USD amounts are decimal strings in the
    contract — convert to the provider's wire format only at the HTTP
    boundary.
@@ -463,13 +464,12 @@ single-vault targets until weights are re-enabled post-V1.
    double-provisioning it exists to prevent; a ref held by a *different* org or
    environment is the one case that really is a conflict.
 6. **Tests.** No-network fetch-stub harness, same pattern as
-   `packages/sdp-earn/src/fetch.test.ts`; Ground's
-   `providers/ground/client.test.ts` covers mappings, filtering, pagination,
+   `packages/sdp-earn/src/fetch.test.ts`: cover mappings, filtering, pagination,
    error taxonomy, requestId behavior, and the capability guard —
    `capabilities.test.ts` is the guard's own suite.
 
-**Live sandbox runs need a key:** `GROUND_SANDBOX_API_KEY` has to reach the
-process before anything can talk to Ground's sandbox. Locally that means
+**Live sandbox runs need a key:** the provider's `<ID>_SANDBOX_API_KEY` has to
+reach the process before anything can talk to its sandbox. Locally that means
 `apps/sdp-api/.env.local` (gitignored): the Doppler wrapper
 (`scripts/doppler/run-with-config.sh`) overlays `apps/*/.env.local` on top of
 the Doppler-injected values, so the file wins with no `DOPPLER_PRESERVE_ENV`
@@ -506,8 +506,8 @@ Three things to understand before opting in:
 
 - **It is a promise about COST.** The pass runs 12× more often than the sync.
   Kamino qualifies because one bulk endpoint carries every vault's figures in
-  two requests. Ground does NOT implement it: its rates arrive on the same paged
-  yield-sources endpoint the catalogue uses, so a five-minute pass would re-pay
+  two requests. A provider whose rates arrive on the same paged endpoint its
+  catalogue uses should NOT implement it: the five-minute pass would re-pay
   the whole catalogue cost for the rate alone.
 - **Return your whole shelf, unfiltered.** The refresh is UPDATE-only —
   `updateStrategyMetrics` no-ops on any reference the catalogue does not hold —
@@ -642,7 +642,7 @@ lose information you want back later.
 ```ts
 export const EARN_PROVIDER_SURFACING = {
   …
-  ground: false,   // ← un-surfaced
+  upshift: false,   // ← un-surfaced
   kamino: true,
 } as const satisfies Record<EarnProviderId, boolean>;
 ```
@@ -678,11 +678,11 @@ Two things that look like bugs and are not:
 
 ### Before you flip one
 
-**Check what the provider is load-bearing for.** Ground is the only
-portfolio-capable provider today, so un-surfacing it leaves nothing that can
-create a program and Earn becomes browse-only. That may be exactly what you
-want — it is what shipped on 2026-08-14 — but it is a product decision to make
-deliberately, not a side effect to discover in the dashboard.
+**Check what the provider is load-bearing for.** If the provider is the only
+portfolio-capable one, un-surfacing it leaves nothing that can create a program
+and Earn becomes browse-only. That may be exactly what you want — it is what
+shipped on 2026-08-14 when Ground was un-surfaced — but it is a product
+decision to make deliberately, not a side effect to discover in the dashboard.
 
 Rule of thumb: if every surfaced provider fails `supportsPortfolioWallets`,
 there is no deposit flow left.

@@ -1,6 +1,5 @@
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { providerNotConfigured } from "./errors";
-import { GroundEarnClient } from "./providers/ground/client";
 import { JupiterLendEarnClient } from "./providers/jupiter-lend/client";
 import { KaminoEarnClient } from "./providers/kamino/client";
 import { OndoEarnClient } from "./providers/ondo/client";
@@ -23,7 +22,6 @@ export {
   SdpEarnError,
   type SdpEarnErrorCode,
 } from "./errors";
-export { GroundEarnClient } from "./providers/ground/client";
 export { JupiterLendEarnClient } from "./providers/jupiter-lend/client";
 export { KaminoEarnClient } from "./providers/kamino/client";
 export { OndoEarnClient } from "./providers/ondo/client";
@@ -70,7 +68,6 @@ export const EARN_PROVIDER_CLIENTS = {
   veda: new VedaEarnClient(),
   upshift: new UpshiftEarnClient(),
   perena: new PerenaEarnClient(),
-  ground: new GroundEarnClient(),
   kamino: new KaminoEarnClient(),
   jupiter_lend: new JupiterLendEarnClient(),
   ondo: new OndoEarnClient(),

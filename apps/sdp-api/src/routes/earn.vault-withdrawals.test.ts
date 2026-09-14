@@ -616,7 +616,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
       .prepare(
         `INSERT INTO earn_provider_wallets
            (id, organization_id, project_id, environment, provider, provider_wallet_ref, created_by)
-         VALUES ('epw_earn_vw', ?, ?, 'sandbox', 'ground', 'ref_earn_vw', ?)`
+         VALUES ('epw_earn_vw', ?, ?, 'sandbox', 'upshift', 'ref_earn_vw', ?)`
       )
       .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id)
       .run();
@@ -626,7 +626,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
         `INSERT INTO earn_positions (
            id, organization_id, project_id, environment, provider, kind,
            provider_wallet_id, label, activated_at
-         ) VALUES (?, ?, ?, 'sandbox', 'ground', 'custodial', 'epw_earn_vw', 'Program', sdp_iso_now())`
+         ) VALUES (?, ?, ?, 'sandbox', 'upshift', 'custodial', 'epw_earn_vw', 'Program', sdp_iso_now())`
       )
       .bind(positionId, TEST_ORG.id, TEST_PROJECT.id)
       .run();
@@ -731,9 +731,9 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 
   it("answers 501 when the provider cannot build an exit — capability, never permission", async () => {
     await seedAuth();
-    const positionId = await seedPosition({ provider: "ground" });
+    const positionId = await seedPosition({ provider: "upshift" });
     withdrawFromVault.mockRejectedValue(
-      new SdpEarnError("NOT_IMPLEMENTED", "ground vault withdrawals is not implemented yet")
+      new SdpEarnError("NOT_IMPLEMENTED", "upshift vault withdrawals is not implemented yet")
     );
 
     const res = await postVaultWithdrawal({ positionId, shares: "10" });

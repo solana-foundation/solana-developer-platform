@@ -159,7 +159,7 @@ describe("providerFetch", () => {
       async () => new Response("{}", { status: 200 })
     );
 
-    await providerFetch("ground", "https://ground.test/sources", { method: "GET" });
+    await providerFetch("veda", "https://veda.test/sources", { method: "GET" });
 
     const init = fetchMock.mock.calls[0]?.arguments[1] as RequestInit;
     assert.equal(init.signal, undefined);
@@ -266,9 +266,9 @@ describe("providerFetchJson", () => {
     );
   });
 
-  it("surfaces a bare string error, the shape Ground rejects writes with", async () => {
-    // Verbatim from Ground sandbox 2026-08-14. Reading only `error.message`
-    // dropped this sentence and left the caller staring at the bare status.
+  it("surfaces a bare string error, the shape a rejected write answers with", async () => {
+    // Reading only `error.message` drops this sentence and leaves the caller
+    // staring at the bare status.
     mock.method(globalThis, "fetch", async () =>
       jsonResponse(400, {
         error: "Invalid query params: unknown parameter(s)",
@@ -279,7 +279,7 @@ describe("providerFetchJson", () => {
     );
 
     await assert.rejects(
-      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      providerFetchJson("veda", "https://veda.test/deposit", { method: "POST" }),
       earnError("BAD_REQUEST", /^Invalid query params: unknown parameter\(s\)$/)
     );
   });
@@ -288,8 +288,8 @@ describe("providerFetchJson", () => {
     mock.method(globalThis, "fetch", async () => jsonResponse(400, { error: "   " }));
 
     await assert.rejects(
-      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
-      earnError("BAD_REQUEST", /^ground request failed with status 400$/)
+      providerFetchJson("veda", "https://veda.test/deposit", { method: "POST" }),
+      earnError("BAD_REQUEST", /^veda request failed with status 400$/)
     );
   });
 
@@ -301,7 +301,7 @@ describe("providerFetchJson", () => {
     );
 
     await assert.rejects(
-      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      providerFetchJson("veda", "https://veda.test/deposit", { method: "POST" }),
       earnError("BAD_REQUEST", /^Yield source is not fundable on this chain$/)
     );
   });
@@ -312,7 +312,7 @@ describe("providerFetchJson", () => {
     );
 
     await assert.rejects(
-      providerFetchJson("ground", "https://ground.test/v2/wallets", { method: "POST" }),
+      providerFetchJson("veda", "https://veda.test/deposit", { method: "POST" }),
       earnError("CONFLICT", /^Wallet is rebalancing$/)
     );
   });
@@ -330,7 +330,7 @@ describe("providerFetchJson", () => {
     mock.method(globalThis, "fetch", async () => new Response("", { status: 200 }));
 
     await assert.rejects(
-      providerFetchJson("ground", "https://ground.test/vaults", { method: "GET" }),
+      providerFetchJson("veda", "https://veda.test/deposit", { method: "GET" }),
       earnError("PROVIDER_UNAVAILABLE", /unparseable/)
     );
   });

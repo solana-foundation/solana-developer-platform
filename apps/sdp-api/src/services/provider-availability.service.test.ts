@@ -64,8 +64,6 @@ const providerEnvKeys = [
   "UPSHIFT_SANDBOX_API_KEY",
   "PERENA_API_KEY",
   "PERENA_SANDBOX_API_KEY",
-  "GROUND_API_KEY",
-  "GROUND_SANDBOX_API_KEY",
   "JUPITER_SWAP_API_KEY",
 ] as const;
 
@@ -706,7 +704,6 @@ describe("provider-availability.service", () => {
       veda: false,
       upshift: false,
       perena: false,
-      ground: false,
       kamino: false,
       jupiter_lend: false,
       ondo: false,

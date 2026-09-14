@@ -12,7 +12,7 @@ import { z } from "zod";
  * which must get PAST the surfacing gate to measure the gate behind it. The
  * surfacing gate itself keeps its own tests, pinned against the real map with
  * upshift — registered and `vault_direct` but not offered. Same pattern as
- * `earn-program.test.ts` (Ground plays that role for the program routes).
+ * `earn-program.test.ts` (upshift plays that role for the program routes).
  */
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 

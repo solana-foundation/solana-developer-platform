@@ -173,8 +173,8 @@ describe("Unified earn movement ledger (postgres)", () => {
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
-      // Nothing in the ledger is Ground-specific, so the pluggability proof uses
-      // a registered provider that is not the live one. A real `EarnProviderId`,
+      // The ledger is provider-neutral, so the pluggability proof uses a
+      // registered provider that is not the live one. A real `EarnProviderId`,
       // so the union check the typed id exists for still applies.
       provider: "veda",
       providerWalletRef: walletRef,
