@@ -32,11 +32,14 @@ function payload() {
 
 // Each test renders inside an isolated SWR cache so a previous test's data
 // never serves (or suppresses the fetch of) a later read.
-function renderIsolatedHook(vault: string | undefined) {
+function renderIsolatedHook(
+  vault: string | undefined,
+  cluster: "devnet" | "mainnet-beta" = "mainnet-beta"
+) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <SWRConfig value={{ provider: () => new Map() }}>{children}</SWRConfig>
   );
-  return renderHook(() => useKaminoVaultAllocations(vault), { wrapper });
+  return renderHook(() => useKaminoVaultAllocations(vault, cluster), { wrapper });
 }
 
 describe("useKaminoVaultAllocations", () => {
@@ -54,7 +57,7 @@ describe("useKaminoVaultAllocations", () => {
     await waitFor(() => expect(result.current.allocations).toBeDefined());
     expect(result.current.error).toBeUndefined();
     expect(mocks.fetch).toHaveBeenCalledWith(
-      "/api/dashboard/markets/earn/kamino-allocations?vault=Kvault1111"
+      "/api/dashboard/markets/earn/kamino-allocations?vault=Kvault1111&cluster=mainnet-beta"
     );
     expect(result.current.allocations?.allocations[0]?.symbol).toBe("SOL");
   });
@@ -67,13 +70,23 @@ describe("useKaminoVaultAllocations", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
+  it("issues no request for a cluster the allocations source cannot serve", async () => {
+    // Kamino's allocations REST source is mainnet-only: a devnet vault is an
+    // unsupported read, never a doomed upstream call.
+    const { result } = renderIsolatedHook("Kvault1111", "devnet");
+
+    expect(result.current.allocations).toBeUndefined();
+    expect(result.current.isLoading).toBe(false);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
   it("encodes the vault into the request, never into the URL unescaped", async () => {
     const { result } = renderIsolatedHook("5YxwKgsv+TdT/not=A RealKey");
     await waitFor(() => expect(result.current.allocations).toBeDefined());
     expect(mocks.fetch).toHaveBeenCalledWith(
       `/api/dashboard/markets/earn/kamino-allocations?vault=${encodeURIComponent(
         "5YxwKgsv+TdT/not=A RealKey"
-      )}`
+      )}&cluster=mainnet-beta`
     );
   });
 

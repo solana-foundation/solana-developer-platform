@@ -20,6 +20,8 @@ const VAULTS = {
   expired: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
   independent1: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   independent2: "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
+  concurrent: "Concurrent11111111111111111111111111111111",
+  inflightFail: "RetryRead111111111111111111111111111111111",
   upstreamFail: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
   malformed: `Kamino${"1".repeat(33)}`,
   badJson: "So11111111111111111111111111111111111111112",
@@ -56,8 +58,10 @@ function upstreamPayload() {
   };
 }
 
-function request(vault: string): Request {
-  return new Request(`https://dashboard.example.test/api/kamino?vault=${vault}`);
+function request(vault: string, cluster = "mainnet-beta"): Request {
+  const params = new URLSearchParams({ vault });
+  if (cluster !== "missing") params.set("cluster", cluster);
+  return new Request(`https://dashboard.example.test/api/kamino?${params.toString()}`);
 }
 
 describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
@@ -146,6 +150,65 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "devnet", "testnet", "mainnet", "sneaky-mainnet-beta"])(
+    "refuses a %s cluster parameter: the allocations source is mainnet-only",
+    async (cluster) => {
+      const response = await GET(request(VAULTS.happy, cluster));
+
+      expect(response.status).toBe(400);
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it("coalesces concurrent misses for one vault into a single upstream read", async () => {
+    // Hold the first upstream response open so every caller piles onto the
+    // same in-flight read instead of starting its own.
+    let releaseUpstream: (payload: Response) => void = () => {};
+    mocks.fetch.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseUpstream = resolve;
+        })
+    );
+    const first = GET(request(VAULTS.concurrent));
+    const second = GET(request(VAULTS.concurrent));
+    const third = GET(request(VAULTS.concurrent));
+    // auth() defers every handler past its first await, so yield until the
+    // shared upstream read has actually started before releasing it.
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1));
+    releaseUpstream(Response.json(upstreamPayload()));
+    const [firstResponse, secondResponse, thirdResponse] = await Promise.all([
+      first,
+      second,
+      third,
+    ]);
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(thirdResponse.status).toBe(200);
+    // The settled read is cached: the next caller after the burst is a hit.
+    await GET(request(VAULTS.concurrent));
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a failed concurrent read so a later caller retries upstream", async () => {
+    mocks.fetch.mockRejectedValue(new Error("upstream down"));
+    const first = GET(request(VAULTS.inflightFail));
+    const second = GET(request(VAULTS.inflightFail));
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+    // One shared read, and both waiters wear its failure.
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(firstResponse.status).toBe(502);
+    expect(secondResponse.status).toBe(502);
+
+    // The failure was neither cached nor left in flight.
+    const retry = await GET(request(VAULTS.inflightFail));
+    expect(retry.status).toBe(502);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("answers 502 when the upstream read fails, caching nothing", async () => {

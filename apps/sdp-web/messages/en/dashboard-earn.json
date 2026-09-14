@@ -91,6 +91,7 @@
       "yourPosition": "Your position",
       "information": "Information",
       "allocationsSummary": "{weight} deployed",
+      "allocationsSummaryUnavailable": "Allocation details",
       "allocationsTitle": "Vault allocations",
       "allocationsAsOf": "As of {date}",
       "allocationsToken": "Token",

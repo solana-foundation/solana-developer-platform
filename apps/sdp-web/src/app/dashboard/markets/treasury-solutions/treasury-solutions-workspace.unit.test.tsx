@@ -164,7 +164,13 @@ const SHARE_MINT = "Share1111111111111111111111111111111111111";
 const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
 
 vi.mock("./kamino-allocations", () => ({
-  useKaminoVaultAllocations: (vaultAddress?: string) => {
+  useKaminoVaultAllocations: (vaultAddress?: string, cluster?: "devnet" | "mainnet-beta") => {
+    // Mirrors the hook's contract: a non-mainnet cluster is an unsupported
+    // read — the SWR key stays null, so nothing is requested and no cell ever
+    // sees data for it.
+    if (cluster !== "mainnet-beta") {
+      return { allocations: undefined, error: undefined, isLoading: false };
+    }
     mocks.allocationsRequests.push(vaultAddress);
     const state = vaultAddress === undefined ? undefined : mocks.allocationsByVault[vaultAddress];
     if (state === "loading") {
@@ -1379,7 +1385,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
   it("discloses a Kamino vault's allocations in the Information column", async () => {
     const user = userEvent.setup();
-    mocks.allocationsByVault.Kvault11111111111111111111111111111111111 = {
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
       asOf: "2026-09-14T17:53:52.895Z",
       capitalDeployedUsd: "569275.60",
       allocations: [
@@ -1406,29 +1412,77 @@ describe("TreasurySolutionsWorkspace", () => {
     };
     renderWorkspace();
 
-    // Non-Kamino rows never ask: the hook is called for each Kamino vault
-    // reference only, and never for the Veda fund.
-    expect(mocks.allocationsRequests).toContain("Kvault11111111111111111111111111111111111");
+    // Only mainnet Kamino vaults are readable (the allocations source is
+    // mainnet-only): the devnet Kamino rows and the Veda fund never ask.
+    expect(mocks.allocationsRequests).toContain("KvaultMainnet111111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("KvaultCatalogue1111111111111111111111111111");
     expect(mocks.allocationsRequests).not.toContain("VedaFund1111111111111111111111111111111111");
 
-    const instantRow = screen
-      .getAllByText("Kamino USDC Vault")
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
       .map((element) => element.closest("tr"))
-      .find((row) => row?.textContent?.includes("6.2%"));
-    if (!instantRow) throw new Error("Expected the instant strategy row");
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
     // Deployed weight is the complement of the unallocated share.
-    expect(within(instantRow).getByText("99.9% deployed")).toBeTruthy();
+    expect(within(mainnetRow).getByText("99.9% deployed")).toBeTruthy();
 
-    const disclosure = within(instantRow).getByRole("button", { name: "99.9% deployed" });
+    const disclosure = within(mainnetRow).getByRole("button", { name: "99.9% deployed" });
     await user.hover(disclosure);
     expect(await screen.findByText("Vault allocations")).toBeTruthy();
+    // The disclosure is a semantic table: its column headings are exposed as
+    // columnheaders, not hidden from assistive technology.
+    expect(screen.getByRole("columnheader", { name: "Weight" })).toBeTruthy();
     expect(screen.getByText("SOL/BTC Market")).toBeTruthy();
     expect(screen.getByText("Unallocated")).toBeTruthy();
     expect(screen.getByText("4.5%")).toBeTruthy();
   });
 
+  it("keeps the disclosure when the deployed weight cannot be certified", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [
+        {
+          reserve: "reserve-1",
+          marketName: "SOL/BTC Market",
+          symbol: "SOL",
+          actualPct: "23.94",
+          suppliedUsd: "136381.92",
+          supplyApy: "0.045",
+        },
+      ],
+    };
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // No unallocated share means no certifiable summary weight, but the
+    // per-reserve rows are still a real read: disclose them under a neutral
+    // summary instead of hiding everything behind the placeholder.
+    const disclosure = within(mainnetRow).getByRole("button", { name: "Allocation details" });
+    await user.hover(disclosure);
+    expect(await screen.findByText("SOL/BTC Market")).toBeTruthy();
+    expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+  });
+
   it("degrades the Information cell to the placeholder when the allocations read fails", () => {
-    mocks.allocationsByVault.Kvault11111111111111111111111111111111111 = "error";
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = "error";
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // Same placeholder as a non-Kamino row — never a partial or stale figure.
+    expect(within(mainnetRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+  });
+
+  it("renders the Information placeholder for devnet Kamino rows without requesting", () => {
     renderWorkspace();
 
     const instantRow = screen
@@ -1436,9 +1490,13 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
-    // Same placeholder as a non-Kamino row — never a partial or stale figure.
+    // Kamino's allocations source is mainnet-only: the devnet vault is an
+    // unsupported read, so it takes the placeholder without a request.
     expect(within(instantRow).getAllByRole("cell")[5]?.textContent).toBe("—");
-    expect(within(instantRow).queryByText(/deployed/)).toBeNull();
+    const informationCell = within(instantRow).getAllByRole("cell")[5];
+    if (!informationCell) throw new Error("Expected the Information cell");
+    expect(within(informationCell).queryByRole("button")).toBeNull();
+    expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
   });
 
   it("renders the Information placeholder for a non-Kamino strategy", () => {

@@ -23,7 +23,7 @@ import {
   WalletCardsIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
@@ -761,60 +761,70 @@ function KaminoAllocationsTooltipContent({
           </span>
         ) : null}
       </span>
-      <span className="grid grid-cols-[minmax(0,1fr)_2.75rem_5.5rem_3rem] gap-x-3 gap-y-1.5">
-        <span aria-hidden="true" className="text-tertiary">
-          {t("DashboardMarkets.treasury.allocationsToken")}
-        </span>
-        <span aria-hidden="true" className="text-right text-tertiary">
-          {t("DashboardMarkets.treasury.allocationsWeight")}
-        </span>
-        <span aria-hidden="true" className="text-right text-tertiary">
-          {t("DashboardMarkets.treasury.allocationsSupplied")}
-        </span>
-        <span aria-hidden="true" className="text-right text-tertiary">
-          {t("DashboardMarkets.treasury.allocationsSupplyApy")}
-        </span>
-        {rows.map((row) => {
-          const targetLabel = row.targetWeightPct
-            ? t("DashboardMarkets.treasury.allocationsTargetWeight", {
-                weight: formatAllocationWeight(row.targetWeightPct, locale),
-              })
-            : undefined;
-          return (
-            <Fragment key={row.reserve}>
-              <span className="min-w-0">
-                <span className="block truncate font-medium" title={row.symbol}>
-                  {row.symbol}
-                </span>
-                <span className="block truncate text-[11px] text-tertiary" title={row.marketName}>
-                  {row.marketName}
-                </span>
-              </span>
-              <span className="text-right tabular-nums" title={targetLabel}>
-                {formatAllocationWeight(row.actualPct, locale)}
-              </span>
-              <span className="text-right tabular-nums">
-                {formatUsd(row.suppliedUsd, locale, 2)}
-              </span>
-              <span className="text-right tabular-nums">
-                {formatAllocationApy(row.supplyApy, locale)}
-              </span>
-            </Fragment>
-          );
-        })}
-        {allocations.unallocated ? (
-          <Fragment key="unallocated">
-            <span className="text-tertiary">{t("DashboardMarkets.treasury.allocationsIdle")}</span>
-            <span className="text-right tabular-nums">
-              {formatAllocationWeight(allocations.unallocated.pct, locale)}
-            </span>
-            <span className="text-right tabular-nums">
-              {formatUsd(allocations.unallocated.usd, locale, 2)}
-            </span>
-            <span className="text-right tabular-nums">—</span>
-          </Fragment>
-        ) : null}
-      </span>
+      {/* Semantic table: the column headings must reach assistive technology
+      as headers, not disappear behind a decorative grid. */}
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <th scope="col" className="pb-1 text-left font-normal text-tertiary">
+              {t("DashboardMarkets.treasury.allocationsToken")}
+            </th>
+            <th scope="col" className="pb-1 text-right font-normal text-tertiary">
+              {t("DashboardMarkets.treasury.allocationsWeight")}
+            </th>
+            <th scope="col" className="pb-1 text-right font-normal text-tertiary">
+              {t("DashboardMarkets.treasury.allocationsSupplied")}
+            </th>
+            <th scope="col" className="pb-1 text-right font-normal text-tertiary">
+              {t("DashboardMarkets.treasury.allocationsSupplyApy")}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const targetLabel = row.targetWeightPct
+              ? t("DashboardMarkets.treasury.allocationsTargetWeight", {
+                  weight: formatAllocationWeight(row.targetWeightPct, locale),
+                })
+              : undefined;
+            return (
+              <tr key={row.reserve}>
+                <td className="min-w-0 py-0.5 pe-3">
+                  <span className="block truncate font-medium" title={row.symbol}>
+                    {row.symbol}
+                  </span>
+                  <span className="block truncate text-[11px] text-tertiary" title={row.marketName}>
+                    {row.marketName}
+                  </span>
+                </td>
+                <td className="py-0.5 text-right tabular-nums" title={targetLabel}>
+                  {formatAllocationWeight(row.actualPct, locale)}
+                </td>
+                <td className="py-0.5 text-right tabular-nums">
+                  {formatUsd(row.suppliedUsd, locale, 2)}
+                </td>
+                <td className="py-0.5 text-right tabular-nums">
+                  {formatAllocationApy(row.supplyApy, locale)}
+                </td>
+              </tr>
+            );
+          })}
+          {allocations.unallocated ? (
+            <tr key="unallocated">
+              <td className="py-0.5 pe-3 text-tertiary">
+                {t("DashboardMarkets.treasury.allocationsIdle")}
+              </td>
+              <td className="py-0.5 text-right tabular-nums">
+                {formatAllocationWeight(allocations.unallocated.pct, locale)}
+              </td>
+              <td className="py-0.5 text-right tabular-nums">
+                {formatUsd(allocations.unallocated.usd, locale, 2)}
+              </td>
+              <td className="py-0.5 text-right tabular-nums">—</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
     </span>
   );
 }
@@ -829,7 +839,13 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
   const t = useTranslations();
   const locale = useLocale();
   const vaultAddress = strategy.provider === "kamino" ? strategy.providerReference : undefined;
-  const { allocations, error, isLoading } = useKaminoVaultAllocations(vaultAddress);
+  // Kamino's allocations source is mainnet-only: devnet vaults are an
+  // unsupported read, so they take the same no-request placeholder path as
+  // non-Kamino rows instead of a doomed upstream call.
+  const { allocations, error, isLoading } = useKaminoVaultAllocations(
+    vaultAddress,
+    strategy.hostCluster
+  );
 
   const placeholder = (
     <span className="text-sm text-tertiary" role="note">
@@ -843,7 +859,14 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
   }
 
   const deployedPct = kaminoDeployedWeightPct(allocations.unallocated?.pct);
-  if (deployedPct === undefined) return placeholder;
+  // A missing unallocated share only hides the SUMMARY weight; the per-reserve
+  // rows in the disclosure are still a real read worth disclosing.
+  const summaryLabel =
+    deployedPct !== undefined
+      ? t("DashboardMarkets.treasury.allocationsSummary", {
+          weight: formatAllocationWeight(deployedPct, locale),
+        })
+      : t("DashboardMarkets.treasury.allocationsSummaryUnavailable");
 
   return (
     <TooltipProvider>
@@ -853,10 +876,8 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
             className="inline-flex items-center gap-1 rounded-md text-sm text-secondary transition-colors hover:text-primary"
             type="button"
           >
-            <span className="tabular-nums">
-              {t("DashboardMarkets.treasury.allocationsSummary", {
-                weight: formatAllocationWeight(deployedPct, locale),
-              })}
+            <span className={deployedPct !== undefined ? "tabular-nums" : undefined}>
+              {summaryLabel}
             </span>
             <InfoIcon aria-hidden="true" className="size-3.5 shrink-0 text-tertiary" />
           </button>
