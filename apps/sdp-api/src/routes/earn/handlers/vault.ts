@@ -1113,7 +1113,8 @@ export async function listEarnVaultPositions(c: AppContext) {
         tokenMint: row.tokenMint,
         shareMint: row.shareMint,
       };
-    })
+    }),
+    { ownerKind: "custody" }
   );
 
   const last = rows.at(-1);

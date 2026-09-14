@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   type EarnPositionRow,
@@ -9,6 +9,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
+import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -193,6 +194,10 @@ beforeEach(async () => {
   );
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("external-wallet position reads", () => {
   it("summary excludes another project's positions and owner addresses", async () => {
     await seedPosition({
@@ -333,6 +338,7 @@ describe("external-wallet position reads", () => {
         }));
       }
     );
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
 
     const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
@@ -341,6 +347,15 @@ describe("external-wallet position reads", () => {
     expect(body.data.positions[0]).toMatchObject({ ownerAddress: OWNER_B, label: "Unreadable" });
     expect(body.data.positions[0]).not.toHaveProperty("tokenValue");
     expect(body.data.positions[0]).not.toHaveProperty("shares");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "kamino",
+        positionCount: 1,
+        error: "RPC unavailable",
+      }),
+      "vault position: live hydration unavailable"
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(OWNER_B);
 
     const summary = (await (await get("/v1/earn/external-wallet/positions/summary")).json()) as {
       data: {
@@ -352,6 +367,39 @@ describe("external-wallet position reads", () => {
     };
     expect(summary.data.summary.unavailablePositionCount).toBe(1);
     expect(summary.data.summary.totalsByToken[0]).not.toHaveProperty("tokenValue");
+  });
+
+  it("omits both end-user owners from mismatch warnings before logger scrubbing", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-owner-mismatch",
+      tokenMint: USDC,
+      label: "Owner mismatch",
+    });
+    readVaultPositions.mockResolvedValue([
+      {
+        providerReference: "vault-owner-mismatch",
+        owner: OWNER_B,
+        cluster: "devnet",
+        shares: "1",
+        withdrawableShares: "1",
+        tokenValue: "1",
+        tokenMint: USDC,
+        shareMint: SHARE,
+      },
+    ]);
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+
+    expect(response.status).toBe(200);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "kamino", ownerMismatch: true }),
+      "vault position: ignored live snapshot with mismatched identity"
+    );
+    const warning = JSON.stringify(warn.mock.calls);
+    expect(warning).not.toContain(OWNER_A);
+    expect(warning).not.toContain(OWNER_B);
   });
 
   it("summary omits every owner address when the caller asks for totals only (EARN-028, PRO-1873)", async () => {
