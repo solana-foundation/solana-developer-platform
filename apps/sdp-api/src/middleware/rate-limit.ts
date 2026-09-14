@@ -208,7 +208,7 @@ export async function enforceRateLimit(
   c: Context<{ Bindings: Env }>,
   identifier: string,
   maxRequests: number,
-  options: { failClosed?: boolean } = {}
+  options: { failClosed?: boolean; cost?: number } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
   if (!kv) {
@@ -237,6 +237,7 @@ export async function enforceRateLimit(
       maxRequests,
       previousWeight,
       expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
+      ...(options.cost === undefined ? {} : { cost: options.cost }),
     })
     .catch((err) => {
       getLogger().error({ error: err, identifier }, "Failed to update rate limit");

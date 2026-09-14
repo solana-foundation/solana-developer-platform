@@ -3,7 +3,12 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EgressBlockedError } from "@/services/guarded-egress";
 import { checkResolvedRpcTargetConnection } from "@/services/provider-setup-registry";
-import { createRpcTransportForTarget, fetchRpcRelayTarget } from "@/services/rpc-egress";
+import {
+  createRpcTransportForTarget,
+  fetchRpcRelayTarget,
+  RELAY_MAX_RESPONSE_BYTES,
+  relayGuardInit,
+} from "@/services/rpc-egress";
 
 /**
  * Both directions matter. A guard that refused everything would pass a
@@ -134,5 +139,28 @@ describe("checkResolvedRpcTargetConnection", () => {
         },
       })
     ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+});
+
+describe("customer egress limits", () => {
+  it("bounds redirects, response size and time on the relay path", () => {
+    const init = relayGuardInit({ headers: {}, body: "{}" });
+
+    expect(init.maxRedirects).toBe(3);
+    expect(init.maxResponseBytes).toBe(RELAY_MAX_RESPONSE_BYTES);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("keeps the time bound even when the caller supplies a signal", () => {
+    // The Kit transport path always passes a signal; if that replaced the
+    // ceiling instead of joining it, the 30s bound would never apply there.
+    const controller = new AbortController();
+    const init = relayGuardInit({ headers: {}, body: "{}", signal: controller.signal });
+
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).not.toBe(controller.signal);
+    expect(init.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(init.signal?.aborted).toBe(true);
   });
 });
