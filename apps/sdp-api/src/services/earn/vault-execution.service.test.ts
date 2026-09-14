@@ -6,20 +6,14 @@ import {
   AccountRole,
   type Address,
   address,
-  appendTransactionMessageInstructions,
   type Blockhash,
-  compileTransaction,
   createNoopSigner,
-  createTransactionMessage,
   generateKeyPairSigner,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
-  pipe,
   type Signature,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeePaymentPort } from "@/services/ports";
@@ -562,27 +556,6 @@ describe("vault signing lifecycle", () => {
    * at broadcast is indistinguishable from a lost response, so the movement
    * parks reconcilable until its blockhash expires.
    */
-  it("rejects sponsored bytes with an unsigned fee-payer slot", async () => {
-    const owner = await generateKeyPairSigner();
-    const sponsor = await generateKeyPairSigner();
-
-    await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan: planForOwner(owner.address),
-        owner,
-        rpcUrl,
-        // Echoes the bytes back untouched, leaving the sponsor slot null.
-        fee: {
-          kind: "sponsored",
-          feePayment: feePayment(),
-          sponsor: sponsor.address,
-        },
-      })
-    ).rejects.toThrow("missing the sponsor fee-payer signature");
-  });
 
   /**
    * The case nothing caught before: the owner slot still carries a signature
@@ -590,43 +563,6 @@ describe("vault signing lifecycle", () => {
    * `getSignatureFromTransaction`, which reads whatever sits in slot zero.
    * Message equality is the only check that sees it.
    */
-  it("rejects sponsored bytes returned over a different message", async () => {
-    const owner = await generateKeyPairSigner();
-    const sponsor = await generateKeyPairSigner();
-    const substitute = await generateKeyPairSigner();
-    const signAsFeePayer = vi.fn(async () => {
-      const foreign = pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayer(substitute.address, m),
-        (m) =>
-          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight: 100n }, m),
-        (m) =>
-          appendTransactionMessageInstructions(
-            [{ programAddress: address("11111111111111111111111111111111") }],
-            m
-          ),
-        compileTransaction
-      );
-      const signed = await partiallySignTransaction([substitute.keyPair], foreign);
-      return new Uint8Array(getTransactionEncoder().encode(signed));
-    });
-
-    await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan: planForOwner(owner.address),
-        owner,
-        rpcUrl,
-        fee: {
-          kind: "sponsored",
-          feePayment: feePayment({ signAsFeePayer }),
-          sponsor: sponsor.address,
-        },
-      })
-    ).rejects.toThrow("came back over a different message");
-  });
 
   it("signs wallet-paid bytes without broadcasting before durable persistence", async () => {
     const owner = await generateKeyPairSigner();

@@ -34,7 +34,6 @@ import {
   compileTransaction,
   createNoopSigner,
   createTransactionMessage,
-  getBase64Encoder,
   getTransactionEncoder,
   none,
   pipe,
@@ -53,10 +52,7 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
-import {
-  assertSponsorSignedSameMessage,
-  createProjectSponsorshipFeePayment,
-} from "@/services/sponsorship.service";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -525,12 +521,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
       transaction: bytes,
       lastValidBlockHeight,
       store: {
-        persistSigned: async ({ signature, signedTransaction, lastValidBlockHeight: height }) => {
-          await assertSponsorSignedSameMessage({
-            unsignedOrPartiallySigned: compiled,
-            sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
-            sponsor,
-          });
+        persistSigned: async ({ signature, lastValidBlockHeight: height }) => {
           const attached = await repository.attachCreateSignature(id, signature, height);
           if (attached === null) {
             throw new Error("claim was resolved before its signature could be attached");

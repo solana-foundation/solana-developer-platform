@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
 import {
-  type Address,
   type Blockhash,
   compileTransaction,
   createTransactionMessage,
@@ -27,7 +26,9 @@ const projectMocks = vi.hoisted(() => ({
   getProject: vi.fn(),
 }));
 
-const FEE_PAYER = "11111111111111111111111111111111" as Address;
+import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+
+const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 
 function buildTransaction(): Uint8Array {
@@ -102,8 +103,7 @@ describe("sponsorship identity boundary", () => {
   });
 
   it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {
-    const signedTransaction = buildTransaction();
-    signedTransaction.fill(1, 1, 65);
+    const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
     const provider: FeePaymentPort = {
       providerId: "kora",
       getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),

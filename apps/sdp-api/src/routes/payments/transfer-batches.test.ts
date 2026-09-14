@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -8,7 +7,6 @@ import {
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import { getBase58Codec } from "@solana/codecs";
 import {
   address,
   createNoopSigner,
@@ -16,9 +14,7 @@ import {
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
   type Signature,
-  type SignatureBytes,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -109,6 +105,16 @@ const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
 
+// Sponsor signatures are real ed25519 now, so their values are only known
+// after signing. Tests pick stable labels (FIRST_SIGNATURE/SECOND_SIGNATURE)
+// through `signingOutcome`; the adapter records which actual signature each
+// label produced and `actualSignature` resolves labels in assertions.
+const labeledSignatures = new Map<string, string>();
+
+function actualSignature(label: string): string {
+  return labeledSignatures.get(label) ?? label;
+}
+
 function ownedSubmissionAdapter(
   signingOutcome = vi.fn().mockResolvedValue(FIRST_SIGNATURE)
 ): ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter> {
@@ -117,29 +123,13 @@ function ownedSubmissionAdapter(
     getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
     getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
     signAsFeePayer: vi.fn(async (transactionBytes: Uint8Array) => {
-      const requestedSignature = await signingOutcome(transactionBytes);
-      const transaction = getTransactionDecoder().decode(
-        await fullySignTestTransaction(transactionBytes)
+      const label = await signingOutcome(transactionBytes);
+      const signed = await fullySignTestTransaction(transactionBytes);
+      labeledSignatures.set(
+        label,
+        getSignatureFromTransaction(getTransactionDecoder().decode(signed))
       );
-      const feePayer = Object.keys(transaction.signatures)[0];
-      let signatureBytes: Uint8Array;
-      try {
-        signatureBytes = new Uint8Array(getBase58Codec().encode(requestedSignature));
-      } catch {
-        signatureBytes = new Uint8Array();
-      }
-      if (signatureBytes.length !== 64) {
-        signatureBytes = createHash("sha512").update(requestedSignature).digest();
-      }
-      return new Uint8Array(
-        getTransactionEncoder().encode({
-          ...transaction,
-          signatures: {
-            ...transaction.signatures,
-            [feePayer]: signatureBytes as SignatureBytes,
-          },
-        })
-      );
+      return signed;
     }),
     signAndSend: signingOutcome,
   } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>;
@@ -546,7 +536,7 @@ describe("payment transfer batches", () => {
       lastValidBlockHeight: 1000n,
     });
     confirmTransactionMock.mockResolvedValue({
-      signature: FIRST_SIGNATURE as Awaited<
+      signature: actualSignature(FIRST_SIGNATURE) as Awaited<
         ReturnType<typeof solanaRpc.confirmTransaction>
       >["signature"],
       slot: 100n,
@@ -762,7 +752,7 @@ describe("payment transfer batches", () => {
     expect(body.data.recipients.every((recipient) => Boolean(recipient.transferId))).toBe(true);
     expect(body.data.transfers).toHaveLength(2);
     expect(body.data.transfers.map((transfer) => transfer.signature).sort()).toEqual(
-      [FIRST_SIGNATURE, SECOND_SIGNATURE].sort()
+      [actualSignature(FIRST_SIGNATURE), actualSignature(SECOND_SIGNATURE)].sort()
     );
     expect(body.data.transfers.every((transfer) => transfer.type === "transfer_batch")).toBe(true);
     expect(body.data.transfers.every((transfer) => transfer.status === "processing")).toBe(true);
@@ -2217,7 +2207,7 @@ describe("payment transfer batches", () => {
         {
           type: "transfer_batch",
           status: "processing",
-          signature: FIRST_SIGNATURE,
+          signature: actualSignature(FIRST_SIGNATURE),
         },
       ]);
       expect(signAndSendMock).toHaveBeenCalledTimes(1);
@@ -2285,7 +2275,7 @@ describe("payment transfer batches", () => {
     expect(body.data.batch.status).toBe("processing");
     expect(body.data.recipients).toMatchObject([{ status: "processing" }]);
     expect(body.data.transfers).toMatchObject([
-      { status: "processing", signature: FIRST_SIGNATURE },
+      { status: "processing", signature: actualSignature(FIRST_SIGNATURE) },
     ]);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
@@ -2601,7 +2591,7 @@ describe("payment transfer batches", () => {
     getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
       signatures.map(
         (signature): solanaRpc.SignatureStatusInfo =>
-          String(signature) === FIRST_SIGNATURE
+          String(signature) === actualSignature(FIRST_SIGNATURE)
             ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
             : {
                 slot: 201n,
@@ -2630,11 +2620,14 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .all<{ status: string; error: string | null; signature: string }>();
-    expect(recipientRows.results).toMatchObject([
-      { status: "confirmed", error: null, signature: FIRST_SIGNATURE },
-      { status: "failed", signature: SECOND_SIGNATURE },
-    ]);
-    expect(recipientRows.results[1].error).toContain("InstructionError");
+    expect(recipientRows.results).toMatchObject(
+      [
+        { status: "confirmed", error: null, signature: actualSignature(FIRST_SIGNATURE) },
+        { status: "failed", signature: actualSignature(SECOND_SIGNATURE) },
+      ].sort((left, right) => left.signature.localeCompare(right.signature))
+    );
+    const failedRow = recipientRows.results.find((row) => row.status === "failed");
+    expect(failedRow?.error).toContain("InstructionError");
   });
 
   it("settles a chunk's recipients as failed when its execution throws mid-flight", async () => {

@@ -12,6 +12,8 @@ import {
   createTransactionMessage,
   getBase64Decoder,
   getBase64Encoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
   getTransactionEncoder,
   type Instruction,
   pipe,
@@ -32,7 +34,6 @@ import {
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
-import { assertSponsorSignedSameMessageBytes } from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
 import { solanaAddressSchema } from "./payments/schemas";
 import {
@@ -116,31 +117,11 @@ pay.post(
     // candidate back, or a Retry-After; a claim is never released early
     // because a signed transaction is a bearer instrument until its blockhash
     // expires, and two live ones would double the sponsor's exposure.
-    // The ledger entry is the only durable attribution this unauthenticated
-    // surface produces, so handing out sponsor-signed bytes without one would
-    // make budget drain untraceable. The write is fail-closed: an audit
-    // failure refuses the response. The sponsorship reservation itself stays
-    // keyed to the destination wallet; the anonymous caller lives here.
-    const respondWithClaim = async (signedTransaction: string, source: "fresh" | "replayed") => {
-      await new AuditService(getDb(c.env)).log(c, {
-        organizationId: request.organization_id,
-        action: "sign",
-        resourceType: "payment_request",
-        resourceId: request.id,
-        metadata: {
-          sponsoredAccount: payer,
-          amount: request.amount,
-          token: request.token,
-          destination: request.destination_address,
-          walletId: request.wallet_id,
-          source,
-        },
-      });
-      return c.json({
+    const respondWithClaim = async (signedTransaction: string) =>
+      c.json({
         transaction: signedTransaction,
         message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
       });
-    };
 
     const serveLiveClaim = async () => {
       const claim = await repository.getSponsoredTransactionClaim(request.id);
@@ -155,7 +136,7 @@ pay.post(
         throw rateLimited("Another payer holds this payment request's sponsored transaction");
       }
       if (claim.signedTransaction !== null) {
-        return respondWithClaim(claim.signedTransaction, "replayed");
+        return respondWithClaim(claim.signedTransaction);
       }
       return signAndStore(claim.unsignedTransaction);
     };
@@ -175,12 +156,27 @@ pay.post(
       const feePayment = await getFeePayment();
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
-      await assertSponsorSignedSameMessageBytes({
-        requested: unsignedBytes,
-        sponsorSigned: sponsored,
-        sponsor: await feePayment.getFeePayer(),
-      });
       const signedBase64 = getBase64Decoder().decode(sponsored);
+      // The ledger entry is the only durable attribution this unauthenticated
+      // surface produces. It is written fail-closed BEFORE the signature is
+      // stored or served, so a fresh grant can never exist without its audit
+      // row; replay polls serve stored bytes without touching the serialized
+      // ledger. The sponsorship reservation stays keyed to the destination
+      // wallet; the anonymous caller lives here.
+      await new AuditService(getDb(c.env)).log(c, {
+        organizationId: request.organization_id,
+        action: "sign",
+        resourceType: "payment_request",
+        resourceId: request.id,
+        metadata: {
+          sponsoredAccount: payer,
+          amount: request.amount,
+          token: request.token,
+          destination: request.destination_address,
+          walletId: request.wallet_id,
+          signature: getSignatureFromTransaction(getTransactionDecoder().decode(sponsored)),
+        },
+      });
       const stored = await repository.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: payer,
@@ -196,11 +192,11 @@ pay.post(
           superseding.account === payer &&
           superseding.signedTransaction !== null
         ) {
-          return respondWithClaim(superseding.signedTransaction, "replayed");
+          return respondWithClaim(superseding.signedTransaction);
         }
         throw rateLimited("This payment request's sponsored transaction was superseded; retry");
       }
-      return respondWithClaim(signedBase64, "fresh");
+      return respondWithClaim(signedBase64);
     };
 
     const served = await serveLiveClaim();

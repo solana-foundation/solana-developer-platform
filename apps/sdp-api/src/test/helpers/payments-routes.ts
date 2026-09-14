@@ -1,20 +1,23 @@
-import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+
+export {
+  fullySignTestTransaction,
+  sponsorSignTestTransaction,
+  TEST_MOCK_FEE_PAYER,
+  TEST_MOCK_FEE_PAYER_KEY_PAIR,
+} from "@/test/helpers/sponsor-signing";
+
 import {
   address,
   createNoopSigner,
-  generateKeyPair,
-  getAddressFromPublicKey,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
-  partiallySignTransaction,
   type Signature,
-  type SignatureBytes,
   SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
@@ -106,7 +109,7 @@ export const TEST_API_KEY = {
 export const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
 
 export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
-  signerAddress: address(TEST_KORA_FEE_PAYER),
+  signerAddress: TEST_MOCK_FEE_PAYER,
   maxAllowedLamports: 0n,
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
@@ -135,28 +138,6 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
     unitsConsumed: null,
     ...(cause === undefined ? {} : { cause }),
   });
-}
-
-export const TEST_MOCK_FEE_PAYER_KEY_PAIR = await generateKeyPair();
-export const TEST_MOCK_FEE_PAYER = await getAddressFromPublicKey(
-  TEST_MOCK_FEE_PAYER_KEY_PAIR.publicKey
-);
-
-export async function fullySignTestTransaction(transactionBytes: Uint8Array): Promise<Uint8Array> {
-  let transaction = getTransactionDecoder().decode(transactionBytes);
-  if (TEST_MOCK_FEE_PAYER in transaction.signatures) {
-    transaction = await partiallySignTransaction([TEST_MOCK_FEE_PAYER_KEY_PAIR], transaction);
-  }
-  const signatureSeed = createHash("sha512")
-    .update(new Uint8Array(transaction.messageBytes))
-    .digest();
-  const signatures = Object.fromEntries(
-    Object.entries(transaction.signatures).map(([signer, signature], index) => [
-      signer,
-      signature ?? (new Uint8Array(signatureSeed.map((byte) => byte ^ index)) as SignatureBytes),
-    ])
-  ) as typeof transaction.signatures;
-  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
 }
 
 const TEST_CACHED_API_KEY: CachedApiKey = {

@@ -6,7 +6,7 @@ import {
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import type { Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -17,7 +17,7 @@ import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
-import { assertSponsorReturnedSameMessage } from "./sponsorship-integrity";
+import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
@@ -46,11 +46,6 @@ export interface OwnedSubmissionLifecycle {
   hasStarted(): Promise<boolean>;
 }
 
-export {
-  assertSponsorSignedSameMessage,
-  assertSponsorSignedSameMessageBytes,
-} from "./sponsorship-integrity";
-
 /** App-local extension for SDP-owned submission flows. */
 export interface SponsorshipFeePayment extends FeePaymentPort {
   prepareOwnedSubmission(
@@ -61,23 +56,17 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
 
 function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
-  let feePayer: Promise<Address> | undefined;
-  const getFeePayer = () => {
-    feePayer ??= provider.getFeePayer();
-    return feePayer;
-  };
   const signVerified = async (transaction: Uint8Array) => {
     const signedTransaction = await provider.signAsFeePayer(transaction);
-    assertSponsorReturnedSameMessage({
+    await assertSponsorSignedSameMessage({
       requested: transaction,
       sponsorSigned: signedTransaction,
-      sponsor: await getFeePayer(),
     });
     return signedTransaction;
   };
   return {
     providerId: provider.providerId,
-    getFeePayer,
+    getFeePayer: () => provider.getFeePayer(),
     signAsFeePayer: signVerified,
     signAndSend: (transaction) => provider.signAndSend(transaction),
     ...(getSponsorshipConfiguration
