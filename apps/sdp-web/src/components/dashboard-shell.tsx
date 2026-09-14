@@ -569,8 +569,7 @@ export function DashboardShell({
     privateChannelsEnabled,
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled,
-    dvpEnabled
+    policiesEnabled
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,

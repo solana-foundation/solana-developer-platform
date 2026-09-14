@@ -1,8 +1,8 @@
 {
   "DashboardMarkets": {
     "landing": {
-      "eyebrow": "Choose a path",
-      "description": "Deposit your organization's own treasury, or offer earn to your customers.",
+      "earnHeading": "Earn",
+      "settlementHeading": "Settlement",
       "treasuryAudience": "For corporate treasury",
       "treasuryDescription": "Deposit from your custody wallets into provider strategies, and track positions and yield in one place.",
       "programAudience": "For payments platforms",
@@ -101,7 +101,9 @@
       "providerUnavailable": "Setup required",
       "productionUnavailable": "Sandbox only",
       "clusterUnavailable": "{cluster} only",
-      "clusterToggleLabel": "Catalogue cluster",
+      "mainnetDepositUnavailable": "Mainnet vaults are view-only in Sandbox.",
+      "devnetStrategiesLoading": "Loading Devnet strategies. Mainnet strategies remain available.",
+      "devnetStrategiesUnavailable": "Devnet strategies could not be loaded. Mainnet strategies remain available.",
       "providerWithdrawalUnavailable": "Provider withdrawal unavailable",
       "strategiesErrorTitle": "Markets data unavailable",
       "strategiesErrorDescription": "Strategies or live vault positions could not be loaded. Refresh to try again.",
@@ -692,9 +694,10 @@
       "vaultWalletBody": "Choose a wallet and amount. The wallet signs the transaction and receives the vault shares.",
       "vaultAmount": "Amount",
       "vaultPayWith": "Pay with",
-      "vaultSwapNotice": "Your {source} is swapped to {target} through Jupiter inside the same transaction, so the swap and the deposit land together or not at all. The deposit is sized to the swap's guaranteed minimum ({pct}% tolerance); anything better stays in your wallet as {target}.",
       "vaultSwapRow": "Swap",
       "vaultSwapVia": "{source} → {target} via Jupiter",
+      "vaultSwapReviewTitle": "Swap required before deposit",
+      "vaultSwapReviewBody": "Your {source} will be swapped to the vault's underlying {target} through Jupiter, then deposited in the same transaction.",
       "vaultStrategy": "Vault",
       "vaultBacking": "Backing",
       "vaultFrom": "From wallet",
