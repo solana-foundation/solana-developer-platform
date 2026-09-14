@@ -226,6 +226,34 @@ describe("API key privilege guards", () => {
   });
 
   it("lets a wallet-scoped key grant a wallet inside its own scope", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES ('cust_privilege_scope', ?, ?, 'local', 'test-config',
+                 'sdp-custody-encryption-v1', 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES ('cwlt_privilege_scope', 'cust_privilege_scope', 'wal_scope_own',
+                 'wal_scope_own_public_key', 'active')`
+      )
+      .run();
+    await seedKeyRow(
+      { id: "key_privilege_scoped2", raw: "sk_test_privilege_scoped2" },
+      "api_developer",
+      null
+    );
+    await db
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_privilege_scope', 'key_privilege_scoped2', 'wal_scope_own', '["*"]')`
+      )
+      .run();
     const scopedHash = await hashString("sk_test_privilege_scoped2", env.API_KEY_PEPPER);
     await seedCachedApiKey(env, scopedHash, {
       ...WRITER_CACHED,
@@ -253,10 +281,46 @@ describe("API key privilege guards", () => {
       env
     );
 
-    expect([200, 201, 400]).toContain(res.status);
-    if (res.status === 403) {
-      throw new Error("scope guard must not block a wallet the actor holds");
-    }
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { apiKey: { id: string } } };
+    const bindings = await getDb(env)
+      .prepare("SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = ?")
+      .bind(body.data.apiKey.id)
+      .all<{ wallet_id: string }>();
+    expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_own"]);
+  });
+
+  it("refuses a wallet-scoped key granting wider permissions on its own wallet", async () => {
+    const scopedHash = await hashString("sk_test_privilege_scoped6", env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, scopedHash, {
+      ...WRITER_CACHED,
+      id: "key_privilege_scoped6",
+      walletScope: "selected",
+      signingWalletIds: ["wal_scope_own"],
+      walletBindings: [{ walletId: "wal_scope_own", permissions: ["tokens:read"] }],
+    });
+
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer sk_test_privilege_scoped6",
+        },
+        body: JSON.stringify({
+          name: "Widened wallet grant",
+          role: "api_readonly",
+          walletScope: "selected",
+          walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("beyond your own");
   });
 
   it("refuses a wallet-scoped key rotating a key with broader wallet access", async () => {

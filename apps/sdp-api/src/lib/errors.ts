@@ -207,6 +207,10 @@ export function unauthorized(message?: string): AppError {
   return new AppError("UNAUTHORIZED", message);
 }
 
+export function insufficientPermissions(message?: string): AppError {
+  return new AppError("INSUFFICIENT_PERMISSIONS", message);
+}
+
 export function forbidden(message?: string): AppError {
   return new AppError("FORBIDDEN", message);
 }

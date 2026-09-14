@@ -20,6 +20,7 @@ import { AppError, badRequest, internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
 import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
+import { parseApiKeyWalletPermissionsColumn } from "./api-key-wallets.service";
 
 export interface ApiKeyListItem {
   id: string;
@@ -159,6 +160,21 @@ function stringifyJsonb(value: unknown, fallback: unknown): string {
 
   return JSON.stringify(value ?? fallback);
 }
+
+type RotationTargetRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  key_hash: string;
+  role: ApiKeyRole;
+  permissions: string | null;
+  environment: ApiKeyEnvironment;
+  project_id: string;
+  allowed_ips: string | null;
+  signing_wallet_id: string | null;
+  created_by: string;
+  expires_at: string | null;
+};
 
 export class ApiKeyService {
   constructor(
@@ -425,7 +441,7 @@ export class ApiKeyService {
     pepper?: string,
     guardTargetWalletScope?: (target: {
       signingWalletId: string | null;
-      bindingWalletIds: string[];
+      bindings: Array<{ walletId: string; permissions: Permission[] }>;
     }) => void
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
@@ -439,20 +455,7 @@ export class ApiKeyService {
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ? AND ak.status = 'active'`
       )
       .bind(keyId, organizationId, projectId)
-      .first<{
-        id: string;
-        name: string;
-        description: string | null;
-        key_hash: string;
-        role: ApiKeyRole;
-        permissions: string | null;
-        environment: ApiKeyEnvironment;
-        project_id: string;
-        allowed_ips: string | null;
-        signing_wallet_id: string | null;
-        created_by: string;
-        expires_at: string | null;
-      }>();
+      .first<RotationTargetRow>();
 
     if (!existing) {
       return null;
@@ -484,6 +487,7 @@ export class ApiKeyService {
     }
 
     let existingReplacementId: string | null = null;
+    let committedTarget: RotationTargetRow | null = null;
 
     await lockedTransactionWithPostCommit(
       `api-key-rotation:${keyId}`,
@@ -501,24 +505,43 @@ export class ApiKeyService {
           return;
         }
 
-        // The wallet scope is judged on the rows this transaction copies,
-        // not on what the caller read before the lock: a binding written in
-        // that window would otherwise be cloned unchecked.
-        const currentTarget = await tx.queryOne<{ signing_wallet_id: string | null }>(
-          `SELECT signing_wallet_id FROM api_keys WHERE id = $1`,
+        // Everything the clone copies is judged and read on the rows this
+        // transaction sees, not on what the caller read before the lock: a
+        // permissions, IP, expiry or binding change committed in that
+        // window would otherwise be cloned unchecked.
+        const target = await tx.queryOne<RotationTargetRow>(
+          `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
+                  p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id,
+                  ak.created_by, ak.expires_at
+           FROM api_keys ak
+           JOIN projects p ON p.id = ak.project_id
+           WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
+             AND ak.status = 'active'`,
+          [keyId, organizationId, projectId]
+        );
+        if (!target) {
+          return;
+        }
+        committedTarget = target;
+
+        assertGrantableApiKeyPermissions(
+          actorPermissions,
+          target.role,
+          target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions)
+        );
+
+        const signingWalletId = target.signing_wallet_id;
+        const bindingRows = await tx.queryMany<{ wallet_id: string; permissions: unknown }>(
+          `SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1`,
           [keyId]
         );
-        const signingWalletId = currentTarget?.signing_wallet_id ?? null;
-        if (guardTargetWalletScope) {
-          const bindingRows = await tx.queryMany<{ wallet_id: string }>(
-            `SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = $1`,
-            [keyId]
-          );
-          guardTargetWalletScope({
-            signingWalletId,
-            bindingWalletIds: bindingRows.map((row) => row.wallet_id),
-          });
-        }
+        guardTargetWalletScope?.({
+          signingWalletId,
+          bindings: bindingRows.map((row) => ({
+            walletId: row.wallet_id,
+            permissions: parseApiKeyWalletPermissionsColumn(row.permissions),
+          })),
+        });
 
         await tx
           .prepare(
@@ -530,18 +553,18 @@ export class ApiKeyService {
           .bind(
             newKeyId,
             organizationId,
-            existing.project_id,
-            existing.created_by,
-            existing.name,
-            existing.description,
+            target.project_id,
+            target.created_by,
+            target.name,
+            target.description,
             newPrefix,
             newKeyHash,
-            existing.role,
-            existing.permissions,
-            existing.allowed_ips,
+            target.role,
+            target.permissions,
+            target.allowed_ips,
             signingWalletId,
             keyId,
-            existing.expires_at
+            target.expires_at
           )
           .run();
 
@@ -554,19 +577,18 @@ export class ApiKeyService {
           .bind(rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId)
           .run();
 
-        await tx
-          .prepare(
-            `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-           SELECT
-             'akw_' || md5(random()::text || clock_timestamp()::text),
-             ?,
-             wallet_id,
-             permissions
-           FROM api_key_wallet_permissions
-           WHERE api_key_id = ?`
-          )
-          .bind(newKeyId, keyId)
-          .run();
+        // The clone inserts the rows the guard judged, not a re-read of the
+        // table — under READ COMMITTED an INSERT … SELECT would see rows
+        // committed after the guard ran.
+        for (const row of bindingRows) {
+          await tx
+            .prepare(
+              `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+             VALUES (?, ?, ?, ?)`
+            )
+            .bind(`akw_${crypto.randomUUID()}`, newKeyId, row.wallet_id, row.permissions)
+            .run();
+        }
 
         await this.cloneApiKeyPolicyFoundation(tx, keyId, newKeyId);
       },
@@ -580,22 +602,30 @@ export class ApiKeyService {
       return { alreadyRotatedTo: existingReplacementId };
     }
 
+    // The assignment happens inside the transaction callback, which TS's
+    // control-flow analysis does not track.
+    const rotated = committedTarget as RotationTargetRow | null;
+    if (!rotated) {
+      // The key was revoked or moved between the pre-flight read and the lock.
+      return null;
+    }
+
     return {
       apiKey: {
         id: newKeyId,
-        name: existing.name,
+        name: rotated.name,
         key: newKey,
         keyPrefix: newPrefix,
-        role: existing.role,
-        environment: existing.environment,
-        expiresAt: existing.expires_at,
+        role: rotated.role,
+        environment: rotated.environment,
+        expiresAt: rotated.expires_at,
         createdAt: new Date().toISOString(),
       },
       previousKey: {
         id: keyId,
         rotationDeadline,
       },
-      previousKeyHash: existing.key_hash,
+      previousKeyHash: rotated.key_hash,
     };
   }
 

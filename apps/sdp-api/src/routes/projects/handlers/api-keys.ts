@@ -149,10 +149,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
   if (actorApiKey) {
     assertBindingsWithinActorWalletScope(
       actorApiKey,
-      [
-        walletSelection.defaultSigningWalletId,
-        ...walletSelection.bindings.map((binding) => binding.walletId),
-      ],
+      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
       walletScope
     );
   }

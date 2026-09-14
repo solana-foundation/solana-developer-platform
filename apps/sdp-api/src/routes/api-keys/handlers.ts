@@ -282,10 +282,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   if (actorApiKey) {
     assertBindingsWithinActorWalletScope(
       actorApiKey,
-      [
-        walletSelection.defaultSigningWalletId,
-        ...walletSelection.bindings.map((binding) => binding.walletId),
-      ],
+      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
       walletScope
     );
   }
@@ -512,10 +509,7 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   if (updateActorApiKey && walletSelection.touched) {
     assertBindingsWithinActorWalletScope(
       updateActorApiKey,
-      [
-        walletSelection.defaultSigningWalletId,
-        ...walletSelection.bindings.map((binding) => binding.walletId),
-      ],
+      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
       body.walletScope
     );
   }
@@ -769,7 +763,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
         target.signing_wallet_id !== null || targetBindings.length > 0 ? "selected" : "all";
       assertBindingsWithinActorWalletScope(
         rotatingActorKey,
-        [target.signing_wallet_id, ...targetBindings.map((binding) => binding.walletId)],
+        [{ walletId: target.signing_wallet_id }, ...targetBindings],
         targetScope
       );
     }
@@ -787,11 +781,11 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     // change before the rotation lock is taken; this guard re-judges the
     // bindings the transaction actually copies.
     rotatingActorKey && isWalletScopedActor(rotatingActorKey)
-      ? ({ signingWalletId, bindingWalletIds }) =>
+      ? ({ signingWalletId, bindings }) =>
           assertBindingsWithinActorWalletScope(
             rotatingActorKey,
-            [signingWalletId, ...bindingWalletIds],
-            signingWalletId !== null || bindingWalletIds.length > 0 ? "selected" : "all"
+            [{ walletId: signingWalletId }, ...bindings],
+            signingWalletId !== null || bindings.length > 0 ? "selected" : "all"
           )
       : undefined
   );

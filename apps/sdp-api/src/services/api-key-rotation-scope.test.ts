@@ -15,11 +15,7 @@ describe("rotateApiKey wallet-scope guard", () => {
     await seedTestDatabase(env);
     const db = getDb(env);
 
-    await db
-      .prepare("DELETE FROM api_keys WHERE organization_id = ?")
-      .bind(TEST_ORG.id)
-      .run()
-      .catch(() => {});
+    await db.prepare("DELETE FROM api_keys WHERE organization_id = ?").bind(TEST_ORG.id).run();
     await db
       .prepare(
         `INSERT INTO organizations (id, name, slug, tier, status)
@@ -72,7 +68,7 @@ describe("rotateApiKey wallet-scope guard", () => {
       .bind(TARGET_KEY_ID)
       .run();
 
-    const seen: string[][] = [];
+    const seen: Array<Array<{ walletId: string; permissions: string[] }>> = [];
     const rotation = await new ApiKeyService(getDb(env), SCOPE).rotateApiKey(
       TARGET_KEY_ID,
       TEST_ORG.id,
@@ -80,13 +76,18 @@ describe("rotateApiKey wallet-scope guard", () => {
       24,
       ["*"],
       "pepper",
-      ({ bindingWalletIds }) => {
-        seen.push([...bindingWalletIds].sort());
+      ({ bindings }) => {
+        seen.push([...bindings].sort((a, b) => a.walletId.localeCompare(b.walletId)));
       }
     );
 
     expect(rotation).not.toBeNull();
-    expect(seen).toEqual([["wallet_rotation_a", "wallet_rotation_b"]]);
+    expect(seen).toEqual([
+      [
+        { walletId: "wallet_rotation_a", permissions: ["tokens:read"] },
+        { walletId: "wallet_rotation_b", permissions: ["tokens:read"] },
+      ],
+    ]);
   });
 
   it("rolls the rotation back when the guard refuses", async () => {
