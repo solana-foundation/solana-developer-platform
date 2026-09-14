@@ -989,7 +989,7 @@ Ondo contributes one strategy: holding USDY, its yield-bearing US Treasury token
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
-const SDP_API_URL = process.env.SDP_API_URL ?? "https://api-preview.solana.com";
+const SDP_API_URL = process.env.SDP_API_URL ?? "https://api.solana.com";
 // For a local SDP API, use the configured base URL, usually http://127.0.0.1:8787.
 
 function sdpHeaders(extra: Record<string, string> = {}) {

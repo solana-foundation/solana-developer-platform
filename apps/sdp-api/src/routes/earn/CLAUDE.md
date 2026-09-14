@@ -920,6 +920,10 @@ fork a keyed and anonymous route with duplicate behavior.
   request has no organization, project, entitlement, policy, custody, or
   persistence context. When a credential is present, the route still enforces
   its previous `earn:read` or `earn:write` scope.
+- **No credential downgrade:** a presented credential must resolve completely
+  or return 401. That includes an unknown, revoked, or expired API key, a Clerk
+  token without organization context, and an invalid or expired session cookie.
+  Only a request that presents no supported credential may continue anonymously.
 - **Keyed control plane:** submits, movements, positions, earnings, custody
   vault routes, programs, and the aggregate feed. These retain the existing
   permission and project boundaries.

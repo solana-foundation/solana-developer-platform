@@ -30,7 +30,18 @@ export function resolveSdpEnvironment(c: Context<{ Bindings: Env }>): SdpEnviron
     return projectEnvironment;
   }
 
-  const deploymentEnvironment = c.env.SDP_ENVIRONMENT?.trim();
+  return resolveAnonymousSdpEnvironment(c.env);
+}
+
+/**
+ * Resolves the deployment-owned environment used by keyless Earn requests.
+ * Kept independent of Hono so startup can validate and report the same value
+ * before accepting traffic.
+ */
+export function resolveAnonymousSdpEnvironment(
+  env: Pick<Env, "SDP_ENVIRONMENT" | "ENVIRONMENT">
+): SdpEnvironment {
+  const deploymentEnvironment = env.SDP_ENVIRONMENT?.trim();
   if (deploymentEnvironment) {
     if (deploymentEnvironment === "sandbox" || deploymentEnvironment === "production") {
       return deploymentEnvironment;
@@ -38,10 +49,10 @@ export function resolveSdpEnvironment(c: Context<{ Bindings: Env }>): SdpEnviron
     throw internalError("SDP_ENVIRONMENT must be sandbox or production");
   }
 
-  if (c.env.ENVIRONMENT === "development") {
+  if (env.ENVIRONMENT === "development") {
     return "sandbox";
   }
-  if (c.env.ENVIRONMENT === "production") {
+  if (env.ENVIRONMENT === "production") {
     return "production";
   }
 

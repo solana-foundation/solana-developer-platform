@@ -48,6 +48,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
+- Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys and sessions, plus Clerk tokens without organization context, return 401.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.

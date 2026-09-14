@@ -531,6 +531,15 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   };
 }
 
+function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
+  if (!payload.sub) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
+  }
+  if (!resolveClerkOrganizationClaims(payload).organizationId) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+  }
+}
+
 export function clerkAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Identity mapping, membership sync, and default-project provisioning all
@@ -553,13 +562,7 @@ export function clerkAuthMiddleware() {
         });
       }
 
-      if (!payload.sub) {
-        throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
-      }
-
-      if (!resolveClerkOrganizationClaims(payload).organizationId) {
-        throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
-      }
+      assertClerkTenantClaims(payload);
 
       const context = await buildClerkContext(c, payload);
 
@@ -592,18 +595,14 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
     try {
       await runWithSystemDatabaseIdentity("http:auth", async () => {
         const payload = await verifyClerkJwtForRequest(c, token);
-
-        if (payload.sub && resolveClerkOrganizationClaims(payload).organizationId) {
-          const clerkContext = await buildClerkContext(c, payload);
-          if (clerkContext) {
-            await enforceRateLimit(
-              c,
-              `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
-              DASHBOARD_ACTOR_MAX_REQUESTS
-            );
-            c.set("clerk", clerkContext);
-          }
-        }
+        assertClerkTenantClaims(payload);
+        const clerkContext = await buildClerkContext(c, payload);
+        await enforceRateLimit(
+          c,
+          `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
+          DASHBOARD_ACTOR_MAX_REQUESTS
+        );
+        c.set("clerk", clerkContext);
       });
     } catch (error) {
       // Ignore invalid Clerk auth for optional usage, but never rate

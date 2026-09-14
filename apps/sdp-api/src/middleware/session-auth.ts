@@ -73,17 +73,19 @@ export function optionalSessionAuth(options: { rejectInvalid?: boolean } = {}) {
           const sessionService = new SessionService(getDb(c.env));
           const cachedSession = await sessionService.getSession(sessionId);
 
-          if (cachedSession) {
-            await enforceRateLimit(
-              c,
-              `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
-              DASHBOARD_ACTOR_MAX_REQUESTS
-            );
-            // Before the context is set: a disallowed origin continues as anonymous.
-            await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
-            c.set("session", cachedSession);
-            updateLastActivity(getDb(c.env), sessionId);
+          if (!cachedSession) {
+            throw new AppError("UNAUTHORIZED", "Invalid or expired session");
           }
+
+          await enforceRateLimit(
+            c,
+            `user:${cachedSession.userId}:org:${cachedSession.organizationId}`,
+            DASHBOARD_ACTOR_MAX_REQUESTS
+          );
+          // Before the context is set: a disallowed origin continues as anonymous.
+          await enforceOrganizationIpAllowlist(c, cachedSession.organizationId);
+          c.set("session", cachedSession);
+          updateLastActivity(getDb(c.env), sessionId);
         });
       } catch (error) {
         // Ignore errors for optional auth, but never rate limiting — a

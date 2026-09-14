@@ -255,6 +255,18 @@ describe("route tier conformance", () => {
     }
   );
 
+  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
+    "$route rejects a stale session cookie instead of silently downgrading",
+    async ({ route }) => {
+      const res = await requestAsSession(route, "ses_stale_earn_keyless", tenant.project.id);
+
+      expect(res.status, route).toBe(401);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code, route).toBe("UNAUTHORIZED");
+      expect(body.error.message, route).toContain("Invalid or expired session");
+    }
+  );
+
   it.each(KEYED_ROUTES.map((route) => ({ route })))(
     "$route refuses an anonymous caller before its handler",
     async ({ route }) => {

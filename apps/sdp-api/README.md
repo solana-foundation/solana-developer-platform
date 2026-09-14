@@ -128,7 +128,9 @@ set, then fall back to the deployment environment. Anonymous quote and build
 traffic has a separate paid-upstream budget configured with
 `EARN_ANONYMOUS_RPC_MAX_REQUESTS` and
 `EARN_ANONYMOUS_RPC_WINDOW_SECONDS`. API-key requests continue to use their
-project environment and authenticated quota. Outside Cloud Run, forwarded
+project environment and authenticated quota. At startup, the API validates and
+logs the resolved anonymous Earn environment; verify that event before exposing
+a non-production deployment. Outside Cloud Run, forwarded
 client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
 behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
 

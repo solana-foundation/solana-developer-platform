@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import { resolveAnonymousSdpEnvironment, resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
@@ -120,5 +120,24 @@ describe("resolveSdpEnvironment", () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INTERNAL_ERROR");
+  });
+});
+
+describe("resolveAnonymousSdpEnvironment", () => {
+  it("uses the exact environment resolution that runs at process startup", () => {
+    expect(
+      resolveAnonymousSdpEnvironment({ ENVIRONMENT: "development", SDP_ENVIRONMENT: "production" })
+    ).toBe("production");
+    expect(resolveAnonymousSdpEnvironment({ ENVIRONMENT: "development" })).toBe("sandbox");
+    expect(resolveAnonymousSdpEnvironment({ ENVIRONMENT: "production" })).toBe("production");
+  });
+
+  it("fails startup validation for an invalid explicit value", () => {
+    expect(() =>
+      resolveAnonymousSdpEnvironment({
+        ENVIRONMENT: "development",
+        SDP_ENVIRONMENT: "preview",
+      } as unknown as Pick<Env, "SDP_ENVIRONMENT" | "ENVIRONMENT">)
+    ).toThrow("SDP_ENVIRONMENT must be sandbox or production");
   });
 });

@@ -546,9 +546,9 @@ describe("Earn routes — strategy catalogue", () => {
       underlyingSource: "morpho",
     });
     const hiddenByProvider = await seedStrategy({
-      provider: "ground",
-      providerReference: "anonymous-ground-usdc",
-      name: "Ground USDC",
+      provider: "upshift",
+      providerReference: "anonymous-upshift-usdc",
+      name: "Upshift USDC",
     });
 
     const list = await getEarnAnonymously("/v1/earn/strategies");
