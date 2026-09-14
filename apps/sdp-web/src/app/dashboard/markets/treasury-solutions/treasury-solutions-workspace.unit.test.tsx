@@ -153,12 +153,39 @@ const mocks = vi.hoisted(() => ({
   secondWalletBalances: undefined as
     | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
     | undefined,
+  // Vault address -> "loading" | "error" | a Kamino allocations payload.
+  allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
+  allocationsRequests: [] as Array<string | undefined>,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "Share1111111111111111111111111111111111111";
 // A share mint known only through the strategy catalogue — no position row.
 const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
+
+vi.mock("./kamino-allocations", () => ({
+  useKaminoVaultAllocations: (vaultAddress?: string, cluster?: "devnet" | "mainnet-beta") => {
+    // Mirrors the hook's contract: a non-mainnet cluster is an unsupported
+    // read — the SWR key stays null, so nothing is requested and no cell ever
+    // sees data for it.
+    if (cluster !== "mainnet-beta") {
+      return { allocations: undefined, error: undefined, isLoading: false };
+    }
+    mocks.allocationsRequests.push(vaultAddress);
+    const state = vaultAddress === undefined ? undefined : mocks.allocationsByVault[vaultAddress];
+    if (state === "loading") {
+      return { allocations: undefined, error: undefined, isLoading: true };
+    }
+    if (state === "error") {
+      return {
+        allocations: undefined,
+        error: new Error("vault allocations unavailable"),
+        isLoading: false,
+      };
+    }
+    return { allocations: state, error: undefined, isLoading: false };
+  },
+}));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
@@ -688,6 +715,8 @@ beforeEach(() => {
   mocks.walletsError = false;
   mocks.walletsEmpty = false;
   mocks.corruptStableShareMint = false;
+  mocks.allocationsByVault = {};
+  mocks.allocationsRequests = [];
   vi.clearAllMocks();
 });
 
@@ -1334,7 +1363,7 @@ describe("TreasurySolutionsWorkspace", () => {
     if (!instantRow) throw new Error("Expected the instant strategy row");
     expect(within(instantRow).getByText("Kamino")).toBeTruthy();
     expect(within(instantRow).queryByText("Instant")).toBeNull();
-    expect(within(instantRow).getAllByRole("cell")).toHaveLength(6);
+    expect(within(instantRow).getAllByRole("cell")).toHaveLength(7);
 
     const strategyTable = instantRow.closest("table");
     if (!strategyTable) throw new Error("Expected the available strategies table");
@@ -1342,7 +1371,7 @@ describe("TreasurySolutionsWorkspace", () => {
       within(strategyTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Actions"]);
+    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Information", "Actions"]);
     expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
@@ -1352,6 +1381,140 @@ describe("TreasurySolutionsWorkspace", () => {
     // No observed APY renders the placeholder, never a fabricated rate.
     expect(within(delayedRow).getAllByRole("cell")[3]?.textContent).toBe("\u2014");
     expect(delayedRow.textContent).not.toMatch(/\d%/);
+  });
+
+  it("discloses a Kamino vault's allocations in the Information column", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      asOf: "2026-09-14T17:53:52.895Z",
+      capitalDeployedUsd: "569275.60",
+      allocations: [
+        {
+          reserve: "reserve-1",
+          marketName: "SOL/BTC Market",
+          symbol: "SOL",
+          targetWeightPct: "23.95",
+          actualPct: "23.94",
+          suppliedUsd: "136381.92",
+          supplyApy: "0.045",
+        },
+        {
+          reserve: "reserve-2",
+          marketName: "USDC Market",
+          symbol: "USDC",
+          targetWeightPct: "76.10",
+          actualPct: "76.00",
+          suppliedUsd: "432544.14",
+          supplyApy: "0.082",
+        },
+      ],
+      unallocated: { usd: "349.54", pct: "0.06" },
+    };
+    renderWorkspace();
+
+    // Only mainnet Kamino vaults are readable (the allocations source is
+    // mainnet-only): the devnet Kamino rows and the Veda fund never ask.
+    expect(mocks.allocationsRequests).toContain("KvaultMainnet111111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("KvaultCatalogue1111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("VedaFund1111111111111111111111111111111111");
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // Deployed weight is the complement of the unallocated share.
+    expect(within(mainnetRow).getByText("99.9% deployed")).toBeTruthy();
+
+    const disclosure = within(mainnetRow).getByRole("button", { name: "99.9% deployed" });
+    await user.hover(disclosure);
+    expect(await screen.findByText("Vault allocations")).toBeTruthy();
+    // The disclosure is a semantic table: its column headings are exposed as
+    // columnheaders, not hidden from assistive technology.
+    expect(screen.getByRole("columnheader", { name: "Weight" })).toBeTruthy();
+    expect(screen.getByText("SOL/BTC Market")).toBeTruthy();
+    expect(screen.getByText("Unallocated")).toBeTruthy();
+    // The reserve APY renders inside the disclosure only — the strategies
+    // table's own APY column may show the same figure on another row.
+    const disclosureTable = screen.getByRole("columnheader", { name: "Weight" }).closest("table");
+    if (!disclosureTable) throw new Error("Expected the allocations disclosure table");
+    expect(within(disclosureTable).getByText("4.5%")).toBeTruthy();
+  });
+
+  it("keeps the disclosure when the deployed weight cannot be certified", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [
+        {
+          reserve: "reserve-1",
+          marketName: "SOL/BTC Market",
+          symbol: "SOL",
+          actualPct: "23.94",
+          suppliedUsd: "136381.92",
+          supplyApy: "0.045",
+        },
+      ],
+    };
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // No unallocated share means no certifiable summary weight, but the
+    // per-reserve rows are still a real read: disclose them under a neutral
+    // summary instead of hiding everything behind the placeholder.
+    const disclosure = within(mainnetRow).getByRole("button", { name: "Allocation details" });
+    await user.hover(disclosure);
+    expect(await screen.findByText("SOL/BTC Market")).toBeTruthy();
+    expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+  });
+
+  it("degrades the Information cell to the placeholder when the allocations read fails", () => {
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = "error";
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // Same placeholder as a non-Kamino row — never a partial or stale figure.
+    expect(within(mainnetRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+  });
+
+  it("renders the Information placeholder for devnet Kamino rows without requesting", () => {
+    renderWorkspace();
+
+    // The devnet shelf's instant row shares the mainnet mirror's name: pick
+    // the devnet row by its own observed APY.
+    const instantRow = screen
+      .getAllByText("Steakhouse USDC")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("6.2%"));
+    if (!instantRow) throw new Error("Expected the instant strategy row");
+    // Kamino's allocations source is mainnet-only: the devnet vault is an
+    // unsupported read, so it takes the placeholder without a request.
+    expect(within(instantRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    const informationCell = within(instantRow).getAllByRole("cell")[5];
+    if (!informationCell) throw new Error("Expected the Information cell");
+    expect(within(informationCell).queryByRole("button")).toBeNull();
+    expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
+    // The devnet-only vault has no mainnet counterpart: the rough-name
+    // intersection hides the whole row, so no cell of it can render at all.
+    expect(screen.queryByText("Kamino Vault USDC")).toBeNull();
+  });
+
+  it("renders the Information placeholder for a non-Kamino strategy", () => {
+    renderWorkspace();
+
+    const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
+    if (!delayedRow) throw new Error("Expected the delayed strategy row");
+    expect(within(delayedRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(delayedRow).queryByRole("button", { name: /deployed/ })).toBeNull();
   });
 
   it("sorts active balances, strategy APYs, and TVLs while keeping unavailable values last", async () => {
