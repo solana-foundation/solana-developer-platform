@@ -1252,6 +1252,8 @@ interface TreasuryStrategiesCardProps {
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
+  mainnetError: unknown;
+  mainnetLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
@@ -1260,14 +1262,23 @@ interface TreasuryStrategiesCardProps {
   unrecordedShareMints: ReadonlySet<string> | undefined;
 }
 
-function DevnetCatalogueStatus({
+type CatalogueShelf = "devnet" | "mainnet";
+
+/**
+ * Inline state for one shelf of the Sandbox catalogue. Either shelf can load
+ * or fail on its own without taking the other's rows off the screen; the
+ * full-card states are reserved for when neither shelf has anything to show.
+ */
+function CatalogueShelfStatus({
   error,
   hasStrategies,
   isLoading,
+  shelf,
 }: {
   error: unknown;
   hasStrategies: boolean;
   isLoading: boolean;
+  shelf: CatalogueShelf;
 }) {
   const t = useTranslations();
   if (!hasStrategies) return null;
@@ -1278,7 +1289,11 @@ function DevnetCatalogueStatus({
         role="alert"
       >
         <InfoIcon aria-hidden="true" className="size-4 shrink-0" />
-        <p>{t("DashboardMarkets.treasury.devnetStrategiesUnavailable")}</p>
+        <p>
+          {shelf === "devnet"
+            ? t("DashboardMarkets.treasury.devnetStrategiesUnavailable")
+            : t("DashboardMarkets.treasury.mainnetStrategiesUnavailable")}
+        </p>
       </div>
     );
   }
@@ -1289,7 +1304,11 @@ function DevnetCatalogueStatus({
       role="status"
     >
       <RefreshCwIcon aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
-      <p>{t("DashboardMarkets.treasury.devnetStrategiesLoading")}</p>
+      <p>
+        {shelf === "devnet"
+          ? t("DashboardMarkets.treasury.devnetStrategiesLoading")
+          : t("DashboardMarkets.treasury.mainnetStrategiesLoading")}
+      </p>
     </div>
   );
 }
@@ -1300,6 +1319,8 @@ function TreasuryStrategiesCardBody({
   environment,
   error,
   isLoading,
+  mainnetError,
+  mainnetLoading,
   onDeposit,
   positions,
   providerAccess,
@@ -1328,10 +1349,17 @@ function TreasuryStrategiesCardBody({
   const availableStrategies = strategies ?? [];
   return (
     <>
-      <DevnetCatalogueStatus
+      <CatalogueShelfStatus
+        error={mainnetError}
+        hasStrategies={availableStrategies.length > 0}
+        isLoading={mainnetLoading}
+        shelf="mainnet"
+      />
+      <CatalogueShelfStatus
         error={devnetError}
         hasStrategies={availableStrategies.length > 0}
         isLoading={devnetLoading}
+        shelf="devnet"
       />
       {availableStrategies.length === 0 ? (
         <ListEmptyState
@@ -1510,6 +1538,8 @@ interface TreasuryWorkspaceContentProps {
   devnetCatalogueError: unknown;
   devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
+  mainnetCatalogueError: unknown;
+  mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   onWithdrawPosition: (position: EarnVaultPosition) => void;
@@ -1539,6 +1569,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     devnetCatalogueError,
     devnetCatalogueLoading,
     environment,
+    mainnetCatalogueError,
+    mainnetCatalogueLoading,
     onDeposit,
     onRefresh,
     onWithdrawPosition,
@@ -1591,6 +1623,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         environment={environment}
         error={catalogueError}
         isLoading={catalogueLoading}
+        mainnetError={mainnetCatalogueError}
+        mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
         positions={positionsError ? undefined : positions}
@@ -1613,11 +1647,16 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   );
 }
 
+/**
+ * Sandbox lists the mirrored mainnet shelf above the depositable devnet shelf.
+ * Neither shelf gates the other: whichever has loaded renders, and only when
+ * both are missing is the catalogue itself unavailable.
+ */
 function mergeStrategyCatalogues(
   mainnet: readonly EarnStrategy[] | undefined,
   devnet: readonly EarnStrategy[] | undefined
 ): EarnStrategy[] | undefined {
-  if (!mainnet) return undefined;
+  if (!mainnet) return devnet ? [...devnet] : undefined;
   if (!devnet) return [...mainnet];
 
   const combined = [...mainnet];
@@ -1652,25 +1691,38 @@ export function TreasurySolutionsWorkspace({
   // Sandbox automatically combines that devnet shelf with the mirrored
   // mainnet catalogue, preserving the API's `fundable: false` response on
   // mainnet rows. Production's default shelf is already mainnet.
-  const catalogueCluster = sdpEnvironment === "sandbox" ? "mainnet-beta" : undefined;
+  const sandboxCatalogue = sdpEnvironment === "sandbox";
+  const catalogueCluster = sandboxCatalogue ? "mainnet-beta" : undefined;
   const {
     strategies: baseCatalogueStrategies,
     error: baseCatalogueError,
     isLoading: baseCatalogueLoading,
     refresh: refreshCatalogue,
   } = useEarnStrategies({ cluster: catalogueCluster });
+  // Each Sandbox shelf drops its rows behind its own failed read, so a stale
+  // list never outlives the error that should have replaced it, and neither
+  // shelf's failure or slow load takes the other's rows off the screen. The
+  // devnet rows are the only ones Sandbox can deposit into, so they must
+  // survive a mainnet mirror outage in particular (PRO-1961).
   const catalogueStrategies = useMemo(
     () =>
-      sdpEnvironment === "sandbox"
-        ? mergeStrategyCatalogues(baseCatalogueStrategies, strategiesError ? undefined : strategies)
+      sandboxCatalogue
+        ? mergeStrategyCatalogues(
+            baseCatalogueError ? undefined : baseCatalogueStrategies,
+            strategiesError ? undefined : strategies
+          )
         : baseCatalogueStrategies,
-    [baseCatalogueStrategies, sdpEnvironment, strategies, strategiesError]
+    [baseCatalogueError, baseCatalogueStrategies, sandboxCatalogue, strategies, strategiesError]
   );
-  const catalogueError = baseCatalogueError;
-  const devnetCatalogueError = sdpEnvironment === "sandbox" ? strategiesError : undefined;
-  const devnetCatalogueLoading = sdpEnvironment === "sandbox" && strategiesLoading;
-  const catalogueLoading =
-    baseCatalogueLoading || (sdpEnvironment === "sandbox" && strategiesLoading);
+  // Sandbox reserves the full-card error for both shelves failing; a single
+  // failed shelf is reported inline above the rows the other shelf still has.
+  const bothShelvesFailed = Boolean(baseCatalogueError && strategiesError);
+  const catalogueError = !sandboxCatalogue || bothShelvesFailed ? baseCatalogueError : undefined;
+  const mainnetCatalogueError = sandboxCatalogue ? baseCatalogueError : undefined;
+  const mainnetCatalogueLoading = sandboxCatalogue && baseCatalogueLoading;
+  const devnetCatalogueError = sandboxCatalogue ? strategiesError : undefined;
+  const devnetCatalogueLoading = sandboxCatalogue && strategiesLoading;
+  const catalogueLoading = baseCatalogueLoading || (sandboxCatalogue && strategiesLoading);
   const {
     positions,
     error: positionsError,
@@ -1941,6 +1993,8 @@ export function TreasurySolutionsWorkspace({
         devnetCatalogueError={devnetCatalogueError}
         devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
+        mainnetCatalogueError={mainnetCatalogueError}
+        mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
         onRefresh={() => {
           refreshWalletBalances();

@@ -144,6 +144,8 @@ const mocks = vi.hoisted(() => ({
   strategiesLoading: false,
   strategiesUnavailable: false,
   strategiesStaleError: false,
+  mainnetStrategiesLoading: false,
+  mainnetStrategiesUnavailable: false,
   strategyMissingShareMint: false,
   walletsError: false,
   walletsEmpty: false,
@@ -215,30 +217,36 @@ vi.mock("../earn/earn-program-data", () => ({
     // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
     // list. Rows arrive `fundable: false`, exactly as the API derives them.
     if (options?.cluster === "mainnet-beta") {
+      const mainnetUnavailable =
+        mocks.mainnetStrategiesUnavailable || mocks.mainnetStrategiesLoading;
       return {
-        error: undefined,
-        isLoading: false,
+        error: mocks.mainnetStrategiesUnavailable
+          ? new Error("mainnet catalogue unavailable")
+          : undefined,
+        isLoading: mocks.mainnetStrategiesLoading,
         refresh: mocks.refreshStrategies,
-        strategies: [
-          {
-            id: "earn_strategy_mainnet_mirror",
-            provider: "kamino",
-            providerReference: "KvaultMainnet111111111111111111111111111111",
-            name: "Kamino JLP Vault",
-            sourceKind: "defi",
-            depositMints: [USDC_MINT],
-            shareMint: "ShareMainnet111111111111111111111111111111",
-            apyType: "variable",
-            currentApy: "0.081",
-            riskMetadata: { tvlUsd: 32_000_000 },
-            liquidityTerm: "instant",
-            status: "active",
-            hostCluster: "mainnet-beta",
-            fundable: false,
-            createdAt: "2026-08-18T00:00:00.000Z",
-            updatedAt: "2026-08-18T00:00:00.000Z",
-          },
-        ],
+        strategies: mainnetUnavailable
+          ? undefined
+          : [
+              {
+                id: "earn_strategy_mainnet_mirror",
+                provider: "kamino",
+                providerReference: "KvaultMainnet111111111111111111111111111111",
+                name: "Kamino JLP Vault",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnet111111111111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.081",
+                riskMetadata: { tvlUsd: 32_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
+            ],
       };
     }
     const strategiesUnavailable = mocks.strategiesUnavailable || mocks.strategiesLoading;
@@ -582,6 +590,8 @@ beforeEach(() => {
   mocks.strategiesLoading = false;
   mocks.strategiesUnavailable = false;
   mocks.strategiesStaleError = false;
+  mocks.mainnetStrategiesLoading = false;
+  mocks.mainnetStrategiesUnavailable = false;
   mocks.secondWalletBalances = undefined;
   mocks.strategyMissingShareMint = false;
   mocks.walletsError = false;
@@ -1868,6 +1878,61 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
       )
     ).toBeTruthy();
     expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+  });
+
+  it("keeps devnet strategies depositable when the mainnet catalogue fails (PRO-1961)", () => {
+    mocks.mainnetStrategiesUnavailable = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    const devnetRow = catalogue.getByText("Kamino USDC Vault").closest("tr");
+    if (!devnetRow) throw new Error("Expected the devnet strategy row");
+    expect(
+      within(devnetRow).getByRole("button", { name: "Deposit" }).hasAttribute("disabled")
+    ).toBe(false);
+    expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
+    expect(
+      catalogue.getByText(
+        "Mainnet strategies could not be loaded. Devnet strategies remain available."
+      )
+    ).toBeTruthy();
+    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+  });
+
+  it("keeps devnet strategies visible while the mainnet catalogue loads (PRO-1961)", () => {
+    mocks.mainnetStrategiesLoading = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Kamino USDC Vault")).toBeTruthy();
+    expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
+    expect(
+      catalogue.getByText("Loading Mainnet strategies. Devnet strategies remain available.")
+    ).toBeTruthy();
+  });
+
+  it("reserves the full catalogue error for both shelves failing (PRO-1961)", () => {
+    mocks.mainnetStrategiesUnavailable = true;
+    mocks.strategiesUnavailable = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Markets data unavailable")).toBeTruthy();
+    expect(catalogue.queryByText("Kamino USDC Vault")).toBeNull();
+    expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
+    expect(catalogue.queryByText(/strategies remain available\./)).toBeNull();
   });
 
   it("refreshes the environment and mainnet shelves once each", async () => {

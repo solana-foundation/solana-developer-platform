@@ -138,12 +138,16 @@ program create still sends the body `requestId` form.
 - `earn-program-data.ts` — THE data seam, over the BFF proxies above.
   `useEarnStrategies()` is what this module's pages read today — it takes an
   optional `{ cluster }` (PRO-1742), the explicit opt-in that browses the
-  mirrored mainnet shelf; the cluster is part of the SWR key. Treasury's
-  strategies card passes it from its sandbox-only toggle and deliberately keeps
-  a SECOND, default hook call alive: the default read doubles as the
-  allocation summary's share-mint vocabulary, and repointing it at mainnet
-  would blank the devnet vocabulary under the page (the two calls share one
-  SWR key until the toggle leaves the default). The program,
+  mirrored mainnet shelf; the cluster is part of the SWR key. In sandbox,
+  Treasury's strategies card always requests that mirror and lists it above
+  the default (devnet) shelf, and deliberately keeps the SECOND, default hook
+  call alive: the default read doubles as the allocation summary's share-mint
+  vocabulary, and repointing it at mainnet would blank the devnet vocabulary
+  under the page. Neither shelf gates the other (PRO-1961): whichever has
+  loaded renders, a failed or slow shelf is reported inline above the other's
+  rows, and the full-card error is reserved for both failing. Devnet rows are
+  the only ones sandbox can deposit into, so a mirror outage must never hide
+  them. The program,
   vault-position and vault-deposit seams serve Treasury Solutions next door (see
   "Where these seams are consumed"). **No provider id is spelled in this file** — surfacing comes
   from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
