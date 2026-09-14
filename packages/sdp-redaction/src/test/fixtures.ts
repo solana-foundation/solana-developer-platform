@@ -11,6 +11,8 @@
 import assert from "node:assert/strict";
 
 export const SOLANA_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+/** An end user's wallet on the embedded Earn surface: PII linkage, must not survive. */
+export const OWNER_ADDRESS = "7Yq3nRbFkMd2pXcLwT9vZs4HaJ1uE6gQoB8iVtNrK5mD";
 
 export const COUNTERPARTY_PAYLOAD = {
   counterpartyId: "cp_01HZY",
@@ -44,6 +46,8 @@ export const COUNTERPARTY_PAYLOAD = {
     walletId: "wlt_01HZY",
     walletAddress: SOLANA_ADDRESS,
     destinationAddress: SOLANA_ADDRESS,
+    // The one `*Address` that is PII: it names an end user, not a treasury.
+    ownerAddress: OWNER_ADDRESS,
   },
   // Corridor context, outside the identity blob. It is what an on-call engineer
   // reads to tell a provider outage from an unsupported country, and none of it
@@ -76,6 +80,7 @@ const FORBIDDEN_VALUES = [
   "privy-app-secret-value",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
   "MIIBVgIBADANBgkqhkiG9w0",
+  OWNER_ADDRESS,
 ];
 
 /**
