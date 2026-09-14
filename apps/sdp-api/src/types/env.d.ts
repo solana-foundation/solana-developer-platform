@@ -68,9 +68,6 @@ export interface Env {
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
   SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
-  // Email configuration
-  EMAIL_FROM?: string;
-  RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
 
   // Clerk configuration

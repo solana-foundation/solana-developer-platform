@@ -17,15 +17,10 @@ import { PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR } from "@/cron/provider-cred
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
 import { runWithCronRunEvent } from "@/cron/run-event";
-import { WORKFLOW_EXECUTIONS_MONITOR } from "@/cron/workflow-executions";
-import { WORKFLOW_SECRET_RETIREMENTS_MONITOR } from "@/cron/workflow-secret-retirements";
+import { SECRET_RETIREMENTS_MONITOR } from "@/cron/secret-retirements";
 import { closeDatabasePools } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
-import {
-  isAssetProfilesEnabled,
-  isEarnEnabled,
-  isPrivateChannelsEnabled,
-} from "@/lib/feature-flags";
+import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -40,8 +35,7 @@ import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
-import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
-import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
+import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
@@ -66,7 +60,7 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  * once everything has run (as an AggregateError when more than one failed, and
  * logged with full causes at the process exit below), failing the job loudly;
  * non-fatal ticks' failures are swallowed after their log. The next execution
- * retries everything. DvP reconciliation, workflow secret retirements and Earn
+ * retries everything. DvP reconciliation, secret retirements and Earn
  * metrics refresh are the ticks whose failures do not enter the final failure
  * collection. Provider Credential cleanup reports failures after its bounded
  * batch; unfinished rows remain durable for the next run.
@@ -98,10 +92,7 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *    new deposits cannot strand old ones. Fatal.
  * 6. **DvP trade reconciliation** — ungated here; failures are logged and
  *    non-fatal, so later reconcilers still run.
- * 7. **Workflow executions** (gated on asset profiles) — this job is the
- *    workflow engine's only tick on managed deployments; without it, enqueued
- *    executions would sit `pending` forever. Fatal.
- * 8. **Workflow secret retirements** — behind no flag, because the queue holds
+ * 7. **Secret retirements** — behind no flag, because the queue holds
  *    credentials that are ALREADY orphaned, so cleanup must outlive the
  *    feature that filled it — and managed Cloud Run is where GCP Secret
  *    Manager is the default backend, so it is precisely where retirements are
@@ -162,7 +153,6 @@ export async function runCronJob(): Promise<void> {
   }
 
   const privateChannelsEnabled = isPrivateChannelsEnabled(env);
-  const assetProfilesEnabled = isAssetProfilesEnabled(env);
   const earnEnabled = isEarnEnabled(env);
 
   try {
@@ -225,20 +215,13 @@ export async function runCronJob(): Promise<void> {
         await collect(
           monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env))
         );
-        // Preserve DvP's non-fatal sweep and its position before workflow execution.
+        // Preserve DvP's non-fatal sweep and its position before secret retirement.
         await monitored(DVP_TRADES_MONITOR, () => reconcileDvpTrades(env)).catch(() => undefined);
         // Keep advisory detection after vault reconciliation and collect its failures.
         await collect(monitored(EARN_SPLIT_SWAPS_MONITOR, () => detectOrphanedEarnSplitSwaps(env)));
-        if (assetProfilesEnabled) {
-          await collect(
-            monitored(WORKFLOW_EXECUTIONS_MONITOR, () => runDueWorkflowExecutions(env))
-          );
-        } else {
-          await monitored(WORKFLOW_EXECUTIONS_MONITOR, async () => undefined);
-        }
-        await monitored(WORKFLOW_SECRET_RETIREMENTS_MONITOR, () =>
-          retireOrphanedActionSecrets(env)
-        ).catch(() => undefined);
+        await monitored(SECRET_RETIREMENTS_MONITOR, () => retireOrphanedSecrets(env)).catch(
+          () => undefined
+        );
         if (earnEnabled) {
           await monitored(EARN_METRICS_REFRESH_MONITOR, () =>
             runEarnMetricsRefreshTick(env, undefined)

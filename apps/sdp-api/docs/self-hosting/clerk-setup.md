@@ -65,7 +65,7 @@ What each claim does:
 | `org_id` | yes | Organization scope; the request is rejected if missing |
 | `org_role` | recommended | Maps `"org:admin"` to admin, anything else to member (`clerk-role.ts`); without it everyone is a member |
 | `org_slug` | optional | Surfaced in some logs and audit events |
-| `email` | optional | Used for actor display and notifications; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
+| `email` | optional | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
 
 When testing, sign in to Clerk's hosted UI with an **active organization selected**. Tokens minted without an active org omit `org_id` and the API rejects them.
 

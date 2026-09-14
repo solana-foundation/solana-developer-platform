@@ -16,8 +16,7 @@ import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
-import { retireOrphanedActionSecrets } from "@/services/jobs/retire-workflow-secrets";
-import { runDueWorkflowExecutions } from "@/services/jobs/run-workflow-executions";
+import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
@@ -88,12 +87,8 @@ vi.mock("@/cron/rings-indexing", () => ({
   RINGS_INDEXING_MONITOR: "sdp-api-poll-rings-indexing",
 }));
 
-vi.mock("@/cron/workflow-executions", () => ({
-  WORKFLOW_EXECUTIONS_MONITOR: "sdp-api-run-workflow-executions",
-}));
-
-vi.mock("@/cron/workflow-secret-retirements", () => ({
-  WORKFLOW_SECRET_RETIREMENTS_MONITOR: "sdp-api-retire-workflow-secrets",
+vi.mock("@/cron/secret-retirements", () => ({
+  SECRET_RETIREMENTS_MONITOR: "sdp-api-retire-secrets",
 }));
 
 vi.mock("@/db/client", () => ({
@@ -116,8 +111,8 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   logEvent: vi.fn(),
 }));
 
-vi.mock("@/services/jobs/retire-workflow-secrets", () => ({
-  retireOrphanedActionSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
+vi.mock("@/services/jobs/retire-orphaned-secrets", () => ({
+  retireOrphanedSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
 }));
 
 vi.mock("@/services/jobs/cleanup-provider-credential-secrets", () => ({
@@ -126,10 +121,6 @@ vi.mock("@/services/jobs/cleanup-provider-credential-secrets", () => ({
     skipped: 0,
     failed: 0,
   })),
-}));
-
-vi.mock("@/services/jobs/run-workflow-executions", () => ({
-  runDueWorkflowExecutions: vi.fn(async () => {}),
 }));
 
 vi.mock("@/services/jobs/collect-recurring-payments", () => ({
@@ -231,10 +222,7 @@ describe("runCronJob", () => {
     vi.mocked(reconcileDvpTrades).mockReset().mockResolvedValue(undefined);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
-    vi.mocked(runDueWorkflowExecutions)
-      .mockReset()
-      .mockResolvedValue(undefined as never);
-    vi.mocked(retireOrphanedActionSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
+    vi.mocked(retireOrphanedSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReset().mockResolvedValue({
       cleaned: 0,
       skipped: 0,
@@ -280,7 +268,6 @@ describe("runCronJob", () => {
     );
     expect(trackPendingTransfers).toHaveBeenCalledOnce();
     expect(collectDueRecurringPayments).toHaveBeenCalledOnce();
-    expect(runDueWorkflowExecutions).toHaveBeenCalledOnce();
     expect(closeDatabasePools).toHaveBeenCalledOnce();
   });
 
@@ -407,8 +394,6 @@ describe("runCronJob", () => {
     expect(vi.mocked(reconcileEarnVaultMovements).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(detectOrphanedEarnSplitSwaps).mock.invocationCallOrder[0]
     );
-    // Managed deployments always have asset profiles on, so the workflow tick runs.
-    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined, {
       workEnabled: false,
     });
@@ -464,8 +449,7 @@ describe("runCronJob", () => {
         expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
         expect(reconcileDvpTrades).toHaveBeenCalledTimes(1);
         expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);
-        expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
-        expect(retireOrphanedActionSecrets).toHaveBeenCalledTimes(1);
+        expect(retireOrphanedSecrets).toHaveBeenCalledTimes(1);
         expect(runEarnMetricsRefreshTick).toHaveBeenCalledTimes(1);
         expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
       });
@@ -520,7 +504,6 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("photon down");
 
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
-    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -563,7 +546,6 @@ describe("runCronJob", () => {
     for (const monitorSlug of [
       "sdp-api-managed-track-pending-deposits",
       "sdp-api-managed-track-pending-withdrawals",
-      "sdp-api-managed-run-workflow-executions",
       "sdp-api-managed-refresh-earn-metrics",
     ]) {
       expect(
@@ -572,7 +554,6 @@ describe("runCronJob", () => {
     }
     expect(trackPendingDeposits).not.toHaveBeenCalled();
     expect(trackPendingWithdrawals).not.toHaveBeenCalled();
-    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
     expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledWith(expect.any(Object), undefined, {
       workEnabled: false,
@@ -595,8 +576,7 @@ describe("runCronJob", () => {
       "sdp-api-managed-reconcile-dvp-trades",
       "sdp-api-managed-reconcile-earn-vault-movements",
       "sdp-api-managed-refresh-earn-metrics",
-      "sdp-api-managed-retire-workflow-secrets",
-      "sdp-api-managed-run-workflow-executions",
+      "sdp-api-managed-retire-secrets",
       "sdp-api-managed-sync-earn-catalogue",
       "sdp-api-managed-track-pending-deposits",
       "sdp-api-managed-track-pending-transfers",
@@ -625,15 +605,6 @@ describe("runCronJob", () => {
     );
   });
 
-  it("skips the workflow tick on a self-hosted deployment without the asset-profiles flag", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted" }));
-
-    await runCronJob();
-
-    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
-  });
-
   // This job is the ONLY tick a Cloud Run deployment gets — the in-process scheduler
   // returns null under K_SERVICE — and Cloud Run is also where GCP Secret Manager is the
   // default backend, so it is exactly where retirements are queued. Omitting the sweep
@@ -644,27 +615,23 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    expect(retireOrphanedActionSecrets).toHaveBeenCalledExactlyOnceWith(env);
+    expect(retireOrphanedSecrets).toHaveBeenCalledExactlyOnceWith(env);
 
     // …and still when the feature that fills the queue is off: the rows outlive it.
     const selfHosted = makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted" });
     vi.mocked(getProcessEnv).mockReturnValue(selfHosted);
-    vi.mocked(retireOrphanedActionSecrets).mockClear();
-    // Cleared too, or the managed run above would still count against the assertion that
-    // the gated tick stays off.
-    vi.mocked(runDueWorkflowExecutions).mockClear();
+    vi.mocked(retireOrphanedSecrets).mockClear();
 
     await runCronJob();
 
-    expect(runDueWorkflowExecutions).not.toHaveBeenCalled();
-    expect(retireOrphanedActionSecrets).toHaveBeenCalledExactlyOnceWith(selfHosted);
+    expect(retireOrphanedSecrets).toHaveBeenCalledExactlyOnceWith(selfHosted);
   });
 
   // The sweep is cleanup, not the reconciliation this job exists for. A queued row is
   // never abandoned, so the next run retries it — failing the whole job instead would
   // strand the transfer reconciliation that already succeeded.
   it("does not fail the job when the retirement sweep throws", async () => {
-    vi.mocked(retireOrphanedActionSecrets).mockRejectedValue(new Error("secret store down"));
+    vi.mocked(retireOrphanedSecrets).mockRejectedValue(new Error("secret store down"));
 
     await expect(runCronJob()).resolves.toBeUndefined();
 
@@ -686,7 +653,6 @@ describe("runCronJob", () => {
       component: "job:sdp-api-reconcile-dvp-trades",
     });
     expect(reconcileDvpTrades).toHaveBeenCalledOnce();
-    expect(runDueWorkflowExecutions).toHaveBeenCalledOnce();
     expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledOnce();
     expect(logEvent).toHaveBeenCalledWith(
       "error",
@@ -778,8 +744,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("sponsorship down");
 
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
-    expect(runDueWorkflowExecutions).toHaveBeenCalledTimes(1);
-    expect(retireOrphanedActionSecrets).toHaveBeenCalledTimes(1);
+    expect(retireOrphanedSecrets).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });

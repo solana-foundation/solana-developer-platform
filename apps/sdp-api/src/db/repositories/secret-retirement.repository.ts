@@ -1,9 +1,9 @@
 import type { RepositoryDbClient } from "./base";
 
-export interface WorkflowSecretRetirementRow {
+export interface SecretRetirementRow {
   id: string;
   organization_id: string;
-  workflow_id: string | null;
+  source_id: string | null;
   storage_backend: string;
   secret_ref: string | null;
   secret_version_ref: string;
@@ -14,9 +14,9 @@ export interface WorkflowSecretRetirementRow {
   updated_at: string;
 }
 
-export interface RecordWorkflowSecretRetirementInput {
+export interface RecordSecretRetirementInput {
   organizationId: string;
-  workflowId: string | null;
+  sourceId: string | null;
   storageBackend: string;
   secretRef: string | null;
   secretVersionRef: string;
@@ -39,10 +39,10 @@ export interface RecordWorkflowSecretRetirementInput {
 
 // Durable queue of secret versions whose destroy call failed. Not tenant-scoped: the
 // sweeper runs as the system, and a retirement outlives the tenant rows it came from.
-export interface WorkflowSecretRetirementsRepository {
+export interface SecretRetirementsRepository {
   // Idempotent on `secret_version_ref` — the same failed retirement can be reported by a
   // later request (or a retried one) without queueing the work twice.
-  recordRetirement(input: RecordWorkflowSecretRetirementInput): Promise<void>;
+  recordRetirement(input: RecordSecretRetirementInput): Promise<void>;
   // Discharges an obligation recorded by the write that created it, once the version is
   // actually gone. Keyed on the ref because the writer never sees the row's id.
   deleteRetirementByVersionRef(secretVersionRef: string): Promise<void>;
@@ -50,14 +50,10 @@ export interface WorkflowSecretRetirementsRepository {
   // operator the truth when a later write fails: the obligation is normally already on
   // record, so "this write failed" is not the same as "nothing will retry".
   hasRetirement(secretVersionRef: string): Promise<boolean>;
-  listDueRetirements(params: {
-    dueBefore: string;
-    limit: number;
-  }): Promise<WorkflowSecretRetirementRow[]>;
+  listDueRetirements(params: { dueBefore: string; limit: number }): Promise<SecretRetirementRow[]>;
   /**
    * Take ownership of a due row BEFORE destroying its version — an optimistic
-   * claim against the `attempt_count` that was read, the same shape workflow
-   * executions use.
+   * claim against the `attempt_count` that was read.
    *
    * Destroying is an external side effect that cannot join a transaction, so
    * the row is the token that decides who may do it. Between listing a row and
@@ -85,6 +81,6 @@ export interface WorkflowSecretRetirementsRepository {
   recordRetirementFailure(params: { id: string; error: string }): Promise<void>;
 }
 
-export interface WorkflowSecretRetirementsRepositoryContext {
+export interface SecretRetirementsRepositoryContext {
   db: RepositoryDbClient;
 }

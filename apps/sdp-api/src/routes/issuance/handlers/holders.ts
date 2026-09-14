@@ -11,7 +11,6 @@ import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { emitKycApprovedForClearedEnrollments } from "@/services/workflows/clearance";
 import type { Env } from "@/types/env";
 import { getTenantTokenService, requireProjectScope } from "../helpers";
 
@@ -25,7 +24,7 @@ export const enrollHolderSchema = z.object({
 
 // Enroll a holder for an asset — the v1 "clearance" act: upsert the SDP-owned
 // kyc_wallets identity row (+ counterparty link) and an active enrollment. If the
-// wallet is already verified, this completes clearance and emits kyc_approved.
+// wallet is already verified, this completes clearance.
 export const enrollHolder = async (c: ValidatedBodyContext<typeof enrollHolderSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -81,10 +80,7 @@ export const enrollHolder = async (c: ValidatedBodyContext<typeof enrollHolderSc
     createdBy: auth.id,
   });
 
-  // Covers the "KYC approved before the operator enrolled them" ordering.
-  const dispatched = await emitKycApprovedForClearedEnrollments(c.env, { kycWallet: wallet });
-
-  return created(c, { wallet, enrollment, dispatched });
+  return created(c, { wallet, enrollment });
 };
 
 // The asset's enrolled (verified/pending) wallets — the reverse lookup.
