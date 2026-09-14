@@ -27,6 +27,14 @@ api/dashboard/markets/earn/
                                      treasury-solutions/. Auth comes from the
                                      proxy middleware; failures answer 502 so
                                      the cell degrades to its placeholder.
+                                     Answers the BARE parsed payload, never an
+                                     envelope: `dashboardFetch` hands the body
+                                     straight to the SWR hook, which re-parses
+                                     it with the same schema (an envelope once
+                                     failed every cell to "—" while both unit
+                                     suites stayed green; the seam test in
+                                     treasury-solutions/kamino-allocations-bff
+                                     wires route → dashboardFetch → hook).
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target

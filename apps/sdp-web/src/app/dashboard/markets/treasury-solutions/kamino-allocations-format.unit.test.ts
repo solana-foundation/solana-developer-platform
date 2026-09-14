@@ -1,26 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatAllocationApy,
   formatAllocationWeight,
   formatKaminoAsOf,
   hasKaminoAllocationContent,
   kaminoAllocationsByWeight,
   kaminoDeployedWeightPct,
+  kaminoDisclosureRows,
+  kaminoMarketLabel,
 } from "./kamino-allocations-format";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 
-function payload(actualPcts: string[]): KaminoVaultAllocations {
+function payload(actualPcts: string[], unallocatedPct?: string): KaminoVaultAllocations {
   return {
     allocations: actualPcts.map((actualPct, index) => ({
       reserve: `reserve-${index}`,
       marketName: `Market ${index}`,
-      symbol: `T${index}`,
       actualPct,
     })),
+    ...(unallocatedPct === undefined ? {} : { unallocated: { pct: unallocatedPct } }),
   };
 }
 
 describe("formatAllocationWeight", () => {
+  it("shows a live sliver as <0.1% instead of a misleading 0.0%", () => {
+    expect(formatAllocationWeight("0.02", "en")).toBe("<0.1%");
+    expect(formatAllocationWeight("0.049", "en")).toBe("<0.1%");
+    expect(formatAllocationWeight("0.05", "en")).toBe("0.1%");
+    expect(formatAllocationWeight("0", "en")).toBe("0.0%");
+  });
+
   it("reads percent-unit wire values as percents", () => {
     expect(formatAllocationWeight("23.94", "en")).toBe("23.9%");
     expect(formatAllocationWeight("0.0613", "en")).toBe("0.1%");
@@ -35,18 +43,6 @@ describe("formatAllocationWeight", () => {
   it("formats in the caller's locale", () => {
     // `Intl` separates the number and % sign with a non-breaking space.
     expect(formatAllocationWeight("23.94", "de")).toBe("23,9\u00A0%");
-  });
-});
-
-describe("formatAllocationApy", () => {
-  it("reads decimal-fraction wire values as percents", () => {
-    expect(formatAllocationApy("0.044979844106186606", "en")).toBe("4.5%");
-    expect(formatAllocationApy("0", "en")).toBe("0.0%");
-  });
-
-  it("keeps an unusable rate a placeholder", () => {
-    expect(formatAllocationApy(undefined, "en")).toBe("—");
-    expect(formatAllocationApy("n/a", "en")).toBe("—");
   });
 });
 
@@ -71,28 +67,77 @@ describe("kaminoDeployedWeightPct", () => {
 describe("kaminoAllocationsByWeight", () => {
   it("orders reserves heaviest first", () => {
     const rows = kaminoAllocationsByWeight(payload(["10", "60", "30"]).allocations);
-    expect(rows.map((row) => row.symbol)).toEqual(["T1", "T2", "T0"]);
+    expect(rows.map((row) => row.marketName)).toEqual(["Market 1", "Market 2", "Market 0"]);
   });
 
   it("sorts unreadable weights last, preserving provider order among them", () => {
     const rows = kaminoAllocationsByWeight(payload(["n/a", "60", "also-n/a", "10"]).allocations);
-    expect(rows.map((row) => row.symbol)).toEqual(["T1", "T3", "T0", "T2"]);
+    expect(rows.map((row) => row.marketName)).toEqual([
+      "Market 1",
+      "Market 3",
+      "Market 0",
+      "Market 2",
+    ]);
   });
 
   it("keeps equal weights in provider order", () => {
     const rows = kaminoAllocationsByWeight(payload(["50", "50", "50"]).allocations);
-    expect(rows.map((row) => row.symbol)).toEqual(["T0", "T1", "T2"]);
+    expect(rows.map((row) => row.marketName)).toEqual(["Market 0", "Market 1", "Market 2"]);
+  });
+});
+
+describe("kaminoDisclosureRows", () => {
+  it("lists markets heaviest first and the idle share last", () => {
+    expect(kaminoDisclosureRows(payload(["10", "60"], "30"))).toEqual([
+      { kind: "market", reserve: "reserve-1", marketName: "Market 1", pct: "60" },
+      { kind: "market", reserve: "reserve-0", marketName: "Market 0", pct: "10" },
+      { kind: "idle", pct: "30" },
+    ]);
+  });
+
+  it("leaves out a market holding exactly nothing", () => {
+    const rows = kaminoDisclosureRows(payload(["0", "99.5", "0.00", "0.5"]));
+    expect(rows.map((row) => (row.kind === "market" ? row.marketName : row.kind))).toEqual([
+      "Market 1",
+      "Market 3",
+    ]);
+  });
+
+  it("leaves out the idle row when nothing is unallocated, keeps a sliver", () => {
+    expect(kaminoDisclosureRows(payload(["100"], "0"))).toHaveLength(1);
+    expect(kaminoDisclosureRows(payload(["100"], "0.000"))).toHaveLength(1);
+    expect(kaminoDisclosureRows(payload(["99.98"], "0.02")).at(-1)).toEqual({
+      kind: "idle",
+      pct: "0.02",
+    });
+  });
+
+  it("keeps an unreadable weight rather than guessing it is nothing", () => {
+    expect(kaminoDisclosureRows(payload(["n/a"]))).toHaveLength(1);
+  });
+});
+
+describe("kaminoMarketLabel", () => {
+  it("shortens an unnamed market's address the way SDP shows any address", () => {
+    expect(kaminoMarketLabel("Dwg1aeZFYtsyMEkoyJn2ak8oPqaXMWd1uui6FBkM1872")).toBe("Dwg1ae…1872");
+  });
+
+  it("leaves a real market name alone", () => {
+    expect(kaminoMarketLabel("SOL/BTC Market")).toBe("SOL/BTC Market");
+    expect(kaminoMarketLabel("Maple Market")).toBe("Maple Market");
   });
 });
 
 describe("hasKaminoAllocationContent", () => {
-  it("is true with reserve rows or an unallocated share", () => {
+  it("is true with a market holding capital or an unallocated share", () => {
     expect(hasKaminoAllocationContent(payload(["50"]))).toBe(true);
     expect(hasKaminoAllocationContent({ allocations: [], unallocated: { pct: "100" } })).toBe(true);
   });
 
-  it("is false for an empty read, so the cell stays a placeholder", () => {
+  it("is false when there is nothing to list, so the cell stays a placeholder", () => {
     expect(hasKaminoAllocationContent({ allocations: [] })).toBe(false);
+    expect(hasKaminoAllocationContent(payload(["0", "0"], "0"))).toBe(false);
+    expect(hasKaminoAllocationContent({ allocations: [], unallocated: {} })).toBe(false);
   });
 });
 

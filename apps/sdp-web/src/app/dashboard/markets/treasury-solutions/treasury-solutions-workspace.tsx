@@ -98,12 +98,12 @@ import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-wi
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 import {
-  formatAllocationApy,
   formatAllocationWeight,
   formatKaminoAsOf,
   hasKaminoAllocationContent,
-  kaminoAllocationsByWeight,
   kaminoDeployedWeightPct,
+  kaminoDisclosureRows,
+  kaminoMarketLabel,
 } from "./kamino-allocations-format";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import {
@@ -748,84 +748,67 @@ function KaminoAllocationsTooltipContent({
   locale: string;
 }) {
   const t = useTranslations();
-  const rows = kaminoAllocationsByWeight(allocations.allocations);
+  const rows = kaminoDisclosureRows(allocations);
   const asOfLabel = formatKaminoAsOf(allocations.asOf, locale);
 
   return (
-    <span className="block">
-      <span className="mb-2 flex items-baseline justify-between gap-4">
-        <span className="font-medium">{t("DashboardMarkets.treasury.allocationsTitle")}</span>
-        {asOfLabel ? (
-          <span className="text-tertiary">
-            {t("DashboardMarkets.treasury.allocationsAsOf", { date: asOfLabel })}
-          </span>
-        ) : null}
-      </span>
-      {/* Semantic table: the column headings must reach assistive technology
-      as headers, not disappear behind a decorative grid. */}
-      <table className="w-full border-collapse">
+    <>
+      {/* Two columns in a FIXED layout inside the cell's fixed-width content
+      box: the market column truncates on its child span (never the cell, see
+      CLAUDE.md), the weight column is sized for "100.0%" and never wraps, so
+      no market name or figure can run past the tooltip's edge. The caption
+      names the table for assistive technology; the trigger's own summary is
+      the visible title. */}
+      <table className="w-full table-fixed border-collapse">
+        <caption className="sr-only">{t("DashboardMarkets.treasury.allocationsTitle")}</caption>
+        <colgroup>
+          <col />
+          <col className="w-16" />
+        </colgroup>
         <thead>
-          <tr>
-            <th scope="col" className="pb-1 text-left font-normal text-tertiary">
-              {t("DashboardMarkets.treasury.allocationsToken")}
+          <tr className="text-tertiary">
+            <th scope="col" className="pb-1.5 text-left font-normal">
+              {t("DashboardMarkets.treasury.allocationsMarket")}
             </th>
-            <th scope="col" className="pb-1 text-right font-normal text-tertiary">
-              {t("DashboardMarkets.treasury.allocationsWeight")}
-            </th>
-            <th scope="col" className="pb-1 text-right font-normal text-tertiary">
-              {t("DashboardMarkets.treasury.allocationsSupplied")}
-            </th>
-            <th scope="col" className="pb-1 text-right font-normal text-tertiary">
-              {t("DashboardMarkets.treasury.allocationsSupplyApy")}
+            <th scope="col" className="pb-1.5 text-right font-normal">
+              {t("DashboardMarkets.treasury.allocationsAllocation")}
             </th>
           </tr>
         </thead>
-        <tbody>
-          {rows.map((row) => {
-            const targetLabel = row.targetWeightPct
-              ? t("DashboardMarkets.treasury.allocationsTargetWeight", {
-                  weight: formatAllocationWeight(row.targetWeightPct, locale),
-                })
-              : undefined;
-            return (
+        <tbody className="border-t border-border-subtle">
+          {rows.map((row) =>
+            row.kind === "market" ? (
               <tr key={row.reserve}>
-                <td className="min-w-0 py-0.5 pe-3">
-                  <span className="block truncate font-medium" title={row.symbol}>
-                    {row.symbol}
-                  </span>
-                  <span className="block truncate text-[11px] text-tertiary" title={row.marketName}>
-                    {row.marketName}
+                <td className="pt-1.5 pe-4">
+                  <span className="block truncate" title={row.marketName}>
+                    {kaminoMarketLabel(row.marketName)}
                   </span>
                 </td>
-                <td className="py-0.5 text-right tabular-nums" title={targetLabel}>
-                  {formatAllocationWeight(row.actualPct, locale)}
-                </td>
-                <td className="py-0.5 text-right tabular-nums">
-                  {formatUsd(row.suppliedUsd, locale, 2)}
-                </td>
-                <td className="py-0.5 text-right tabular-nums">
-                  {formatAllocationApy(row.supplyApy, locale)}
+                <td className="whitespace-nowrap pt-1.5 text-right tabular-nums">
+                  {formatAllocationWeight(row.pct, locale)}
                 </td>
               </tr>
-            );
-          })}
-          {allocations.unallocated ? (
-            <tr key="unallocated">
-              <td className="py-0.5 pe-3 text-tertiary">
-                {t("DashboardMarkets.treasury.allocationsIdle")}
-              </td>
-              <td className="py-0.5 text-right tabular-nums">
-                {formatAllocationWeight(allocations.unallocated.pct, locale)}
-              </td>
-              <td className="py-0.5 text-right tabular-nums">
-                {formatUsd(allocations.unallocated.usd, locale, 2)}
-              </td>
-              <td className="py-0.5 text-right tabular-nums">—</td>
-            </tr>
-          ) : null}
+            ) : (
+              <tr key="idle" className="text-tertiary">
+                <td className="pt-1.5 pe-4">
+                  <span className="block truncate">
+                    {t("DashboardMarkets.treasury.allocationsIdle")}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap pt-1.5 text-right tabular-nums">
+                  {formatAllocationWeight(row.pct, locale)}
+                </td>
+              </tr>
+            )
+          )}
         </tbody>
       </table>
-    </span>
+      {asOfLabel ? (
+        <span className="mt-2 block truncate text-tertiary">
+          {t("DashboardMarkets.treasury.allocationsAsOf", { date: asOfLabel })}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -882,7 +865,7 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
             <InfoIcon aria-hidden="true" className="size-3.5 shrink-0 text-tertiary" />
           </button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-80 text-xs leading-5">
+        <TooltipContent className="w-64 text-xs leading-5">
           <KaminoAllocationsTooltipContent allocations={allocations} locale={locale} />
         </TooltipContent>
       </Tooltip>
