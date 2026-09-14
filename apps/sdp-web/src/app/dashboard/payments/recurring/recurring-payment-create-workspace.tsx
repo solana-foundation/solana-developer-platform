@@ -28,7 +28,6 @@ import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
-  fetchWallets,
 } from "../payments-workspace.data";
 import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
@@ -424,9 +423,6 @@ export function RecurringPaymentCreateWorkspace({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(paymentsQueryKeys.actionWallets(), () =>
-        fetchWallets({ includeBalances: true }, t)
-      );
       void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
         fetchCounterpartyAccounts(counterpartyId, t)
       );
@@ -722,12 +718,18 @@ export function RecurringPaymentCreateWorkspace({
               value: wallet.id,
               label: wallet.label ?? wallet.walletId,
               description: shortenAddress(wallet.publicKey),
+              ...(wallet.isRuntimeExecutionAllowed !== true
+                ? { badge: t("DashboardPayments.unavailable"), badgeVariant: "warning" as const }
+                : {}),
             }))}
             placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
             searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
             icon={<WalletIcon />}
             disabled={availableWallets.length === 0}
           />
+          {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
+            <FieldHint>{t("DashboardPayments.signingUnavailable")}</FieldHint>
+          ) : null}
 
           <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
             <div className="flex flex-col gap-2">

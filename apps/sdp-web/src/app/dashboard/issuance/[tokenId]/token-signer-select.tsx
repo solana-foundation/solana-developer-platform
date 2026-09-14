@@ -4,7 +4,10 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
-import { getSignerWalletOptionLabel } from "./token-management-workspace.utils";
+import {
+  getSignerWalletOptionLabel,
+  getSignerWalletUnavailableReason,
+} from "./token-management-workspace.utils";
 
 interface TokenSignerSelectProps {
   signerWallets: PaymentsDashboardWallet[];
@@ -38,6 +41,9 @@ export function TokenSignerSelect({
   const selectedWallet =
     signerWallets.find((wallet) => wallet.id === signerWalletId) ??
     (!signerWalletId && signerWallets.length === 1 ? signerWallets[0] : null);
+  const selectionUnavailableReason = optional
+    ? null
+    : getSignerWalletUnavailableReason(signerWallets, signerWalletId || selectedWallet?.id, t);
   // A disappeared explicit choice must stay editable, not display a replacement.
   const isLocked = !isUnavailable && signerWallets.length === 1 && selectedWallet !== null;
   const hasDuplicateAddress =
@@ -45,18 +51,19 @@ export function TokenSignerSelect({
   // Red only signals a genuine problem: an explicit unavailable reason, or no
   // wallets in a context that requires a signer. An empty list where the signer
   // is optional (draft creation) is expected, so it stays neutral.
-  const isError = hasReason || (hasNoWallets && !optional);
+  const isError = hasReason || Boolean(selectionUnavailableReason) || (hasNoWallets && !optional);
   const defaultMessage = isLocked
     ? t("DashboardIssuance.signer.requiredAuthorityHint")
     : t("DashboardIssuance.signer.selectedWalletHint");
   const availableMessage = helperText === undefined ? defaultMessage : helperText;
-  const message = signerUnavailableReason
-    ? signerUnavailableReason
-    : hasNoWallets
+  const message =
+    signerUnavailableReason ??
+    selectionUnavailableReason ??
+    (hasNoWallets
       ? optional
         ? t("DashboardIssuance.signer.defaultSignerHint")
         : t("DashboardIssuance.signer.noneAvailable")
-      : availableMessage;
+      : availableMessage);
   return (
     <div className="space-y-2">
       <span className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
@@ -80,7 +87,11 @@ export function TokenSignerSelect({
           onValueChange={(value) => onSignerWalletIdChange(value === null ? "" : value)}
         >
           {signerWallets.map((wallet) => (
-            <SelectItem key={wallet.id} value={wallet.id}>
+            <SelectItem
+              key={wallet.id}
+              value={wallet.id}
+              disabled={!optional && wallet.isRuntimeExecutionAllowed !== true}
+            >
               {getSignerWalletOptionLabel(wallet, t, hasDuplicateAddress)}
             </SelectItem>
           ))}

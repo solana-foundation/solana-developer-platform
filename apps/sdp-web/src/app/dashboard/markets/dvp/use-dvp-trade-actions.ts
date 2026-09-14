@@ -7,8 +7,8 @@
  * operations go through one request shape and share success and failure handling.
  *
  * Funding is the one action that names a leg: the unified fund endpoint takes
- * `{ side: "a" | "b" }`, authorizing by the caller holding custody of that
- * side's party address — whoever holds it, on whichever org's trade.
+ * `{ side, walletId }`, naming the exact wallet shown for that side. The
+ * server rechecks its party address, authorization and runtime admission.
  */
 
 import type { DvpTradeSide } from "@sdp/types";
@@ -23,7 +23,7 @@ export type DvpTradeActionName = "settle" | "cancel" | "fund";
 /** Settle and cancel act on the trade; fund names the leg it moves. */
 export type DvpTradeActionCall =
   | [action: "settle" | "cancel"]
-  | [action: "fund", options: { side: DvpTradeSide }];
+  | [action: "fund", options: { side: DvpTradeSide; walletId: string }];
 
 /**
  * One in-flight request. Funding is keyed by side, since a bilateral trade
@@ -59,12 +59,20 @@ export function useDvpTradeActions(tradeId: string): DvpTradeActions {
     const key: DvpPendingAction = call[0] === "fund" ? `fund:${call[1].side}` : call[0];
     setPending((current) => new Set(current).add(key));
     try {
+      // An absent ID would ask the API to choose a different wallet by address.
+      if (
+        call[0] === "fund" &&
+        (typeof call[1].walletId !== "string" || !call[1].walletId.trim())
+      ) {
+        toast.error(t("DashboardCustody.unavailable"), { position: "bottom-right" });
+        return;
+      }
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
         {
           method: "POST",
           // Funding names the leg it moves; settle and cancel carry no body.
-          ...(call[0] === "fund" ? { body: JSON.stringify({ side: call[1].side }) } : {}),
+          ...(call[0] === "fund" ? { body: JSON.stringify(call[1]) } : {}),
         }
       );
       if (!response.ok) {

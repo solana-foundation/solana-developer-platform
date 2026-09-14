@@ -33,6 +33,10 @@ export interface DvpCallerWallet {
   name: string | null;
 }
 
+export interface DvpActionWallet extends DvpCallerWallet {
+  isRuntimeExecutionAllowed: boolean;
+}
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;
@@ -46,6 +50,8 @@ export interface DvpPartyRef {
    * caller custodies this party; the id is the wallet page's identifier.
    */
   wallet: DvpCallerWallet | null;
+  /** Present on action-bearing reads; null means no readable funding target. */
+  actionWallet?: DvpActionWallet | null;
 }
 
 export interface DvpTradeLeg {

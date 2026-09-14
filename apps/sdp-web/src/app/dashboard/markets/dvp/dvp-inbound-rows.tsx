@@ -20,7 +20,7 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
-import { formatLegAmount } from "./dvp-trade";
+import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -57,22 +57,40 @@ function InboundFundAction({
   frozen,
   side,
   tradeId,
+  party,
 }: {
   frozen: boolean;
   /** The leg the custody lookup made this caller's. */
   side: "a" | "b";
   tradeId: string;
+  party: DvpPartyRef;
 }) {
   const t = useTranslations();
   const { act, pending } = useDvpTradeActions(tradeId);
+  const wallet = party.actionWallet;
+  const shownWallet = wallet ?? party.wallet;
+  const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
+      {shownWallet ? (
+        <Link
+          className="max-w-40 truncate text-secondary text-xs hover:underline"
+          href={`/dashboard/wallets/${encodeURIComponent(shownWallet.id)}`}
+          title={party.address}
+        >
+          {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
+        </Link>
+      ) : null}
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
-        disabled={frozen || pending.has(`fund:${side}`)}
-        onClick={() => act("fund", { side })}
+        disabled={unavailable || frozen || pending.has(`fund:${side}`)}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("fund", { side, walletId: wallet.id });
+          }
+        }}
         size="sm"
         type="button"
         variant="secondary"
@@ -81,6 +99,9 @@ function InboundFundAction({
           ? t("DashboardMarkets.dvp.inboundFunding")
           : t("DashboardMarkets.dvp.inboundFundAction")}
       </Button>
+      {unavailable ? (
+        <span className="text-tertiary text-xs">{t("DashboardCustody.unavailable")}</span>
+      ) : null}
     </span>
   );
 }
@@ -147,6 +168,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
               frozen={yours.frozen === true}
               side={trade.yourSide}
               tradeId={trade.id}
+              party={yours.party}
             />
           )}
         </TableCell>

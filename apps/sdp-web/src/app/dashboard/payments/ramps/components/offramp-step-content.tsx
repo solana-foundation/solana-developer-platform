@@ -97,7 +97,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     setMemoRows,
   } = wizard;
 
-  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const walletOptions = useMemo(
+    () => walletComboboxOptions(liveWallets, t("DashboardPayments.unavailable")),
+    [liveWallets, t]
+  );
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;

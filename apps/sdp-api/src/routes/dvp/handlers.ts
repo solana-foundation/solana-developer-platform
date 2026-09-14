@@ -40,6 +40,7 @@ import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { type DvpActionWallet, readDvpActionWallets } from "./action-wallets";
 import { toDvpInboundResponse } from "./inbound-response";
 import {
   type createDvpTradeSchema,
@@ -79,6 +80,7 @@ interface PartyRef {
   counterparty: { id: string; label: string } | null;
   /** The caller's custody wallet holding this address, or null. Truthy = the caller custodies this party. */
   wallet: DvpCallerWallet | null;
+  actionWallet?: DvpActionWallet | null;
 }
 
 /**
@@ -127,7 +129,8 @@ function resolveParty(
   address: string,
   counterpartyAccountId: string | null,
   callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
-  counterpartyLabels: ReadonlyMap<string, string>
+  counterpartyLabels: ReadonlyMap<string, string>,
+  actionWallets?: ReadonlyMap<string, DvpActionWallet>
 ): PartyRef {
   const wallet = callerAddresses.get(address);
   if (counterpartyAccountId === null) {
@@ -135,6 +138,7 @@ function resolveParty(
       address,
       counterparty: null,
       wallet: wallet === undefined ? null : wallet,
+      ...(actionWallets === undefined ? {} : { actionWallet: actionWallets.get(address) ?? null }),
     };
   }
   const label = counterpartyLabels.get(counterpartyAccountId);
@@ -142,6 +146,7 @@ function resolveParty(
     address,
     counterparty: label === undefined ? null : { id: counterpartyAccountId, label },
     wallet: wallet === undefined ? null : wallet,
+    ...(actionWallets === undefined ? {} : { actionWallet: actionWallets.get(address) ?? null }),
   };
 }
 
@@ -213,6 +218,7 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
 interface TradeReadContext {
   /** The caller's custody wallets (address → wallet identity). */
   callerAddresses: ReadonlyMap<string, DvpCallerWallet>;
+  actionWallets?: ReadonlyMap<string, DvpActionWallet>;
   /** Creator-org counterparty names; empty on cross-org party reads (attribution is the creator's fact). */
   counterpartyLabels: ReadonlyMap<string, string>;
   /** This trade's funding claims, keyed by side. RLS-scoped to the funding org. */
@@ -256,7 +262,8 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           row.userA,
           row.counterpartyAccountIdA,
           context.callerAddresses,
-          context.counterpartyLabels
+          context.counterpartyLabels,
+          context.actionWallets
         ),
         fundingSignatureFor(context.fundingClaims, "a")
       ),
@@ -279,7 +286,8 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           row.userB,
           row.counterpartyAccountIdB,
           context.callerAddresses,
-          context.counterpartyLabels
+          context.counterpartyLabels,
+          context.actionWallets
         ),
         fundingSignatureFor(context.fundingClaims, "b")
       ),
@@ -622,9 +630,15 @@ export const listInboundTrades = async (c: AppContext) => {
     inbound.trades.flatMap((entry) => [entry.trade.mintA, entry.trade.mintB])
   );
 
+  const actionWallets = await readDvpActionWallets(
+    c.env,
+    { organizationId: auth.organizationId, projectId, auth },
+    inbound.trades.flatMap(({ trade }) => [trade.userA, trade.userB]),
+    inbound.callerAddresses
+  );
   return success(c, {
     trades: inbound.trades.map((trade) =>
-      toDvpInboundResponse(trade, inbound.callerAddresses, mintImages)
+      toDvpInboundResponse(trade, inbound.callerAddresses, mintImages, actionWallets)
     ),
   });
 };
@@ -726,9 +740,16 @@ export const getTrade = async (c: AppContext) => {
     readFundingClaims(c.env, observed.id),
     readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
   ]);
+  const actionWallets = await readDvpActionWallets(
+    c.env,
+    { organizationId: auth.organizationId, projectId, auth },
+    [observed.userA, observed.userB],
+    callerAddresses
+  );
   return success(c, {
     trade: {
       ...toTradeResponse(observed, {
+        actionWallets,
         callerAddresses,
         counterpartyLabels,
         fundingClaims,
@@ -813,9 +834,16 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
     readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
   ]);
 
+  const actionWallets = await readDvpActionWallets(
+    c.env,
+    { organizationId: auth.organizationId, projectId, auth },
+    [observed.userA, observed.userB],
+    callerAddresses
+  );
   return success(c, {
     trade: {
       ...toTradeResponse(observed, {
+        actionWallets,
         callerAddresses,
         counterpartyLabels: new Map<string, string>(),
         fundingClaims,

@@ -72,6 +72,28 @@ function request(responses: { wallets: unknown; tokens: unknown; counterparties?
 }
 
 describe("fetchDvpCreateContext", () => {
+  it("includes nondefault Connection parties even when runtime execution is disabled", async () => {
+    const load = request({
+      wallets: ok({
+        data: [
+          { ...WALLET, custodyConnectionId: "conn_external", isRuntimeExecutionAllowed: false },
+        ],
+      }),
+      tokens: ok({ data: [] }),
+    });
+
+    const context = await fetchDvpCreateContext(load);
+
+    expect(load).toHaveBeenCalledWith("/v1/wallets?includeBalances=true&includeAllProviders=true");
+    expect(context.wallets).toEqual([
+      expect.objectContaining({
+        id: WALLET.id,
+        custodyConnectionId: "conn_external",
+        isRuntimeExecutionAllowed: false,
+      }),
+    ]);
+  });
+
   it("maps wallets and deployed tokens", async () => {
     const context = await fetchDvpCreateContext(
       request({ wallets: ok({ data: [WALLET] }), tokens: ok({ data: [TOKEN] }) })

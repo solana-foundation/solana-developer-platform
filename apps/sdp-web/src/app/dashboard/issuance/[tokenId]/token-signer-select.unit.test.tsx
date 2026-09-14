@@ -11,6 +11,7 @@ function makeWallet(index: number): PaymentsDashboardWallet {
   return {
     id: `cw_${index}`,
     walletId: `wal_${index}`,
+    isRuntimeExecutionAllowed: true,
     publicKey: `PubKey${index}`,
     label: `Wallet ${index}`,
   };
@@ -33,6 +34,23 @@ function render(
 }
 
 describe("TokenSignerSelect", () => {
+  it("shows runtime unavailability for signing, while the same wallet remains usable in a draft", () => {
+    const wallet = { ...makeWallet(1), isRuntimeExecutionAllowed: false };
+    const markup = renderToStaticMarkup(
+      <TokenSignerSelect
+        signerWallets={[wallet]}
+        signerWalletId={wallet.id}
+        signerUnavailableReason={null}
+        onSignerWalletIdChange={() => {}}
+      />
+    );
+    expect(markup).toContain("Wallet 1");
+    expect(markup).toContain("DashboardIssuance.management.signingUnavailable");
+    const draftMarkup = render([wallet], null, wallet.id);
+    expect(draftMarkup).toContain("Wallet 1");
+    expect(draftMarkup).not.toContain("DashboardIssuance.management.signingUnavailable");
+  });
+
   it("shows the only wallet as a compact identity row without a select", () => {
     const markup = render([makeWallet(1)]);
     expect(markup).toContain('href="/dashboard/wallets/wal_1"');

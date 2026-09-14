@@ -139,7 +139,10 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
   } = wizard;
 
   const [bulkOpen, setBulkOpen] = useState(false);
-  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const walletOptions = useMemo(
+    () => walletComboboxOptions(liveWallets, t("DashboardPayments.unavailable")),
+    [liveWallets, t]
+  );
 
   return (
     <div className="space-y-4">

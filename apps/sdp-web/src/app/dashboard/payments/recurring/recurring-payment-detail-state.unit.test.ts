@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
 
 describe("getRecurringPaymentDetailState", () => {
+  it("allows pending edits and cancellation while signing is unavailable", () => {
+    expect(
+      getRecurringPaymentDetailState({
+        sourceCustodyWalletId: "cwlt_source",
+        selectedCustodyWalletId: "cwlt_source",
+        status: "pending_activation",
+        hasPendingAction: false,
+        savingPayment: false,
+        sourceWallet: { isRuntimeExecutionAllowed: false },
+        selectedWallet: { isRuntimeExecutionAllowed: false },
+      })
+    ).toMatchObject({
+      isEditable: true,
+      saveDisabled: false,
+      signingActionsDisabled: true,
+      cancelDisabled: false,
+    });
+  });
+
   it.each([
     [null, "active", false, false, true, false, true],
     ["cwlt_exact", "active", false, false, false, true, false],
@@ -27,8 +46,11 @@ describe("getRecurringPaymentDetailState", () => {
           status,
           hasPendingAction,
           savingPayment,
+          sourceWallet: { isRuntimeExecutionAllowed: true },
+          selectedWallet: { isRuntimeExecutionAllowed: true },
+          selectedCustodyWalletId: sourceCustodyWalletId ?? "",
         })
-      ).toEqual({ sourceWalletUnresolved, isEditable, controlsDisabled });
+      ).toMatchObject({ sourceWalletUnresolved, isEditable, controlsDisabled });
     }
   );
 });

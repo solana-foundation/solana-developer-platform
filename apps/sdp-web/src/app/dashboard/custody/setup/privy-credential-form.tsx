@@ -8,6 +8,7 @@ import {
   submitPrivyCredentialAction,
 } from "@/app/dashboard/custody/byok-actions";
 import { getCustodyProviderEntry } from "@/app/dashboard/custody/provider-catalog";
+import { useWalletInventoryRefresh } from "@/app/dashboard/custody/use-wallet-inventory-refresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,6 +60,7 @@ export function PrivyCredentialForm({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const [isPending, startTransition] = useTransition();
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
@@ -76,6 +78,7 @@ export function PrivyCredentialForm({
   const applyResult = (result: PrivyByokSubmitResult) => {
     if (result.status === "success") {
       onRecoveryLockChange?.(false);
+      refreshWalletInventory();
       router.refresh();
       router.push("/dashboard/wallets");
       return;

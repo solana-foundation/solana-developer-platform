@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { getSignerWalletUnavailableReason } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
 
 /**
@@ -50,7 +51,13 @@ export function TokenLockSupplyModal({
   // "0" or an unparseable remainder both mean there is nothing to mint, so the
   // flow degenerates to a bare revoke and the destination field is irrelevant.
   const needsMint = !alreadyMinted && /[1-9]/.test(remaining);
-  const confirmDisabled = isPending || (needsMint && destination.trim().length === 0);
+  const confirmDisabled =
+    isPending ||
+    (needsMint && destination.trim().length === 0) ||
+    !signerWalletId ||
+    Boolean(
+      signerUnavailableReason || getSignerWalletUnavailableReason(signerWallets, signerWalletId, t)
+    );
 
   return (
     <div className="space-y-5">

@@ -8,7 +8,7 @@
  * endpoint with the side, so each card's button names its own leg.
  */
 
-import { fireEvent, render, within } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -38,6 +38,7 @@ vi.stubGlobal(
 );
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
 
 /** The page with the on-chain details opened, as text. */
@@ -66,6 +67,70 @@ function renderDetail(value: DvpTrade): string {
 }
 
 describe("DvpTradeDetailWorkspace", () => {
+  it("shows and funds the server-selected exact wallet instead of the discovery wallet", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    const value = trade({
+      legs: {
+        a: testLeg({
+          party: ownParty({
+            wallet: { id: "cwlt_read", name: "Read desk" },
+            actionWallet: {
+              id: "cwlt_execute",
+              name: "Execution desk",
+              isRuntimeExecutionAllowed: true,
+            },
+          }),
+        }),
+        b: testLeg(),
+      },
+    });
+    const { container } = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+      </I18nProvider>
+    );
+
+    expect(
+      within(container).getByRole("link", { name: "Execution desk" }).getAttribute("href")
+    ).toBe("/dashboard/wallets/cwlt_execute");
+    expect(container.textContent).not.toContain("Read desk");
+    fireEvent.click(within(container).getByRole("button", { name: "Fund" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/dashboard/markets/dvp/trades/dvp_1/fund",
+        expect.objectContaining({ body: JSON.stringify({ side: "a", walletId: "cwlt_execute" }) })
+      )
+    );
+  });
+
+  it.each([null, { id: "cwlt_disabled", name: "Disabled desk", isRuntimeExecutionAllowed: false }])(
+    "keeps the party readable but prevents funding an unavailable action wallet: %j",
+    (actionWallet) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      const value = trade({
+        legs: {
+          a: testLeg({ party: ownParty({ actionWallet }) }),
+          b: testLeg(),
+        },
+      });
+      const { container } = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+        </I18nProvider>
+      );
+
+      const button = within(container).getByRole("button", { name: "Fund" });
+      expect(button.hasAttribute("disabled")).toBe(true);
+      expect(container.textContent).toContain("Unavailable");
+      expect(
+        within(container).getByRole("link", { name: actionWallet?.name ?? "Fixture Desk" })
+      ).toBeTruthy();
+      fireEvent.click(button);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
   // The escrow address IS the counterparty's whole integration, so it has to be
   // reachable for both legs: behind the on-chain details, one click away.
   it("publishes an escrow address for each leg in the on-chain details", () => {

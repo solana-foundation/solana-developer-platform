@@ -34,6 +34,9 @@ export interface DvpCreateWallet {
   id: string;
   address: string;
   label: string | null;
+  custodyConfigId?: string;
+  custodyConnectionId?: string;
+  isRuntimeExecutionAllowed?: boolean;
   /** What this wallet holds, so a leg can show the balance it spends from. */
   balances: DvpWalletBalance[];
 }
@@ -97,6 +100,9 @@ interface WalletRow {
   id?: string;
   publicKey?: string;
   label?: string | null;
+  custodyConfigId?: string;
+  custodyConnectionId?: string;
+  isRuntimeExecutionAllowed?: boolean;
   balances?: WalletBalanceRow[] | null;
 }
 
@@ -126,6 +132,9 @@ function mapWallets(rows: WalletRow[]): DvpCreateWallet[] {
             id: wallet.id,
             address: wallet.publicKey,
             label: wallet.label ?? null,
+            custodyConfigId: wallet.custodyConfigId,
+            custodyConnectionId: wallet.custodyConnectionId,
+            isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
             balances: mapBalances(wallet.balances),
           },
         ]
@@ -166,7 +175,7 @@ export async function fetchDvpCreateContext(
       // a quantity of an asset, and it was doing so without ever showing how
       // much of it they hold — so an over-commitment only surfaced later, as a
       // funding transfer that failed for insufficient funds.
-      request("/v1/wallets?includeBalances=true"),
+      request("/v1/wallets?includeBalances=true&includeAllProviders=true"),
       request("/v1/issuance/tokens?pageSize=100"),
       // The registered crypto-wallet accounts a slot can name, address resolved
       // server-side the same way create will resolve `counterpartyAccountId`.

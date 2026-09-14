@@ -33,6 +33,7 @@ import {
   getLockSupplyDisabledReason,
   getMintValidationErrors,
   getMintValidationReason,
+  getPermissionRows,
   getRemainingMintableSupply,
   getSeizeValidationErrors,
   getSeizeValidationReason,
@@ -64,15 +65,6 @@ export function useTokenOperations({
 }) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const {
-    isPending,
-    actionConfirmation,
-    runAction: runActionBase,
-    runActionImmediately: runActionImmediatelyBase,
-    dismissActionConfirmation,
-    confirmAction,
-    selectConfirmationWallet,
-  } = useTokenActionRunner();
   const { isPending: isRefreshingSupply, runAction: refreshSupply } = useTokenActionRunner();
 
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
@@ -137,6 +129,15 @@ export function useTokenOperations({
     shouldLoadSupportingData,
     showControlList,
   });
+  const {
+    isPending,
+    actionConfirmation,
+    runAction: runActionBase,
+    runActionImmediately: runActionImmediatelyBase,
+    dismissActionConfirmation,
+    confirmAction,
+    selectConfirmationWallet,
+  } = useTokenActionRunner(authorityWallets);
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
     runActionBase(input, {
       ...options,
@@ -618,6 +619,22 @@ export function useTokenOperations({
   };
 
   const handleAuthorityUpdate = () => {
+    const selection = withWalletLoadError(
+      getSignerSelectionForAction({
+        action: "authority",
+        token,
+        authorityWallets,
+        metadataAuthority,
+        permissionRow: getPermissionRows(token, metadataAuthority, t).find(
+          (row) => row.authorityRole === authorityForm.role
+        ),
+        t,
+      })
+    );
+    if (selection.unavailableReason) {
+      toast.error(selection.unavailableReason);
+      return;
+    }
     runAction(
       {
         label: t("DashboardIssuance.management.updateAuthority"),
@@ -633,6 +650,7 @@ export function useTokenOperations({
       },
       {
         requiresConfirmation: true,
+        signerWallets: selection.wallets,
         confirmationTitle: t("DashboardIssuance.management.authorityConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.authorityConfirmationDescription"),
         confirmButtonLabel: t("DashboardIssuance.management.updateNow"),

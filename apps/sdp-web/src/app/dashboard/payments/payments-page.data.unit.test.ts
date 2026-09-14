@@ -1,8 +1,56 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   fetchDashboardPaymentTransfersForWallets,
+  fetchPaymentsWallets,
   fetchPaymentTransfers,
 } from "./payments-page.data";
+
+describe("fetchPaymentsWallets", () => {
+  it("keeps same-address Connection wallets and their execution admission", async () => {
+    const wallets = [
+      {
+        id: "wallet-a",
+        walletId: "provider-wallet",
+        publicKey: "shared-address",
+        label: "Treasury",
+        provider: "privy",
+        custodyConnectionId: "connection-a",
+        isRuntimeExecutionAllowed: true,
+      },
+      {
+        id: "wallet-b",
+        walletId: "provider-wallet",
+        publicKey: "shared-address",
+        label: "Treasury",
+        provider: "privy",
+        custodyConnectionId: "connection-b",
+        isRuntimeExecutionAllowed: false,
+      },
+    ];
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets } }));
+
+    const result = await fetchPaymentsWallets(request, { view: "summary" });
+
+    expect(request).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true&view=summary");
+    expect(result).toEqual({ ok: true, data: wallets });
+  });
+
+  it("keeps a Config wallet visible without inferring execution admission from missing data", async () => {
+    const wallet = {
+      id: "config-wallet",
+      walletId: "provider-wallet",
+      publicKey: "address",
+      label: null,
+      custodyConfigId: "config",
+    };
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets: [wallet] } }));
+
+    expect(await fetchPaymentsWallets(request)).toEqual({
+      ok: true,
+      data: [{ ...wallet, isRuntimeExecutionAllowed: false }],
+    });
+  });
+});
 
 describe("fetchDashboardPaymentTransfersForWallets", () => {
   it("keeps exact wallets when persisted history fails and observes each address once", async () => {
@@ -37,9 +85,27 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
       {
         ok: true,
         data: [
-          { id: "wallet-row-1", walletId: "wallet-1", publicKey: "address-1", label: null },
-          { id: "wallet-row-2", walletId: "wallet-1", publicKey: "address-1", label: null },
-          { id: "wallet-row-3", walletId: "wallet-3", publicKey: "address-2", label: null },
+          {
+            id: "wallet-row-1",
+            walletId: "wallet-1",
+            publicKey: "address-1",
+            label: null,
+            isRuntimeExecutionAllowed: true,
+          },
+          {
+            id: "wallet-row-2",
+            walletId: "wallet-1",
+            publicKey: "address-1",
+            label: null,
+            isRuntimeExecutionAllowed: true,
+          },
+          {
+            id: "wallet-row-3",
+            walletId: "wallet-3",
+            publicKey: "address-2",
+            label: null,
+            isRuntimeExecutionAllowed: true,
+          },
         ],
       },
       20
@@ -91,12 +157,14 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
             walletId: "provider-wallet",
             publicKey: "shared-address",
             label: null,
+            isRuntimeExecutionAllowed: true,
           },
           {
             id: "wallet-row-2",
             walletId: "provider-wallet",
             publicKey: "shared-address",
             label: null,
+            isRuntimeExecutionAllowed: true,
           },
         ],
       },
@@ -150,6 +218,7 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
             walletId: "provider-wallet-1",
             publicKey: "address-1",
             label: null,
+            isRuntimeExecutionAllowed: true,
           },
         ],
       },

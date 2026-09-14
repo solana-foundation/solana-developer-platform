@@ -473,10 +473,11 @@ function ChainValueCell({ value, href }: { value: string; href: string }) {
 /** The link to a party's own page, when it is a wallet or a registered counterparty. */
 function PartyLink({ party }: { party: DvpPartyRef }) {
   const t = useTranslations();
-  if (party.wallet) {
+  const wallet = party.actionWallet ?? party.wallet;
+  if (wallet) {
     return (
-      <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
-        {party.wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : party.wallet.name}
+      <EntityLink href={`/dashboard/wallets/${encodeURIComponent(wallet.id)}`}>
+        {wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : wallet.name}
       </EntityLink>
     );
   }
@@ -803,19 +804,31 @@ export function DvpTradeDetailWorkspace({
   // One fund action per custodied side: a bilateral trade funds both legs,
   // each from the wallet that holds its party address, through the unified
   // fund endpoint naming the side.
-  const fundActionFor = (side: DvpTradeSide): ReactNode =>
-    canFundLeg(trade.legs[side], trade.status) ? (
+  const fundActionFor = (side: DvpTradeSide): ReactNode => {
+    const wallet = trade.legs[side].party.actionWallet;
+    const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
+    return canFundLeg(trade.legs[side], trade.status) ? (
       /* Clicked, not held. Funding moves your leg into the trade's own
          escrow, which is a step forward rather than something to walk back;
          hold is reserved for destroying something (HOO-1230). */
-      <Button
-        disabled={pending.has(`fund:${side}`)}
-        onClick={() => act("fund", { side })}
-        type="button"
-      >
-        {t("DashboardMarkets.dvp.actionFund")}
-      </Button>
+      <span className="flex flex-col items-end gap-1">
+        <Button
+          disabled={unavailable || pending.has(`fund:${side}`)}
+          onClick={() => {
+            if (wallet?.isRuntimeExecutionAllowed === true) {
+              void act("fund", { side, walletId: wallet.id });
+            }
+          }}
+          type="button"
+        >
+          {t("DashboardMarkets.dvp.actionFund")}
+        </Button>
+        {unavailable ? (
+          <span className="text-tertiary text-xs">{t("DashboardCustody.unavailable")}</span>
+        ) : null}
+      </span>
     ) : undefined;
+  };
 
   // Your leg first, whichever it is. With no custodied leg (agent) or both
   // custodied (bilateral) the trade's own asset-then-cash order stays.

@@ -48,6 +48,7 @@ import type {
   SeizeValidationErrors,
 } from "./token-management-workspace.types";
 import {
+  getSignerWalletUnavailableReason,
   getTokenAmountFieldDescription,
   NON_WHITESPACE_PATTERN,
   SOLANA_ADDRESS_PATTERN,
@@ -179,6 +180,19 @@ export function TokenActionAdminForms({
         }
       : {};
   const exactSignerChoiceRequired = signerWallets.length > 1;
+  const selectedSignerWalletId =
+    activeAction === "seize"
+      ? seizeForm.signingWalletId
+      : activeAction === "force-burn"
+        ? forceBurnForm.signingWalletId
+        : activeAction === "freeze"
+          ? freezeForm.signingWalletId || defaultSignerWalletId
+          : defaultSignerWalletId;
+  const selectedSignerUnavailableReason = getSignerWalletUnavailableReason(
+    signerWallets,
+    selectedSignerWalletId,
+    t
+  );
   return (
     <>
       {activeAction === "seize" ? (
@@ -272,7 +286,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.seize}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !seizeForm.signingWalletId) ||
                   Boolean(seizeValidationReason)
                 }
@@ -358,7 +372,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.forceBurn}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !forceBurnForm.signingWalletId) ||
                   Boolean(forceBurnValidationReason)
                 }
@@ -464,7 +478,9 @@ export function TokenActionAdminForms({
                   iconLeft={icon.pause}
                   onClick={() => onPause(true)}
                   disabled={
-                    isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)
+                    isPending ||
+                    tokenStatus === "paused" ||
+                    Boolean(signerUnavailableReason || selectedSignerUnavailableReason)
                   }
                 >
                   {t("DashboardIssuance.management.pauseToken")}
@@ -478,7 +494,9 @@ export function TokenActionAdminForms({
                   iconLeft={icon.unpause}
                   onClick={() => onPause(false)}
                   disabled={
-                    isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)
+                    isPending ||
+                    tokenStatus === "active" ||
+                    Boolean(signerUnavailableReason || selectedSignerUnavailableReason)
                   }
                 >
                   {t("DashboardIssuance.management.unpauseToken")}
@@ -506,7 +524,7 @@ export function TokenActionAdminForms({
           >
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId={defaultSignerWalletId} // Always single locked wallet
+              signerWalletId={freezeForm.signingWalletId || defaultSignerWalletId}
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
@@ -558,7 +576,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.freeze}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !freezeForm.signingWalletId)
                 }
               >
@@ -570,7 +588,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.unfreeze}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !freezeForm.signingWalletId)
                 }
               >

@@ -59,7 +59,9 @@ describe("useDvpTradeActions", () => {
     global.fetch = respond(409, { error: { message: "Leg already funded." } }) as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
 
-    await act(async () => await result.current.act("fund", { side: "a" }));
+    await act(
+      async () => await result.current.act("fund", { side: "a", walletId: "cwlt_shown_a" })
+    );
 
     expect(toast.error).toHaveBeenCalledWith(
       "Leg already funded.",
@@ -93,16 +95,33 @@ describe("useDvpTradeActions", () => {
 
   // The unified fund endpoint names the leg it moves; the action is the same
   // whatever the side, so settle and cancel carry no body.
-  it("sends the side as the fund request body", async () => {
+  it("sends the side and exact displayed wallet in the fund request body", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
 
-    await act(async () => await result.current.act("fund", { side: "b" }));
+    await act(
+      async () => await result.current.act("fund", { side: "b", walletId: "cwlt_shown_b" })
+    );
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-    expect(JSON.parse(init.body)).toEqual({ side: "b" });
+    expect(JSON.parse(init.body)).toEqual({ side: "b", walletId: "cwlt_shown_b" });
   });
+
+  it.each([undefined, null, ""])(
+    "never submits an implicit funding request for a missing wallet ID: %s",
+    async (walletId) => {
+      const fetchMock = respond(200);
+      global.fetch = fetchMock as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1"), { wrapper: withI18n });
+
+      await act(async () => await result.current.act("fund", { side: "a", walletId } as never));
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalled();
+      expect(result.current.pending.size).toBe(0);
+    }
+  );
 
   it("sends no body for settle", async () => {
     const fetchMock = respond(200);

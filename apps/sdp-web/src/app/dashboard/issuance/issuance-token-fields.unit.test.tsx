@@ -47,6 +47,7 @@ function wallet(publicKey: string): PaymentsDashboardWallet {
   return {
     id: `id_${publicKey}`,
     walletId: `wid_${publicKey}`,
+    isRuntimeExecutionAllowed: true,
     publicKey,
     label: "Treasury",
   };

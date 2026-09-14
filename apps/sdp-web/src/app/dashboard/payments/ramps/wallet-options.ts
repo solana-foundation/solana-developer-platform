@@ -66,13 +66,19 @@ export function walletBalanceAssetOptions(
   return assetOptions;
 }
 
-export function walletComboboxOptions(wallets: PaymentsDashboardWallet[]): ComboboxOption[] {
+export function walletComboboxOptions(
+  wallets: PaymentsDashboardWallet[],
+  signingUnavailableLabel?: string
+): ComboboxOption[] {
   return wallets.map((wallet) => {
     const total = resolveTotalBalance(wallet.balances ?? []);
     return {
       value: wallet.id,
       label: wallet.label ?? wallet.publicKey,
       description: total !== null ? formatCurrencyAmount(total) : undefined,
+      ...(signingUnavailableLabel && wallet.isRuntimeExecutionAllowed !== true
+        ? { badge: signingUnavailableLabel, badgeVariant: "warning" as const }
+        : {}),
     };
   });
 }

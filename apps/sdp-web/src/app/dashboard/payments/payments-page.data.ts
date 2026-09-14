@@ -62,6 +62,9 @@ export async function fetchPaymentsWallets(
           publicKey?: string;
           label?: string | null;
           provider?: string;
+          custodyConfigId?: string;
+          custodyConnectionId?: string;
+          isRuntimeExecutionAllowed?: boolean;
           balances?: PaymentsDashboardWallet["balances"];
         }>;
       };
@@ -86,6 +89,9 @@ export async function fetchPaymentsWallets(
         walletId: wallet.walletId,
         publicKey: wallet.publicKey,
         label: wallet.label ?? null,
+        isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed === true,
+        ...(wallet.custodyConfigId ? { custodyConfigId: wallet.custodyConfigId } : {}),
+        ...(wallet.custodyConnectionId ? { custodyConnectionId: wallet.custodyConnectionId } : {}),
         ...(wallet.provider ? { provider: wallet.provider as CustodyProvider } : {}),
         ...(Array.isArray(wallet.balances) ? { balances: wallet.balances } : {}),
       }));

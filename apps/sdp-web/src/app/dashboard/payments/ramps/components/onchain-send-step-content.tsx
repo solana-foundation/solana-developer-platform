@@ -77,7 +77,10 @@ export function OnchainSendStepContent({
     transferResult,
   } = wizard;
 
-  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const walletOptions = useMemo(
+    () => walletComboboxOptions(liveWallets, t("DashboardPayments.unavailable")),
+    [liveWallets, t]
+  );
   const assetSelectOptions = useMemo(
     () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
     [assetOptions]

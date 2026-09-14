@@ -117,6 +117,8 @@ export function useOnchainSendWizard({
     () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
     [liveWallets, fields.walletId]
   );
+  const signingUnavailable =
+    !!fields.walletId && selectedWallet?.isRuntimeExecutionAllowed !== true;
   const selectedAccount = useMemo(
     () => cryptoAccounts.find((account) => account.id === fields.accountId) ?? null,
     [cryptoAccounts, fields.accountId]
@@ -162,6 +164,9 @@ export function useOnchainSendWizard({
     if (currentStepId === "DESTINATION") {
       return onchainDestinationSchema.safeParse(fields).success && !!destinationAddress;
     }
+    if (signingUnavailable && !transferResult) {
+      return false;
+    }
     if (currentStepId === "DETAILS") {
       const schemaOk = onchainDetailsSchema.safeParse(fields).success;
       // When a wallet is selected, require a matching balance entry so that
@@ -171,7 +176,15 @@ export function useOnchainSendWizard({
       return schemaOk && !exceedsBalance && hasMint;
     }
     return true;
-  }, [currentStepId, fields, destinationAddress, exceedsBalance, selectedAssetBalance]);
+  }, [
+    currentStepId,
+    fields,
+    destinationAddress,
+    exceedsBalance,
+    selectedAssetBalance,
+    signingUnavailable,
+    transferResult,
+  ]);
 
   const handleAccountAdded = (account: CounterpartyAccount) => {
     setField("accountId", account.id);
@@ -183,7 +196,7 @@ export function useOnchainSendWizard({
   };
 
   const submitTransfer = async () => {
-    if (!fields.walletId || !destinationAddress || !selectedAssetBalance) {
+    if (!fields.walletId || !destinationAddress || !selectedAssetBalance || signingUnavailable) {
       return;
     }
     setSubmitting(true);
@@ -275,7 +288,9 @@ export function useOnchainSendWizard({
     canProceed,
     liveWallets,
     walletsLoading,
-    liveWalletsError,
+    liveWalletsError:
+      liveWalletsError ??
+      (signingUnavailable && !transferResult ? t("DashboardPayments.signingUnavailable") : null),
     cryptoAccounts,
     accountsLoading,
     counterpartyId,

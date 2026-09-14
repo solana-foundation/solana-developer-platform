@@ -2,6 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import useSWR, { SWRConfig } from "swr";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   recheckPrivyCredentialAction,
@@ -73,6 +74,64 @@ describe("PrivyCredentialForm", () => {
 
     await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
     expect(submittedKey(0)).toMatch(/[0-9a-f-]{36}/);
+  });
+
+  it("refreshes wallet inventories in the current project after install without replaying commands", async () => {
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    const walletRead = vi.fn(async () => "New Connection wallet");
+    const otherProjectRead = vi.fn(async () => "Other project changed");
+    const command = vi.fn(async () => "Replayed command");
+    function Inventory({
+      cacheKey,
+      name,
+      fetcher,
+    }: {
+      cacheKey: string | readonly string[];
+      name: string;
+      fetcher: () => Promise<string>;
+    }) {
+      const { data } = useSWR(cacheKey, fetcher, {
+        fallbackData: "Previous data",
+        revalidateOnMount: false,
+      });
+      return <output data-testid={name}>{data}</output>;
+    }
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <PrivyCredentialForm formId="byok-test-form" />
+          <Inventory cacheKey="payments-action-wallets" name="payments" fetcher={walletRead} />
+          <Inventory cacheKey="dashboard-earn-funding-wallets" name="earn" fetcher={walletRead} />
+          <Inventory
+            cacheKey={["token-management-authority-wallets", "token"]}
+            name="issuance"
+            fetcher={walletRead}
+          />
+          <Inventory cacheKey="payments-create-transfer" name="command" fetcher={command} />
+        </SWRConfig>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <Inventory
+            cacheKey="payments-action-wallets"
+            name="other-project"
+            fetcher={otherProjectRead}
+          />
+        </SWRConfig>
+      </I18nProvider>
+    );
+
+    await fillAndSubmit(user);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("payments").textContent).toBe("New Connection wallet")
+    );
+    expect(screen.getByTestId("earn").textContent).toBe("New Connection wallet");
+    expect(screen.getByTestId("issuance").textContent).toBe("New Connection wallet");
+    expect(screen.getByTestId("other-project").textContent).toBe("Previous data");
+    expect(screen.getByTestId("command").textContent).toBe("Previous data");
+    expect(otherProjectRead).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(1);
   });
 
   it("mints a fresh key and clears the rejected secret after a terminal failure", async () => {
