@@ -9,6 +9,7 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
+import { kaminoVaultAllocationsSchema } from "@/app/dashboard/markets/treasury-solutions/kamino-allocations-schema";
 import { GET } from "./route";
 
 // The route keeps a module-level TTL cache, so every test that reaches the
@@ -77,28 +78,23 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     vi.useRealTimers();
   });
 
-  it("answers with the parsed allocations envelope", async () => {
+  it("answers with the parsed allocations, unwrapped", async () => {
     const response = await GET(request(VAULTS.happy));
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data.allocations).toHaveLength(1);
+    // The SWR hook re-parses the body it gets from dashboardFetch with this
+    // same schema, so an envelope around the payload would fail every cell.
+    expect(() => kaminoVaultAllocationsSchema.parse(body)).not.toThrow();
+    expect(body.allocations).toHaveLength(1);
     // Nothing beyond the parsed contract leaks through, not even upstream
     // bookkeeping fields the dashboard does not render.
-    expect(body.data.allocations[0]).toEqual({
+    expect(body.allocations[0]).toEqual({
       reserve: "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
       marketName: "SOL/BTC Market",
-      symbol: "SOL",
-      targetWeightPct: "23.95715235153837132",
       actualPct: "23.942398955779318467",
-      suppliedUsd: "136381.92491188545657",
-      supplyApy: "0.044979844106186606",
-      rewardsApy: "0",
     });
-    expect(body.data.unallocated).toEqual({
-      usd: "349.54317161908771822",
-      pct: "0.061363718634853357161",
-    });
+    expect(body.unallocated).toEqual({ pct: "0.061363718634853357161" });
     expect(mocks.fetch).toHaveBeenCalledWith(
       `https://api.kamino.finance/kvaults/vaults/${VAULTS.happy}/allocations`,
       expect.objectContaining({ cache: "no-store" })

@@ -11,37 +11,47 @@ import type { KaminoVaultAllocation, KaminoVaultAllocations } from "./kamino-all
  * directive-free so the workspace renders and the unit tests read the exact
  * same figures.
  *
- * Like `formatProviderApy`, these deliberately take ONE `Number` on a RATE or
- * percent for `Intl` percent output. They never touch amounts: USD figures go
- * through `formatUsd`, which formats the decimal string exactly.
+ * Like `formatProviderApy`, the weight formatter deliberately takes ONE
+ * `Number` on a percent for `Intl` percent output; the deployed-weight
+ * complement below never routes through a float at all.
  */
 
-function formatPercentUnits(pct: string | undefined, locale: string, digits: number): string {
+/** Base58 Solana public key: the "name" Kamino reports for an unnamed market. */
+const PUBKEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * A percent-unit weight ("23.94" = 23.94%) as a locale percent string. A live
+ * weight too small for one decimal would print as "0.0%" and read as nothing,
+ * so it is shown as "<0.1%" instead; a weight that IS nothing never reaches
+ * here (see `kaminoDisclosureRows`).
+ */
+export function formatAllocationWeight(pct: string | undefined, locale: string): string {
   if (pct === undefined || !isDecimalString(pct)) return "—";
   const value = Number(pct);
   if (!Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat(locale, {
-    maximumFractionDigits: digits,
-    minimumFractionDigits: digits,
-    style: "percent",
-  }).format(value / 100);
-}
-
-/** A percent-unit weight ("23.94" = 23.94%) as a locale percent string. */
-export function formatAllocationWeight(pct: string | undefined, locale: string): string {
-  return formatPercentUnits(pct, locale, 1);
-}
-
-/** A decimal-fraction APY ("0.0449" = 4.49%) as a locale percent string. */
-export function formatAllocationApy(apy: string | undefined, locale: string): string {
-  if (apy === undefined || !isDecimalString(apy)) return "—";
-  const rate = Number(apy);
-  if (!Number.isFinite(rate)) return "—";
-  return new Intl.NumberFormat(locale, {
-    maximumFractionDigits: 2,
+  const formatter = new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 1,
     minimumFractionDigits: 1,
     style: "percent",
-  }).format(rate);
+  });
+  if (value > 0 && value < 0.05) return `<${formatter.format(0.001)}`;
+  return formatter.format(value / 100);
+}
+
+/** Exactly zero, decided on the decimal string: "0", "0.00" and "0.000" all qualify. */
+function isZeroWeight(pct: string): boolean {
+  if (!isDecimalString(pct)) return false;
+  return parseDecimalAmount(pct, decimalScale(pct)) === 0n;
+}
+
+/**
+ * The disclosure's label for a market. Kamino reports an unnamed market by its
+ * address; that is shortened the way SDP shows any address, with the full
+ * string kept in the cell's `title`.
+ */
+export function kaminoMarketLabel(marketName: string): string {
+  if (!PUBKEY_PATTERN.test(marketName)) return marketName;
+  return `${marketName.slice(0, 6)}…${marketName.slice(-4)}`;
 }
 
 /**
@@ -91,9 +101,32 @@ export function kaminoAllocationsByWeight(
     });
 }
 
+export type KaminoDisclosureRow =
+  | { kind: "market"; reserve: string; marketName: string; pct: string }
+  | { kind: "idle"; pct: string };
+
+/**
+ * The rows the disclosure lists: markets holding capital, heaviest first, then
+ * the idle share. A weight that is exactly zero says nothing about where the
+ * vault's capital is, so it is left out (an unreadable weight stays, as "—").
+ */
+export function kaminoDisclosureRows(allocations: KaminoVaultAllocations): KaminoDisclosureRow[] {
+  const rows: KaminoDisclosureRow[] = kaminoAllocationsByWeight(allocations.allocations)
+    .filter((row) => !isZeroWeight(row.actualPct))
+    .map((row) => ({
+      kind: "market",
+      reserve: row.reserve,
+      marketName: row.marketName,
+      pct: row.actualPct,
+    }));
+  const idle = allocations.unallocated?.pct;
+  if (idle !== undefined && !isZeroWeight(idle)) rows.push({ kind: "idle", pct: idle });
+  return rows;
+}
+
 /** Whether the vault read carries anything the disclosure can honestly show. */
 export function hasKaminoAllocationContent(allocations: KaminoVaultAllocations): boolean {
-  return allocations.allocations.length > 0 || allocations.unallocated !== undefined;
+  return kaminoDisclosureRows(allocations).length > 0;
 }
 
 /** Locale timestamp for the provider's `asOf` marker; undefined when unusable. */

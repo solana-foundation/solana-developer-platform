@@ -17,16 +17,8 @@ vi.mock("@/lib/dashboard-fetch", () => ({
 function payload() {
   return {
     asOf: "2026-09-14T17:53:52.895Z",
-    allocations: [
-      {
-        reserve: "reserve-1",
-        marketName: "SOL/BTC Market",
-        symbol: "SOL",
-        actualPct: "23.94",
-        supplyApy: "0.045",
-      },
-    ],
-    unallocated: { pct: "0.06", usd: "349.54" },
+    allocations: [{ reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "23.94" }],
+    unallocated: { pct: "0.06" },
   };
 }
 
@@ -59,7 +51,7 @@ describe("useKaminoVaultAllocations", () => {
     expect(mocks.fetch).toHaveBeenCalledWith(
       "/api/dashboard/markets/earn/kamino-allocations?vault=Kvault1111&cluster=mainnet-beta"
     );
-    expect(result.current.allocations?.allocations[0]?.symbol).toBe("SOL");
+    expect(result.current.allocations?.allocations[0]?.marketName).toBe("SOL/BTC Market");
   });
 
   it("issues no request for a row without a vault reference", async () => {
@@ -107,7 +99,7 @@ describe("useKaminoVaultAllocations", () => {
   it("surfaces a malformed BFF payload as an error, never as partial data", async () => {
     mocks.fetch.mockResolvedValue({
       ok: true,
-      data: { allocations: [{ symbol: "SOL" }] },
+      data: { allocations: [{ marketName: "SOL/BTC Market" }] },
       status: 200,
     });
 

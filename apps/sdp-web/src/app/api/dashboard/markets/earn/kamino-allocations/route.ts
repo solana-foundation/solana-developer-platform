@@ -46,11 +46,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    // The body IS the contract, with no envelope around it: `dashboardFetch`
+    // hands the parsed JSON straight to the SWR hook, which re-parses it with
+    // the same schema this route parsed upstream.
     const payload = await readVaultAllocations(vault);
-    return NextResponse.json(
-      { data: payload },
-      { headers: { "Cache-Control": "private, no-store" } }
-    );
+    return NextResponse.json(payload, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     // The reason (network, status, schema) is deliberately not surfaced: the
     // dashboard renders the same placeholder for every failure, and the raw

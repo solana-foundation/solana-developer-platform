@@ -1387,28 +1387,18 @@ describe("TreasurySolutionsWorkspace", () => {
     const user = userEvent.setup();
     mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
       asOf: "2026-09-14T17:53:52.895Z",
-      capitalDeployedUsd: "569275.60",
       allocations: [
-        {
-          reserve: "reserve-1",
-          marketName: "SOL/BTC Market",
-          symbol: "SOL",
-          targetWeightPct: "23.95",
-          actualPct: "23.94",
-          suppliedUsd: "136381.92",
-          supplyApy: "0.045",
-        },
+        { reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "23.94" },
         {
           reserve: "reserve-2",
-          marketName: "USDC Market",
-          symbol: "USDC",
-          targetWeightPct: "76.10",
+          marketName: "A deliberately long lending market name that must truncate",
           actualPct: "76.00",
-          suppliedUsd: "432544.14",
-          supplyApy: "0.082",
         },
+        // A configured reserve holding nothing says nothing about where the
+        // capital is; it never becomes a row.
+        { reserve: "reserve-3", marketName: "Empty Market", actualPct: "0" },
       ],
-      unallocated: { usd: "349.54", pct: "0.06" },
+      unallocated: { pct: "0.06" },
     };
     renderWorkspace();
 
@@ -1429,32 +1419,94 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const disclosure = within(mainnetRow).getByRole("button", { name: "99.9% deployed" });
     await user.hover(disclosure);
+    // The table is named for assistive technology only; its column headings
+    // are exposed as columnheaders, not hidden behind a decorative grid.
     expect(await screen.findByText("Vault allocations")).toBeTruthy();
-    // The disclosure is a semantic table: its column headings are exposed as
-    // columnheaders, not hidden from assistive technology.
-    expect(screen.getByRole("columnheader", { name: "Weight" })).toBeTruthy();
-    expect(screen.getByText("SOL/BTC Market")).toBeTruthy();
-    expect(screen.getByText("Unallocated")).toBeTruthy();
-    // The reserve APY renders inside the disclosure only — the strategies
-    // table's own APY column may show the same figure on another row.
-    const disclosureTable = screen.getByRole("columnheader", { name: "Weight" }).closest("table");
+    const disclosureTable = screen
+      .getByRole("columnheader", { name: "Allocation" })
+      .closest("table");
     if (!disclosureTable) throw new Error("Expected the allocations disclosure table");
-    expect(within(disclosureTable).getByText("4.5%")).toBeTruthy();
+    expect(within(disclosureTable).getByRole("columnheader", { name: "Market" })).toBeTruthy();
+    // Two columns, heaviest market first, the idle share last: one weight per
+    // row and nothing else (no token, supplied or APY figures).
+    const bodyRows = within(disclosureTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole("cell")
+          .map((cell) => cell.textContent)
+      );
+    expect(bodyRows).toEqual([
+      ["A deliberately long lending market name that must truncate", "76.0%"],
+      ["SOL/BTC Market", "23.9%"],
+      ["Unallocated", "0.1%"],
+    ]);
+    expect(within(disclosureTable).queryByText("Empty Market")).toBeNull();
+    // A long market name truncates inside its cell and keeps the full string
+    // reachable, so nothing can run past the tooltip's edge.
+    const longName = within(disclosureTable).getByText(
+      "A deliberately long lending market name that must truncate"
+    );
+    expect(longName.className).toContain("truncate");
+    expect(longName.getAttribute("title")).toBe(
+      "A deliberately long lending market name that must truncate"
+    );
+    // The provider timestamp is a quiet footer, rendered in the viewer's
+    // locale and zone (so the exact time is not pinned here).
+    expect(screen.getByText(/^As of .+2026/)).toBeTruthy();
+  });
+
+  it("omits the idle row when nothing is unallocated", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [
+        { reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "60" },
+        // Kamino names an unnamed market by its address; the row shortens it
+        // the way SDP shows any address and keeps the full string in `title`.
+        {
+          reserve: "reserve-2",
+          marketName: "Dwg1aeZFYtsyMEkoyJn2ak8oPqaXMWd1uui6FBkM1872",
+          actualPct: "40",
+        },
+      ],
+      unallocated: { pct: "0" },
+    };
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    const disclosure = within(mainnetRow).getByRole("button", { name: "100.0% deployed" });
+    await user.hover(disclosure);
+    const disclosureTable = (
+      await screen.findByRole("columnheader", { name: "Allocation" })
+    ).closest("table");
+    if (!disclosureTable) throw new Error("Expected the allocations disclosure table");
+    const bodyRows = within(disclosureTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole("cell")
+          .map((cell) => cell.textContent)
+      );
+    expect(bodyRows).toEqual([
+      ["SOL/BTC Market", "60.0%"],
+      ["Dwg1ae…1872", "40.0%"],
+    ]);
+    expect(within(disclosureTable).queryByText("Unallocated")).toBeNull();
+    expect(within(disclosureTable).getByText("Dwg1ae…1872").getAttribute("title")).toBe(
+      "Dwg1aeZFYtsyMEkoyJn2ak8oPqaXMWd1uui6FBkM1872"
+    );
   });
 
   it("keeps the disclosure when the deployed weight cannot be certified", async () => {
     const user = userEvent.setup();
     mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
-      allocations: [
-        {
-          reserve: "reserve-1",
-          marketName: "SOL/BTC Market",
-          symbol: "SOL",
-          actualPct: "23.94",
-          suppliedUsd: "136381.92",
-          supplyApy: "0.045",
-        },
-      ],
+      allocations: [{ reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "23.94" }],
     };
     renderWorkspace();
 
