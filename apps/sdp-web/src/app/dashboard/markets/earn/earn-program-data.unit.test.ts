@@ -294,7 +294,7 @@ describe("external-wallet position reads", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("continues one wallet past one hundred strict cursor pages", async () => {
+  it("throws when a wallet feed keeps minting fresh cursors past the safety limit", async () => {
     let page = 0;
     const fetchMock = vi.fn(async () => {
       const current = page;
@@ -303,8 +303,8 @@ describe("external-wallet position reads", () => {
         JSON.stringify({
           data: {
             positions: [externalWalletPosition(`p${current}`)],
-            hasMore: current < 100,
-            nextCursor: current < 100 ? `cursor_${current}` : null,
+            hasMore: true,
+            nextCursor: `cursor_${current}`,
           },
         }),
         { headers: { "Content-Type": "application/json" } }
@@ -314,8 +314,8 @@ describe("external-wallet position reads", () => {
 
     await expect(
       fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).resolves.toHaveLength(101);
-    expect(fetchMock).toHaveBeenCalledTimes(101);
+    ).rejects.toThrow("External-wallet positions pagination exceeded its safety limit");
+    expect(fetchMock).toHaveBeenCalledTimes(20);
   });
 
   it("fails loudly when a wallet cursor repeats", async () => {

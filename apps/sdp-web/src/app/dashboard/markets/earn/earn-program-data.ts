@@ -547,6 +547,14 @@ export function useEarnVaultPositions() {
 const EXTERNAL_WALLET_POSITIONS_PAGE_SIZE = 100;
 
 /**
+ * Hard stop on the paging loop, same reason as the other readers' page limits:
+ * a server that never stops advancing its cursor must not spin this client
+ * (and the BFF it drives) forever. 20 pages × 100 = 2,000 live positions for
+ * one end-user wallet, far past anything a partner wallet can plausibly hold.
+ */
+const EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT = 20;
+
+/**
  * Reads every live position for exactly one partner end-user wallet.
  * Kept at the strict dashboard boundary for the planned wallet drill-down.
  */
@@ -557,7 +565,7 @@ export async function fetchEarnExternalWalletPositions(
   const seenCursors = new Set<string>();
   let before: string | undefined;
 
-  while (true) {
+  for (let page = 1; page <= EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT; page += 1) {
     const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
     if (before) query.set("before", before);
     const { status, body } = await requestJson<{ data: EarnExternalWalletPositionsPage }>(
@@ -577,6 +585,9 @@ export async function fetchEarnExternalWalletPositions(
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
+
+  // A partial portfolio is worse than an error because it can hide money.
+  throw new Error("External-wallet positions pagination exceeded its safety limit");
 }
 
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
