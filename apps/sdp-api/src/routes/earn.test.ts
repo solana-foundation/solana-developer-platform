@@ -36,7 +36,7 @@ import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, readRateLimitCount, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_earn_routes",
@@ -531,7 +531,7 @@ describe("Earn routes — strategy catalogue", () => {
     expect(anonymous.headers.get("cache-control")).toBe(
       "public, max-age=30, stale-while-revalidate=30"
     );
-    expect(keyed.headers.get("cache-control")).toBe(anonymous.headers.get("cache-control"));
+    expect(keyed.headers.get("cache-control")).toBe("private, max-age=30");
     expect(anonymous.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
     expect(keyed.headers.get("access-control-allow-origin")).toBe(
       anonymous.headers.get("access-control-allow-origin")
@@ -785,6 +785,17 @@ describe("Earn routes — strategy catalogue", () => {
 
     const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`);
     expect(detail.status).toBe(404);
+  });
+});
+
+describe("Earn route middleware isolation", () => {
+  it("charges an authenticated keyed-only route exactly once", async () => {
+    await seedAuth();
+
+    const res = await getEarn("/v1/earn/movements");
+
+    expect(res.status).toBe(200);
+    expect(await readRateLimitCount(env, TEST_API_KEY.id)).toBe(1);
   });
 });
 

@@ -424,29 +424,34 @@ export async function buildExternalWalletDepositTransaction(
     const swapLeg = attempt.swapLeg;
     const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
     const depositTokenDecimals = requireWellKnownMintDecimals(input.tokenMint, "deposit token");
-    // The keyed-only baseline is read after compilation and under the same
-    // deadline. It fails closed alongside the insert: a blind advisory could
-    // page on any wallet that happened to hold the deposit token, and money in
-    // may refuse; the partner simply builds again.
-    const swapTransaction = await compileStandaloneSwapTransaction(env, {
-      cluster,
-      deadline,
-      rpcUrl,
-      ownerAddress: input.ownerAddress,
-      sourceTokenMint,
-      depositTokenMint: input.tokenMint,
-      swapLeg,
-      // The split swap is one of the transactions this flow hands out, so
-      // the partner fee payer covers it too and co-signs before the owner
-      // broadcasts it, exactly like the deposit it precedes.
-      fee,
-    });
-    if (!hasExternalWalletBuildTenant(input)) {
+    const hasTenant = hasExternalWalletBuildTenant(input);
+    // Compile and read the keyed-only baseline concurrently, preserving the
+    // partner's blockhash window. The baseline fails closed alongside the
+    // advisory insert; an anonymous build skips the read entirely.
+    const [swapTransaction, baseline] = await Promise.all([
+      compileStandaloneSwapTransaction(env, {
+        cluster,
+        deadline,
+        rpcUrl,
+        ownerAddress: input.ownerAddress,
+        sourceTokenMint,
+        depositTokenMint: input.tokenMint,
+        swapLeg,
+        // The split swap is one of the transactions this flow hands out, so
+        // the partner fee payer covers it too and co-signs before the owner
+        // broadcasts it, exactly like the deposit it precedes.
+        fee,
+      }),
+      hasTenant
+        ? deadline.run("Reading the split-swap baseline balance", () =>
+            readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
+          )
+        : Promise.resolve(null),
+    ]);
+    if (!hasTenant) {
       return { kind: "swap_required", swap: swapLeg, swapTransaction };
     }
-    const baseline = await deadline.run("Reading the split-swap baseline balance", () =>
-      readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
-    );
+    if (baseline === null) throw internalError("Split-swap baseline balance is unavailable");
     if (baseline.decimals !== null && baseline.decimals !== depositTokenDecimals) {
       throw internalError(
         `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`

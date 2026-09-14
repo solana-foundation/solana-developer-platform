@@ -20,6 +20,7 @@ import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { optionalSessionAuth } from "@/middleware/session-auth";
 import { validateBody } from "@/middleware/validate";
+import { SESSION_COOKIE_NAME } from "@/routes/auth/constants";
 import { getLogger } from "@/runtime/logger";
 import { APPROVED_OPERATION_REPLAY_HEADER } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
@@ -129,16 +130,17 @@ async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
 // Authenticated callers keep their verified project selection. Anonymous
 // callers have no organization or project to resolve and continue untouched.
 const resolveProjectContext = projectContextMiddleware();
+function hasEarnAuth(c: Context<{ Bindings: Env }>): boolean {
+  return Boolean(c.get("apiKey") || c.get("clerk") || c.get("session"));
+}
+
 async function optionalEarnProjectContext(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!c.get("apiKey") && !c.get("clerk") && !c.get("session")) {
+  if (!hasEarnAuth(c)) {
     await next();
     return;
   }
   await resolveProjectContext(c, next);
 }
-
-optionalAuthEarn.use("*", optionalEarnAuth);
-optionalAuthEarn.use("*", optionalEarnProjectContext);
 
 async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) {
   try {
@@ -147,7 +149,7 @@ async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) 
     getLogger().info(
       {
         event: "sdp_api_earn_tier_request",
-        tier: c.get("apiKey") || c.get("clerk") || c.get("session") ? "keyed" : "anonymous",
+        tier: hasEarnAuth(c) ? "keyed" : "anonymous",
         method: c.req.method,
         route: c.req.path.startsWith("/v1/earn/strategies/")
           ? "/v1/earn/strategies/:strategyId"
@@ -158,13 +160,25 @@ async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) 
     );
   }
 }
-optionalAuthEarn.use("*", observeEarnAccessTier);
+
+// Hono flattens sub-app `use("*")` middleware into the parent at mount time.
+// Keep this tuple on the six optional-auth declarations so it can never run on
+// the keyed router that shares the same mount point.
+const OPTIONAL_EARN_ACCESS_MIDDLEWARE = [
+  optionalEarnAuth,
+  optionalEarnProjectContext,
+  observeEarnAccessTier,
+] as const;
 
 const EARN_CATALOGUE_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=30";
+const EARN_AUTHENTICATED_CATALOGUE_CACHE_CONTROL = "private, max-age=30";
 async function cacheEarnCatalogue(c: Context<{ Bindings: Env }>, next: Next) {
   await next();
   if (c.res.status >= 200 && c.res.status < 300) {
-    c.header("Cache-Control", EARN_CATALOGUE_CACHE_CONTROL);
+    c.header(
+      "Cache-Control",
+      hasEarnAuth(c) ? EARN_AUTHENTICATED_CATALOGUE_CACHE_CONTROL : EARN_CATALOGUE_CACHE_CONTROL
+    );
   }
 }
 
@@ -192,12 +206,14 @@ const anonymousEarnRpcQuota = anonymousMeteredQuota(EARN_ANONYMOUS_RPC_QUOTA);
 // reads only the deployment-scoped global catalogue.
 optionalAuthEarn.get(
   "/strategies",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
   cacheEarnCatalogue,
   listEarnStrategies
 );
 optionalAuthEarn.get(
   "/strategies/:strategyId",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
   cacheEarnCatalogue,
   getEarnStrategy
@@ -209,6 +225,7 @@ optionalAuthEarn.get(
 // callers never acquire a tenant identity or write a row.
 optionalAuthEarn.post(
   "/vault-deposit-previews",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
@@ -217,6 +234,7 @@ optionalAuthEarn.post(
 );
 optionalAuthEarn.post(
   "/external-wallet/deposit-transactions",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:write"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletDepositTransactionSchema),
@@ -224,6 +242,7 @@ optionalAuthEarn.post(
 );
 optionalAuthEarn.post(
   "/external-wallet/withdrawal-previews",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalPreviewSchema),
@@ -231,6 +250,7 @@ optionalAuthEarn.post(
 );
 optionalAuthEarn.post(
   "/external-wallet/withdrawal-transactions",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:write"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalTransactionSchema),
@@ -243,7 +263,7 @@ optionalAuthEarn.post(
 async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: Next) {
   if (
     !c.req.header("Authorization") &&
-    !getCookie(c, "sdp_session") &&
+    !getCookie(c, SESSION_COOKIE_NAME) &&
     !c.req.header(APPROVED_OPERATION_REPLAY_HEADER)
   ) {
     throw new AppError("UNAUTHORIZED", "API key required for this Earn route");
