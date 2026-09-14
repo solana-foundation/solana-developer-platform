@@ -783,6 +783,53 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     expect(body.data.total).toBe(1);
   });
 
+  it("keeps the hidden Ethena PYUSD vaults off every strategy read", async () => {
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    // Addresses read from the shipped HIDDEN_VAULTS so a re-pick of the hidden
+    // set moves this test with it instead of breaking it on a literal — the
+    // same rule the curated-shelf tests above follow.
+    const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
+      "@/routes/earn/handlers/curation"
+    );
+    const [mainnetKey] = actual.HIDDEN_VAULTS["mainnet-beta"] ?? [];
+    const [devnetKey] = actual.HIDDEN_VAULTS.devnet ?? [];
+    const mainnetReference = mainnetKey?.split(":")[1];
+    const devnetReference = devnetKey?.split(":")[1];
+    if (!mainnetReference || !devnetReference) {
+      throw new Error("Expected shipped HIDDEN_VAULTS entries in both clusters");
+    }
+
+    const mainnetVault = await seedStrategy({
+      providerReference: mainnetReference,
+      hostCluster: "mainnet-beta",
+    });
+    const devnetVault = await seedStrategy({ providerReference: devnetReference });
+
+    for (const [path, hidden] of [
+      ["/v1/earn/strategies?cluster=mainnet-beta", mainnetVault],
+      ["/v1/earn/strategies", devnetVault],
+    ] as const) {
+      // Each seeded row is the only one on its cluster shelf, and both are
+      // hidden — so the list is empty and `total` must agree at zero rather
+      // than count rows the page then drops.
+      const list = await getEarn(path);
+      expect(list.status).toBe(200);
+      const body = (await list.json()) as {
+        data: { strategies: Array<{ id: string }>; total: number };
+      };
+      expect(body.data.strategies).toEqual([]);
+      expect(body.data.total).toBe(0);
+
+      expect((await getEarn(`${path.split("?")[0]}/${hidden.id}`)).status).toBe(404);
+    }
+
+    // Still stored — hiding is a read-time policy, never a refusal to persist.
+    const repository = createPostgresEarnRepository(getDb(env));
+    expect(await repository.getStrategyById(mainnetVault.id)).not.toBeNull();
+    expect(await repository.getStrategyById(devnetVault.id)).not.toBeNull();
+  });
+
   it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
