@@ -1,5 +1,5 @@
 import { SigningError } from "../signing";
-import { parseJsonResponse, readErrorResponseText } from "./common";
+import { assertHttpsBaseUrl, parseJsonResponse, readErrorResponseText } from "./common";
 import type { CustodyProvisioningRuntime } from "./runtime";
 
 const DEFAULT_ANCHORAGE_API_BASE_URL = "https://api.anchorage.com";
@@ -84,7 +84,10 @@ function resolveAnchorageConfig(config: AnchorageProvisioningConfig): {
   }
 
   return {
-    apiBaseUrl: config.apiBaseUrl ?? DEFAULT_ANCHORAGE_API_BASE_URL,
+    apiBaseUrl: assertHttpsBaseUrl(
+      config.apiBaseUrl ?? DEFAULT_ANCHORAGE_API_BASE_URL,
+      "Anchorage"
+    ),
     apiKey,
   };
 }
