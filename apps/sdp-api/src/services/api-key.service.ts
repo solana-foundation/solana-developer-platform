@@ -586,7 +586,14 @@ export class ApiKeyService {
               `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
              VALUES (?, ?, ?, ?)`
             )
-            .bind(`akw_${crypto.randomUUID()}`, newKeyId, row.wallet_id, row.permissions)
+            .bind(
+              `akw_${crypto.randomUUID()}`,
+              newKeyId,
+              row.wallet_id,
+              // Preserve the column verbatim: NULL stays the historical
+              // unrestricted marker, and a driver-parsed array re-serializes.
+              row.permissions == null ? null : stringifyJsonb(row.permissions, [])
+            )
             .run();
         }
 

@@ -28,6 +28,7 @@ import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.servic
 import {
   assertBindingsWithinActorWalletScope,
   isWalletScopedActor,
+  legacySigningWalletBinding,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
   resolveWalletBindingsInScope,
@@ -763,7 +764,10 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
         target.signing_wallet_id !== null || targetBindings.length > 0 ? "selected" : "all";
       assertBindingsWithinActorWalletScope(
         rotatingActorKey,
-        [{ walletId: target.signing_wallet_id }, ...targetBindings],
+        [
+          ...legacySigningWalletBinding(target.signing_wallet_id, targetBindings),
+          ...targetBindings,
+        ],
         targetScope
       );
     }
@@ -784,7 +788,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
       ? ({ signingWalletId, bindings }) =>
           assertBindingsWithinActorWalletScope(
             rotatingActorKey,
-            [{ walletId: signingWalletId }, ...bindings],
+            [...legacySigningWalletBinding(signingWalletId, bindings), ...bindings],
             signingWalletId !== null || bindings.length > 0 ? "selected" : "all"
           )
       : undefined

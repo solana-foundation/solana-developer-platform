@@ -513,6 +513,22 @@ function coversRequestedPermissions(actorHeld: Permission[], requested: Permissi
   return requested.every((permission) => actorHeld.includes(permission));
 }
 
+/**
+ * A target key whose signing wallet has no binding row predates per-wallet
+ * permissions and holds full access to that wallet — an actor must hold "*"
+ * on it, not merely have the wallet in scope. A signing wallet that does
+ * have a row is judged by that row instead.
+ */
+export function legacySigningWalletBinding(
+  signingWalletId: string | null,
+  bindings: Array<{ walletId: string }>
+): RequestedWalletBinding[] {
+  if (!signingWalletId || bindings.some((binding) => binding.walletId === signingWalletId)) {
+    return [];
+  }
+  return [{ walletId: signingWalletId, permissions: ["*"] }];
+}
+
 export function assertBindingsWithinActorWalletScope(
   actor: WalletScopeActor,
   bindings: RequestedWalletBinding[],
