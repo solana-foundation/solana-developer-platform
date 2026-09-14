@@ -9,20 +9,26 @@ import type { EarnStrategy } from "@sdp/types";
  * on — so the presentation question ("does this devnet offering also exist
  * for real money?") is answered by a ROUGH name match, worked out once by
  * hand against the catalogues and hardcoded here. The sources of that
- * one-off analysis: the mainnet Kamino registry census
- * (`apps/sdp-api/.earn-catalogue/kamino.inventory.json`), the shipped curation
- * picks (`CURATED_VAULTS` in `apps/sdp-api/src/routes/earn/handlers/
- * curation.ts`), and the devnet vault names read on-chain
+ * one-off analysis: the live mainnet Kamino registry (`GET /kvaults/vaults`),
+ * Kamino's own display config (`cdn.kamino.com/resources.json` — the names and
+ * slugs kamino.com actually renders), the shipped curation picks
+ * (`CURATED_VAULTS` in `apps/sdp-api/src/routes/earn/handlers/curation.ts`),
+ * and the devnet vault names read on-chain
  * (`packages/sdp-earn/src/providers/kamino/devnet.ts`). Each entry maps a
  * devnet strategy name to the mainnet strategy name it mirrors:
  *
- * - "Steakhouse USDC" → "Steakhouse USDC" — exact name on both clusters.
- * - "Allez USDC" → "Allez USDC" — exact name; the mainnet vault is in the
- *   registry census (`A1USdzqD…`).
+ * - "Steakhouse USDC" → "Steakhouse USDC" — exact name on both clusters
+ *   (`HDsayqAs…`).
+ * - "Allez USDC" → "Allez USDC" — exact name (`A1USdzqD…`).
  * - "Gauntlet Frontier USDC" → "Gauntlet Frontier" — the devnet vault appends
- *   the deposit token to the mainnet vault's name.
- * - "RockawayX RWA USDC" → "RockawayX EUROP" — the same house's USDC vault;
- *   the devnet mirror's name postdates the mainnet one.
+ *   the deposit token to the mainnet vault's name (`GFiW6eds…`; branded
+ *   "Gauntlet USDC Frontier" on kamino.com).
+ * - "RockawayX RWA USDC" → "RockawayX RWA USDC" — the mainnet vault's
+ *   ON-CHAIN name is just "RWA USDC" (`DWSXb18x…`); Kamino brands it
+ *   "RockawayX RWA USDC" in its display config, which is exactly the devnet
+ *   vault's on-chain name. The vault is absent from the REST registry, so our
+ *   mainnet shelf never lists it — the counterpart is verified on-chain and
+ *   in Kamino's display config, not through our own catalogue.
  *
  * Devnet vaults with no mainnet counterpart ("Kamino Vault USDC", "PyUSDC")
  * have no entry here, so they are HIDDEN from the shelf — fail-closed: a
@@ -52,7 +58,7 @@ import type { EarnStrategy } from "@sdp/types";
 const MAINNET_COUNTERPART_BY_DEVNET_NAME: Readonly<Record<string, string>> = {
   "allez usdc": "Allez USDC",
   "gauntlet frontier usdc": "Gauntlet Frontier",
-  "rockawayx rwa usdc": "RockawayX EUROP",
+  "rockawayx rwa usdc": "RockawayX RWA USDC",
   "steakhouse usdc": "Steakhouse USDC",
 };
 
