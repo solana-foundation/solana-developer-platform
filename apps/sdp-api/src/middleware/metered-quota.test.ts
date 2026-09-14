@@ -1,18 +1,25 @@
 import type { Permission } from "@sdp/types";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
 import type { KVStoreSet } from "@/runtime/kv";
 import { env } from "@/test/helpers/env";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { kvStoreMiddleware } from "./kv-store";
-import { meteredQuota } from "./metered-quota";
+import { anonymousMeteredQuota, meteredQuota } from "./metered-quota";
 
 const ORG_ID = "org_metered_quota_test";
 const QUOTA = { name: "test-op", actorMax: 3, orgMax: 5 };
 
 const ORG_SCOPE = `metered:${QUOTA.name}:org:${ORG_ID}`;
+const ANONYMOUS_QUOTA = {
+  name: "anonymous-test-op",
+  maxRequests: () => 2,
+  windowMs: () => 60_000,
+};
+const ANONYMOUS_IP = "203.0.113.19";
+const ANONYMOUS_SCOPE = `metered:${ANONYMOUS_QUOTA.name}:anonymous:ip:${ANONYMOUS_IP}`;
 
 type Actor = { kind: "key"; id: string } | { kind: "user"; id: string };
 
@@ -83,6 +90,23 @@ function createQuotaApp(options: { actor: Actor; kv?: "store" | "broken" | "miss
 
 async function requestOp(app: Hono<{ Bindings: Env }>): Promise<Response> {
   return await app.request("/op", {}, env);
+}
+
+function createAnonymousQuotaApp(handler: () => void) {
+  const app = new Hono<{ Bindings: Env }>();
+  app.use("*", kvStoreMiddleware());
+  app.use("*", anonymousMeteredQuota(ANONYMOUS_QUOTA));
+  app.get("/op", (c) => {
+    handler();
+    return c.json({ ok: true });
+  });
+  app.onError((error, c) => {
+    if (error instanceof AppError) {
+      return c.json(error.toResponse(), error.statusCode as 429 | 503);
+    }
+    throw error;
+  });
+  return app;
 }
 
 describe("meteredQuota", () => {
@@ -156,5 +180,41 @@ describe("meteredQuota", () => {
     );
 
     expect(res.status).toBe(503);
+  });
+
+  it("rejects an exhausted anonymous IP before the route handler", async () => {
+    await seedRateLimit(env, ANONYMOUS_SCOPE, ANONYMOUS_QUOTA.maxRequests());
+    const handler = vi.fn();
+
+    const res = await createAnonymousQuotaApp(handler).request(
+      "/op",
+      { headers: { "x-forwarded-for": ANONYMOUS_IP } },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    expect(handler).not.toHaveBeenCalled();
+    expect(res.headers.get("X-RateLimit-Limit")).toBe("2");
+  });
+
+  it("does not charge the anonymous budget for an authenticated request", async () => {
+    const handler = vi.fn();
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", kvStoreMiddleware());
+    app.use("*", async (c, next) => {
+      c.set("apiKey", apiKeyContext("key_a"));
+      await next();
+    });
+    app.use("*", anonymousMeteredQuota(ANONYMOUS_QUOTA));
+    app.get("/op", (c) => {
+      handler();
+      return c.json({ ok: true });
+    });
+
+    const res = await app.request("/op", { headers: { "x-forwarded-for": ANONYMOUS_IP } }, env);
+
+    expect(res.status).toBe(200);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(await readRateLimitCount(env, ANONYMOUS_SCOPE)).toBe(0);
   });
 });

@@ -27,47 +27,56 @@ import { clearKVStores } from "@/test/mocks/kv";
  * seed custody (`earn.vault.test.ts`, `earn.movements.test.ts`).
  */
 
-const EARN_ROUTE_SCOPES: Record<string, readonly Permission[]> = {
+type EarnRouteDeclaration =
+  | { readonly tier: "keyless"; readonly scopes: readonly Permission[] }
+  | { readonly tier: "keyed"; readonly scopes: readonly Permission[] };
+
+const keyless = (...scopes: Permission[]) =>
+  ({ tier: "keyless", scopes }) as const satisfies EarnRouteDeclaration;
+const keyed = (...scopes: Permission[]) =>
+  ({ tier: "keyed", scopes }) as const satisfies EarnRouteDeclaration;
+
+const EARN_ROUTE_SCOPES: Record<string, EarnRouteDeclaration> = {
   // Catalogue
-  "GET /strategies": ["earn:read"],
-  "GET /strategies/:strategyId": ["earn:read"],
+  "GET /strategies": keyless("earn:read"),
+  "GET /strategies/:strategyId": keyless("earn:read"),
   // External-wallet per-owner reads (no wallets:read: end-user wallets carry
   // no custody bindings — see the router comment)
-  "GET /external-wallet/positions/summary": ["earn:read"],
-  "GET /external-wallet/positions": ["earn:read"],
-  "GET /external-wallet/movements": ["earn:read"],
-  "GET /external-wallet/movements/:movementId": ["earn:read"],
-  "GET /external-wallet/earnings": ["earn:read"],
+  "GET /external-wallet/positions/summary": keyed("earn:read"),
+  "GET /external-wallet/positions": keyed("earn:read"),
+  "GET /external-wallet/movements": keyed("earn:read"),
+  "GET /external-wallet/movements/:movementId": keyed("earn:read"),
+  "GET /external-wallet/earnings": keyed("earn:read"),
   // Custody vault money + reads
-  "POST /vault-deposits": ["earn:write", "wallets:read"],
-  "POST /vault-deposit-previews": ["earn:read"],
-  "GET /vault-deposits": ["earn:read", "wallets:read"],
-  "GET /vault-deposits/:movementId": ["earn:read", "wallets:read"],
-  "POST /vault-withdrawals": ["earn:write", "wallets:read"],
-  "POST /vault-withdrawal-previews": ["earn:read", "wallets:read"],
-  "GET /vault-withdrawals": ["earn:read", "wallets:read"],
-  "GET /vault-withdrawals/:movementId": ["earn:read", "wallets:read"],
-  "GET /vault-positions": ["earn:read", "wallets:read"],
-  "GET /vault-share-reconciliation": ["earn:read", "wallets:read"],
+  "POST /vault-deposits": keyed("earn:write", "wallets:read"),
+  "POST /vault-deposit-previews": keyless("earn:read"),
+  "GET /vault-deposits": keyed("earn:read", "wallets:read"),
+  "GET /vault-deposits/:movementId": keyed("earn:read", "wallets:read"),
+  "POST /vault-withdrawals": keyed("earn:write", "wallets:read"),
+  "POST /vault-withdrawal-previews": keyed("earn:read", "wallets:read"),
+  "GET /vault-withdrawals": keyed("earn:read", "wallets:read"),
+  "GET /vault-withdrawals/:movementId": keyed("earn:read", "wallets:read"),
+  "GET /vault-positions": keyed("earn:read", "wallets:read"),
+  "GET /vault-share-reconciliation": keyed("earn:read", "wallets:read"),
   // External-wallet money (customer signs; the owner's signature is the final
   // authorization, so no wallets:read and no policy gate — router comment)
-  "POST /external-wallet/deposit-transactions": ["earn:write"],
-  "POST /external-wallet/deposits": ["earn:write"],
-  "POST /external-wallet/withdrawal-previews": ["earn:read"],
-  "POST /external-wallet/withdrawal-transactions": ["earn:write"],
-  "POST /external-wallet/withdrawals": ["earn:write"],
+  "POST /external-wallet/deposit-transactions": keyless("earn:write"),
+  "POST /external-wallet/deposits": keyed("earn:write"),
+  "POST /external-wallet/withdrawal-previews": keyless("earn:read"),
+  "POST /external-wallet/withdrawal-transactions": keyless("earn:write"),
+  "POST /external-wallet/withdrawals": keyed("earn:write"),
   // Unified feed
-  "GET /movements": ["earn:read", "wallets:read"],
+  "GET /movements": keyed("earn:read", "wallets:read"),
   // Managed programs
-  "GET /programs": ["earn:read"],
-  "POST /programs": ["earn:write"],
-  "GET /programs/:programId": ["earn:read"],
-  "PUT /programs/:programId": ["earn:write"],
-  "GET /programs/:programId/deposits": ["earn:read"],
-  "POST /programs/:programId/withdrawal-preview": ["earn:read"],
-  "POST /programs/:programId/withdrawals": ["earn:write"],
-  "GET /programs/:programId/withdrawals": ["earn:read"],
-  "GET /programs/:programId/withdrawals/:withdrawalRef": ["earn:read"],
+  "GET /programs": keyed("earn:read"),
+  "POST /programs": keyed("earn:write"),
+  "GET /programs/:programId": keyed("earn:read"),
+  "PUT /programs/:programId": keyed("earn:write"),
+  "GET /programs/:programId/deposits": keyed("earn:read"),
+  "POST /programs/:programId/withdrawal-preview": keyed("earn:read"),
+  "POST /programs/:programId/withdrawals": keyed("earn:write"),
+  "GET /programs/:programId/withdrawals": keyed("earn:read"),
+  "GET /programs/:programId/withdrawals/:withdrawalRef": keyed("earn:read"),
 };
 
 const ALL_EARN_SCOPES = ["earn:read", "earn:write", "wallets:read"] as const satisfies Permission[];
@@ -142,13 +151,31 @@ function requestAsSession(route: string, sessionId: string, projectId: string) {
   );
 }
 
+function requestAnonymously(route: string) {
+  const { method, path } = requestPath(route);
+  return app.request(
+    path,
+    {
+      method,
+      headers: {
+        "x-forwarded-for": uniqueClientIp(),
+        ...(method === "GET" ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(method === "GET" ? {} : { body: "{}" }),
+    },
+    env
+  );
+}
+
 const ROUTES = Object.keys(EARN_ROUTE_SCOPES).sort();
+const KEYLESS_ROUTES = ROUTES.filter((route) => EARN_ROUTE_SCOPES[route]?.tier === "keyless");
+const KEYED_ROUTES = ROUTES.filter((route) => EARN_ROUTE_SCOPES[route]?.tier === "keyed");
 
 /** The declared scopes for a route in the table (routes come from its keys). */
 function scopesFor(route: string): readonly Permission[] {
-  const scopes = EARN_ROUTE_SCOPES[route];
-  if (!scopes) throw new Error(`no scopes declared for ${route}`);
-  return scopes;
+  const declaration = EARN_ROUTE_SCOPES[route];
+  if (!declaration) throw new Error(`no tier declared for ${route}`);
+  return declaration.scopes;
 }
 
 /** One key per distinct permission set the matrix exercises. */
@@ -163,10 +190,10 @@ function permissionSetId(permissions: readonly Permission[]): string {
 
 const PERMISSION_SETS = new Map<string, readonly Permission[]>();
 PERMISSION_SETS.set(permissionSetId(ALL_EARN_SCOPES), ALL_EARN_SCOPES);
-for (const scopes of Object.values(EARN_ROUTE_SCOPES)) {
-  PERMISSION_SETS.set(permissionSetId(scopes), scopes);
-  for (const dropped of scopes) {
-    const subset = scopes.filter((scope) => scope !== dropped);
+for (const declaration of Object.values(EARN_ROUTE_SCOPES)) {
+  PERMISSION_SETS.set(permissionSetId(declaration.scopes), declaration.scopes);
+  for (const dropped of declaration.scopes) {
+    const subset = declaration.scopes.filter((scope) => scope !== dropped);
     PERMISSION_SETS.set(permissionSetId(subset), subset);
   }
 }
@@ -204,6 +231,41 @@ describe("earn route inventory", () => {
   it("declares every live route in the scope table (a new route fails until added)", () => {
     expect(extractRoutes(earnRoutes)).toEqual(ROUTES);
   });
+});
+
+describe("route tier conformance", () => {
+  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
+    "$route admits an anonymous caller",
+    async ({ route }) => {
+      const res = await requestAnonymously(route);
+
+      expect(res.status, `${route} unexpectedly required authentication`).not.toBe(401);
+      expect(res.status, `${route} unexpectedly required permissions`).not.toBe(403);
+    }
+  );
+
+  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
+    "$route rejects an invalid presented API key instead of silently downgrading",
+    async ({ route }) => {
+      const res = await requestAsKey(route, "sk_test_unknown_key");
+
+      expect(res.status, route).toBe(401);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code, route).toBe("INVALID_API_KEY");
+    }
+  );
+
+  it.each(KEYED_ROUTES.map((route) => ({ route })))(
+    "$route refuses an anonymous caller before its handler",
+    async ({ route }) => {
+      const res = await requestAnonymously(route);
+
+      expect(res.status, route).toBe(401);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code, route).toBe("UNAUTHORIZED");
+      expect(body.error.message.toLowerCase(), route).toContain("api key");
+    }
+  );
 });
 
 describe("scope conformance: a key missing exactly one declared scope is refused", () => {

@@ -49,22 +49,17 @@ export interface ClerkAuthContext {
 }
 
 /**
- * Get authenticated API key context from request.
- * Use this in protected routes instead of c.get("apiKey")!
+ * Get the normalized auth context when the request authenticated through any
+ * supported mode. Optional routes use this to preserve keyed behavior without
+ * manufacturing an identity for anonymous callers.
  *
  * This provides:
  * 1. Type safety without non-null assertions
  * 2. A defensive runtime check (should never fail in protected routes)
  * 3. Clear error if auth middleware wasn't applied
  *
- * @throws AppError with UNAUTHORIZED if auth is not present
- * @example
- * ```ts
- * const auth = getAuth(c);
- * const orgId = auth.organizationId; // No ! needed
- * ```
  */
-export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
+export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | null {
   const apiKey = c.get("apiKey");
   if (apiKey) {
     return {
@@ -126,6 +121,16 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     };
   }
 
+  return null;
+}
+
+/**
+ * Require the normalized auth context. Protected routes use this instead of
+ * non-null assertions so a missing middleware remains a typed 401.
+ */
+export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
+  const auth = getOptionalAuth(c);
+  if (auth) return auth;
   throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 

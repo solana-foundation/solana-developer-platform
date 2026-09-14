@@ -216,7 +216,8 @@ holds the money and who signs:
   removed; see ADR 0002's 2026-09 addendum): a live `listStrategies` plus the
   portfolio-wallet capability (§4b) and a credential key pair. Copy this when
   SDP provisions a wallet and moves funds through the provider.
-- **Kamino: executing vault-direct, and keyless.** `kamino` id,
+- **Kamino: executing vault-direct, with a credential-free upstream and keyless
+  hosted builds.** `kamino` id,
   `KaminoEarnClient` (catalogue, no credential), the live-metrics capability
   (§4c), and *none* of the portfolio-wallet surface: the vaults are
   non-custodial, so `supportsPortfolioWallets` returning false is the finished
@@ -226,7 +227,7 @@ holds the money and who signs:
   signs and submits vault deposits and withdrawals from the organization's own
   custody wallet (§4d). Copy this for any provider SDP executes for.
 - **Veda: executing vault-direct with required live quotes.** Surfaced on
-  devnet, keyless, and executable through `VedaVaultDirectClient` in
+  devnet, backed by a credential-free upstream, and executable through `VedaVaultDirectClient` in
   `packages/sdp-veda`. Its deployment registry has one confirmed devnet Test
   Vault and a deliberately null mainnet entry. Both builders require explicit
   quote-derived floors, declared through the deposit and withdrawal slippage
@@ -246,9 +247,11 @@ holds the money and who signs:
   shelf to the PRO-1742 mirror, which in a devnet deployment only fills when
   the catalogue can reach mainnet (`SOLANA_MAINNET_RPC_URL`, below).
 
-Steps 5–8 below are the **credentialed** path; a provider on a public API
-skips most of them (see the keyless variant under the table). Step 10 and §4d
-apply only to providers SDP executes for.
+Steps 5–8 below are the **upstream-credentialed** path; a provider on a public
+API skips most of them (see the credential-free upstream variant under the
+table). Step 10 and §4d apply only to providers SDP executes for. This use of
+provider credentials is independent of whether an integrator sends an SDP API
+key to the hosted `/v1/earn` routes.
 
 | Step | File | What you add |
 |---|---|---|
@@ -267,7 +270,7 @@ apply only to providers SDP executes for.
 | 10. Execution wiring (executing providers only) | `packages/sdp-<id>` + `apps/sdp-api/src/services/earn-provider-registry.ts` + `apps/sdp-api/src/services/earn/execution-registry.ts` | The executing client lives in its own workspace package and registers TWICE in the API: the composition-root overlay in `earn-provider-registry.ts` (capability resolution for routes) and a branch in `resolveEarnExecutionClient` (the one place a provider id maps to an executing client; everything downstream narrows by capability, so no route edits). Plus workspace plumbing: `apps/sdp-api/package.json` and the Dockerfile's explicit package COPY list. Full walk in §4d. |
 | 11. Error contract (executing providers only) | Provider package error type + `apps/sdp-api/src/services/earn/vault-refusals.ts` | Emit the shared provider-neutral codes. Use `INVALID_AMOUNT`, `DEPOSIT_REFUSED`, `WITHDRAW_REFUSED`, or `COMPLIANCE_APPROVAL_REQUIRED` only for caller-actionable failures. Use `VAULT_UNREADABLE` for RPC outages, rate limits, missing live state, and other retryable read failures. The API maps those families to 400 and sanitized 503 responses respectively; unknown codes stay 500s. Never put RPC URLs, credentials, or raw transport messages in the public response. |
 
-### The keyless variant (public API or on-chain state: Kamino and Veda)
+### The credential-free upstream variant (public API or on-chain state: Kamino and Veda)
 
 A provider whose data API takes no credential does steps 1–4 unchanged, then:
 
@@ -286,11 +289,13 @@ A provider whose data API takes no credential does steps 1–4 unchanged, then:
 - **Add the id to `KEYLESS_EARN_PROVIDERS`** in
   `provider-availability.drift.test.ts`. The drift suite's inverse guard fails
   any provider that declares no credential keys unless it is named in that
-  set, so going keyless stays a decision someone makes on purpose.
+  set, so making an upstream credential-free stays a deliberate decision.
 
-Entitlement is unaffected: a keyless provider still defaults to disabled, since
-entitlement and configuration are separate gates. A catalogue-only provider
-simply never reaches the entitlement gate, which only guards money-in.
+Provider configuration and caller entitlement are separate gates. An
+authenticated request retains the organization's provider entitlement. The
+PRO-1943 anonymous catalogue, preview, and unsigned-build subset has no
+organization whose entitlement can be evaluated, so it relies on global
+provider surfacing, environment capability, and strategy admission instead.
 
 ### If the provider is not deployed on every cluster
 

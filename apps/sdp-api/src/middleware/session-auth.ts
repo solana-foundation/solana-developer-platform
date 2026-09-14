@@ -62,10 +62,8 @@ export function sessionAuthMiddleware() {
   };
 }
 
-/**
- * Optional session auth - doesn't fail if no session provided
- */
-export function optionalSessionAuth() {
+/** Authenticate a session when present, without requiring a session cookie. */
+export function optionalSessionAuth(options: { rejectInvalid?: boolean } = {}) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const sessionId = getCookie(c, SESSION_COOKIE_NAME);
 
@@ -90,7 +88,7 @@ export function optionalSessionAuth() {
       } catch (error) {
         // Ignore errors for optional auth, but never rate limiting — a
         // limited user must not proceed as anonymous.
-        if (error instanceof AppError && error.code === "RATE_LIMITED") {
+        if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
           throw error;
         }
       }

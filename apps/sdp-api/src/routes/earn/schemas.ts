@@ -420,9 +420,9 @@ export const earnVaultWithdrawalPreviewSchema = z.object({
 export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 
 // ---------------------------------------------------------------------------
-// External-wallet (caller-signed) vault flows (PRO-1722): SDP builds unsigned
-// transactions for a wallet it does not custody, and records the movement when
-// the signed transaction is submitted back.
+// External-wallet (caller-signed) vault flows (PRO-1722, PRO-1943): SDP builds
+// unsigned transactions for a wallet it does not custody. Only keyed builds
+// can be submitted back for a durable movement and SDP broadcast.
 // ---------------------------------------------------------------------------
 
 /** Same trim + isAddress convention as the payments destination schema. */
@@ -442,12 +442,11 @@ const solanaFeePayerAddressSchema = z.preprocess(
 );
 
 /**
- * The fee-payer field both external-wallet BUILD bodies share. Optional: the
- * owner pays everything when absent (the launch behavior). Present, the
- * partner's wallet pays the network fee — and the share-ATA rent an account
- * creation needs, the one-identity rule — and the built transaction requires
- * its signature alongside the owner's: co-sign server-side before submitting.
- * Sending the owner's own address is accepted and means the default.
+ * The fee-payer field both external-wallet BUILD bodies share. Keyed builds
+ * may name a partner wallet; anonymous builds require the owner. When present,
+ * the partner pays the network fee and share-account rent, and the transaction
+ * requires its signature alongside the owner's. Sending the owner's own
+ * address is accepted and normalizes to the default.
  */
 export const earnExternalWalletFeePayerShape = {
   feePayer: solanaFeePayerAddressSchema.optional(),
@@ -483,20 +482,50 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
   ...earnDepositSwapShape,
 });
 
-/**
- * Build one unsigned exit transaction for an external-wallet position. The
- * caller names its own POSITION, never a strategy and never a raw vault
- * address, for the same ADR 0002 exit-safety reason as the custody exit.
- */
-export const earnExternalWalletWithdrawalTransactionSchema = z.object({
-  /** The `earn_positions` row being exited. */
-  positionId: earnWithdrawalPositionIdSchema,
+/** Fields shared by the keyed position form and anonymous strategy form. */
+const earnExternalWalletWithdrawalFields = {
   /** Shares to redeem, decimal string in share units. */
   shares: earnWithdrawalSharesSchema,
   /** Same explicit output floor contract as the custody withdrawal builder. */
   minAmountOut: earnMinAmountOutSchema,
   ...earnExternalWalletFeePayerShape,
-});
+} as const;
+
+/**
+ * Authenticated callers keep the tenant position contract. Anonymous callers
+ * cannot safely resolve that identifier, so they name the global strategy and
+ * the owner that will sign instead. The strategy supplies the trusted vault
+ * and mint identity without reading tenant state.
+ */
+export const earnExternalWalletWithdrawalTransactionSchema = z.union([
+  z.object({
+    /** The caller's tenant-scoped `earn_positions` row. */
+    positionId: earnWithdrawalPositionIdSchema,
+    ...earnExternalWalletWithdrawalFields,
+  }),
+  z.object({
+    /** Catalogue strategy id, resolved to a vault address server-side. */
+    strategyId: z.string().min(1),
+    /** The external wallet that owns the shares and will sign the exit. */
+    ownerAddress: solanaOwnerAddressSchema,
+    ...earnExternalWalletWithdrawalFields,
+  }),
+]);
+
+export const earnExternalWalletWithdrawalPreviewSchema = z.union([
+  z.object({
+    /** The caller's tenant-scoped `earn_positions` row. */
+    positionId: earnWithdrawalPositionIdSchema,
+    shares: earnWithdrawalSharesSchema,
+  }),
+  z.object({
+    /** Catalogue strategy id, resolved to a vault address server-side. */
+    strategyId: z.string().min(1),
+    /** The external wallet that owns the shares. */
+    ownerAddress: solanaOwnerAddressSchema,
+    shares: earnWithdrawalSharesSchema,
+  }),
+]);
 
 /**
  * Submit the signed bytes back, both directions. `signedTransaction` is

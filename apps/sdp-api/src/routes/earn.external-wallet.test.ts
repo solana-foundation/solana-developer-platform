@@ -305,14 +305,16 @@ function submitResult(overrides: Record<string, unknown> = {}) {
 function post(
   path: string,
   body: Record<string, unknown>,
-  options: { idempotencyKey?: string | null; apiKey?: string } = {}
+  options: { idempotencyKey?: string | null; apiKey?: string | null } = {}
 ) {
   return app.request(
     `/v1/earn/external-wallet/${path}`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}`,
+        ...(options.apiKey === null
+          ? {}
+          : { Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}` }),
         "Content-Type": "application/json",
         ...(options.idempotencyKey == null ? {} : { "Idempotency-Key": options.idempotencyKey }),
       },
@@ -358,6 +360,25 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates", () => {
+  it("builds anonymously without tenant context or sponsorship", async () => {
+    const strategy = await seedStrategy();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { transaction: { ownerAddress: OWNER, amount: "25", sponsored: false } },
+    });
+    const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
+    expect(input).not.toHaveProperty("organizationId");
+    expect(input).not.toHaveProperty("projectId");
+    expect(input).not.toHaveProperty("feePayer");
+  });
+
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
@@ -456,6 +477,26 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         amount: "25",
       });
       expect(res.status).toBe(400);
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    });
+
+    it("refuses a separate fee payer on an anonymous build", async () => {
+      const strategy = await seedStrategy();
+      const res = await post(
+        "deposit-transactions",
+        {
+          strategyId: strategy.id,
+          ownerAddress: OWNER,
+          feePayer: FEE_PAYER,
+          amount: "25",
+        },
+        { apiKey: null }
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { message: expect.stringContaining("API key") },
+      });
       expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
     });
   });
@@ -893,6 +934,87 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 });
 
 describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
+  it("builds an anonymous exit from global strategy metadata", async () => {
+    const strategy = await seedStrategy();
+
+    const res = await post(
+      "withdrawal-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: {
+        transaction: {
+          strategyId: strategy.id,
+          ownerAddress: OWNER,
+          shares: "10",
+          sponsored: false,
+        },
+      },
+    });
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        positionId: null,
+        vaultAddress: strategy.provider_reference,
+        ownerAddress: OWNER,
+        tokenMint: USDC_MINT,
+        shareMint: SHARE_MINT,
+        shareAtaRentFunder: null,
+      })
+    );
+    const input = buildExternalWalletWithdrawalTransaction.mock.calls[0]?.[1];
+    expect(input).not.toHaveProperty("organizationId");
+    expect(input).not.toHaveProperty("projectId");
+  });
+
+  it("quotes an anonymous exit from the same global strategy locator", async () => {
+    const strategy = await seedStrategy();
+
+    const res = await post(
+      "withdrawal-previews",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { strategyId: strategy.id, assetsOut: "9.95", assetDecimals: 6 },
+    });
+    expect(quoteVaultWithdrawal).toHaveBeenCalledWith(expect.anything(), {
+      providerReference: strategy.provider_reference,
+      shares: "10",
+    });
+  });
+
+  it("does not let an anonymous caller resolve a tenant position id", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+    const res = await post(
+      "withdrawal-transactions",
+      { positionId, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(400);
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the authenticated exit body position-based", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const res = await post("withdrawal-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      shares: "10",
+    });
+
+    expect(res.status).toBe(400);
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["withdrawal preview", "withdrawal-previews"],
     ["withdrawal transaction", "withdrawal-transactions"],
@@ -989,6 +1111,21 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("minAmountOut");
     expect(body.error.message).toContain("jupiter_lend");
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("enforces the withdrawal floor on an anonymous build", async () => {
+    const strategy = await seedStrategy({ provider: "jupiter_lend" });
+    const res = await post(
+      "withdrawal-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining("minAmountOut") },
+    });
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
   });
 

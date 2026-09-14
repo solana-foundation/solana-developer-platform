@@ -206,15 +206,19 @@ async function seedProgram(): Promise<EarnProviderWalletRow> {
   return row;
 }
 
-function getEarn(path: string) {
+function getEarn(path: string, headers: Record<string, string> = {}) {
   return app.request(
     path,
     {
       method: "GET",
-      headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      headers: { Authorization: `Bearer ${TEST_API_KEY.raw}`, ...headers },
     },
     env
   );
+}
+
+function getEarnAnonymously(path: string, headers: Record<string, string> = {}) {
+  return app.request(path, { method: "GET", headers }, env);
 }
 
 function getEarnAsSession(path: string, projectId: string) {
@@ -454,6 +458,17 @@ describe("Earn routes — environment scoping", () => {
     const listBody = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
+
+  it("serves the deployment-scoped catalogue without resolving a tenant", async () => {
+    const sandbox = await seedStrategy();
+    await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+
+    const res = await getEarnAnonymously("/v1/earn/strategies");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { strategies: Array<{ id: string }> } };
+    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([sandbox.id]);
+  });
 });
 
 describe("Earn routes — session-caller environment resolution", () => {
@@ -500,6 +515,55 @@ describe("Earn routes — session-caller environment resolution", () => {
 // describe above alongside the PRO-1628 removals.
 
 describe("Earn routes — strategy catalogue", () => {
+  it("answers anonymous and keyed readers with the same public catalogue", async () => {
+    await seedAuth();
+    await seedStrategy();
+    const corsHeaders = { Origin: "http://localhost:3000" };
+
+    const anonymous = await getEarnAnonymously("/v1/earn/strategies", corsHeaders);
+    const keyed = await getEarn("/v1/earn/strategies", corsHeaders);
+
+    expect(anonymous.status).toBe(200);
+    expect(keyed.status).toBe(200);
+    const anonymousBody = (await anonymous.json()) as { data: unknown };
+    const keyedBody = (await keyed.json()) as { data: unknown };
+    expect(anonymousBody.data).toEqual(keyedBody.data);
+    expect(anonymous.headers.get("cache-control")).toBe(
+      "public, max-age=30, stale-while-revalidate=30"
+    );
+    expect(keyed.headers.get("cache-control")).toBe(anonymous.headers.get("cache-control"));
+    expect(anonymous.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(keyed.headers.get("access-control-allow-origin")).toBe(
+      anonymous.headers.get("access-control-allow-origin")
+    );
+  });
+
+  it("keeps hidden and unsurfaced strategies out of the anonymous catalogue", async () => {
+    const visible = await seedStrategy({ providerReference: "anonymous-visible-usdc" });
+    const hiddenByTerms = await seedStrategy({
+      providerReference: "anonymous-morpho-usdc",
+      name: "Morpho USDC",
+      underlyingSource: "morpho",
+    });
+    const hiddenByProvider = await seedStrategy({
+      provider: "ground",
+      providerReference: "anonymous-ground-usdc",
+      name: "Ground USDC",
+    });
+
+    const list = await getEarnAnonymously("/v1/earn/strategies");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number };
+    };
+    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
+    expect(body.data.total).toBe(1);
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByTerms.id}`)).status).toBe(404);
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByProvider.id}`)).status).toBe(
+      404
+    );
+  });
+
   it("returns the paginated list envelope and omits non-active strategies", async () => {
     await seedAuth();
     const active = await seedStrategy();

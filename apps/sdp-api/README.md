@@ -11,11 +11,12 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
 - **On/Off Ramps** — integrate fiat on/off-ramps via MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, or Stripe
+- **Earn:** discover yield strategies and build self-custodial deposit or withdrawal transactions
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 
 ## Public API Routes
 
-The API exposes these public REST endpoints (all require API key or session token):
+The API exposes these public REST endpoints. Most require an API key or session token. Earn catalogue, quote, and unsigned-build routes also accept anonymous requests; submission, positions, movements, and other control-plane routes remain authenticated.
 
 | Family | Path | Use Case |
 |---|---|---|
@@ -26,6 +27,7 @@ The API exposes these public REST endpoints (all require API key or session toke
 | **Compliance** | `POST /v1/compliance/*` | Screen addresses/transactions |
 | **Projects** | `POST/GET /v1/projects/*` | Manage API projects |
 | **API Keys** | `POST/GET /v1/api-keys/*` | Create and manage API keys |
+| **Earn** | `GET/POST /v1/earn/*` | Discover strategies, build transactions, and manage tracked positions |
 
 ## Internal Routes (Maintainers Only)
 
@@ -120,6 +122,13 @@ Kora is a fee-payment provider, not a signing provider. To use local Kora,
 set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL=http://127.0.0.1:8080`
 instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
+
+Keyless Earn requests use `SDP_ENVIRONMENT` (`sandbox` or `production`) when
+set, then fall back to the deployment environment. Anonymous quote and build
+traffic has a separate paid-upstream budget configured with
+`EARN_ANONYMOUS_RPC_MAX_REQUESTS` and
+`EARN_ANONYMOUS_RPC_WINDOW_SECONDS`. API-key requests continue to use their
+project environment and authenticated quota.
 
 ### Optional: Custody Integrations
 

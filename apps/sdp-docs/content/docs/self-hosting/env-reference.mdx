@@ -86,6 +86,9 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
+| `SDP_ENVIRONMENT` | deployment-derived | Environment for keyless Earn catalogue, quote, and build requests: `sandbox` or `production`. Authenticated requests always use their project environment. |
+| `EARN_ANONYMOUS_RPC_MAX_REQUESTS` | `20` | Paid-upstream calls allowed per anonymous client IP in one Earn RPC quota window. |
+| `EARN_ANONYMOUS_RPC_WINDOW_SECONDS` | `60` | Anonymous Earn RPC quota window in seconds. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
 for server-to-server calls. The browser-facing `NEXT_PUBLIC_*` URLs default to
