@@ -23,7 +23,7 @@ import {
   WalletCardsIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
@@ -96,6 +96,16 @@ import {
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
+import { useKaminoVaultAllocations } from "./kamino-allocations";
+import {
+  formatAllocationApy,
+  formatAllocationWeight,
+  formatKaminoAsOf,
+  hasKaminoAllocationContent,
+  kaminoAllocationsByWeight,
+  kaminoDeployedWeightPct,
+} from "./kamino-allocations-format";
+import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import {
   availableTreasuryCashForWallet,
   estimatedTreasuryApy,
@@ -730,6 +740,135 @@ function strategyNetworkRank(strategy: EarnStrategy): number {
   return 2;
 }
 
+function KaminoAllocationsTooltipContent({
+  allocations,
+  locale,
+}: {
+  allocations: KaminoVaultAllocations;
+  locale: string;
+}) {
+  const t = useTranslations();
+  const rows = kaminoAllocationsByWeight(allocations.allocations);
+  const asOfLabel = formatKaminoAsOf(allocations.asOf, locale);
+
+  return (
+    <span className="block">
+      <span className="mb-2 flex items-baseline justify-between gap-4">
+        <span className="font-medium">{t("DashboardMarkets.treasury.allocationsTitle")}</span>
+        {asOfLabel ? (
+          <span className="text-tertiary">
+            {t("DashboardMarkets.treasury.allocationsAsOf", { date: asOfLabel })}
+          </span>
+        ) : null}
+      </span>
+      <span className="grid grid-cols-[minmax(0,1fr)_2.75rem_5.5rem_3rem] gap-x-3 gap-y-1.5">
+        <span aria-hidden="true" className="text-tertiary">
+          {t("DashboardMarkets.treasury.allocationsToken")}
+        </span>
+        <span aria-hidden="true" className="text-right text-tertiary">
+          {t("DashboardMarkets.treasury.allocationsWeight")}
+        </span>
+        <span aria-hidden="true" className="text-right text-tertiary">
+          {t("DashboardMarkets.treasury.allocationsSupplied")}
+        </span>
+        <span aria-hidden="true" className="text-right text-tertiary">
+          {t("DashboardMarkets.treasury.allocationsSupplyApy")}
+        </span>
+        {rows.map((row) => {
+          const targetLabel = row.targetWeightPct
+            ? t("DashboardMarkets.treasury.allocationsTargetWeight", {
+                weight: formatAllocationWeight(row.targetWeightPct, locale),
+              })
+            : undefined;
+          return (
+            <Fragment key={row.reserve}>
+              <span className="min-w-0">
+                <span className="block truncate font-medium" title={row.symbol}>
+                  {row.symbol}
+                </span>
+                <span className="block truncate text-[11px] text-tertiary" title={row.marketName}>
+                  {row.marketName}
+                </span>
+              </span>
+              <span className="text-right tabular-nums" title={targetLabel}>
+                {formatAllocationWeight(row.actualPct, locale)}
+              </span>
+              <span className="text-right tabular-nums">
+                {formatUsd(row.suppliedUsd, locale, 2)}
+              </span>
+              <span className="text-right tabular-nums">
+                {formatAllocationApy(row.supplyApy, locale)}
+              </span>
+            </Fragment>
+          );
+        })}
+        {allocations.unallocated ? (
+          <Fragment key="unallocated">
+            <span className="text-tertiary">{t("DashboardMarkets.treasury.allocationsIdle")}</span>
+            <span className="text-right tabular-nums">
+              {formatAllocationWeight(allocations.unallocated.pct, locale)}
+            </span>
+            <span className="text-right tabular-nums">
+              {formatUsd(allocations.unallocated.usd, locale, 2)}
+            </span>
+            <span className="text-right tabular-nums">—</span>
+          </Fragment>
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The strategies table's "Information" cell. Kamino rows disclose how the
+ * vault's capital is deployed (the vault's own allocation weights, condensed
+ * behind a summary line); every other provider renders the same plain
+ * placeholder as an unavailable read, and issues no request.
+ */
+function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const vaultAddress = strategy.provider === "kamino" ? strategy.providerReference : undefined;
+  const { allocations, error, isLoading } = useKaminoVaultAllocations(vaultAddress);
+
+  const placeholder = (
+    <span className="text-sm text-tertiary" role="note">
+      —
+    </span>
+  );
+
+  if (isLoading) return <SkeletonBlock className="h-4 w-24 rounded-md" />;
+  if (error || !vaultAddress || !allocations || !hasKaminoAllocationContent(allocations)) {
+    return placeholder;
+  }
+
+  const deployedPct = kaminoDeployedWeightPct(allocations.unallocated?.pct);
+  if (deployedPct === undefined) return placeholder;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className="inline-flex items-center gap-1 rounded-md text-sm text-secondary transition-colors hover:text-primary"
+            type="button"
+          >
+            <span className="tabular-nums">
+              {t("DashboardMarkets.treasury.allocationsSummary", {
+                weight: formatAllocationWeight(deployedPct, locale),
+              })}
+            </span>
+            <InfoIcon aria-hidden="true" className="size-3.5 shrink-0 text-tertiary" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 text-xs leading-5">
+          <KaminoAllocationsTooltipContent allocations={allocations} locale={locale} />
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function StrategyDepositAction({
   availability,
   environment,
@@ -819,28 +958,29 @@ function StrategyTable({
     <div className="overflow-x-auto">
       <Table
         className="!rounded-none !border-0 [&_table]:table-fixed"
-        style={{ minWidth: "56rem" }}
+        style={{ minWidth: "64rem" }}
       >
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[26%]">{t("DashboardMarkets.treasury.position")}</TableHead>
-            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
-            <TableHead className="w-[16%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
+            <TableHead className="w-[22%]">{t("DashboardMarkets.treasury.position")}</TableHead>
+            <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
+            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
             <SortableNumericTableHead
-              className="w-[12%]"
+              className="w-[10%]"
               direction={strategySort.field === "apy" ? strategySort.direction : "none"}
               onToggle={() => toggleStrategySort("apy")}
             >
               {t("DashboardMarkets.treasury.apy")}
             </SortableNumericTableHead>
             <SortableNumericTableHead
-              className="w-[18%]"
+              className="w-[14%]"
               direction={strategySort.field === "tvl" ? strategySort.direction : "none"}
               onToggle={() => toggleStrategySort("tvl")}
             >
               {t("DashboardMarkets.treasury.tvl")}
             </SortableNumericTableHead>
-            <TableHead align="right" className="w-[14%]">
+            <TableHead className="w-[16%]">{t("DashboardMarkets.treasury.information")}</TableHead>
+            <TableHead align="right" className="w-[12%]">
               {t("DashboardMarkets.treasury.actions")}
             </TableHead>
           </TableRow>
@@ -896,6 +1036,9 @@ function StrategyTable({
                 </TableCell>
                 <TableCell className="text-sm text-primary tabular-nums">
                   {formatUsd(tvlUsd, locale, 2)}
+                </TableCell>
+                <TableCell>
+                  <StrategyInformationCell strategy={strategy} />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex flex-col items-end gap-2">

@@ -19,6 +19,14 @@ api/dashboard/markets/earn/
   provider-query.ts                  allowlisted query passthrough — lives at
                                      the earn/ ROOT because its importers sit
                                      at several depths under programs/
+  kamino-allocations/route.ts        NOT a proxy: the one route that fetches a
+                                     THIRD PARTY (Kamino's public allocations
+                                     endpoint) server-side for the Treasury
+                                     "Information" column, TTL-cached 45s and
+                                     zod-parsed through the schema module in
+                                     treasury-solutions/. Auth comes from the
+                                     proxy middleware; failures answer 502 so
+                                     the cell degrades to its placeholder.
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target
