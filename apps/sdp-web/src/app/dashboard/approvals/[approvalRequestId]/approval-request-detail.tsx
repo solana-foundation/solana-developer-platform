@@ -4,18 +4,24 @@ import type { WalletApprovalRequestSummary, WalletPolicyEvaluationDetail } from 
 import { Check, Copy, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import {
   type ApprovalAction,
+  type ApprovalActionResponse,
   buildApprovalActionPath,
   classifyApprovalActionResponse,
+  readApprovalActionResponse,
 } from "../approval-actions";
 import { ApprovalStatusBadge } from "../approval-request-shared";
 import {
+  type ApprovalExecutionState,
   approvalApiKeyLabel,
+  approvalBadgeStatus,
+  approvalExecutionState,
   approvalReason,
   approvalWalletLabel,
   formatApprovalDateTime,
@@ -59,17 +65,139 @@ const ADMISSION_ERROR_COPY = {
   provider_not_entitled: "DashboardApprovals.providerAccessDenied",
 } as const;
 
-const runtimeExecutionErrorSchema = z.object({
-  error: z.object({
-    details: z.object({
-      reason: z.enum([
-        "runtime_execution_paused",
-        "runtime_execution_unavailable",
-        "provider_not_entitled",
-      ]),
-    }),
-  }),
-});
+const EXECUTION_COPY = {
+  succeeded: "DashboardApprovals.executionSucceeded",
+  running: "DashboardApprovals.executionRunning",
+  not_run: "DashboardApprovals.executionNotRun",
+} as const satisfies Record<Exclude<ApprovalExecutionState, "failed">, MessageKey>;
+
+/** Either a catalog key or the API's own words, which are already user-facing. */
+type FeedbackMessage = { key: MessageKey } | { text: string };
+
+type DecisionFeedback =
+  | {
+      settled: true;
+      /** The decided request, or null when it has to be fetched again. */
+      request: WalletApprovalRequestSummary | null;
+      message: MessageKey;
+      tone: "success" | "error";
+    }
+  | { settled: false; message: FeedbackMessage; closeConfirmation: boolean };
+
+/**
+ * Maps a decision response to what the page does next. Settled outcomes show
+ * the latest request; refusals leave the request as it was. A refusal's own
+ * message names the rule the caller did not meet, so it wins over the generic
+ * role line.
+ */
+function decisionFeedback(
+  action: ApprovalAction,
+  result: ApprovalActionResponse
+): DecisionFeedback {
+  if (result.ok) {
+    return {
+      settled: true,
+      request: result.approvalRequest,
+      message: ACTION_COPY[action].success,
+      tone: "success",
+    };
+  }
+  const outcome = classifyApprovalActionResponse(result.status, result.reason);
+  switch (outcome) {
+    case "stale":
+      return {
+        settled: true,
+        request: null,
+        message: "DashboardApprovals.alreadyDecided",
+        tone: "error",
+      };
+    case "runtime_paused":
+    case "runtime_unavailable":
+    case "provider_not_entitled":
+      return {
+        settled: false,
+        message: { key: ADMISSION_ERROR_COPY[outcome] },
+        closeConfirmation: true,
+      };
+    case "forbidden":
+      return {
+        settled: false,
+        message: result.message
+          ? { text: result.message }
+          : { key: "DashboardApprovals.forbiddenDecision" },
+        closeConfirmation: true,
+      };
+    default:
+      return {
+        settled: false,
+        message: result.message
+          ? { text: result.message }
+          : { key: "DashboardApprovals.decisionFailed" },
+        closeConfirmation: false,
+      };
+  }
+}
+
+/** Holds the request on screen and runs approve, reject and cancel against it. */
+function useApprovalDecision(initialRequest: WalletApprovalRequestSummary) {
+  const t = useTranslations();
+  const [request, setRequest] = useState(initialRequest);
+  const [confirmation, setConfirmation] = useState<ApprovalAction | null>(null);
+  const [activeAction, setActiveAction] = useState<ApprovalAction | null>(null);
+
+  function showLatest(latest: WalletApprovalRequestSummary) {
+    setRequest(latest);
+    window.dispatchEvent(new Event("sdp:approval-requests-updated"));
+  }
+
+  async function refreshRequest(): Promise<WalletApprovalRequestSummary | null> {
+    try {
+      const response = await fetch(
+        `/api/dashboard/approval-requests/${encodeURIComponent(request.id)}`,
+        { cache: "no-store" }
+      );
+      const result = await readApprovalActionResponse(response);
+      if (result.ok && result.approvalRequest) {
+        showLatest(result.approvalRequest);
+        return result.approvalRequest;
+      }
+    } catch {
+      // The action feedback below remains the useful message when refresh also fails.
+    }
+    return null;
+  }
+
+  async function decide(action: ApprovalAction) {
+    setActiveAction(action);
+    try {
+      const response = await fetch(buildApprovalActionPath(request.id, action), { method: "POST" });
+      const feedback = decisionFeedback(action, await readApprovalActionResponse(response));
+      if (!feedback.settled) {
+        if (feedback.closeConfirmation) setConfirmation(null);
+        toast.error("key" in feedback.message ? t(feedback.message.key) : feedback.message.text);
+        return;
+      }
+      if (feedback.request) showLatest(feedback.request);
+      const latest = feedback.request ?? (await refreshRequest());
+      setConfirmation(null);
+      if (feedback.tone === "error") {
+        toast.error(t(feedback.message));
+      } else if (latest && approvalExecutionState(latest) === "failed") {
+        // Approving runs the operation in the same call. A run that failed must
+        // not be announced as a plain success.
+        toast.error(t("DashboardApprovals.approvedExecutionFailedToast"));
+      } else {
+        toast.success(t(feedback.message));
+      }
+    } catch {
+      toast.error(t("DashboardApprovals.decisionFailed"));
+    } finally {
+      setActiveAction(null);
+    }
+  }
+
+  return { request, confirmation, setConfirmation, activeAction, decide };
+}
 
 export function ApprovalRequestDetail({
   initialRequest,
@@ -79,96 +207,275 @@ export function ApprovalRequestDetail({
 }: ApprovalRequestDetailProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const [request, setRequest] = useState(initialRequest);
-  const [confirmation, setConfirmation] = useState<ApprovalAction | null>(null);
-  const [activeAction, setActiveAction] = useState<ApprovalAction | null>(null);
-  const isPending = request.status === "pending";
-  const controlsDisabled = Boolean(activeAction) || !isPending || !canDecide;
+  const { request, confirmation, setConfirmation, activeAction, decide } =
+    useApprovalDecision(initialRequest);
   const apiKeyLabel = approvalApiKeyLabel(
     request,
     apiKeyNames,
     t("DashboardApprovals.directRequest")
   );
 
-  async function refreshRequest(): Promise<WalletApprovalRequestSummary | null> {
-    try {
-      const response = await fetch(
-        `/api/dashboard/approval-requests/${encodeURIComponent(request.id)}`,
-        { cache: "no-store" }
-      );
-      const body = (await response.json().catch(() => null)) as {
-        data?: { approvalRequest?: WalletApprovalRequestSummary };
-      } | null;
-      const latest = body?.data?.approvalRequest;
-      if (response.ok && latest) {
-        setRequest(latest);
-        window.dispatchEvent(new Event("sdp:approval-requests-updated"));
-        return latest;
-      }
-    } catch {
-      // The action error below remains the useful feedback when refresh also fails.
-    }
-    return null;
+  return (
+    <div className="h-full overflow-y-auto px-3 pb-10 outline-none md:px-6">
+      <div className="mx-auto w-full max-w-[1500px] py-6">
+        <ApprovalRequestHeader
+          request={request}
+          canDecide={canDecide}
+          busy={Boolean(activeAction)}
+          onAction={setConfirmation}
+        />
+        <ApprovalRequestNotice request={request} canDecide={canDecide} locale={locale} />
+
+        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <ApprovalRequestSections
+            request={request}
+            evaluation={evaluation}
+            apiKeyLabel={apiKeyLabel}
+            locale={locale}
+          />
+          <ApprovalRequestMetadata
+            request={request}
+            evaluation={evaluation}
+            apiKeyLabel={apiKeyLabel}
+            locale={locale}
+          />
+        </div>
+      </div>
+
+      <ApprovalDecisionModal
+        action={confirmation}
+        isPending={Boolean(activeAction)}
+        onClose={() => setConfirmation(null)}
+        onConfirm={() => confirmation && decide(confirmation)}
+      />
+    </div>
+  );
+}
+
+function ApprovalRequestHeader({
+  request,
+  canDecide,
+  busy,
+  onAction,
+}: {
+  request: WalletApprovalRequestSummary;
+  canDecide: boolean;
+  busy: boolean;
+  onAction: (action: ApprovalAction) => void;
+}) {
+  const t = useTranslations();
+  const isPending = request.status === "pending";
+  // The API refuses a decision from whoever raised the request, so neither
+  // decision is offered to them. Withdrawing it stays theirs.
+  const canApproveOrReject = isPending && canDecide && !request.viewerIsRequester;
+
+  return (
+    <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border-default pb-6">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-3">
+          <ApprovalStatusBadge status={approvalBadgeStatus(request)} />
+          <span className="text-xs text-secondary">{shortApprovalIdentifier(request.id, 8)}</span>
+        </div>
+        <h1 className="mt-4 text-2xl font-medium text-primary sm:text-3xl">
+          {t("DashboardApprovals.reviewTitle", {
+            operation: formatApprovalLabel(request.operation.operationFamily),
+          })}
+        </h1>
+        {canApproveOrReject ? (
+          <p className="mt-2 max-w-2xl text-sm text-secondary">
+            {t("DashboardApprovals.reviewDescription")}
+          </p>
+        ) : null}
+      </div>
+
+      {isPending && canDecide ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onAction("cancel")}
+            disabled={busy}
+          >
+            {t("DashboardApprovals.cancel")}
+          </Button>
+          {canApproveOrReject ? (
+            <>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => onAction("reject")}
+                disabled={busy}
+                iconLeft={<X className="size-4" />}
+              >
+                {t("DashboardApprovals.reject")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => onAction("approve")}
+                disabled={busy}
+                iconLeft={<Check className="size-4" />}
+              >
+                {t("DashboardApprovals.approve")}
+              </Button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </header>
+  );
+}
+
+/**
+ * The one line under the header: who can decide a pending request, or what
+ * running an approved one did. Other statuses need nothing beyond the badge.
+ */
+function ApprovalRequestNotice({
+  request,
+  canDecide,
+  locale,
+}: {
+  request: WalletApprovalRequestSummary;
+  canDecide: boolean;
+  locale: string;
+}) {
+  const t = useTranslations();
+  if (request.status === "pending") {
+    if (canDecide && !request.viewerIsRequester) return null;
+    return (
+      <p className="border-b border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
+        {t(canDecide ? "DashboardApprovals.requesterCannotDecide" : "DashboardApprovals.viewOnly")}
+      </p>
+    );
   }
 
-  async function decide(action: ApprovalAction) {
-    setActiveAction(action);
-    try {
-      const response = await fetch(buildApprovalActionPath(request.id, action), { method: "POST" });
-      const body = (await response.json().catch(() => null)) as {
-        data?: { approvalRequest?: WalletApprovalRequestSummary };
-        error?: { message?: string } | string;
-      } | null;
+  const execution = approvalExecutionState(request);
+  if (!execution) return null;
+  const failed = execution === "failed";
+  const completedAt = request.operation.executionCompletedAt;
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b px-3 py-2 text-sm",
+        failed
+          ? "border-error-border bg-error-bg text-error"
+          : "border-border-default bg-fill-subtle text-secondary"
+      )}
+    >
+      <p className="min-w-0 break-words">
+        {failed
+          ? (request.operation.executionError ?? t("DashboardApprovals.executionErrorMissing"))
+          : t(EXECUTION_COPY[execution])}
+      </p>
+      {completedAt ? (
+        <time className="text-xs" dateTime={completedAt}>
+          {formatApprovalDateTime(completedAt, locale)}
+        </time>
+      ) : null}
+    </div>
+  );
+}
 
-      const runtimeError = runtimeExecutionErrorSchema.safeParse(body);
-      const outcome = classifyApprovalActionResponse(
-        response.status,
-        runtimeError.success ? runtimeError.data.error.details.reason : undefined
-      );
+function ApprovalRequestSections({
+  request,
+  evaluation,
+  apiKeyLabel,
+  locale,
+}: {
+  request: WalletApprovalRequestSummary;
+  evaluation: WalletPolicyEvaluationDetail | null;
+  apiKeyLabel: string;
+  locale: string;
+}) {
+  const t = useTranslations();
+  const { operation } = request;
+  return (
+    <main className="min-w-0 lg:pr-8">
+      <DetailSection title={t("DashboardApprovals.requestSection")}>
+        <DetailGrid>
+          <DetailValue label={t("DashboardApprovals.submittedBy")} value={apiKeyLabel} />
+          <DetailValue
+            label={t("DashboardApprovals.submittedAt")}
+            value={formatApprovalDateTime(request.createdAt, locale)}
+          />
+          <DetailValue
+            label={t("DashboardApprovals.expiresAt")}
+            value={formatApprovalDateTime(request.expiresAt, locale)}
+          />
+        </DetailGrid>
+      </DetailSection>
 
-      if (outcome === "success") {
-        if (body?.data?.approvalRequest) {
-          setRequest(body.data.approvalRequest);
-          window.dispatchEvent(new Event("sdp:approval-requests-updated"));
-        } else {
-          await refreshRequest();
-        }
-        setConfirmation(null);
-        toast.success(t(ACTION_COPY[action].success));
-        return;
-      }
+      <DetailSection title={t("DashboardApprovals.policyDecisionSection")}>
+        <DetailGrid>
+          <DetailValue
+            label={t("DashboardApprovals.policyDecision")}
+            value={formatApprovalLabel(
+              request.policyEvaluation?.decision ?? evaluation?.decision ?? "not_reported"
+            )}
+          />
+          <DetailValue
+            label={t("DashboardApprovals.reasonCode")}
+            value={formatApprovalLabel(
+              request.policyEvaluation?.reasonCode ?? evaluation?.reasonCode ?? "not_reported"
+            )}
+          />
+          <DetailValue
+            className="sm:col-span-2"
+            label={t("DashboardApprovals.policyReason")}
+            value={approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"))}
+          />
+        </DetailGrid>
+      </DetailSection>
 
-      if (
-        outcome === "runtime_paused" ||
-        outcome === "runtime_unavailable" ||
-        outcome === "provider_not_entitled"
-      ) {
-        setConfirmation(null);
-        toast.error(t(ADMISSION_ERROR_COPY[outcome]));
-        return;
-      }
+      <DetailSection title={t("DashboardApprovals.operationDetailsSection")}>
+        <DetailGrid>
+          <DetailValue
+            label={t("DashboardApprovals.operationFamily")}
+            value={formatApprovalLabel(operation.operationFamily)}
+          />
+          <DetailValue
+            label={t("DashboardApprovals.operationType")}
+            value={operation.operationType}
+          />
+          <DetailValue label={t("DashboardApprovals.amount")} value={operation.amount ?? "-"} />
+          <DetailValue label={t("DashboardApprovals.asset")} value={operation.asset ?? "-"} />
+          <DetailValue
+            className="sm:col-span-2"
+            label={t("DashboardApprovals.destination")}
+            value={operation.destination ?? "-"}
+            mono={Boolean(operation.destination)}
+          />
+          <DetailValue label={t("DashboardApprovals.source")} value={operation.source ?? "-"} />
+        </DetailGrid>
+      </DetailSection>
 
-      if (outcome === "stale") {
-        await refreshRequest();
-        setConfirmation(null);
-        toast.error(t("DashboardApprovals.alreadyDecided"));
-        return;
-      }
+      <DetailSection title={t("DashboardApprovals.matchedControlsSection")}>
+        <MatchedControls
+          rules={evaluation?.matchedRules ?? request.policyEvaluation?.matchedRules ?? []}
+        />
+      </DetailSection>
 
-      if (outcome === "forbidden") {
-        setConfirmation(null);
-        toast.error(t("DashboardApprovals.forbiddenDecision"));
-        return;
-      }
+      <DetailSection title={t("DashboardApprovals.timelineSection")} last>
+        <Timeline request={request} locale={locale} />
+      </DetailSection>
+    </main>
+  );
+}
 
-      const message = typeof body?.error === "string" ? body.error : body?.error?.message;
-      toast.error(message || t("DashboardApprovals.decisionFailed"));
-    } catch {
-      toast.error(t("DashboardApprovals.decisionFailed"));
-    } finally {
-      setActiveAction(null);
-    }
-  }
+function ApprovalRequestMetadata({
+  request,
+  evaluation,
+  apiKeyLabel,
+  locale,
+}: {
+  request: WalletApprovalRequestSummary;
+  evaluation: WalletPolicyEvaluationDetail | null;
+  apiKeyLabel: string;
+  locale: string;
+}) {
+  const t = useTranslations();
+  const walletAddress = request.wallet?.publicKey ?? request.operation.walletId;
+  const walletRevisionId = evaluation?.policyRevisions.wallet.evaluatedRevisionId;
+  const apiKeyRevisionId = evaluation?.policyRevisions.apiKey.evaluatedRevisionId;
 
   async function copyRequestId() {
     try {
@@ -180,243 +487,88 @@ export function ApprovalRequestDetail({
   }
 
   return (
-    <div className="h-full overflow-y-auto px-3 pb-10 outline-none md:px-6">
-      <div className="mx-auto w-full max-w-[1500px] py-6">
-        <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border-default pb-6">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <ApprovalStatusBadge status={request.status} />
-              <span className="text-xs text-secondary">
-                {shortApprovalIdentifier(request.id, 8)}
-              </span>
-            </div>
-            <h1 className="mt-4 text-2xl font-medium text-primary sm:text-3xl">
-              {t("DashboardApprovals.reviewTitle", {
-                operation: formatApprovalLabel(request.operation.operationFamily),
-              })}
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-secondary">
-              {t("DashboardApprovals.reviewDescription")}
-            </p>
-          </div>
-
-          {isPending && canDecide ? (
-            <div className="flex flex-wrap items-center gap-2">
+    <aside className="border-t border-border-default py-7 lg:border-t-0 lg:border-l lg:py-8 lg:pl-8">
+      <div className="lg:sticky lg:top-6">
+        <h2 className="text-base font-medium text-primary">{t("DashboardApprovals.metadata")}</h2>
+        <dl className="mt-4 divide-y divide-border-default border-y border-border-default">
+          <MetadataRow
+            label={t("DashboardApprovals.wallet")}
+            value={approvalWalletLabel(request)}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.walletAddress")}
+            value={shortApprovalIdentifier(walletAddress)}
+            title={walletAddress}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.requester")}
+            value={shortApprovalIdentifier(request.requestedBy)}
+            title={request.requestedBy ?? undefined}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.apiKey")}
+            value={apiKeyLabel}
+            title={request.operation.apiKeyId ?? undefined}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.walletRevision")}
+            value={shortApprovalIdentifier(walletRevisionId)}
+            title={walletRevisionId ?? undefined}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.apiKeyRevision")}
+            value={shortApprovalIdentifier(apiKeyRevisionId)}
+            title={apiKeyRevisionId ?? undefined}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.provider")}
+            value={request.provider || t("DashboardApprovals.notReported")}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.providerStatus")}
+            value={formatApprovalLabel(request.operation.status)}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.requestId")}
+            value={shortApprovalIdentifier(request.id, 8)}
+            title={request.id}
+            action={
               <Button
                 type="button"
-                variant="outline"
-                onClick={() => setConfirmation("cancel")}
-                disabled={controlsDisabled}
+                variant="ghost"
+                size="icon-xs"
+                onClick={copyRequestId}
+                aria-label={t("DashboardApprovals.copyRequestId")}
+                title={t("DashboardApprovals.copyRequestId")}
               >
-                {t("DashboardApprovals.cancel")}
+                <Copy className="size-3" />
               </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setConfirmation("reject")}
-                disabled={controlsDisabled}
-                iconLeft={<X className="size-4" />}
-              >
-                {t("DashboardApprovals.reject")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setConfirmation("approve")}
-                disabled={controlsDisabled}
-                iconLeft={<Check className="size-4" />}
-              >
-                {t("DashboardApprovals.approve")}
-              </Button>
-            </div>
+            }
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.submitted")}
+            value={formatApprovalDateTime(request.createdAt, locale)}
+          />
+          <MetadataRow
+            label={t("DashboardApprovals.currentStatus")}
+            value={formatApprovalLabel(request.status)}
+          />
+          {request.resolvedBy ? (
+            <MetadataRow
+              label={t("DashboardApprovals.resolvedBy")}
+              value={shortApprovalIdentifier(request.resolvedBy)}
+              title={request.resolvedBy}
+            />
           ) : null}
-        </header>
-
-        {isPending && !canDecide ? (
-          <p className="border-b border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-            {t("DashboardApprovals.viewOnly")}
-          </p>
-        ) : null}
-
-        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <main className="min-w-0 lg:pr-8">
-            <DetailSection title={t("DashboardApprovals.requestSection")}>
-              <DetailGrid>
-                <DetailValue label={t("DashboardApprovals.submittedBy")} value={apiKeyLabel} />
-                <DetailValue
-                  label={t("DashboardApprovals.submittedAt")}
-                  value={formatApprovalDateTime(request.createdAt, locale)}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.expiresAt")}
-                  value={formatApprovalDateTime(request.expiresAt, locale)}
-                />
-              </DetailGrid>
-            </DetailSection>
-
-            <DetailSection title={t("DashboardApprovals.policyDecisionSection")}>
-              <DetailGrid>
-                <DetailValue
-                  label={t("DashboardApprovals.policyDecision")}
-                  value={formatApprovalLabel(
-                    request.policyEvaluation?.decision ?? evaluation?.decision ?? "not_reported"
-                  )}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.reasonCode")}
-                  value={formatApprovalLabel(
-                    request.policyEvaluation?.reasonCode ?? evaluation?.reasonCode ?? "not_reported"
-                  )}
-                />
-                <DetailValue
-                  className="sm:col-span-2"
-                  label={t("DashboardApprovals.policyReason")}
-                  value={approvalReason(request, t("DashboardApprovals.approvalRequiredByPolicy"))}
-                />
-              </DetailGrid>
-            </DetailSection>
-
-            <DetailSection title={t("DashboardApprovals.operationDetailsSection")}>
-              <DetailGrid>
-                <DetailValue
-                  label={t("DashboardApprovals.operationFamily")}
-                  value={formatApprovalLabel(request.operation.operationFamily)}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.operationType")}
-                  value={request.operation.operationType}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.amount")}
-                  value={request.operation.amount ?? "-"}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.asset")}
-                  value={request.operation.asset ?? "-"}
-                />
-                <DetailValue
-                  className="sm:col-span-2"
-                  label={t("DashboardApprovals.destination")}
-                  value={request.operation.destination ?? "-"}
-                  mono={Boolean(request.operation.destination)}
-                />
-                <DetailValue
-                  label={t("DashboardApprovals.source")}
-                  value={request.operation.source ?? "-"}
-                />
-              </DetailGrid>
-            </DetailSection>
-
-            <DetailSection title={t("DashboardApprovals.matchedControlsSection")}>
-              <MatchedControls
-                rules={evaluation?.matchedRules ?? request.policyEvaluation?.matchedRules ?? []}
-              />
-            </DetailSection>
-
-            <DetailSection title={t("DashboardApprovals.timelineSection")} last>
-              <Timeline request={request} locale={locale} />
-            </DetailSection>
-          </main>
-
-          <aside className="border-t border-border-default py-7 lg:border-t-0 lg:border-l lg:py-8 lg:pl-8">
-            <div className="lg:sticky lg:top-6">
-              <h2 className="text-base font-medium text-primary">
-                {t("DashboardApprovals.metadata")}
-              </h2>
-              <dl className="mt-4 divide-y divide-border-default border-y border-border-default">
-                <MetadataRow
-                  label={t("DashboardApprovals.wallet")}
-                  value={approvalWalletLabel(request)}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.walletAddress")}
-                  value={shortApprovalIdentifier(
-                    request.wallet?.publicKey ?? request.operation.walletId
-                  )}
-                  title={request.wallet?.publicKey ?? request.operation.walletId}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.requester")}
-                  value={shortApprovalIdentifier(request.requestedBy)}
-                  title={request.requestedBy ?? undefined}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.apiKey")}
-                  value={apiKeyLabel}
-                  title={request.operation.apiKeyId ?? undefined}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.walletRevision")}
-                  value={shortApprovalIdentifier(
-                    evaluation?.policyRevisions.wallet.evaluatedRevisionId
-                  )}
-                  title={evaluation?.policyRevisions.wallet.evaluatedRevisionId ?? undefined}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.apiKeyRevision")}
-                  value={shortApprovalIdentifier(
-                    evaluation?.policyRevisions.apiKey.evaluatedRevisionId
-                  )}
-                  title={evaluation?.policyRevisions.apiKey.evaluatedRevisionId ?? undefined}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.provider")}
-                  value={request.provider || t("DashboardApprovals.notReported")}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.providerStatus")}
-                  value={formatApprovalLabel(request.operation.status)}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.requestId")}
-                  value={shortApprovalIdentifier(request.id, 8)}
-                  title={request.id}
-                  action={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={copyRequestId}
-                      aria-label={t("DashboardApprovals.copyRequestId")}
-                      title={t("DashboardApprovals.copyRequestId")}
-                    >
-                      <Copy className="size-3" />
-                    </Button>
-                  }
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.submitted")}
-                  value={formatApprovalDateTime(request.createdAt, locale)}
-                />
-                <MetadataRow
-                  label={t("DashboardApprovals.currentStatus")}
-                  value={formatApprovalLabel(request.status)}
-                />
-                {request.resolvedBy ? (
-                  <MetadataRow
-                    label={t("DashboardApprovals.resolvedBy")}
-                    value={shortApprovalIdentifier(request.resolvedBy)}
-                    title={request.resolvedBy}
-                  />
-                ) : null}
-                {request.resolvedAt ? (
-                  <MetadataRow
-                    label={t("DashboardApprovals.resolvedAt")}
-                    value={formatApprovalDateTime(request.resolvedAt, locale)}
-                  />
-                ) : null}
-              </dl>
-            </div>
-          </aside>
-        </div>
+          {request.resolvedAt ? (
+            <MetadataRow
+              label={t("DashboardApprovals.resolvedAt")}
+              value={formatApprovalDateTime(request.resolvedAt, locale)}
+            />
+          ) : null}
+        </dl>
       </div>
-
-      <ApprovalDecisionModal
-        action={confirmation}
-        isPending={Boolean(activeAction)}
-        onClose={() => setConfirmation(null)}
-        onConfirm={() => confirmation && decide(confirmation)}
-      />
-    </div>
+    </aside>
   );
 }
 

@@ -18,7 +18,10 @@ import { WalletPolicyEnforcementService } from "@/services/policy/enforcement.se
 import type { AppContext } from "../context";
 import { approvalRequestListQuerySchema, approvalRequestParamsSchema } from "../schemas";
 
-function mapApprovalRequest(row: ApprovalRequestDetailRow): WalletApprovalRequestSummary {
+function mapApprovalRequest(
+  row: ApprovalRequestDetailRow,
+  viewerIsRequester: boolean
+): WalletApprovalRequestSummary {
   return {
     id: row.approval_request_id,
     organizationId: row.organization_id,
@@ -72,6 +75,7 @@ function mapApprovalRequest(row: ApprovalRequestDetailRow): WalletApprovalReques
           evaluatedAt: row.evaluated_at ?? row.approval_created_at,
         }
       : null,
+    viewerIsRequester,
   };
 }
 
@@ -98,6 +102,33 @@ async function actorOwnerId(
   return (await repository.getApiKeyCreatorUserId(principalId)) ?? principalId;
 }
 
+/**
+ * Answers "did the caller raise this request?" for one request or many.
+ *
+ * A user and every API key they created are the same owner. Comparing only
+ * principal ids would let one person request with a session and approve with
+ * their API key (or the reverse). The decision routes refuse on this answer, and
+ * reads report it, so the dashboard never offers a decision the API will refuse.
+ * Owner lookups are memoized, so a list costs one lookup per distinct requester.
+ */
+function requesterCheck(
+  repository: ReturnType<typeof createPolicyRepository>,
+  auth: ApiKeyContext
+): (requestedBy: string | null) => Promise<boolean> {
+  const owners = new Map<string, Promise<string>>();
+  const ownerOf = (principalId: string) => {
+    const cached = owners.get(principalId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const lookup = actorOwnerId(repository, principalId);
+    owners.set(principalId, lookup);
+    return lookup;
+  };
+  return async (requestedBy) =>
+    requestedBy !== null && (await ownerOf(requestedBy)) === (await ownerOf(actorId(auth)));
+}
+
 async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
   const auth = getAuth(c);
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
@@ -111,7 +142,7 @@ async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
     throw notFound("Approval request");
   }
 
-  return mapApprovalRequest(row);
+  return mapApprovalRequest(row, await requesterCheck(repository, auth)(row.requested_by));
 }
 
 async function assertCanResolveApprovalRequest(
@@ -130,17 +161,9 @@ async function assertCanResolveApprovalRequest(
     throw notFound("Approval request");
   }
 
-  // Treat a user and every API key they created as the same owner. Comparing
-  // only principal IDs would let one person request with a session and approve
-  // with their API key (or the reverse).
-  const resolverOwnerId = await actorOwnerId(repository, actorId(auth));
-  const requesterOwnerId = row.requested_by
-    ? await actorOwnerId(repository, row.requested_by)
-    : null;
-
   // Requesters may withdraw their own pending request, but they cannot satisfy
   // or reject the approval gate they created.
-  if (requesterOwnerId && requesterOwnerId === resolverOwnerId) {
+  if (await requesterCheck(repository, auth)(row.requested_by)) {
     if (action === "cancel") {
       return row;
     }
@@ -174,18 +197,19 @@ export const listApprovalRequests = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
   }
 
-  const rows = await createPolicyRepository(
-    c.env,
-    getRequestTenantScope(c)
-  ).listApprovalRequestDetails({
+  const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
+  const rows = await repository.listApprovalRequestDetails({
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     status: parsed.data.status,
     limit: parsed.data.limit,
   });
 
+  const isRequester = requesterCheck(repository, auth);
   return success(c, {
-    approvalRequests: rows.map(mapApprovalRequest),
+    approvalRequests: await Promise.all(
+      rows.map(async (row) => mapApprovalRequest(row, await isRequester(row.requested_by)))
+    ),
   });
 };
 

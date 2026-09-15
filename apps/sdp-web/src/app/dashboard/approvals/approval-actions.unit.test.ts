@@ -4,6 +4,7 @@ import {
   buildApprovalActionPath,
   classifyApprovalActionResponse,
   isApprovalAction,
+  readApprovalActionResponse,
 } from "./approval-actions";
 
 describe("approval actions", () => {
@@ -41,5 +42,70 @@ describe("approval actions", () => {
     expect(classifyApprovalActionResponse(409, "other_reason")).toBe("stale");
     expect(classifyApprovalActionResponse(200, "runtime_execution_paused")).toBe("success");
     expect(classifyApprovalActionResponse(500, "runtime_execution_unavailable")).toBe("failure");
+  });
+});
+
+describe("readApprovalActionResponse", () => {
+  const approvalRequest = {
+    id: "apr_1",
+    status: "approved",
+    viewerIsRequester: false,
+    operation: {
+      status: "failed",
+      executionCompletedAt: "2026-09-11T10:05:00.000Z",
+      executionError: "Provider quote/session reference has expired; create a new quote.",
+    },
+  };
+
+  it("returns the request from a successful response", async () => {
+    const result = await readApprovalActionResponse(Response.json({ data: { approvalRequest } }));
+    expect(result).toEqual({ ok: true, approvalRequest });
+  });
+
+  it("returns no request when a successful body does not carry a valid one", async () => {
+    for (const body of [
+      { data: {} },
+      { data: { approvalRequest: { ...approvalRequest, status: "done" } } },
+      { data: { approvalRequest: { ...approvalRequest, operation: { status: "failed" } } } },
+    ]) {
+      expect(await readApprovalActionResponse(Response.json(body))).toEqual({
+        ok: true,
+        approvalRequest: null,
+      });
+    }
+    expect(await readApprovalActionResponse(new Response("not json", { status: 200 }))).toEqual({
+      ok: true,
+      approvalRequest: null,
+    });
+  });
+
+  it("keeps the API's message and reason from an error response", async () => {
+    expect(
+      await readApprovalActionResponse(
+        Response.json(
+          {
+            error: {
+              message: "Runtime refusal",
+              details: { reason: "runtime_execution_paused" },
+            },
+          },
+          { status: 403 }
+        )
+      )
+    ).toEqual({
+      ok: false,
+      status: 403,
+      message: "Runtime refusal",
+      reason: "runtime_execution_paused",
+    });
+    expect(
+      await readApprovalActionResponse(Response.json({ error: "Upstream failed" }, { status: 502 }))
+    ).toEqual({ ok: false, status: 502, message: "Upstream failed", reason: undefined });
+    expect(await readApprovalActionResponse(new Response("<html>", { status: 500 }))).toEqual({
+      ok: false,
+      status: 500,
+      message: null,
+      reason: undefined,
+    });
   });
 });

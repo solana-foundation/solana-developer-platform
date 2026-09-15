@@ -1,23 +1,25 @@
-import type { ApprovalRequestStatus } from "@sdp/types";
+import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { formatApprovalLabel } from "./approval-requests.data";
+import { type ApprovalBadgeStatus, formatApprovalLabel } from "./approval-requests.data";
 
-const STATUS_CLASS_NAMES: Record<ApprovalRequestStatus, string> = {
+const STATUS_CLASS_NAMES: Record<ApprovalBadgeStatus, string> = {
   pending: "border-warning-border bg-warning-bg text-warning",
   approved: "border-success-border bg-success-bg text-success",
   rejected: "border-error-border bg-error-bg text-error",
   canceled: "border-border-default bg-fill-subtle text-secondary",
   expired: "border-border-default bg-fill-subtle text-secondary",
   failed: "border-error-border bg-error-bg text-error",
+  execution_failed: "border-error-border bg-error-bg text-error",
 };
 
 export function ApprovalStatusBadge({
   status,
   className,
 }: {
-  status: ApprovalRequestStatus;
+  status: ApprovalBadgeStatus;
   className?: string;
 }) {
+  const t = useTranslations();
   return (
     <span
       className={cn(
@@ -26,7 +28,9 @@ export function ApprovalStatusBadge({
         className
       )}
     >
-      {formatApprovalLabel(status)}
+      {status === "execution_failed"
+        ? t("DashboardApprovals.executionFailedStatus")
+        : formatApprovalLabel(status)}
     </span>
   );
 }
