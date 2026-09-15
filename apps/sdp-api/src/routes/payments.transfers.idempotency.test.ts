@@ -404,7 +404,10 @@ describe("Payments routes — transfer idempotency", () => {
     const stored = await readTransferRow(firstJson.data.transfer.id);
     expect(stored.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     if (!stored.idempotency_fingerprint) throw new Error("missing idempotency fingerprint");
-    expect(JSON.parse(stored.idempotency_fingerprint)).not.toHaveProperty("custodyWalletId");
+    expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
+      "custodyWalletId",
+      TEST_CUSTODY_WALLET_ID
+    );
     expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
   });
