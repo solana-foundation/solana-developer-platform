@@ -27,8 +27,22 @@ import { DFNS_PROVIDER_LABEL } from "./client";
 const SIGNATURE_POLL_INTERVAL_MS = 600;
 const SIGNATURE_MAX_POLL_ATTEMPTS = 50;
 const SOLANA_BLOCKCHAIN_KIND = "Solana";
-const TERMINAL_SUCCESS_STATUSES = new Set<DfnsSignatureStatus>(["Signed", "Confirmed"]);
-const TERMINAL_FAILURE_STATUSES = new Set<DfnsSignatureStatus>(["Failed", "Rejected"]);
+const SUCCESSFUL_DFNS_SIGNATURE_STATUSES = [
+  "Signed",
+  "Confirmed",
+] as const satisfies readonly DfnsSignatureStatus[];
+const FAILED_DFNS_SIGNATURE_STATUSES = [
+  "Failed",
+  "Rejected",
+] as const satisfies readonly DfnsSignatureStatus[];
+
+function isSuccessfulDfnsSignatureStatus(status: DfnsSignatureStatus): boolean {
+  return SUCCESSFUL_DFNS_SIGNATURE_STATUSES.some((candidate) => candidate === status);
+}
+
+function isFailedDfnsSignatureStatus(status: DfnsSignatureStatus): boolean {
+  return FAILED_DFNS_SIGNATURE_STATUSES.some((candidate) => candidate === status);
+}
 type SignatureBytes = Parameters<typeof createSignatureDictionary>[0]["signature"];
 
 export interface DfnsSignerConfig {
@@ -288,11 +302,11 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     for (let attempt = 0; attempt <= SIGNATURE_MAX_POLL_ATTEMPTS; attempt += 1) {
       const status = current.status;
 
-      if (!status || TERMINAL_SUCCESS_STATUSES.has(status)) {
+      if (!status || isSuccessfulDfnsSignatureStatus(status)) {
         return current;
       }
 
-      if (TERMINAL_FAILURE_STATUSES.has(status)) {
+      if (isFailedDfnsSignatureStatus(status)) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request failed (${status})${
             current.reason ? `: ${current.reason}` : ""

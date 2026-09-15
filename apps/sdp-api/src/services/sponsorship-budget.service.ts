@@ -6,6 +6,11 @@ import {
 } from "@sdp/payments/fee-payment";
 import { createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
+  isReplayableSponsorshipReservationStatus,
+  isSubmittedSponsorshipReservationStatus,
+  POST_SIGNING_SPONSORSHIP_RESERVATION_STATUSES,
+} from "@sdp/types";
+import {
   type Address,
   assertIsFullySignedTransaction,
   assertIsSignature,
@@ -342,7 +347,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       submittedResult !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
+      !(await this.durablyAdvanced(reservation, [...POST_SIGNING_SPONSORSHIP_RESERVATION_STATUSES]))
     ) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -389,7 +394,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       result !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
+      !(await this.durablyAdvanced(reservation, [...POST_SIGNING_SPONSORSHIP_RESERVATION_STATUSES]))
     ) {
       return this.accountingUnavailable(
         resolveNetwork(this.env),
@@ -493,7 +498,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       : false;
     if (
       durableReplay &&
-      ["signed", "submitted", "committed"].includes(durableReplay.status) &&
+      isReplayableSponsorshipReservationStatus(durableReplay.status) &&
       hasOperationResponse
     ) {
       return {
@@ -701,7 +706,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       }
       if (
         existing &&
-        ["signed", "submitted", "committed"].includes(existing.status) &&
+        isReplayableSponsorshipReservationStatus(existing.status) &&
         reservationHasResponse(existing, operation)
       ) {
         return {
@@ -960,9 +965,11 @@ function reservationHasResponse(
 ): boolean {
   if (operation === "sign") {
     return (
-      ["signed", "submitted", "committed"].includes(reservation.status) &&
+      isReplayableSponsorshipReservationStatus(reservation.status) &&
       Boolean(reservation.signedTransaction)
     );
   }
-  return ["submitted", "committed"].includes(reservation.status) && Boolean(reservation.signature);
+  return (
+    isSubmittedSponsorshipReservationStatus(reservation.status) && Boolean(reservation.signature)
+  );
 }

@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { getSettleDvpInstruction } from "@sdp/dvp";
+import { CLOSED_DVP_TRADE_STATUSES } from "@sdp/types";
 import {
   address,
   getCompiledTransactionMessageDecoder,
@@ -225,7 +226,7 @@ describe("closeDvpTrade", () => {
   });
 
   it("refuses to settle a trade that is already closed", async () => {
-    for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
+    for (const status of CLOSED_DVP_TRADE_STATUSES) {
       await expect(closeDvpTrade(context, trade({ status }), "settle", settlement)).rejects.toThrow(
         /can no longer be settled/
       );

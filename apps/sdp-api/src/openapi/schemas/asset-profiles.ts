@@ -1,4 +1,4 @@
-import { ASSET_CATEGORIES, ASSET_TYPES } from "@sdp/types";
+import { ASSET_CATEGORIES, ASSET_PROFILE_STATUSES, ASSET_TYPES } from "@sdp/types";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetProfileIdSchema as assetProfileIdSchemaBase,
@@ -85,7 +85,7 @@ export const assetProfileSchema = withOpenApi(
     }),
     issuanceMetadata: issuanceMetadataSchema,
     publicMetadata: publicTokenMetadataSchema,
-    status: withOpenApi(z.enum(["active", "archived"]), {
+    status: withOpenApi(z.enum(ASSET_PROFILE_STATUSES), {
       description: "Asset profile status.",
       example: "active",
     }),

@@ -7,6 +7,7 @@ import type {
   PolicyRule,
   RotateApiKeyResponse,
 } from "@sdp/types";
+import { isRevokedApiKeyStatus } from "@sdp/types";
 import type { Context } from "hono";
 import { asTransactionalClient, getDb } from "@/db";
 import {
@@ -901,7 +902,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     throw notFound("API key");
   }
 
-  if (existing.status === "deactivated" || existing.status === "revoked") {
+  if (isRevokedApiKeyStatus(existing.status)) {
     // Already revoked in Postgres, but the cache may still say otherwise
     // (e.g. the earlier revocation crashed between the DB write and the
     // cache write). Re-assert before reporting success.

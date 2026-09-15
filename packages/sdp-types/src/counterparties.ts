@@ -96,7 +96,8 @@ export const COUNTERPARTY_INDUSTRY_SECTORS = [
   "WEAPONS",
 ] as const;
 
-export type CounterpartyStatus = "active" | "archived";
+export const COUNTERPARTY_STATUSES = ["active", "archived"] as const;
+export type CounterpartyStatus = (typeof COUNTERPARTY_STATUSES)[number];
 
 export type CounterpartyProviderData = Record<string, unknown>;
 
@@ -148,7 +149,14 @@ export interface ListCounterpartiesResponse {
 export const COUNTERPARTY_ACCOUNT_KINDS = ["crypto_wallet"] as const;
 export type CounterpartyAccountKind = (typeof COUNTERPARTY_ACCOUNT_KINDS)[number];
 
-export type CounterpartyAccountStatus = "active" | "archived";
+export const COUNTERPARTY_ACCOUNT_STATUSES = ["active", "archived"] as const;
+export type CounterpartyAccountStatus = (typeof COUNTERPARTY_ACCOUNT_STATUSES)[number];
+export const COUNTERPARTY_PROVIDER_ACCOUNT_KINDS = [
+  "customer_link",
+  "payout_account",
+  "funding_wallet",
+  "merchant_wallet",
+] as const;
 
 export type CounterpartyAccountDetails = Record<string, unknown>;
 

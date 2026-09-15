@@ -1,6 +1,10 @@
 import { createRpc } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
+import {
+  isBlockhashBoundEarnMovementStatus,
+  isObservedEarnMovementStatus,
+  type SdpEnvironment,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -84,9 +88,6 @@ const GRACE_MS = 30 * 60_000;
 const FOLLOW_UP_WINDOW_MS = 30 * 60_000;
 /** Orphans older than this are escalated so the alert rule can key on it. */
 const ESCALATE_AFTER_MS = 60 * 60_000;
-
-const OBSERVED_STATUSES = new Set(["confirmed", "finalized"]);
-const IN_FLIGHT_STATUSES = new Set(["requested", "submitted"]);
 
 export interface EarnSplitSwapDetectionStats {
   checked: number;
@@ -209,7 +210,7 @@ async function judgeAdvisory(
 
   // 1. The partner is demonstrably still working: a deposit in flight, or a
   //    recent unconsumed follow-up build.
-  if (deposits.some((row) => IN_FLIGHT_STATUSES.has(row.status))) {
+  if (deposits.some((row) => isBlockhashBoundEarnMovementStatus(row.status))) {
     stats.followUpPending += 1;
     await advisories.recordObservation({
       advisoryId: advisory.id,
@@ -246,7 +247,7 @@ async function judgeAdvisory(
   //    Definitive whatever else the wallet holds, so it is judged before the
   //    balance read (and spares the RPC call).
   const floor = BigInt(advisory.swap_min_out_atoms);
-  const committed = deposits.filter((row) => OBSERVED_STATUSES.has(row.status));
+  const committed = deposits.filter((row) => isObservedEarnMovementStatus(row.status));
   const exactFollowUps = committed.filter(
     (row) =>
       row.vault_address === advisory.vault_address &&

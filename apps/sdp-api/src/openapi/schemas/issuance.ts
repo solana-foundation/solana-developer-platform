@@ -1,4 +1,8 @@
-import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+import {
+  EXTENSION_IMPLEMENTATION_STATUSES,
+  TOKEN_TRANSACTION_STATUSES,
+  TOKEN_TRANSACTION_TYPES,
+} from "@sdp/types";
 
 import {
   assetCategorySchema as assetCategorySchemaBase,
@@ -1198,7 +1202,7 @@ export const removeTokenAllowlistQuerySchema = removeAllowlistQuerySchemaBase.ex
 // Template Schemas
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const extensionStatusSchema = z.enum(["implemented", "disabled", "planned"]).openapi({
+export const extensionStatusSchema = z.enum(EXTENSION_IMPLEMENTATION_STATUSES).openapi({
   description: "Extension implementation status.",
   example: "implemented",
 });

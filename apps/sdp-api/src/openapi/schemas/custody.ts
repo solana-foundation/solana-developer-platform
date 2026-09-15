@@ -1,3 +1,4 @@
+import { CUSTODY_CONFIG_STATUSES, CUSTODY_WALLET_STATUSES } from "@sdp/types";
 import {
   approvalRequestStatusSchema as approvalRequestStatusSchemaBase,
   createWalletSchema as createWalletSchemaBase,
@@ -232,7 +233,7 @@ const custodyWalletBaseSchema = z.object({
     ])
     .nullable()
     .openapi({ description: "Optional wallet purpose.", example: "root" }),
-  status: z.enum(["active", "inactive"]).openapi({
+  status: z.enum(CUSTODY_CONFIG_STATUSES).openapi({
     description: "Wallet status.",
     example: "active",
   }),
@@ -374,7 +375,7 @@ const orgCustodyConfigBaseSchema = z.object({
   defaultWalletId: walletIdParamSchema
     .nullable()
     .openapi({ description: "Default provider wallet ID." }),
-  status: z.enum(["active", "inactive"]).openapi({
+  status: z.enum(CUSTODY_WALLET_STATUSES).openapi({
     description: "Config status.",
     example: "active",
   }),

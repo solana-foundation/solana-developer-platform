@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import { requireEnv } from "@sdp/payments/ramps/shared";
+import { UNFINISHED_CUSTODY_CONNECTION_STATUSES } from "@sdp/types";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -975,8 +976,8 @@ async function classifySetup(
       context.projectId,
       { lock }
     );
-    const unfinished = connections.find(
-      (connection) => connection.status === "pending" || connection.status === "checking"
+    const unfinished = connections.find((connection) =>
+      UNFINISHED_CUSTODY_CONNECTION_STATUSES.some((status) => status === connection.status)
     );
     if (unfinished) {
       throw new SetupConflict("unfinished_installation_exists", unfinished.id);

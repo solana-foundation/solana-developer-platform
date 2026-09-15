@@ -1,13 +1,5 @@
+import { isApprovalRequestStatus } from "@sdp/types";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-
-const APPROVAL_STATUSES = new Set([
-  "pending",
-  "approved",
-  "rejected",
-  "canceled",
-  "expired",
-  "failed",
-]);
 
 export async function GET(request: Request) {
   const incoming = new URL(request.url);
@@ -15,7 +7,7 @@ export async function GET(request: Request) {
   const status = incoming.searchParams.get("status");
   const limit = incoming.searchParams.get("limit");
 
-  if (status && APPROVAL_STATUSES.has(status)) query.set("status", status);
+  if (status && isApprovalRequestStatus(status)) query.set("status", status);
   if (limit && /^\d{1,3}$/.test(limit)) query.set("limit", limit);
 
   return proxyToSdpApi({

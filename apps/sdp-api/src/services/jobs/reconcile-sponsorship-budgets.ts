@@ -1,5 +1,9 @@
 import type { SponsorshipProviderConfiguration } from "@sdp/payments/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  DURABLY_RESOLVED_SPONSORSHIP_RESERVATION_STATUSES,
+  LEDGER_SETTLED_SPONSORSHIP_RESERVATION_STATUSES,
+} from "@sdp/types";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -224,7 +228,9 @@ async function reconcileReservation(input: {
   isBlockhashValid: SponsorshipReconciliationDependencies["isBlockhashValid"] & {};
 }): Promise<ReconciliationOutcome> {
   const { reservation, repository, budgetRedis } = input;
-  if (reservation.status === "committed" || reservation.status === "released") {
+  if (
+    LEDGER_SETTLED_SPONSORSHIP_RESERVATION_STATUSES.some((status) => status === reservation.status)
+  ) {
     if (reservation.actualLamports === null) {
       throw new Error("Terminal sponsorship reservation omitted actual lamports");
     }
@@ -427,9 +433,9 @@ async function persistAmbiguousCharge(input: {
   const concurrentlyResolved =
     current !== null &&
     (current.attempt !== reservation.attempt ||
-      current.status === "charged_unknown" ||
-      current.status === "committed" ||
-      current.status === "released");
+      DURABLY_RESOLVED_SPONSORSHIP_RESERVATION_STATUSES.some(
+        (status) => status === current.status
+      ));
   if (concurrentlyResolved) {
     return;
   }

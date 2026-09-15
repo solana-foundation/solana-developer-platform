@@ -1,3 +1,4 @@
+import { SETTLED_OPERATION_STATES } from "@sdp/helius-rings";
 import type { DatabaseExecutor } from "@/db";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 
@@ -145,9 +146,9 @@ export class HeliusRingsConnectionStore {
       `SELECT id
          FROM helius_rings_operations
         WHERE organization_id = ? AND project_id = ? AND rings_connection_id = ?
-          AND state NOT IN ('completed', 'voided')
+          AND NOT (state = ANY(?::text[]))
         LIMIT 1`,
-      [organizationId, projectId, connectionId]
+      [organizationId, projectId, connectionId, [...SETTLED_OPERATION_STATES]]
     );
     return row !== null;
   }

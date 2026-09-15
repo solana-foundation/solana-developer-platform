@@ -9,6 +9,7 @@
  * trade is over or the tab is not being watched.
  */
 
+import { DVP_TRADE_STATUSES, isClosedDvpTradeStatus } from "@sdp/types";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTrade } from "./dvp-trade";
@@ -56,13 +57,16 @@ describe("useDvpTradeWatch", () => {
 
   // Settled and cancelled are terminal. Polling one asks the same question
   // forever and can never get a different answer.
-  it.each(["settled", "cancelled"])("stops once the trade is %s", (status) => {
-    render(<Probe value={trade(status)} />);
+  it.each(DVP_TRADE_STATUSES.filter(isClosedDvpTradeStatus))(
+    "stops once the trade is %s",
+    (status) => {
+      render(<Probe value={trade(status)} />);
 
-    vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(30_000);
 
-    expect(refresh).not.toHaveBeenCalled();
-  });
+      expect(refresh).not.toHaveBeenCalled();
+    }
+  );
 
   it("does not poll a tab nobody is looking at", () => {
     render(<Probe value={trade("funded")} />);

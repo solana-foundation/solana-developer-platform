@@ -9,11 +9,36 @@ export type SdpEnvironment = "sandbox" | "production";
 
 export type ApiKeyEnvironment = SdpEnvironment;
 
-export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
+export const API_KEY_STATUSES = ["active", "revoked", "expired", "deactivated"] as const;
+export type ApiKeyStatus = (typeof API_KEY_STATUSES)[number];
+/** API key statuses that deny access as an explicit revocation. */
+export const REVOKED_API_KEY_STATUSES = [
+  "revoked",
+  "deactivated",
+] as const satisfies readonly ApiKeyStatus[];
+
+/** Reports whether an API key has been explicitly revoked. */
+export function isRevokedApiKeyStatus(status: string): boolean {
+  return REVOKED_API_KEY_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Whether each API key status can never become active again. */
+export const API_KEY_STATUS_TERMINAL = {
+  active: false,
+  revoked: true,
+  expired: true,
+  deactivated: true,
+} as const satisfies Record<ApiKeyStatus, boolean>;
+
+/** Reports whether an API key can never become active again. */
+export function isTerminalApiKeyStatus(status: ApiKeyStatus): boolean {
+  return API_KEY_STATUS_TERMINAL[status];
+}
 
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 
-export type ApiKeyWalletScope = "all" | "selected";
+export const API_KEY_WALLET_SCOPES = ["all", "selected"] as const;
+export type ApiKeyWalletScope = (typeof API_KEY_WALLET_SCOPES)[number];
 
 export interface ApiKeyWalletBinding {
   walletId: string;

@@ -1,6 +1,6 @@
 import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+import { TOKEN_STATUSES, TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 import { isSignature } from "@solana/kit";
 import { z } from "zod";
 import {
@@ -399,7 +399,7 @@ export const listTokensQuerySchema = z.object({
   // can't use the trigram index and fall back to a filtered scan, which is fine
   // at this table's per-project size.
   search: z.string().trim().max(100).optional(),
-  status: z.enum(["pending", "active", "paused", "revoked"]).optional(),
+  status: z.enum(TOKEN_STATUSES).optional(),
   deploymentStatus: tokenDeploymentStatusSchema.optional(),
   // Exact match against the stored template id. Not an enum: rows predating the
   // current catalog hold legacy ids (`rwa`, `tokenized_security`), and the

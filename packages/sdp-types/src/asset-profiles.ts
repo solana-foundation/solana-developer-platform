@@ -211,7 +211,8 @@ export type PublicTokenMetadata = Record<string, unknown>;
 
 // --- API models ------------------------------------------------------------
 
-export type AssetProfileStatus = "active" | "archived";
+export const ASSET_PROFILE_STATUSES = ["active", "archived"] as const;
+export type AssetProfileStatus = (typeof ASSET_PROFILE_STATUSES)[number];
 
 export interface AssetProfile {
   id: string;

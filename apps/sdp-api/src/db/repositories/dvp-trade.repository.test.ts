@@ -1,3 +1,4 @@
+import { DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address, signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -599,7 +600,7 @@ describe("DvpTradeRepository (postgres)", () => {
       ).resolves.toMatchObject({ id: "dvp_trade_test_2" });
     });
 
-    it.each(["creating", "created"] as const)(
+    it.each(DVP_TRADE_STATUSES.filter((status) => status !== "create_failed"))(
       "refuses to free a %s trade's key",
       async (status) => {
         const created = await repo.create(tradeInsert({ idempotencyKey: "key-1" }));

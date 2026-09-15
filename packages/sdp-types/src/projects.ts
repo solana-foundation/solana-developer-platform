@@ -9,7 +9,8 @@ import type { ProjectRole } from "./permissions";
 
 export type ProjectEnvironment = "sandbox" | "production";
 
-export type ProjectStatus = "active" | "archived";
+export const PROJECT_STATUSES = ["active", "archived"] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export const PROJECT_RPC_PROVIDERS = [...ORGANIZATION_RPC_PROVIDERS, "custom"] as const;
 export type ProjectRpcProvider = (typeof PROJECT_RPC_PROVIDERS)[number];

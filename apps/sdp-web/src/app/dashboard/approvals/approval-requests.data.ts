@@ -1,5 +1,7 @@
 import {
+  APPROVAL_REQUEST_STATUSES,
   type ApprovalRequestStatus,
+  isPendingApprovalRequestStatus,
   WALLET_OPERATION_FAMILIES,
   type WalletApprovalRequestSummary,
   type WalletOperationFamily,
@@ -9,13 +11,9 @@ export const APPROVAL_INBOX_PAGE_SIZE = 25;
 
 export const APPROVAL_OPERATION_FAMILIES = WALLET_OPERATION_FAMILIES;
 
-export const APPROVAL_HISTORY_STATUSES = [
-  "approved",
-  "rejected",
-  "canceled",
-  "expired",
-  "failed",
-] as const satisfies readonly ApprovalRequestStatus[];
+export const APPROVAL_HISTORY_STATUSES = APPROVAL_REQUEST_STATUSES.filter(
+  (status) => !isPendingApprovalRequestStatus(status)
+);
 
 export type ApprovalInboxTab = "pending" | "history";
 

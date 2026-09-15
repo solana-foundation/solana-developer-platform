@@ -1,3 +1,4 @@
+import { OPERATION_STATES } from "./constants";
 import type { FailureCode, OperationState } from "./types";
 
 /**
@@ -83,3 +84,7 @@ export function failEdgeFor(current: OperationState): FailEdge | null {
   const transition = TRANSITIONS.find((t) => t.from === current && t.onFail !== undefined);
   return transition?.onFail ?? null;
 }
+
+export const OPERATION_STATES_WITHOUT_FAIL_EDGE = OPERATION_STATES.filter(
+  (state) => failEdgeFor(state) === null
+);

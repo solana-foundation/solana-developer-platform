@@ -8,7 +8,10 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
+  PAYMENT_TRANSFER_BATCH_STATUSES,
   PAYMENT_TRANSFER_STATUSES,
+  POLICY_DEFAULT_ACTIONS,
   type PolicyRule,
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
@@ -175,7 +178,7 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
 
 export const updateWalletPolicyBaseSchema = z.object({
   commitMessage: z.string().trim().min(1).max(500).optional(),
-  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+  defaultAction: z.enum(POLICY_DEFAULT_ACTIONS),
   rules: z.array(walletPolicyRuleSchema).max(100),
   // Stale-write guard. Every update activates a revision, so the active
   // revision id versions the whole policy; null means "expect no profile yet".
@@ -577,22 +580,9 @@ export const transferBatchIdParamsSchema = z.object({
   batchId: z.string().min(1),
 });
 
-export const transferBatchStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "partially_failed",
-  "archived",
-]);
+export const transferBatchStatusSchema = z.enum(PAYMENT_TRANSFER_BATCH_STATUSES);
 
-export const transferBatchRecipientStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "archived",
-]);
+export const transferBatchRecipientStatusSchema = z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES);
 
 export const transferBatchRecipientSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),

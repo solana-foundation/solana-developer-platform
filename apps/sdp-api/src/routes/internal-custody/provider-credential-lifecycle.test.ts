@@ -1,3 +1,7 @@
+import {
+  HISTORICAL_PROVIDER_CREDENTIAL_STATUSES,
+  NON_DEACTIVATED_CONNECTION_STATUSES,
+} from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -608,7 +612,7 @@ describe("provider credential lifecycle", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
-  it.each(["pending", "checking", "failed", "active"])(
+  it.each(NON_DEACTIVATED_CONNECTION_STATUSES)(
     "blocks Credential deactivation while a %s Connection references it, even without active wallets",
     async (status) => {
       const db = getDb(env);
@@ -788,7 +792,7 @@ describe("provider credential lifecycle", () => {
       }
     );
 
-    it.each(["failed_validation", "retired"])("preserves %s history", async (status) => {
+    it.each(HISTORICAL_PROVIDER_CREDENTIAL_STATUSES)("preserves %s history", async (status) => {
       const db = getDb(env);
       await db.execute("UPDATE provider_credentials SET status = ? WHERE id = ?", [
         status,

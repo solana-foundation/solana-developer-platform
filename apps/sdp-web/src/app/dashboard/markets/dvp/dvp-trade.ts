@@ -11,6 +11,8 @@ import {
   type DvpLegOutcome,
   type DvpTradeSide,
   type DvpTradeStatus,
+  isClosedDvpTradeStatus,
+  isOpenDvpTradeStatus,
 } from "@sdp/types";
 
 export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
@@ -95,18 +97,9 @@ export interface DvpTrade {
   yourSide?: DvpTradeSide;
 }
 
-/** Statuses where the trade is over and its escrows no longer exist on chain. */
-const CLOSED_STATUSES: ReadonlySet<DvpTradeStatus> = new Set([
-  "settled",
-  "cancelled",
-  "rejected",
-  "closed_unknown",
-  "create_failed",
-]);
-
 /** Whether the trade is finished and its escrows can no longer receive funds. */
 export function isDvpTradeClosed(trade: { status: DvpTradeStatus }): boolean {
-  return CLOSED_STATUSES.has(trade.status);
+  return isClosedDvpTradeStatus(trade.status);
 }
 
 /** What the reconciler last saw in an escrow. Null before it has looked. */
@@ -139,16 +132,8 @@ export function custodiedSidesOf(trade: Pick<DvpTrade, "legs">): DvpTradeSide[] 
   return DVP_TRADE_SIDES.filter((side) => trade.legs[side].party.wallet !== null);
 }
 
-/** Statuses a trade can still be settled or cancelled from. */
-const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
-  "created",
-  "partially_funded",
-  "funded",
-  "expired",
-]);
-
 export function isDvpTradeOpen(trade: DvpTrade): boolean {
-  return OPEN.has(trade.status);
+  return isOpenDvpTradeStatus(trade.status);
 }
 
 /**

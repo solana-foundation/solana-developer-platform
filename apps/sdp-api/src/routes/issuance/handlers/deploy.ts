@@ -10,7 +10,7 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { isSuccessfulTokenTransactionStatus, SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -282,7 +282,7 @@ async function resolveCompletedDeployReplay(params: {
   ) {
     throw conflict("Idempotency key already used with different request payload");
   }
-  if ((replay.status !== "confirmed" && replay.status !== "finalized") || !replay.signature) {
+  if (!isSuccessfulTokenTransactionStatus(replay.status) || !replay.signature) {
     throw conflict("Deployment transaction is not settled");
   }
 

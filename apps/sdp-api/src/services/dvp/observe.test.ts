@@ -1,3 +1,8 @@
+import {
+  OPEN_DVP_TRADE_STATUSES,
+  RECENTLY_CLOSED_DVP_TRADE_STATUSES,
+  RESOLVED_CLOSED_DVP_TRADE_STATUSES,
+} from "@sdp/types";
 import { signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { type DvpTradeExpectation, type DvpTradeObservation, deriveDvpTradeState } from "./observe";
@@ -165,7 +170,7 @@ describe("deriveDvpTradeState", () => {
   });
 
   describe("closure", () => {
-    it.each(["settled", "cancelled", "rejected"] as const)("uses a decoded %s close", (status) => {
+    it.each(RESOLVED_CLOSED_DVP_TRADE_STATUSES)("uses a decoded %s close", (status) => {
       const result = deriveDvpTradeState(
         observation({
           tradeAccountExists: false,
@@ -179,7 +184,7 @@ describe("deriveDvpTradeState", () => {
 
     // The sweep may find no history on the tick the account vanishes and write
     // closed_unknown; the decode on a later tick is strictly better informed.
-    it.each(["settled", "cancelled", "rejected"] as const)(
+    it.each(RESOLVED_CLOSED_DVP_TRADE_STATUSES)(
       "lifts closed_unknown to a decoded %s close",
       (status) => {
         const result = deriveDvpTradeState(
@@ -195,7 +200,7 @@ describe("deriveDvpTradeState", () => {
     );
 
     it("reports closed_unknown for a trade whose account has gone", () => {
-      for (const status of ["created", "partially_funded", "funded", "expired"] as const) {
+      for (const status of OPEN_DVP_TRADE_STATUSES) {
         const result = deriveDvpTradeState(
           observation({ tradeAccountExists: false }),
           trade({ status }),
@@ -219,7 +224,7 @@ describe("deriveDvpTradeState", () => {
     });
 
     it("never walks a terminal trade backwards", () => {
-      for (const status of ["settled", "cancelled", "rejected", "closed_unknown"] as const) {
+      for (const status of RECENTLY_CLOSED_DVP_TRADE_STATUSES) {
         const result = deriveDvpTradeState(
           observation({ tradeAccountExists: false }),
           trade({ status }),

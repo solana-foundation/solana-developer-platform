@@ -17,6 +17,7 @@ import type {
   SwitchProviderOptionsResponse,
   SwitchSigningResponse,
 } from "@sdp/types";
+import { APPROVAL_REQUEST_STATUSES } from "@sdp/types";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
@@ -193,14 +194,7 @@ export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
 // Approval Requests
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const approvalRequestStatusSchema = z.enum([
-  "pending",
-  "approved",
-  "rejected",
-  "canceled",
-  "expired",
-  "failed",
-]);
+export const approvalRequestStatusSchema = z.enum(APPROVAL_REQUEST_STATUSES);
 
 export const approvalRequestListQuerySchema = z.object({
   status: approvalRequestStatusSchema.optional(),

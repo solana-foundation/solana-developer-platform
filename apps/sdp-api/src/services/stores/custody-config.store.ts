@@ -6,6 +6,7 @@
  */
 
 import type { SignStatus } from "@sdp/custody/signing";
+import { ACTIVE_DVP_TRADE_STATUSES } from "@sdp/types";
 import type { PreparedStatement } from "@/db";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
@@ -505,14 +506,13 @@ export class CustodyConfigStore implements SigningConfigStore {
       return new Map();
     }
 
-    const placeholders = configIds.map(() => "?").join(", ");
     const { results } = await this.db
       .prepare(
         `SELECT * FROM custody_wallets
-         WHERE custody_config_id IN (${placeholders}) AND status = 'active'
+         WHERE custody_config_id = ANY(?::text[]) AND status = 'active'
          ORDER BY created_at ASC`
       )
-      .bind(...configIds)
+      .bind(configIds)
       .all<CustodyWalletRow>();
 
     const walletsByConfigId = new Map(
@@ -720,10 +720,10 @@ export class CustodyConfigStore implements SigningConfigStore {
            FROM dvp_settlement_wallets s
            JOIN dvp_trades t
              ON t.project_id = s.project_id
-            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+            AND t.status = ANY(?::text[])
           WHERE s.custody_wallet_id = ?`
       )
-      .bind(custodyWalletId)
+      .bind([...ACTIVE_DVP_TRADE_STATUSES], custodyWalletId)
       .first<{ open_trades: number | string }>();
 
     const openTrades = Number(blocking?.open_trades ?? 0);

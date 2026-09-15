@@ -17,7 +17,8 @@
 // Token Status Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type TokenStatus = "pending" | "active" | "paused" | "revoked";
+export const TOKEN_STATUSES = ["pending", "active", "paused", "revoked"] as const;
+export type TokenStatus = (typeof TOKEN_STATUSES)[number];
 
 export const TOKEN_TRANSACTION_TYPES = [
   "mint",
@@ -41,8 +42,31 @@ export const TOKEN_TRANSACTION_STATUSES = [
   "failed",
 ] as const;
 export type TokenTransactionStatus = (typeof TOKEN_TRANSACTION_STATUSES)[number];
+/** Token transaction statuses whose requested supply remains reserved. */
+export const SUPPLY_RESERVING_TOKEN_TRANSACTION_STATUSES = [
+  "pending",
+  "processing",
+  "failed",
+] as const satisfies readonly TokenTransactionStatus[];
 
-export type AllowlistEntryStatus = "pending" | "active" | "revoked";
+/** Reports whether a string belongs to the token-transaction status vocabulary. */
+export function isTokenTransactionStatus(status: string): status is TokenTransactionStatus {
+  return TOKEN_TRANSACTION_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Token transaction statuses representing a successful chain outcome. */
+export const SUCCESSFUL_TOKEN_TRANSACTION_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly TokenTransactionStatus[];
+
+/** Reports whether a token transaction has reached a successful chain outcome. */
+export function isSuccessfulTokenTransactionStatus(status: TokenTransactionStatus): boolean {
+  return SUCCESSFUL_TOKEN_TRANSACTION_STATUSES.some((candidate) => candidate === status);
+}
+
+export const ALLOWLIST_ENTRY_STATUSES = ["pending", "active", "revoked"] as const;
+export type AllowlistEntryStatus = (typeof ALLOWLIST_ENTRY_STATUSES)[number];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Token Templates
@@ -56,7 +80,8 @@ export type TokenTemplate = "stablecoin" | "rwa" | "arcade" | "tokenized-securit
 /**
  * Extension implementation status for feature flags
  */
-export type ExtensionImplementationStatus = "implemented" | "disabled" | "planned";
+export const EXTENSION_IMPLEMENTATION_STATUSES = ["implemented", "disabled", "planned"] as const;
+export type ExtensionImplementationStatus = (typeof EXTENSION_IMPLEMENTATION_STATUSES)[number];
 
 /**
  * Extension name for Token-2022

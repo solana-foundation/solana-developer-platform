@@ -386,8 +386,10 @@ export type CustodyWalletPurpose =
    * tokens around.
    */
   | "dvp_settlement_authority";
-export type CustodyConfigStatus = "active" | "inactive";
-export type CustodyWalletStatus = "active" | "inactive";
+export const CUSTODY_CONFIG_STATUSES = ["active", "inactive"] as const;
+export type CustodyConfigStatus = (typeof CUSTODY_CONFIG_STATUSES)[number];
+export const CUSTODY_WALLET_STATUSES = ["active", "inactive"] as const;
+export type CustodyWalletStatus = (typeof CUSTODY_WALLET_STATUSES)[number];
 
 export interface FireblocksCustodyOptions {
   provider: "fireblocks";
@@ -701,14 +703,39 @@ export interface SignerCheckResponse {
  * Lifecycle a custody Connection can be in. Counts of these are safe to publish
  * per provider; the Connections themselves are read from their own resource.
  */
-export const CUSTODY_CONNECTION_LIFECYCLES = [
+export const CONNECTION_LIFECYCLE_STATUSES = [
   "pending",
   "checking",
   "active",
   "failed",
   "deactivated",
 ] as const;
-export type CustodyConnectionLifecycle = (typeof CUSTODY_CONNECTION_LIFECYCLES)[number];
+export type ConnectionLifecycleStatus = (typeof CONNECTION_LIFECYCLE_STATUSES)[number];
+export const CUSTODY_CONNECTION_LIFECYCLES = CONNECTION_LIFECYCLE_STATUSES;
+export type CustodyConnectionLifecycle = ConnectionLifecycleStatus;
+/** Custody connection statuses whose installation has not finished. */
+export const UNFINISHED_CUSTODY_CONNECTION_STATUSES = [
+  "pending",
+  "checking",
+] as const satisfies readonly CustodyConnectionLifecycle[];
+/** Custody connection statuses from which deactivation is allowed. */
+export const DEACTIVATABLE_CUSTODY_CONNECTION_STATUSES = [
+  "failed",
+  "active",
+] as const satisfies readonly CustodyConnectionLifecycle[];
+/** Custody connection statuses that block installing another connection. */
+export const BLOCKING_CUSTODY_CONNECTION_STATUSES = [
+  "pending",
+  "checking",
+  "active",
+] as const satisfies readonly CustodyConnectionLifecycle[];
+/** Custody connection statuses that have not completed deactivation. */
+export const NON_DEACTIVATED_CONNECTION_STATUSES = [
+  "pending",
+  "checking",
+  "failed",
+  "active",
+] as const satisfies readonly ConnectionLifecycleStatus[];
 
 /** Outcome of a single connection install check. */
 export const CUSTODY_CONNECTION_CHECK_STATUSES = [
@@ -739,6 +766,29 @@ export const PROVIDER_CREDENTIAL_STATUSES = [
 ] as const;
 export type ProviderCredentialStatus = (typeof PROVIDER_CREDENTIAL_STATUSES)[number];
 
+/** Provider credential statuses whose creation has not finished. */
+export const UNFINISHED_PROVIDER_CREDENTIAL_STATUSES = [
+  "creating",
+  "pending",
+] as const satisfies readonly ProviderCredentialStatus[];
+
+/** Statuses a superseded credential keeps as history instead of being deleted. */
+export const HISTORICAL_PROVIDER_CREDENTIAL_STATUSES = [
+  "failed_validation",
+  "retired",
+] as const satisfies readonly ProviderCredentialStatus[];
+
+/** Provider credential statuses that cannot become active again. */
+export const TERMINAL_PROVIDER_CREDENTIAL_STATUSES = [
+  "failed_validation",
+  "deactivated",
+] as const satisfies readonly ProviderCredentialStatus[];
+/** Provider credential statuses from which activation is allowed. */
+export const ACTIVATABLE_PROVIDER_CREDENTIAL_STATUSES = [
+  "pending",
+  "failed_validation",
+  "active",
+] as const satisfies readonly ProviderCredentialStatus[];
 /**
  * Which record actually backs signing for a provider in the current scope.
  *

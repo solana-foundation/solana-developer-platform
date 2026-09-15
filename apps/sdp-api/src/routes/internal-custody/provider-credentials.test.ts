@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { DEACTIVATABLE_CUSTODY_CONNECTION_STATUSES } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -1446,7 +1447,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     }
   );
 
-  it.each(["active", "failed"] as const)(
+  it.each(DEACTIVATABLE_CUSTODY_CONNECTION_STATUSES)(
     "creates a fresh Connection beside %s history instead of implicitly replacing it",
     async (historyStatus) => {
       const { app, token } = buildApp();

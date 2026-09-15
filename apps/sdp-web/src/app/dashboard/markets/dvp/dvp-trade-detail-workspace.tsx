@@ -1,6 +1,11 @@
 "use client";
 
-import type { DvpLegOutcome, DvpTradeSide, SolanaCluster } from "@sdp/types";
+import {
+  type DvpLegOutcome,
+  type DvpTradeSide,
+  isFundableDvpTradeStatus,
+  type SolanaCluster,
+} from "@sdp/types";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -776,9 +781,11 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
  * already hold its target, and a frozen escrow bounces transfers.
  */
 function canFundLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
-  const fundableStatus = status === "created" || status === "partially_funded";
   return (
-    leg.party.wallet !== null && fundableStatus && !leg.funding?.funded && !leg.funding?.frozen
+    leg.party.wallet !== null &&
+    isFundableDvpTradeStatus(status) &&
+    !leg.funding?.funded &&
+    !leg.funding?.frozen
   );
 }
 

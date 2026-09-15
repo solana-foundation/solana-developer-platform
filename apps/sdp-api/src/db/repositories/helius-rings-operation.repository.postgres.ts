@@ -1,4 +1,8 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
+import {
+  HeliusRingsError,
+  IN_FLIGHT_OPERATION_STATES,
+  SUBMITTED_OPERATION_STATES,
+} from "@sdp/helius-rings";
 import type { AppDb } from "@/db";
 import {
   DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
@@ -29,8 +33,6 @@ import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
  * rows nothing can advance fill the sweep's row budget, oldest first, and starve
  * the ones it exists to settle.
  */
-const IN_FLIGHT_STATES = ["proving", "ready_to_sign", "submitted", "indexing"] as const;
-
 function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
   return {
     id: row.id as string,
@@ -392,11 +394,15 @@ export function createPostgresHeliusRingsOperationRepository(
           `SELECT * FROM helius_rings_operations
             WHERE signed_transaction IS NOT NULL
               AND last_valid_block_height < ?
-              AND state IN ('submitted', 'indexing')
+              AND state = ANY(?::text[])
             ORDER BY last_valid_block_height ASC
             LIMIT ?`
         )
-        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .bind(
+          input.blockHeight,
+          [...SUBMITTED_OPERATION_STATES],
+          input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -415,13 +421,19 @@ export function createPostgresHeliusRingsOperationRepository(
               AND project_id = ?
               AND op_type = ANY(?)
               AND (
-                    state IN ('proving', 'ready_to_sign', 'submitted', 'indexing')
+                    state = ANY(?::text[])
                  OR (state = 'failed' AND signed_transaction IS NOT NULL)
               )
             ORDER BY created_at ASC
             LIMIT 1`
         )
-        .bind(input.walletId, input.organizationId, input.projectId, [...input.opTypes])
+        .bind(
+          input.walletId,
+          input.organizationId,
+          input.projectId,
+          [...input.opTypes],
+          [...IN_FLIGHT_OPERATION_STATES]
+        )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
@@ -578,17 +590,16 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listInFlightOperations(input: ListHeliusRingsInFlightOperationsInput) {
-      const placeholders = IN_FLIGHT_STATES.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE state IN (${placeholders})
+            WHERE state = ANY(?::text[])
               AND updated_at < ?
             ORDER BY updated_at ASC, id ASC
             LIMIT ?`
         )
         .bind(
-          ...IN_FLIGHT_STATES,
+          [...IN_FLIGHT_OPERATION_STATES],
           input.staleBefore,
           input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
         )

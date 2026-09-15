@@ -48,7 +48,7 @@ describe("API key wallet provisioning schema", () => {
 
   it("uses an exact-Connection shape that the previous revision rejects", () => {
     const previousProvisioningSchema = z.object({
-      walletScope: z.enum(["all", "selected"]),
+      walletScope: z.enum(API_KEY_WALLET_SCOPES),
       provisionWallet: z.boolean().optional(),
     });
 
@@ -66,3 +66,5 @@ describe("API key wallet provisioning schema", () => {
     ).toBe(false);
   });
 });
+
+import { API_KEY_WALLET_SCOPES } from "@sdp/types";

@@ -1,8 +1,5 @@
-import type {
-  CustodyConnectionStatus,
-  InstallationConnectionState,
-  ProviderCredentialStatus,
-} from "@/services/stores/provider-credential.store";
+import type { CustodyConnectionLifecycle, ProviderCredentialStatus } from "@sdp/types";
+import type { InstallationConnectionState } from "@/services/stores/provider-credential.store";
 
 export const INSTALLATION_COMPLETION_LEASE_MS = 60_000;
 
@@ -23,7 +20,7 @@ export type InstallationDecision<Mode extends string = never> =
   | { kind: "conflict"; reason?: InstallationConflictReason };
 
 export interface InstallationFacts {
-  connectionStatus: CustodyConnectionStatus;
+  connectionStatus: CustodyConnectionLifecycle;
   credentialStatus: ProviderCredentialStatus;
   credentialSource: "stored" | "runtime";
   isExpectedProjectCredential: boolean;

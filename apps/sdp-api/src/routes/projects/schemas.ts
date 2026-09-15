@@ -1,5 +1,5 @@
 import { assertReachableTenantEndpoint } from "@sdp/rpc/byok";
-import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
+import { PROJECT_ROLE_VALUES, PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import { z } from "zod";
 
 const projectRpcProviderSchema = z.enum(PROJECT_RPC_PROVIDERS);
@@ -39,9 +39,9 @@ export const updateProjectSchema = z.object({
 
 export const addMemberSchema = z.object({
   userId: z.string(),
-  role: z.enum(["admin", "developer", "viewer"]).optional(),
+  role: z.enum(PROJECT_ROLE_VALUES).optional(),
 });
 
 export const updateMemberSchema = z.object({
-  role: z.enum(["admin", "developer", "viewer"]),
+  role: z.enum(PROJECT_ROLE_VALUES),
 });

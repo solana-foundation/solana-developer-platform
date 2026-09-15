@@ -1,3 +1,4 @@
+import { TERMINAL_PROVIDER_CREDENTIAL_STATUSES } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { rootLogger } from "@/runtime/logger";
@@ -537,7 +538,7 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
     });
   });
 
-  it.each(["failed_validation", "deactivated"] as const)(
+  it.each(TERMINAL_PROVIDER_CREDENTIAL_STATUSES)(
     "retries cleanup for a GCP rotation candidate that ends %s without changing its status",
     async (status) => {
       const predecessorId = `pcred_${status}_predecessor`;

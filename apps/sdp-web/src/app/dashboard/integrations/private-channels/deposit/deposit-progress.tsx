@@ -1,6 +1,10 @@
 "use client";
 
-import type { PrivateChannelDeposit } from "@sdp/types";
+import {
+  isSuccessfulPrivateChannelDepositStatus,
+  isTerminalPrivateChannelDepositStatus,
+  type PrivateChannelDeposit,
+} from "@sdp/types";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -34,11 +38,6 @@ const STAGES = [
   },
 ] as const;
 
-const TERMINAL: ReadonlySet<PrivateChannelDeposit["status"]> = new Set([
-  "confirmed",
-  "settled",
-  "failed",
-]);
 const POLL_INTERVAL_MS = 1500;
 
 export function DepositProgress({
@@ -57,7 +56,7 @@ export function DepositProgress({
   }, [initial]);
 
   useEffect(() => {
-    if (TERMINAL.has(deposit.status)) {
+    if (isTerminalPrivateChannelDepositStatus(deposit.status)) {
       return;
     }
     let active = true;
@@ -75,7 +74,7 @@ export function DepositProgress({
 
   const rank = RANK[deposit.status];
   const failed = deposit.status === "failed";
-  const done = deposit.status === "confirmed" || deposit.status === "settled";
+  const done = isSuccessfulPrivateChannelDepositStatus(deposit.status);
 
   return (
     <div className="space-y-5">
@@ -167,11 +166,10 @@ function StatusBadge({
     settled: t("DashboardPrivateChannels.deposit.statusSettled"),
     failed: t("DashboardPrivateChannels.deposit.statusFailed"),
   };
-  const variant: BadgeVariant =
-    status === "confirmed" || status === "settled"
-      ? "success"
-      : status === "failed"
-        ? "danger"
-        : "default";
+  const variant: BadgeVariant = isSuccessfulPrivateChannelDepositStatus(status)
+    ? "success"
+    : status === "failed"
+      ? "danger"
+      : "default";
   return <Badge variant={variant}>{label[status]}</Badge>;
 }

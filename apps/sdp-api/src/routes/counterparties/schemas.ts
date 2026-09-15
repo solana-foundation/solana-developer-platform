@@ -1,4 +1,8 @@
-import { COUNTERPARTY_ACCOUNT_SUMMARY_TYPES, COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import {
+  COUNTERPARTY_ACCOUNT_SUMMARY_TYPES,
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTERPARTY_STATUSES,
+} from "@sdp/types";
 import { z } from "zod";
 import { queryBooleanSchema } from "@/openapi/schemas/base";
 import {
@@ -10,7 +14,7 @@ import {
 
 export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);
 
-export const counterpartyStatusSchema = z.enum(["active", "archived"]);
+export const counterpartyStatusSchema = z.enum(COUNTERPARTY_STATUSES);
 
 export const counterpartyIdParamsSchema = z.object({
   counterpartyId: z.string().min(1),

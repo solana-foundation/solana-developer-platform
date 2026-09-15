@@ -1,3 +1,4 @@
+import { OPEN_DVP_TRADE_STATUSES, RECENTLY_CLOSED_DVP_TRADE_STATUSES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { OTHER_ADDRESS, OWN_WALLET_ID, ownParty, testLeg, testTrade } from "./dvp.fixtures";
 import {
@@ -69,7 +70,7 @@ describe("legFundingRatio", () => {
 describe("trade actions", () => {
   it("allows settling only a fully funded trade", () => {
     expect(canSettleDvpTrade(trade({ status: "funded" }))).toBe(true);
-    for (const status of ["created", "partially_funded", "expired"] as const) {
+    for (const status of OPEN_DVP_TRADE_STATUSES.filter((status) => status !== "funded")) {
       expect(canSettleDvpTrade(trade({ status }))).toBe(false);
     }
   });
@@ -77,13 +78,13 @@ describe("trade actions", () => {
   // Cancel is the escape hatch. Requiring funding would make an abandoned
   // half-funded trade impossible to unwind from the dashboard.
   it("allows cancelling any open trade, funded or not", () => {
-    for (const status of ["created", "partially_funded", "funded", "expired"] as const) {
+    for (const status of OPEN_DVP_TRADE_STATUSES) {
       expect(canCancelDvpTrade(trade({ status }))).toBe(true);
     }
   });
 
   it("offers neither action on a closed trade", () => {
-    for (const status of ["settled", "cancelled", "rejected", "closed_unknown"] as const) {
+    for (const status of RECENTLY_CLOSED_DVP_TRADE_STATUSES) {
       expect(canCancelDvpTrade(trade({ status }))).toBe(false);
       expect(canSettleDvpTrade(trade({ status }))).toBe(false);
     }

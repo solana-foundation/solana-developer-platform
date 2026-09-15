@@ -6,6 +6,7 @@
  */
 
 import * as solanaRpc from "@sdp/rpc/solana";
+import { isOpenDvpTradeStatus } from "@sdp/types";
 import {
   appendTransactionMessageInstructions,
   createNoopSigner,
@@ -18,7 +19,7 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
-import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -37,14 +38,6 @@ import {
 } from "./settle-instructions";
 import type { DvpSettlementWallet } from "./settlement-wallet";
 
-/** Statuses from which a trade can still be acted on. */
-const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
-  "created",
-  "partially_funded",
-  "funded",
-  "expired",
-]);
-
 export type DvpCloseAction = "settle" | "cancel";
 
 export interface DvpCloseResult {
@@ -60,7 +53,7 @@ export async function closeDvpTrade(
 ): Promise<DvpCloseResult> {
   const env = c.env;
 
-  if (!OPEN.has(trade.status)) {
+  if (!isOpenDvpTradeStatus(trade.status)) {
     // A closed trade's account is gone, so the instruction would fail on chain
     // anyway — but saying so here names the reason instead of surfacing a
     // program error, and avoids spending a signature to learn it.

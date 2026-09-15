@@ -1,5 +1,9 @@
 import { isAddress } from "@sdp/solana/address";
-import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
+import {
+  type ListPaymentRequestsResponse,
+  PAYMENT_REQUEST_STATUSES,
+  type PaymentRequest,
+} from "@sdp/types";
 import { z } from "zod";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
@@ -21,7 +25,7 @@ import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../
 const listPaymentRequestsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  status: z.enum(["awaiting_payment", "paid", "canceled", "expired"]).optional(),
+  status: z.enum(PAYMENT_REQUEST_STATUSES).optional(),
 });
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {

@@ -11,6 +11,7 @@
  * exists in the component but not in the catalogue fails here.
  */
 
+import { RECENTLY_CLOSED_DVP_TRADE_STATUSES } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -187,10 +188,7 @@ describe("DvpNextStep — terminal states", () => {
 
   // A closed trade has no next step, and inventing one would be worse than the
   // status badge saying "Settled" on its own.
-  it.each(["settled", "cancelled", "rejected", "closed_unknown"] as const)(
-    "renders nothing for a %s trade",
-    (status) => {
-      expect(renderStep(trade({ status }))).toBe("");
-    }
-  );
+  it.each(RECENTLY_CLOSED_DVP_TRADE_STATUSES)("renders nothing for a %s trade", (status) => {
+    expect(renderStep(trade({ status }))).toBe("");
+  });
 });

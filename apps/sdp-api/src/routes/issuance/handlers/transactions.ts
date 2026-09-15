@@ -1,5 +1,6 @@
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import {
+  isTokenTransactionStatus,
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
   type TokenTransactionStatus,
@@ -76,13 +77,13 @@ function parseTransactionStatus(value: string | undefined): TokenTransactionStat
     return undefined;
   }
 
-  if (!TOKEN_TRANSACTION_STATUSES.includes(value as TokenTransactionStatus)) {
+  if (!isTokenTransactionStatus(value)) {
     throw badRequest("Invalid status query parameter", {
       allowedStatuses: TOKEN_TRANSACTION_STATUSES,
     });
   }
 
-  return value as TokenTransactionStatus;
+  return value;
 }
 
 async function resolveWalletFilter(

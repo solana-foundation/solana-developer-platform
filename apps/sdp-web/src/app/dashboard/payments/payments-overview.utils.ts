@@ -1,6 +1,9 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  isInFlightPaymentTransferStatus,
+  isPaymentTransferStatus,
+  isSuccessfulPaymentTransferStatus,
   SOL_DECIMALS,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
@@ -346,8 +349,9 @@ export function statusMessageKey(status: string): MessageKey | null {
 }
 
 export function statusVariant(status: string): BadgeVariant {
-  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
-  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
+  if (!isPaymentTransferStatus(status)) return "default";
+  if (isSuccessfulPaymentTransferStatus(status)) return "success";
+  if (isInFlightPaymentTransferStatus(status)) {
     return "warning";
   }
   if (status === "failed") return "danger";

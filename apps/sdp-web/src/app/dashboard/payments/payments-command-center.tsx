@@ -1,4 +1,8 @@
-import type { PaymentTransferSummary } from "@sdp/types";
+import {
+  isInFlightPaymentTransferStatus,
+  isSuccessfulPaymentTransferStatus,
+  type PaymentTransferSummary,
+} from "@sdp/types";
 import {
   ArrowDownToLineIcon,
   ArrowRightIcon,
@@ -201,9 +205,9 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
   );
 }
 
-function statusVariant(status: string): BadgeVariant {
-  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
-  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
+function statusVariant(status: PaymentTransferSummary["status"]): BadgeVariant {
+  if (isSuccessfulPaymentTransferStatus(status)) return "success";
+  if (isInFlightPaymentTransferStatus(status)) {
     return "warning";
   }
   if (status === "failed") return "danger";

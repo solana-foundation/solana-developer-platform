@@ -1,17 +1,17 @@
-import type { CustodyConnectionCheckStatus, CustodyWalletStatus } from "@sdp/types";
+import type {
+  CustodyConnectionCheckStatus,
+  CustodyConnectionLifecycle,
+  CustodyWalletStatus,
+  ProviderCredentialStatus,
+} from "@sdp/types";
+import {
+  DEACTIVATABLE_CUSTODY_CONNECTION_STATUSES,
+  UNFINISHED_CUSTODY_CONNECTION_STATUSES,
+  UNFINISHED_PROVIDER_CREDENTIAL_STATUSES,
+} from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
-
-export type ProviderCredentialStatus =
-  | "creating"
-  | "pending"
-  | "active"
-  | "failed_validation"
-  | "retired"
-  | "deactivated";
-
-export type CustodyConnectionStatus = "pending" | "checking" | "active" | "failed" | "deactivated";
 
 export interface ProviderCredentialRow {
   id: string;
@@ -51,7 +51,7 @@ export interface CredentialReferenceRow {
   id: string;
   project_id: string;
   project_name: string;
-  status: CustodyConnectionStatus;
+  status: CustodyConnectionLifecycle;
   provider_account_fingerprint: string | null;
 }
 
@@ -66,7 +66,7 @@ export interface CustodyConnectionRow {
   default_custody_wallet_id: string | null;
   provider_account_fingerprint: string | null;
   request_delay_ms: number | null;
-  status: CustodyConnectionStatus;
+  status: CustodyConnectionLifecycle;
   setup_metadata: unknown;
   last_check_status: CustodyConnectionCheckStatus | null;
   last_check_at: string | null;
@@ -79,7 +79,7 @@ export interface CustodyConnectionRow {
 export interface ProjectConnectionListRow {
   id: string;
   provider: "privy";
-  connection_status: CustodyConnectionStatus;
+  connection_status: CustodyConnectionLifecycle;
   setup_metadata: unknown;
   last_check_status: CustodyConnectionCheckStatus | null;
   last_check_at: string | null;
@@ -368,11 +368,11 @@ export class ProviderCredentialStore {
        WHERE organization_id = ?
          AND provider = 'privy'
          AND rotated_from_provider_credential_id = ?
-         AND status IN ('creating', 'pending')
+         AND status = ANY(?::text[])
        ORDER BY created_at, id
        LIMIT 1
        ${options.lock ? "FOR UPDATE" : ""}`,
-      [organizationId, providerCredentialId]
+      [organizationId, providerCredentialId, [...UNFINISHED_PROVIDER_CREDENTIAL_STATUSES]]
     );
   }
 
@@ -700,7 +700,7 @@ export class ProviderCredentialStore {
          SET status = 'deactivated', deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
          WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
            AND c.provider = 'privy' AND c.provider_credential_id = ?
-           AND c.status = ? AND c.status IN ('failed', 'active')
+           AND c.status = ? AND c.status = ANY(?::text[])
            AND EXISTS (
              SELECT 1 FROM provider_credentials pc
              WHERE pc.id = c.provider_credential_id AND pc.organization_id = c.organization_id
@@ -718,6 +718,7 @@ export class ProviderCredentialStore {
           params.projectId,
           params.credentialId,
           params.observedStatus,
+          [...DEACTIVATABLE_CUSTODY_CONNECTION_STATUSES],
           params.credentialStatus,
         ]
       )) === 1
@@ -759,7 +760,7 @@ export class ProviderCredentialStore {
                   AND sibling.project_id = c.project_id
                   AND sibling.provider = c.provider
                   AND sibling.id <> c.id
-                  AND sibling.status IN ('pending', 'checking')
+                  AND sibling.status = ANY(?::text[])
               ) OR EXISTS (
                 SELECT 1 FROM provider_credentials creating
                 WHERE creating.organization_id = c.organization_id
@@ -781,7 +782,13 @@ export class ProviderCredentialStore {
          AND c.project_id = ?
          AND c.provider = 'privy'
        ${options.lock ? "FOR UPDATE OF c, pc" : ""}`,
-      [options.excludedCreatingCredentialId ?? null, connectionId, organizationId, projectId]
+      [
+        [...UNFINISHED_CUSTODY_CONNECTION_STATUSES],
+        options.excludedCreatingCredentialId ?? null,
+        connectionId,
+        organizationId,
+        projectId,
+      ]
     );
   }
 
@@ -879,7 +886,7 @@ export class ProviderCredentialStore {
              AND sibling.project_id = c.project_id
              AND sibling.provider = c.provider
              AND sibling.id <> c.id
-             AND sibling.status IN ('pending', 'checking')
+             AND sibling.status = ANY(?::text[])
          )
          AND NOT EXISTS (
            SELECT 1 FROM provider_credentials creating
@@ -904,6 +911,7 @@ export class ProviderCredentialStore {
         params.providerCredentialId,
         params.expectedLastCheckAt,
         params.expectedFailureCode,
+        [...UNFINISHED_CUSTODY_CONNECTION_STATUSES],
         params.expectedFailureCode,
       ]
     );
@@ -1365,7 +1373,7 @@ export class ProviderCredentialStore {
              AND sibling.project_id = custody_connections.project_id
              AND sibling.provider = custody_connections.provider
              AND sibling.id <> custody_connections.id
-             AND sibling.status IN ('pending', 'checking')
+             AND sibling.status = ANY(?::text[])
          )
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
@@ -1383,6 +1391,7 @@ export class ProviderCredentialStore {
         ),
         params.id,
         params.expectedProviderCredentialId,
+        [...UNFINISHED_CUSTODY_CONNECTION_STATUSES],
       ]
     );
   }

@@ -8,12 +8,13 @@
  * ordinary tenant isolation.
  */
 
+import { DVP_TRADE_SIDES, UNSETTLED_DVP_TRADE_STATUSES } from "@sdp/types";
 import { z } from "zod";
 import type { RepositoryDbClient } from "./base";
 
 const dvpLegFundingClaimRowSchema = z.object({
   trade_id: z.string(),
-  side: z.enum(["a", "b"]),
+  side: z.enum(DVP_TRADE_SIDES),
   organization_id: z.string(),
   project_id: z.string(),
   custody_wallet_id: z.string(),
@@ -230,9 +231,9 @@ export function createPostgresDvpLegFundingClaimRepository(
              JOIN dvp_trades t ON t.id = c.trade_id
             WHERE c.funding_tx IS NOT NULL
               AND CAST(c.expiry_height AS NUMERIC) < ?
-              AND t.status IN ('created', 'partially_funded', 'funded')`
+              AND t.status = ANY(?::text[])`
         )
-        .bind(blockHeight.toString())
+        .bind(blockHeight.toString(), [...UNSETTLED_DVP_TRADE_STATUSES])
         .all<Record<string, unknown>>();
       return result.results.map(toDvpLegFundingClaim);
     },

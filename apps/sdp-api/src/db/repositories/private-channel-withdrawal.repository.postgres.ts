@@ -1,4 +1,7 @@
-import type { PrivateChannelTransferContext } from "@sdp/types";
+import {
+  IN_FLIGHT_PRIVATE_CHANNEL_TRANSFER_STATUSES,
+  type PrivateChannelTransferContext,
+} from "@sdp/types";
 import type { AppDb } from "@/db";
 import {
   type CreateWithdrawalInput,
@@ -164,10 +167,12 @@ export function createPostgresPrivateChannelWithdrawalRepository(
         .prepare(
           `SELECT * FROM private_channel_withdrawals
              WHERE organization_id = ? AND project_id = ?
-               AND status IN ('pending', 'submitted', 'confirmed')
+               AND status = ANY(?::text[])
              ORDER BY updated_at ASC, id ASC`
         )
-        .bind(scope.organizationId, scope.projectId)
+        .bind(scope.organizationId, scope.projectId, [
+          ...IN_FLIGHT_PRIVATE_CHANNEL_TRANSFER_STATUSES,
+        ])
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -176,11 +181,11 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       const result = await db
         .prepare(
           `SELECT * FROM private_channel_withdrawals
-             WHERE status IN ('pending', 'submitted', 'confirmed')
+             WHERE status = ANY(?::text[])
              ORDER BY updated_at ASC, id ASC
              LIMIT ?`
         )
-        .bind(limit)
+        .bind([...IN_FLIGHT_PRIVATE_CHANNEL_TRANSFER_STATUSES], limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -189,9 +194,9 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       const row = await db
         .prepare(
           `SELECT COUNT(*)::int AS count FROM private_channel_withdrawals
-             WHERE instance_id = ? AND status IN ('pending', 'submitted', 'confirmed')`
+             WHERE instance_id = ? AND status = ANY(?::text[])`
         )
-        .bind(instanceId)
+        .bind(instanceId, [...IN_FLIGHT_PRIVATE_CHANNEL_TRANSFER_STATUSES])
         .first<{ count: number }>();
       // Deletion gates on this count, so a missing or non-numeric row must not
       // read as "nothing in flight" and clear the way for a delete (HOO-1011).

@@ -1,3 +1,8 @@
+import {
+  APPROVAL_PENDING_WALLET_OPERATION_STATUSES,
+  FAILABLE_WALLET_OPERATION_STATUSES,
+  REVOKED_API_KEY_STATUSES,
+} from "@sdp/types";
 import type { AppDb, DatabaseExecutor } from "@/db";
 import {
   asPostgresJsonArray,
@@ -91,7 +96,7 @@ api_key_targets AS (
   INNER JOIN scope s
     ON ak.organization_id = s.organization_id
    AND ak.project_id IS NOT DISTINCT FROM s.project_id
-  WHERE ak.status NOT IN ('revoked', 'deactivated')
+  WHERE NOT (ak.status = ANY(?::text[]))
 ),
 wallet_profile_candidates AS (
   SELECT
@@ -1148,6 +1153,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           scope.organizationId,
           scope.projectId,
           input.custodyWalletIds ?? null,
+          [...REVOKED_API_KEY_STATUSES],
           ...(input.status ? [input.status] : []),
           ...summaryFilters.params
         )
@@ -1169,6 +1175,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
           scope.organizationId,
           scope.projectId,
           input.custodyWalletIds ?? null,
+          [...REVOKED_API_KEY_STATUSES],
           ...rowFilters.params,
           pageSize,
           offset
@@ -2479,10 +2486,10 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         }
 
         if (input.operationStatus) {
-          const currentOperationStatus =
+          const fromStatuses =
             input.operationStatus === "failed"
-              ? "status IN ('created', 'pending_approval')"
-              : "status = 'pending_approval'";
+              ? FAILABLE_WALLET_OPERATION_STATUSES
+              : APPROVAL_PENDING_WALLET_OPERATION_STATUSES;
 
           await tx
             .prepare(
@@ -2492,14 +2499,15 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
                WHERE id = ?
                  AND organization_id = ?
                  AND project_id IS NOT DISTINCT FROM ?
-                 AND ${currentOperationStatus}`
+                 AND status = ANY(?::text[])`
             )
             .bind(
               input.operationStatus,
               resolvedAt,
               current.wallet_operation_id,
               scope.organizationId,
-              scope.projectId
+              scope.projectId,
+              [...fromStatuses]
             )
             .run();
         }

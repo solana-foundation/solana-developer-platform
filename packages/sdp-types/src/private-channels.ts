@@ -216,12 +216,72 @@ export interface CreatePrivateChannelRequest {
  *   failed     pre-broadcast or on-chain terminal failure. Never entered after
  *              `confirmed` for withdrawals — the balance is already gone.
  */
-export type PrivateChannelTransferStatus =
-  | "pending"
-  | "submitted"
-  | "confirmed"
-  | "settled"
-  | "failed";
+export const PRIVATE_CHANNEL_TRANSFER_STATUSES = [
+  "pending",
+  "submitted",
+  "confirmed",
+  "settled",
+  "failed",
+] as const;
+export type PrivateChannelTransferStatus = (typeof PRIVATE_CHANNEL_TRANSFER_STATUSES)[number];
+
+/** Whether each private-channel transfer status ends the transfer lifecycle. */
+export const PRIVATE_CHANNEL_TRANSFER_STATUS_TERMINAL = {
+  pending: false,
+  submitted: false,
+  confirmed: false,
+  settled: true,
+  failed: true,
+} as const satisfies Record<PrivateChannelTransferStatus, boolean>;
+
+/** Whether each private-channel transfer status ends deposit polling. */
+export const PRIVATE_CHANNEL_DEPOSIT_STATUS_TERMINAL = {
+  pending: false,
+  submitted: false,
+  confirmed: true,
+  settled: true,
+  failed: true,
+} as const satisfies Record<PrivateChannelTransferStatus, boolean>;
+
+/** Private-channel deposit statuses representing a successful chain outcome. */
+export const SUCCESSFUL_PRIVATE_CHANNEL_DEPOSIT_STATUSES = [
+  "confirmed",
+  "settled",
+] as const satisfies readonly PrivateChannelTransferStatus[];
+
+/** Private-channel transfer statuses that have not reached a terminal outcome. */
+export const IN_FLIGHT_PRIVATE_CHANNEL_TRANSFER_STATUSES = [
+  "pending",
+  "submitted",
+  "confirmed",
+] as const satisfies readonly PrivateChannelTransferStatus[];
+
+/** Private-channel transfer statuses from which submission may still complete. */
+export const SUBMITTABLE_PRIVATE_CHANNEL_TRANSFER_STATUSES = [
+  "pending",
+  "submitted",
+] as const satisfies readonly PrivateChannelTransferStatus[];
+
+/** Reports whether a private-channel transfer can never leave the given status. */
+export function isTerminalPrivateChannelTransferStatus(
+  status: PrivateChannelTransferStatus
+): boolean {
+  return PRIVATE_CHANNEL_TRANSFER_STATUS_TERMINAL[status];
+}
+
+/** Reports whether a private-channel deposit should stop being polled. */
+export function isTerminalPrivateChannelDepositStatus(
+  status: PrivateChannelTransferStatus
+): boolean {
+  return PRIVATE_CHANNEL_DEPOSIT_STATUS_TERMINAL[status];
+}
+
+/** Reports whether a private-channel deposit has reached a successful chain outcome. */
+export function isSuccessfulPrivateChannelDepositStatus(
+  status: PrivateChannelTransferStatus
+): boolean {
+  return SUCCESSFUL_PRIVATE_CHANNEL_DEPOSIT_STATUSES.some((candidate) => candidate === status);
+}
 
 /**
  * Read-only audit snapshot of the SPC instance parameters at intent time.
@@ -331,7 +391,14 @@ export interface PrivateChannelWithdrawal {
  * returned a verdict (transport error, or a dedup drop that will never surface).
  * Nothing sweeps either, so treat both as an operator signal.
  */
-export type PrivateChannelMemberTransferStatus = "pending" | "submitted" | "confirmed" | "failed";
+export const PRIVATE_CHANNEL_MEMBER_TRANSFER_STATUSES = [
+  "pending",
+  "submitted",
+  "confirmed",
+  "failed",
+] as const;
+export type PrivateChannelMemberTransferStatus =
+  (typeof PRIVATE_CHANNEL_MEMBER_TRANSFER_STATUSES)[number];
 
 /**
  * A custody-signed token transfer between two verified private-channel member

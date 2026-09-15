@@ -6,6 +6,7 @@
  * trade is already over.
  */
 
+import { RECENTLY_CLOSED_DVP_TRADE_STATUSES } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -58,12 +59,9 @@ describe("DvpCloseActions", () => {
 
   // A settled or cancelled trade has no account left to act on, so offering
   // either button would be offering a guaranteed failure.
-  it.each(["settled", "cancelled", "rejected", "closed_unknown"] as const)(
-    "renders nothing for a %s trade",
-    (status) => {
-      expect(renderActions(trade(status, true))).toBe("");
-    }
-  );
+  it.each(RECENTLY_CLOSED_DVP_TRADE_STATUSES)("renders nothing for a %s trade", (status) => {
+    expect(renderActions(trade(status, true))).toBe("");
+  });
 
   // Expiry blocks settlement on chain but not the refund path, so cancel has
   // to survive it.

@@ -34,7 +34,7 @@
  * find because there is no row left to list.
  */
 
-import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
+import { type CachedApiKey, isTerminalApiKeyStatus } from "@sdp/types";
 import { getDb } from "@/db";
 import { apiKeyCacheKey, apiKeyHashFromCacheKey, refreshApiKeyCache } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
@@ -55,8 +55,6 @@ const SWEEP_CONCURRENCY = 25;
 
 /** Key hashes per `IN (...)` query when checking cached entries against Postgres. */
 const LIVE_LOOKUP_CHUNK = 500;
-
-const TERMINAL_STATUSES: ReadonlySet<ApiKeyStatus> = new Set(["revoked", "deactivated", "expired"]);
 
 export interface RevokedApiKeyCacheReconciliation {
   scanned: number;
@@ -151,7 +149,7 @@ export async function reconcileRevokedApiKeyCache(
         kind: "revoked",
         // Stale-active or unparseable entries need the terminal state
         // written; an entry already terminal is converged.
-        isConverged: (cached) => cached !== null && TERMINAL_STATUSES.has(cached.status),
+        isConverged: (cached) => cached !== null && isTerminalApiKeyStatus(cached.status),
       })
     ),
     ...recentlyRotated.map(
@@ -162,7 +160,7 @@ export async function reconcileRevokedApiKeyCache(
         // entry is converged only when it carries the row's exact deadline.
         isConverged: (cached) =>
           cached !== null &&
-          (TERMINAL_STATUSES.has(cached.status) ||
+          (isTerminalApiKeyStatus(cached.status) ||
             cached.rotationDeadline === row.rotation_deadline),
       })
     ),
@@ -170,7 +168,7 @@ export async function reconcileRevokedApiKeyCache(
       (keyHash): SweepTarget => ({
         keyHash,
         kind: "orphaned",
-        isConverged: (cached) => cached !== null && TERMINAL_STATUSES.has(cached.status),
+        isConverged: (cached) => cached !== null && isTerminalApiKeyStatus(cached.status),
       })
     ),
   ]);
@@ -230,9 +228,9 @@ async function listOrphanedCacheEntries(
         `SELECT ak.key_hash FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE p.status = 'active'
-           AND ak.key_hash IN (${chunk.map(() => "?").join(", ")})`
+           AND ak.key_hash = ANY(?::text[])`
       )
-      .bind(...chunk)
+      .bind(chunk)
       .all<{ key_hash: string }>();
     for (const row of rows.results) {
       live.add(row.key_hash);

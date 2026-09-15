@@ -116,11 +116,40 @@ export const PAYMENT_TRANSFER_STATUSES = [
 
 export type PaymentTransferStatus = (typeof PAYMENT_TRANSFER_STATUSES)[number];
 
+/** Reports whether a string belongs to the payment-transfer status vocabulary. */
+export function isPaymentTransferStatus(status: string): status is PaymentTransferStatus {
+  return PAYMENT_TRANSFER_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Payment transfer statuses representing successful settlement. */
 export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
   "completed",
   "confirmed",
   "finalized",
 ] as const satisfies readonly PaymentTransferStatus[];
+
+/** Payment transfer statuses that remain in flight. */
+export const IN_FLIGHT_PAYMENT_TRANSFER_STATUSES = [
+  "pending",
+  "processing",
+  "awaiting_payment",
+  "settling",
+] as const satisfies readonly PaymentTransferStatus[];
+/** On-ramp transfer statuses that can accept a provider settlement event. */
+export const MATCHABLE_ONRAMP_TRANSFER_STATUSES = [
+  "pending",
+  "awaiting_payment",
+  "settling",
+] as const satisfies readonly PaymentTransferStatus[];
+/** Reports whether a payment transfer settled successfully. */
+export function isSuccessfulPaymentTransferStatus(status: PaymentTransferStatus): boolean {
+  return SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Reports whether a payment transfer is still in flight. */
+export function isInFlightPaymentTransferStatus(status: PaymentTransferStatus): boolean {
+  return IN_FLIGHT_PAYMENT_TRANSFER_STATUSES.some((candidate) => candidate === status);
+}
 
 /** Whether each status ends a ramp transfer's lifecycle. Scoped to ramps — onchain sends terminate at `finalized`. */
 export const RAMP_TRANSFER_STATUS_TERMINAL = {
@@ -140,6 +169,11 @@ export const RAMP_TRANSFER_STATUS_TERMINAL = {
 export function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
   return RAMP_TRANSFER_STATUS_TERMINAL[status];
 }
+
+/** Payment transfer statuses that end a ramp transfer's lifecycle. */
+export const TERMINAL_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_TERMINAL[status]
+);
 
 /** Whether a ramp transfer in each status can still be canceled: only before the customer has funded it. */
 export const RAMP_TRANSFER_STATUS_CANCELABLE = {
@@ -323,20 +357,53 @@ export interface PaymentTransferEnvelope {
   };
 }
 
-export type PaymentTransferBatchStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "partially_failed"
-  | "archived";
+export const PAYMENT_TRANSFER_BATCH_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "partially_failed",
+  "archived",
+] as const;
+export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES)[number];
 
+export const PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "archived",
+] as const;
 export type PaymentTransferBatchRecipientStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "archived";
+  (typeof PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES)[number];
+
+/** Transfer-batch member statuses that remain in flight. */
+export const IN_FLIGHT_PAYMENT_TRANSFER_BATCH_MEMBER_STATUSES = [
+  "pending",
+  "processing",
+] as const satisfies readonly (PaymentTransferStatus | PaymentTransferBatchRecipientStatus)[];
+
+/** Transfer-batch member statuses representing successful settlement. */
+export const SUCCESSFUL_PAYMENT_TRANSFER_BATCH_MEMBER_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly (PaymentTransferStatus | PaymentTransferBatchRecipientStatus)[];
+
+/** Reports whether a transfer-batch member is still in flight. */
+export function isInFlightPaymentTransferBatchMemberStatus(
+  status: PaymentTransferStatus | PaymentTransferBatchRecipientStatus
+): boolean {
+  return IN_FLIGHT_PAYMENT_TRANSFER_BATCH_MEMBER_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Reports whether a transfer-batch member settled successfully. */
+export function isSuccessfulPaymentTransferBatchMemberStatus(
+  status: PaymentTransferStatus | PaymentTransferBatchRecipientStatus
+): boolean {
+  return SUCCESSFUL_PAYMENT_TRANSFER_BATCH_MEMBER_STATUSES.some(
+    (candidate) => candidate === status
+  );
+}
 
 export interface PaymentTransferBatchRecipientRequest {
   externalId?: string;
@@ -568,7 +635,13 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
@@ -758,7 +831,13 @@ export interface ListPaymentSubscriptionCollectionAttemptsResponse {
   pageSize: number;
 }
 
-export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
+export const PAYMENT_RAMP_EXECUTION_STATUSES = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+] as const;
+export type PaymentRampExecutionStatus = (typeof PAYMENT_RAMP_EXECUTION_STATUSES)[number];
 
 export interface CryptoDepositPaymentRampInstruction {
   provider: RampProviderId;

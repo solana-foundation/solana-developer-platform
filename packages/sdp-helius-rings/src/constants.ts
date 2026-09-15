@@ -16,6 +16,36 @@ export const OPERATION_STATES = [
   "failed",
   "voided",
 ] as const;
+export type OperationStateValue = (typeof OPERATION_STATES)[number];
+
+/** Operation states with no successful lifecycle transition remaining. */
+export const TERMINAL_OPERATION_STATES = [
+  "completed",
+  "failed",
+  "voided",
+] as const satisfies readonly OperationStateValue[];
+/** Operation states between proof generation and indexed settlement. */
+export const IN_FLIGHT_OPERATION_STATES = [
+  "proving",
+  "ready_to_sign",
+  "submitted",
+  "indexing",
+] as const satisfies readonly OperationStateValue[];
+/** Operation states that have been submitted to the network. */
+export const SUBMITTED_OPERATION_STATES = [
+  "submitted",
+  "indexing",
+] as const satisfies readonly OperationStateValue[];
+/** Operation states without a completed settlement outcome. */
+export const SETTLED_OPERATION_STATES = [
+  "completed",
+  "voided",
+] as const satisfies readonly OperationStateValue[];
+
+/** Reports whether an operation has no successful lifecycle transition remaining. */
+export function isTerminalOperationState(state: OperationStateValue): boolean {
+  return TERMINAL_OPERATION_STATES.some((candidate) => candidate === state);
+}
 
 export const OP_TYPES = [
   "shield",

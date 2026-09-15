@@ -1,6 +1,6 @@
 "use client";
 
-import type { PrivateChannelWithdrawal } from "@sdp/types";
+import { isTerminalPrivateChannelTransferStatus, type PrivateChannelWithdrawal } from "@sdp/types";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -37,7 +37,6 @@ const STAGES = [
   },
 ] as const;
 
-const TERMINAL: ReadonlySet<PrivateChannelWithdrawal["status"]> = new Set(["settled", "failed"]);
 const POLL_INTERVAL_MS = 1500;
 
 export function WithdrawProgress({
@@ -56,7 +55,7 @@ export function WithdrawProgress({
   }, [initial]);
 
   useEffect(() => {
-    if (TERMINAL.has(withdrawal.status)) {
+    if (isTerminalPrivateChannelTransferStatus(withdrawal.status)) {
       return;
     }
     let active = true;

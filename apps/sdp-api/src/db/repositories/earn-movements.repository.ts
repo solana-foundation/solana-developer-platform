@@ -4,7 +4,13 @@ import type {
   EarnMovementStatus,
   SdpEnvironment,
 } from "@sdp/types";
-import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
+import {
+  BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES,
+  EARN_MOVEMENT_TRANSITIONS,
+  LIVE_EARN_MOVEMENT_STATUSES,
+  SETTLED_EARN_MOVEMENT_STATUSES_BY_DIRECTION,
+  UNSETTLED_EARN_MOVEMENT_STATUSES,
+} from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
 import { conflict } from "@/lib/errors";
 
@@ -789,11 +795,6 @@ const NON_ZERO_DIGIT = /[1-9]/;
  * `failed` is terminal. Keep this direction-aware or recovery can silently
  * drop a confirmed withdrawal before finalization.
  */
-const SETTLED_VAULT_STATUSES_BY_DIRECTION = {
-  deposit: ["confirmed", "finalized", "failed"],
-  withdrawal: ["finalized", "failed"],
-} as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
-
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
     id: row.id as string,
@@ -859,7 +860,7 @@ const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
                    FROM earn_movements reentry
                    WHERE reentry.position_id = earn_positions.id
                      AND reentry.direction = 'deposit'
-                     AND reentry.status IN ('requested', 'submitted')
+                     AND reentry.status = ANY(?::text[])
                  )
                )
                AND custody_wallet_id = ANY (?::text[])
@@ -867,7 +868,7 @@ const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
                  SELECT 1
                  FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
-                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+                   AND movement.status = ANY(?::text[])
                )`;
 
 export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsRepository {
@@ -937,7 +938,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const settledValues =
         params.settled === undefined
           ? []
-          : [[...SETTLED_VAULT_STATUSES_BY_DIRECTION[params.direction]]];
+          : [[...SETTLED_EARN_MOVEMENT_STATUSES_BY_DIRECTION[params.direction]]];
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
@@ -1039,7 +1040,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(
           params.organizationId,
           params.environment,
+          [...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES],
           params.custodyWalletIds,
+          [...LIVE_EARN_MOVEMENT_STATUSES],
           ...beforeValues,
           params.limit + 1
         )
@@ -1064,13 +1067,20 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     SELECT 1
                     FROM earn_movements unsettled
                     WHERE unsettled.position_id = earn_positions.id
-                      AND unsettled.status IN ('requested', 'submitted', 'confirmed')
+                      AND unsettled.status = ANY(?::text[])
                   ) AS has_unsettled_movements
              FROM earn_positions
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
              ORDER BY created_at DESC, id DESC`
         )
-        .bind(params.organizationId, params.environment, params.custodyWalletIds)
+        .bind(
+          [...UNSETTLED_EARN_MOVEMENT_STATUSES],
+          params.organizationId,
+          params.environment,
+          [...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES],
+          params.custodyWalletIds,
+          [...LIVE_EARN_MOVEMENT_STATUSES]
+        )
         .all<EarnPositionRow & { has_unsettled_movements: boolean }>();
       return result.results ?? [];
     },
@@ -1096,14 +1106,14 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                    FROM earn_movements reentry
                    WHERE reentry.position_id = earn_positions.id
                      AND reentry.direction = 'deposit'
-                     AND reentry.status IN ('requested', 'submitted')
+                     AND reentry.status = ANY(?::text[])
                  )
                )
                AND EXISTS (
                  SELECT 1
                  FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
-                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+                   AND movement.status = ANY(?::text[])
                )
                ${ownerClause}
                ${beforeClause}
@@ -1114,6 +1124,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           params.organizationId,
           params.projectId,
           params.environment,
+          [...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES],
+          [...LIVE_EARN_MOVEMENT_STATUSES],
           ...ownerValues,
           ...beforeValues,
           params.limit + 1
@@ -1240,7 +1252,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     WHERE direction = 'withdrawal' AND status = 'finalized'
                   ) AS finalized_withdrawal_count,
                   COUNT(*) FILTER (
-                    WHERE status IN ('requested', 'submitted', 'confirmed')
+                    WHERE status = ANY(?::text[])
                   ) AS unsettled_movement_count
              FROM earn_movements
             WHERE organization_id = ?
@@ -1249,7 +1261,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               AND owner_address = ?
             GROUP BY position_id`
         )
-        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
+        .bind(
+          [...UNSETTLED_EARN_MOVEMENT_STATUSES],
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.ownerAddress
+        )
         .all<{
           position_id: string;
           finalized_deposits: string;
@@ -1355,7 +1373,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           `WITH blockhash_bound AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
-                AND status IN ('requested', 'submitted')
+                AND status = ANY(?::text[])
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -1378,7 +1396,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT movement.id
                FROM earn_movements movement
               WHERE movement.execution_model = 'vault_direct'
-                AND movement.status IN ('requested', 'submitted', 'confirmed')
+                AND movement.status = ANY(?::text[])
                 AND NOT EXISTS (
                   SELECT 1 FROM reserved WHERE reserved.id = movement.id
                 )
@@ -1402,7 +1420,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            SELECT * FROM touched
            ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC`
         )
-        .bind(blockhashBoundQuota, confirmedQuota, limit)
+        .bind(
+          [...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES],
+          blockhashBoundQuota,
+          confirmedQuota,
+          [...UNSETTLED_EARN_MOVEMENT_STATUSES],
+          limit
+        )
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -1418,17 +1442,22 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const row = await db
         .prepare(
           `SELECT COUNT(*) AS backlog,
-                  COUNT(*) FILTER (WHERE status IN ('requested', 'submitted')) AS backlog_blockhash_bound,
+                  COUNT(*) FILTER (WHERE status = ANY(?::text[])) AS backlog_blockhash_bound,
                   COUNT(*) FILTER (WHERE status = 'confirmed') AS backlog_confirmed,
                   COUNT(*) FILTER (WHERE direction = 'withdrawal') AS backlog_withdrawals,
                   MIN(created_at) AS oldest_created_at,
-                  MIN(created_at) FILTER (WHERE status IN ('requested', 'submitted'))
+                  MIN(created_at) FILTER (WHERE status = ANY(?::text[]))
                     AS oldest_blockhash_bound_created_at,
                   MIN(created_at) FILTER (WHERE direction = 'withdrawal')
                     AS oldest_withdrawal_created_at
              FROM earn_movements
             WHERE execution_model = 'vault_direct'
-              AND status IN ('requested', 'submitted', 'confirmed')`
+              AND status = ANY(?::text[])`
+        )
+        .bind(
+          [...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES],
+          [...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES],
+          [...UNSETTLED_EARN_MOVEMENT_STATUSES]
         )
         .first<{
           backlog: number | string;
@@ -1658,7 +1687,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     async advanceVaultMovement(input) {
       assertVaultTransitionMetadata(input);
       const sources = allowedSourceStatuses("vault_direct", input.toStatus);
-      const guards = sources.map(() => "?").join(", ");
 
       const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
       const values: unknown[] = [input.toStatus];
@@ -1697,10 +1725,10 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               WHERE id = ?
                 AND organization_id = ?
                 AND execution_model = 'vault_direct'
-                AND status IN (${guards})
+                AND status = ANY(?::text[])
               RETURNING *`
           )
-          .bind(...values, input.movementId, input.organizationId, ...sources)
+          .bind(...values, input.movementId, input.organizationId, sources)
           .first<Record<string, unknown>>();
 
       // Only an outcome that changes what the organization HOLDS needs the
@@ -1741,10 +1769,10 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                   AND NOT EXISTS (
                     SELECT 1 FROM earn_movements movement
                      WHERE movement.position_id = position.id
-                       AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
+                       AND movement.status = ANY(?::text[])
                   )`
             )
-            .bind(movement.position_id)
+            .bind(movement.position_id, [...LIVE_EARN_MOVEMENT_STATUSES])
             .run();
           // A failed movement charged no rent: an expired transaction never
           // executed, and one that failed on chain had every effect reverted.

@@ -6,18 +6,19 @@
  */
 
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import type {
-  AllowlistEntryStatus,
-  FrozenAccount,
-  Token,
-  TokenAllowlistEntry,
-  TokenExtensionsConfig,
-  TokenStatus,
-  TokenTemplate,
-  TokenTransaction,
-  TokenTransactionListItem,
-  TokenTransactionStatus,
-  TokenTransactionType,
+import {
+  type AllowlistEntryStatus,
+  type FrozenAccount,
+  SUPPLY_RESERVING_TOKEN_TRANSACTION_STATUSES,
+  type Token,
+  type TokenAllowlistEntry,
+  type TokenExtensionsConfig,
+  type TokenStatus,
+  type TokenTemplate,
+  type TokenTransaction,
+  type TokenTransactionListItem,
+  type TokenTransactionStatus,
+  type TokenTransactionType,
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -758,14 +759,13 @@ export class TokenService {
       return new Map();
     }
     const tenant = this.tenantTokenScope();
-    const placeholders = mints.map(() => "?").join(", ");
     const result = await this.db
       .prepare(
         `SELECT mint_address, image_url
          FROM issued_tokens
-         WHERE mint_address IN (${placeholders})${tenant.clause}`
+         WHERE mint_address = ANY(?::text[])${tenant.clause}`
       )
-      .bind(...mints, ...tenant.values)
+      .bind(mints, ...tenant.values)
       .all<{ mint_address: string; image_url: string | null }>();
     return new Map(result.results.map((row) => [row.mint_address, row.image_url]));
   }
@@ -2132,7 +2132,7 @@ export class TokenService {
            FROM issuance_transactions t
            JOIN issued_tokens tok ON tok.id = t.token_id
            WHERE t.token_id = ? AND t.type = 'mint'
-             AND t.status IN ('pending', 'processing', 'failed')
+             AND t.status = ANY(?::text[])
              AND t.updated_at >= ?
          ),
          resolved AS (
@@ -2161,6 +2161,7 @@ export class TokenService {
       )
       .bind(
         tokenId,
+        [...SUPPLY_RESERVING_TOKEN_TRANSACTION_STATUSES],
         since,
         supplyBaseUnits,
         supplyBaseUnits,
@@ -2614,7 +2615,7 @@ export class TokenService {
       offset = 0,
     } = options;
     const distinctTypes = Array.from(new Set(types));
-    const params: (string | number)[] = [organizationId];
+    const params: unknown[] = [organizationId];
     const conditions = ["tx.organization_id = ?"];
     const publicKeys = Array.from(new Set(walletScope?.publicKeys ?? []));
     const tokenAccounts = walletScope?.tokenAccounts ?? [];
@@ -2642,8 +2643,8 @@ export class TokenService {
     }
 
     if (distinctTypes.length > 0) {
-      conditions.push(`tx.type IN (${distinctTypes.map(() => "?").join(", ")})`);
-      params.push(...distinctTypes);
+      conditions.push(`tx.type = ANY(?::text[])`);
+      params.push(distinctTypes);
     }
 
     if (walletScope) {
@@ -2662,7 +2663,7 @@ export class TokenService {
                   // operation_params is TEXT; a malformed row would abort the whole
                   // scan on the ::jsonb cast, so guard it with pg_input_is_valid
                   // (PG16+) inside a CASE (WHERE AND is not short-circuited).
-                  `CASE WHEN pg_input_is_valid(tx.operation_params, 'jsonb') THEN tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")}) ELSE false END`
+                  `CASE WHEN pg_input_is_valid(tx.operation_params, 'jsonb') THEN tx.operation_params::jsonb ->> '${key}' = ANY(?::text[]) ELSE false END`
               )
             : [];
         const tokenAccountConditions =
@@ -2687,7 +2688,7 @@ export class TokenService {
         walletTypeConditions.push(`(tx.type = ? AND (${matchConditions.join(" OR ")}))`);
         params.push(type);
         for (const _field of config.publicKeyFields) {
-          params.push(...publicKeys);
+          params.push(publicKeys);
         }
       }
 
@@ -3372,14 +3373,13 @@ export class TokenService {
       return map;
     }
 
-    const placeholders = tokenIds.map(() => "?").join(", ");
     const rows = await this.db
       .prepare(
         `SELECT token_id, extension, config
          FROM issued_token_extensions
-         WHERE token_id IN (${placeholders})`
+         WHERE token_id = ANY(?::text[])`
       )
-      .bind(...tokenIds)
+      .bind(tokenIds)
       .all<{ token_id: string; extension: string; config: string | null }>();
 
     const grouped = new Map<string, TokenExtensionRow[]>();

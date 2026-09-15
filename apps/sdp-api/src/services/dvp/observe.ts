@@ -10,6 +10,7 @@
  * inferred from account state, and is only ever a description of one moment.
  */
 
+import { isOpenDvpTradeStatus } from "@sdp/types";
 import type { DvpTradeStatus } from "@/db/repositories";
 import type { DvpCloseResolution } from "./closing-transaction";
 
@@ -73,14 +74,6 @@ export interface DvpTradeDerivation {
   frozenEscrow: boolean;
 }
 
-/** Lifecycle states from which a vanished account is genuinely terminal. */
-const CLOSABLE: ReadonlySet<DvpTradeStatus> = new Set([
-  "created",
-  "partially_funded",
-  "funded",
-  "expired",
-]);
-
 /** Grace period covering a request that is still waiting on Kora's timeout. */
 export const DVP_CREATE_CLAIM_GRACE_MS = 15 * 60 * 1_000;
 
@@ -102,7 +95,9 @@ function deriveMissingTradeAccountStatus(
   // `closed_unknown` written by an earlier tick that found no history yet.
   if (
     observation.closeResolution !== null &&
-    (trade.status === "creating" || trade.status === "closed_unknown" || CLOSABLE.has(trade.status))
+    (trade.status === "creating" ||
+      trade.status === "closed_unknown" ||
+      isOpenDvpTradeStatus(trade.status))
   ) {
     return observation.closeResolution.status;
   }
@@ -118,7 +113,7 @@ function deriveMissingTradeAccountStatus(
       ? "create_failed"
       : "creating";
   }
-  return CLOSABLE.has(trade.status) ? "closed_unknown" : trade.status;
+  return isOpenDvpTradeStatus(trade.status) ? "closed_unknown" : trade.status;
 }
 
 /**

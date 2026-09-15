@@ -9,6 +9,7 @@ import {
 } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { isFundableDvpTradeStatus } from "@sdp/types";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -30,7 +31,7 @@ import {
 } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
+import type { DvpTradeRow, DvpTradeSide } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -46,9 +47,6 @@ import {
 import type { Env } from "@/types/env";
 import { readMintDecimals } from "./mints";
 import { readDvpAccounts, readEscrowState } from "./read-chain";
-
-/** Statuses from which a leg can still be funded. */
-const FUNDABLE: ReadonlySet<DvpTradeStatus> = new Set(["created", "partially_funded"]);
 
 export interface DvpFundResult {
   signature: Signature;
@@ -177,7 +175,7 @@ export async function executeDvpFunding(
 ): Promise<DvpFundResult> {
   const env = c.env;
 
-  if (!FUNDABLE.has(trade.status)) {
+  if (!isFundableDvpTradeStatus(trade.status)) {
     throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be funded`);
   }
 

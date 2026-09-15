@@ -1,4 +1,4 @@
-import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
+import { PROJECT_RPC_PROVIDERS, PROJECT_STATUSES } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
   projectRpcEndpointSchema,
@@ -63,7 +63,7 @@ export const projectSchema = z
     settings: projectSettingsSchema.openapi({
       description: "Project settings with normalized defaults.",
     }),
-    status: z.enum(["active", "archived"]).openapi({
+    status: z.enum(PROJECT_STATUSES).openapi({
       description: "Project status.",
       example: "active",
     }),

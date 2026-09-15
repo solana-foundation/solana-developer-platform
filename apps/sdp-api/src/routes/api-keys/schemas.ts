@@ -1,4 +1,9 @@
-import { PERMISSIONS } from "@sdp/types";
+import {
+  API_KEY_ROLE_VALUES,
+  API_KEY_WALLET_SCOPES,
+  PERMISSIONS,
+  POLICY_DEFAULT_ACTIONS,
+} from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
 import { refinePolicyRules, walletPolicyRuleSchema } from "../payments/schemas";
@@ -20,9 +25,9 @@ const apiKeyWalletProvisioningSchema = z.union([
 export const apiKeyCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
-  role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
+  role: z.enum(API_KEY_ROLE_VALUES).optional(),
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
-  walletScope: z.enum(["all", "selected"]),
+  walletScope: z.enum(API_KEY_WALLET_SCOPES),
   allowedIps: z.array(apiKeyAllowedIpSchema).optional(),
   expiresAt: z.string().datetime().optional(),
   signingWalletId: z.string().min(1).optional(),
@@ -39,7 +44,7 @@ export const apiKeyCreateSchema = z.object({
 export const apiKeyUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
-  walletScope: z.enum(["all", "selected"]).optional(),
+  walletScope: z.enum(API_KEY_WALLET_SCOPES).optional(),
   allowedIps: z.array(apiKeyAllowedIpSchema).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
   permissions: z.array(z.enum(PERMISSIONS)).nullable().optional(),
@@ -56,7 +61,7 @@ export const apiKeyRevokeSchema = z.strictObject({
   confirmation: z.string().trim().min(1).optional(),
 });
 
-const policyDefaultActionSchema = z.enum(["allow", "deny", "approval_required", "review"]);
+const policyDefaultActionSchema = z.enum(POLICY_DEFAULT_ACTIONS);
 
 export const apiKeyControlProfileCreateSchema = z.object({
   name: z.string().min(1).max(100),

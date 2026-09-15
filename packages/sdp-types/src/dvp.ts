@@ -30,6 +30,78 @@ export const DVP_TRADE_STATUSES = [
 ] as const;
 export type DvpTradeStatus = (typeof DVP_TRADE_STATUSES)[number];
 
+/** DvP trade statuses that can receive another funding leg. */
+export const FUNDABLE_DVP_TRADE_STATUSES = [
+  "created",
+  "partially_funded",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** DvP trade statuses from which settlement or cancellation remains possible. */
+export const OPEN_DVP_TRADE_STATUSES = [
+  "created",
+  "partially_funded",
+  "funded",
+  "expired",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** DvP trade statuses representing creation or an open trade. */
+export const ACTIVE_DVP_TRADE_STATUSES = [
+  "creating",
+  ...OPEN_DVP_TRADE_STATUSES,
+] as const satisfies readonly DvpTradeStatus[];
+
+/** DvP trade statuses whose chain outcome can still refine stored state. */
+export const OBSERVABLE_DVP_TRADE_STATUSES = [
+  ...OPEN_DVP_TRADE_STATUSES,
+  "closed_unknown",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** DvP trade statuses eligible for the recent-closure activity window. */
+export const RECENTLY_CLOSED_DVP_TRADE_STATUSES = [
+  "settled",
+  "cancelled",
+  "rejected",
+  "closed_unknown",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** Closed DvP trade statuses with a definitive decoded outcome. */
+export const RESOLVED_CLOSED_DVP_TRADE_STATUSES = [
+  "settled",
+  "cancelled",
+  "rejected",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** DvP trade statuses whose escrow may still hold unsettled value. */
+export const UNSETTLED_DVP_TRADE_STATUSES = [
+  "created",
+  "partially_funded",
+  "funded",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** DvP trade statuses whose escrows no longer exist. */
+export const CLOSED_DVP_TRADE_STATUSES = [
+  "settled",
+  "cancelled",
+  "rejected",
+  "closed_unknown",
+  "create_failed",
+] as const satisfies readonly DvpTradeStatus[];
+
+/** Reports whether a trade can receive another funding leg. */
+export function isFundableDvpTradeStatus(status: DvpTradeStatus): boolean {
+  return FUNDABLE_DVP_TRADE_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Reports whether a trade can still be settled or cancelled. */
+export function isOpenDvpTradeStatus(status: DvpTradeStatus): boolean {
+  return OPEN_DVP_TRADE_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Reports whether a trade is finished and its escrows no longer exist. */
+export function isClosedDvpTradeStatus(status: DvpTradeStatus): boolean {
+  return CLOSED_DVP_TRADE_STATUSES.some((candidate) => candidate === status);
+}
+
 /** Which leg of a DvP trade SDP holds. The other side is an arbitrary external address. */
 export const DVP_TRADE_SIDES = ["a", "b"] as const;
 export type DvpTradeSide = (typeof DVP_TRADE_SIDES)[number];

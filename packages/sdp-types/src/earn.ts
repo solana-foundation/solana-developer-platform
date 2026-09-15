@@ -129,6 +129,11 @@ export type EarnLiquidityTerm = (typeof EARN_LIQUIDITY_TERMS)[number];
 
 export const EARN_STRATEGY_STATUSES = ["active", "paused", "deprecated"] as const;
 export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
+/** Earn strategy statuses that automated sync must not reactivate. */
+export const OPERATOR_DISABLED_EARN_STRATEGY_STATUSES = [
+  "paused",
+  "deprecated",
+] as const satisfies readonly EarnStrategyStatus[];
 
 /**
  * Curators (Gauntlet, Steakhouse, Sentora, ...) publish strategy/risk
@@ -1165,6 +1170,40 @@ export const EARN_MOVEMENT_STATUSES = {
 export type EarnCustodialMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["custodial"][number];
 export type EarnVaultDirectMovementStatus = (typeof EARN_MOVEMENT_STATUSES)["vault_direct"][number];
 export type EarnMovementStatus = EarnCustodialMovementStatus | EarnVaultDirectMovementStatus;
+
+/** Vault-direct movement statuses still bound to a transaction blockhash. */
+export const BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES = [
+  "requested",
+  "submitted",
+] as const satisfies readonly EarnVaultDirectMovementStatus[];
+/** Vault-direct movement statuses without a final settlement outcome. */
+export const UNSETTLED_EARN_MOVEMENT_STATUSES = [
+  ...BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES,
+  "confirmed",
+] as const satisfies readonly EarnVaultDirectMovementStatus[];
+/** Vault-direct movement statuses that still block a new position movement. */
+export const LIVE_EARN_MOVEMENT_STATUSES = [
+  ...UNSETTLED_EARN_MOVEMENT_STATUSES,
+  "finalized",
+] as const satisfies readonly EarnVaultDirectMovementStatus[];
+/** Vault-direct movement statuses supported by a positive chain observation. */
+export const OBSERVED_EARN_MOVEMENT_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly EarnVaultDirectMovementStatus[];
+/** Reports whether an Earn movement remains bound to a transaction blockhash. */
+export function isBlockhashBoundEarnMovementStatus(status: EarnMovementStatus): boolean {
+  return BLOCKHASH_BOUND_EARN_MOVEMENT_STATUSES.some((candidate) => candidate === status);
+}
+/** Reports whether an Earn movement has a positive chain observation. */
+export function isObservedEarnMovementStatus(status: EarnMovementStatus): boolean {
+  return OBSERVED_EARN_MOVEMENT_STATUSES.some((candidate) => candidate === status);
+}
+/** Earn movement statuses that settle ledger accounting for each direction. */
+export const SETTLED_EARN_MOVEMENT_STATUSES_BY_DIRECTION = {
+  deposit: ["confirmed", "finalized", "failed"],
+  withdrawal: ["finalized", "failed"],
+} as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
 
 /**
  * Statuses a movement never moves on from, per model — the UNIFIED ledger's

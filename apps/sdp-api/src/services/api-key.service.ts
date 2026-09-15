@@ -6,12 +6,13 @@
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
-import type {
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  ApiKeyStatus,
-  ApiKeyWalletScope,
-  Permission,
+import {
+  type ApiKeyEnvironment,
+  type ApiKeyRole,
+  type ApiKeyStatus,
+  type ApiKeyWalletScope,
+  type Permission,
+  REVOKED_API_KEY_STATUSES,
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
@@ -235,10 +236,10 @@ export class ApiKeyService {
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
            AND ak.project_id = ?
-           AND ak.status NOT IN ('revoked', 'deactivated')
+           AND NOT (ak.status = ANY(?::text[]))
          ORDER BY ak.created_at DESC`
       )
-      .bind(this.scope.organizationId, this.scope.projectId)
+      .bind(this.scope.organizationId, this.scope.projectId, [...REVOKED_API_KEY_STATUSES])
       .all<ApiKeyListRow>();
 
     return result.results.map((row) => this.mapListRow(row));

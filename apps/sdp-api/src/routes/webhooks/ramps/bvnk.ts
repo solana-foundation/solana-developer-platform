@@ -15,7 +15,12 @@ import {
   withBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { BvnkBankFundingDetails, SdpEnvironment } from "@sdp/types";
+import {
+  type BvnkBankFundingDetails,
+  MATCHABLE_ONRAMP_TRANSFER_STATUSES,
+  type SdpEnvironment,
+  TERMINAL_RAMP_TRANSFER_STATUSES,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import {
   createPostgresCounterpartyProviderAccountsRepository,
@@ -224,7 +229,7 @@ async function handleProviderOnrampSettlementWebhook(
          AND counterparty_id = ?
          AND provider = 'bvnk'
          AND type = 'onramp'
-         AND status IN ('pending', 'awaiting_payment', 'settling')
+         AND status = ANY(?::text[])
          AND provider_data->'bvnk'->>'fundingWalletId' = ?
          AND fiat_amount IS NOT NULL
          AND fiat_amount::numeric = ?::numeric
@@ -235,6 +240,7 @@ async function handleProviderOnrampSettlementWebhook(
       counterparty.organization_id,
       counterparty.project_id,
       counterparty.id,
+      [...MATCHABLE_ONRAMP_TRANSFER_STATUSES],
       event.walletId,
       paymentAmount
     )
@@ -552,14 +558,15 @@ async function handleProviderOfframpSettlementWebhook(
        WHERE id = ?
          AND provider = 'bvnk'
          AND type = 'offramp'
-         AND status NOT IN ('completed', 'failed', 'expired', 'canceled')`
+         AND NOT (status = ANY(?::text[]))`
     )
     .bind(
       status,
       fiatAmount !== undefined,
       fiatAmount ?? null,
       new Date().toISOString(),
-      event.transferId
+      event.transferId,
+      [...TERMINAL_RAMP_TRANSFER_STATUSES]
     )
     .run();
 }

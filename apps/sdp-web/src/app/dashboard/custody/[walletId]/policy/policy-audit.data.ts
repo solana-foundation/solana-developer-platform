@@ -3,6 +3,7 @@ import {
   type ListApiKeysResponse,
   type PolicyDecision,
   WALLET_OPERATION_FAMILIES,
+  WALLET_OPERATION_STATUSES,
   type WalletControlProfileRevisionHistory,
   type WalletOperationFamily,
   type WalletOperationStatus,
@@ -27,15 +28,7 @@ const POLICY_DECISIONS = [
   "not_evaluated",
 ] as const satisfies readonly PolicyDecision[];
 
-export const POLICY_AUDIT_OPERATION_STATUSES = [
-  "created",
-  "evaluated",
-  "pending_approval",
-  "executing",
-  "completed",
-  "failed",
-  "canceled",
-] as const satisfies readonly WalletOperationStatus[];
+export const POLICY_AUDIT_OPERATION_STATUSES = WALLET_OPERATION_STATUSES;
 
 export const POLICY_AUDIT_OPERATION_FAMILIES = WALLET_OPERATION_FAMILIES;
 

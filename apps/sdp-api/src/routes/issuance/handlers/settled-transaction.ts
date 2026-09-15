@@ -1,4 +1,8 @@
-import type { TokenTransaction } from "@sdp/types";
+import {
+  isSuccessfulTokenTransactionStatus,
+  isTokenTransactionStatus,
+  type TokenTransaction,
+} from "@sdp/types";
 import { getLogger } from "@/runtime/logger";
 import {
   type AuditAction,
@@ -143,7 +147,8 @@ export function isSettledIssuanceTransaction(transaction: {
   signature: string | null;
 }): boolean {
   return (
-    (transaction.status === "confirmed" || transaction.status === "finalized") &&
+    isTokenTransactionStatus(transaction.status) &&
+    isSuccessfulTokenTransactionStatus(transaction.status) &&
     transaction.signature !== null
   );
 }

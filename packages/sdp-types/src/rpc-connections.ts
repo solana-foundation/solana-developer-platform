@@ -1,3 +1,4 @@
+import { CONNECTION_LIFECYCLE_STATUSES, type ConnectionLifecycleStatus } from "./custody";
 import type { OrganizationRpcProvider } from "./organizations";
 
 /**
@@ -5,14 +6,12 @@ import type { OrganizationRpcProvider } from "./organizations";
  * Connections on purpose — one setup model across provider families, so a
  * dashboard that can render one can render the other.
  */
-export const RPC_CONNECTION_LIFECYCLES = [
-  "pending",
-  "checking",
-  "active",
+export const RPC_CONNECTION_LIFECYCLES = CONNECTION_LIFECYCLE_STATUSES;
+export type RpcConnectionLifecycle = ConnectionLifecycleStatus;
+export const RESOLVED_RPC_CONNECTION_STATUSES = [
   "failed",
-  "deactivated",
-] as const;
-export type RpcConnectionLifecycle = (typeof RPC_CONNECTION_LIFECYCLES)[number];
+  "active",
+] as const satisfies readonly RpcConnectionLifecycle[];
 
 export const RPC_CONNECTION_SCOPES = ["organization", "project"] as const;
 export type RpcConnectionScope = (typeof RPC_CONNECTION_SCOPES)[number];

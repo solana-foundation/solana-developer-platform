@@ -3,6 +3,7 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPE_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPES,
+  PRIVATE_CHANNEL_TRANSFER_STATUSES,
 } from "@sdp/types";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
 import { solanaAddressSchema, withOpenApi, z } from "./base";
@@ -445,7 +446,7 @@ export const privateChannelTransferSchema = z
     recipient: solanaAddressSchema,
     mint: solanaAddressSchema,
     amount: z.string().openapi({ description: "Decimal amount.", example: "1.5" }),
-    status: z.enum(["pending", "submitted", "confirmed", "failed"]).openapi({
+    status: z.enum(PRIVATE_CHANNEL_TRANSFER_STATUSES).openapi({
       description:
         "Transfer lifecycle. `pending` is written before broadcast. `submitted` means SPC accepted the transaction at ingress, which is not yet execution. `confirmed` means SPC executed it and is terminal — SPC runs a single sequencer with no fork choice, so one status read is final. `failed` covers preparation errors, ingress rejection and execution errors. A transfer left at `submitted` means the confirm read returned no verdict.",
       example: "confirmed",

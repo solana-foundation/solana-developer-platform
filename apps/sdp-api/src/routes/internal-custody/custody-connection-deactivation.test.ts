@@ -1,3 +1,4 @@
+import { UNFINISHED_CUSTODY_CONNECTION_STATUSES } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -169,7 +170,7 @@ describe("custody Connection deactivation", () => {
     await clearKVStores(env);
   });
 
-  it.each(["pending", "checking"] as const)(
+  it.each(UNFINISHED_CUSTODY_CONNECTION_STATUSES)(
     "rejects unfinished %s installation without cancellation",
     async (status) => {
       await seedConnection(status);

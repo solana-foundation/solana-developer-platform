@@ -1,4 +1,9 @@
-import { PERMISSIONS } from "@sdp/types";
+import {
+  API_KEY_WALLET_SCOPES,
+  PERMISSIONS,
+  POLICY_DEFAULT_ACTIONS,
+  POLICY_PROFILE_STATUSES,
+} from "@sdp/types";
 import {
   apiKeyControlProfileCreateSchema as apiKeyControlProfileCreateSchemaBase,
   apiKeyControlProfileRevisionCreateBaseSchema as apiKeyControlProfileRevisionCreateSchemaBase,
@@ -24,7 +29,7 @@ export const apiKeyEnvironmentSchema = z
   .enum(["sandbox", "production"])
   .openapi({ description: "API key environment.", example: "sandbox" });
 
-export const apiKeyWalletScopeSchema = z.enum(["all", "selected"]).openapi({
+export const apiKeyWalletScopeSchema = z.enum(API_KEY_WALLET_SCOPES).openapi({
   description: "Whether the key can use all wallets in scope or only explicitly selected wallets.",
   example: "selected",
 });
@@ -112,7 +117,7 @@ export const apiKeyControlProfileSchema = z
     projectId: projectIdParamSchema.nullable().openapi({ description: "Owning project ID." }),
     apiKeyId: apiKeyIdParamSchema,
     name: z.string().openapi({ description: "Control profile name." }),
-    status: z.enum(["draft", "active", "disabled", "archived"]).openapi({
+    status: z.enum(POLICY_PROFILE_STATUSES).openapi({
       description: "Control profile status.",
     }),
     activeRevisionId: z.string().nullable().openapi({
@@ -132,7 +137,7 @@ export const apiKeyControlProfileRevisionSchema = z
     profileId: z.string().openapi({ description: "Parent control profile ID." }),
     revisionNumber: z.number().int().positive().openapi({ description: "Revision number." }),
     rules: z.array(apiKeyPolicyRuleSchema).openapi({ description: "Revision policy rules." }),
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+    defaultAction: z.enum(POLICY_DEFAULT_ACTIONS).openapi({
       description: "Decision used when no rule matches.",
     }),
     createdBy: z.string().nullable().openapi({ description: "Revision author ID." }),

@@ -1,13 +1,14 @@
-import type {
-  EarnApyType,
-  EarnLiquidityTerm,
-  EarnStrategyRiskMetadata,
-  EarnStrategySourceKind,
-  EarnStrategyStatus,
-  SdpEnvironment,
-  SolanaCluster,
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type EarnApyType,
+  type EarnLiquidityTerm,
+  type EarnStrategyRiskMetadata,
+  type EarnStrategySourceKind,
+  type EarnStrategyStatus,
+  OPERATOR_DISABLED_EARN_STRATEGY_STATUSES,
+  type SdpEnvironment,
+  type SolanaCluster,
 } from "@sdp/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
 import type {
   DeleteUnlistedEarnStrategiesInput,
@@ -163,7 +164,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              -- and rates keep flowing, but leaving paused/deprecated takes an
              -- explicit status write, never a sync.
              status = CASE
-               WHEN earn_strategies.status IN ('paused', 'deprecated')
+               WHEN earn_strategies.status = ANY(?::text[])
                  THEN earn_strategies.status
                ELSE EXCLUDED.status
              END,
@@ -186,7 +187,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           JSON.stringify(input.riskMetadata ?? {}),
           input.status,
           input.hostCluster,
-          input.environment
+          input.environment,
+          [...OPERATOR_DISABLED_EARN_STRATEGY_STATUSES]
         )
         .first<Record<string, unknown>>();
 
@@ -330,17 +332,16 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           // empty — the exact inversion this filter exists to prevent.
           conditions.push("1 = 0");
         } else {
-          conditions.push(`provider IN (${input.providers.map(() => "?").join(", ")})`);
-          bindings.push(...input.providers);
+          conditions.push(`provider = ANY(?::text[])`);
+          bindings.push(input.providers);
         }
       }
       if (input.excludeProviderKeys?.length) {
-        const placeholders = input.excludeProviderKeys.map(() => "?").join(", ");
         // Concatenated so one binding list covers both halves of the key; a bare
         // provider_reference match could hide another provider's vault that
         // happens to share a reference.
-        conditions.push(`(provider || ':' || provider_reference) NOT IN (${placeholders})`);
-        bindings.push(...input.excludeProviderKeys);
+        conditions.push(`NOT ((provider || ':' || provider_reference) = ANY(?::text[]))`);
+        bindings.push(input.excludeProviderKeys);
       }
       for (const [provider, references] of Object.entries(input.allowedProviderReferences ?? {})) {
         if (references.length === 0) {
@@ -350,9 +351,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         }
         // Scoped to the one provider: every other provider's rows pass through,
         // so adding an allowlist for one shelf never silently curates another.
-        const placeholders = references.map(() => "?").join(", ");
-        conditions.push(`(provider <> ? OR provider_reference IN (${placeholders}))`);
-        bindings.push(provider, ...references);
+        conditions.push(`(provider <> ? OR provider_reference = ANY(?::text[]))`);
+        bindings.push(provider, references);
       }
       for (const rawTerm of input.excludeRelatedTerms ?? []) {
         const term = rawTerm.trim().toLowerCase();

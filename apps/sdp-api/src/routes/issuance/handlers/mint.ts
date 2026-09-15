@@ -1,6 +1,6 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import { isSuccessfulTokenTransactionStatus, type TokenTransaction } from "@sdp/types";
 import type { Context } from "hono";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -106,10 +106,7 @@ function mintIdempotencyMetadata(
 }
 
 function isSettledIssuanceTransaction(transaction: TokenTransaction): boolean {
-  return (
-    (transaction.status === "confirmed" || transaction.status === "finalized") &&
-    transaction.signature !== null
-  );
+  return isSuccessfulTokenTransactionStatus(transaction.status) && transaction.signature !== null;
 }
 
 interface SettledMintEvidence {

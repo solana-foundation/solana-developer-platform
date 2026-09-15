@@ -1,4 +1,12 @@
-import { DVP_TRADE_STATUSES } from "@sdp/types";
+import {
+  ACTIVE_DVP_TRADE_STATUSES,
+  DVP_TRADE_STATUSES,
+  OBSERVABLE_DVP_TRADE_STATUSES,
+  OPEN_DVP_TRADE_STATUSES,
+  RECENTLY_CLOSED_DVP_TRADE_STATUSES,
+  RESOLVED_CLOSED_DVP_TRADE_STATUSES,
+  UNSETTLED_DVP_TRADE_STATUSES,
+} from "@sdp/types";
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
 import type { AppDb } from "@/db";
@@ -151,7 +159,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
  */
 function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
   sql: string;
-  bindings: string[];
+  bindings: unknown[];
 } {
   if (sdpWalletIds === undefined || sdpWalletIds === null) {
     return { sql: "", bindings: [] };
@@ -159,11 +167,10 @@ function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
   if (sdpWalletIds.length === 0) {
     return { sql: " AND 1 = 0", bindings: [] };
   }
-  const placeholders = sdpWalletIds.map(() => "?").join(", ");
   return {
-    sql: ` AND (user_a IN (SELECT public_key FROM custody_wallets WHERE id IN (${placeholders}))
-            OR user_b IN (SELECT public_key FROM custody_wallets WHERE id IN (${placeholders})))`,
-    bindings: [...sdpWalletIds, ...sdpWalletIds],
+    sql: ` AND (user_a IN (SELECT public_key FROM custody_wallets WHERE id = ANY(?::text[]))
+            OR user_b IN (SELECT public_key FROM custody_wallets WHERE id = ANY(?::text[])))`,
+    bindings: [sdpWalletIds, sdpWalletIds],
   };
 }
 
@@ -320,14 +327,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-               OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+            WHERE status = ANY(?::text[])
+               OR (status = ANY(?::text[])
                    AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
-            ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
+            ORDER BY CASE WHEN status = ANY(?::text[]) THEN 0 ELSE 1 END,
                      observed_at ASC NULLS FIRST, created_at ASC, id ASC
             LIMIT ?`
         )
-        .bind(limit)
+        .bind(
+          [...ACTIVE_DVP_TRADE_STATUSES],
+          [...RECENTLY_CLOSED_DVP_TRADE_STATUSES],
+          [...ACTIVE_DVP_TRADE_STATUSES],
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },
@@ -341,12 +353,12 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   escrow_b_amount = ?,
                   escrow_a_frozen = ?,
                   escrow_b_frozen = ?,
-                  escrow_a_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
-                  escrow_b_peak_amount = CASE WHEN ?::text IN ('created', 'partially_funded', 'funded', 'expired') AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
+                  escrow_a_peak_amount = CASE WHEN ?::text = ANY(?::text[]) AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_a_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_a_peak_amount END,
+                  escrow_b_peak_amount = CASE WHEN ?::text = ANY(?::text[]) AND ?::text IS NOT NULL THEN GREATEST(COALESCE(escrow_b_peak_amount, '0')::numeric, ?::numeric)::text ELSE escrow_b_peak_amount END,
                   close_signature = CASE WHEN close_signature IS NULL THEN ?::text ELSE close_signature END,
-                  close_resolution_attempts = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN 0 ELSE close_resolution_attempts END,
-                  close_resolution_after = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN NULL ELSE close_resolution_after END,
-                  closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN ?::text ELSE closed_at END,
+                  close_resolution_attempts = CASE WHEN ?::text IS NOT NULL AND ?::text = ANY(?::text[]) THEN 0 ELSE close_resolution_attempts END,
+                  close_resolution_after = CASE WHEN ?::text IS NOT NULL AND ?::text = ANY(?::text[]) THEN NULL ELSE close_resolution_after END,
+                  closed_at = CASE WHEN closed_at IS NULL AND ?::text = ANY(?::text[]) THEN ?::text ELSE closed_at END,
                   observed_at = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND status = ?
@@ -354,6 +366,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         )
         .bind(
           input.status,
+          [...OPEN_DVP_TRADE_STATUSES],
           input.escrowAAmount,
           input.escrowBAmount,
           input.escrowAFrozen,
@@ -362,14 +375,18 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.escrowAAmount,
           input.escrowAAmount,
           input.status,
+          [...OPEN_DVP_TRADE_STATUSES],
           input.escrowBAmount,
           input.escrowBAmount,
           input.closeSignature,
           input.closeSignature,
           input.status,
+          [...RESOLVED_CLOSED_DVP_TRADE_STATUSES],
           input.closeSignature,
           input.status,
+          [...RESOLVED_CLOSED_DVP_TRADE_STATUSES],
           input.status,
+          [...RECENTLY_CLOSED_DVP_TRADE_STATUSES],
           input.observedAt,
           input.observedAt,
           input.id,
@@ -461,10 +478,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   closed_at = CASE WHEN closed_at IS NULL THEN sdp_iso_now() ELSE closed_at END,
                   updated_at = sdp_iso_now()
             WHERE id = ?
-              AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
+              AND status = ANY(?::text[])
             RETURNING ${SELECT_COLUMNS}`
         )
-        .bind(status, signature, id)
+        .bind(status, signature, id, [...OBSERVABLE_DVP_TRADE_STATUSES])
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
@@ -478,9 +495,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       // list is capped with no cursor, so narrowing after the page would make a
       // matching trade older than the newest page unfindable.
       if (filters.statuses !== null) {
-        const placeholders = filters.statuses.map(() => "?").join(", ");
-        clauses.push(`status IN (${placeholders})`);
-        bindings.push(...filters.statuses);
+        clauses.push(`status = ANY(?::text[])`);
+        bindings.push(filters.statuses);
       }
 
       // Same semantics as the dashboard's `matchesAddressQuery`, as close as SQL
@@ -549,18 +565,23 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       // cancelled trade naming you is history, and putting it in a list called
       // "waiting on you" would be false. `expired` is left out for the same
       // reason: nothing a party funds can settle after it.
-      const placeholders = scope.partyAddresses.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE status IN ('created', 'partially_funded', 'funded')
+            WHERE status = ANY(?::text[])
               AND project_id <> ?
-              AND (user_a IN (${placeholders}) OR user_b IN (${placeholders}))
+              AND (user_a = ANY(?::text[]) OR user_b = ANY(?::text[]))
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(scope.projectId, ...scope.partyAddresses, ...scope.partyAddresses, limit)
+        .bind(
+          [...UNSETTLED_DVP_TRADE_STATUSES],
+          scope.projectId,
+          scope.partyAddresses,
+          scope.partyAddresses,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

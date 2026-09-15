@@ -1,6 +1,9 @@
-export type PolicyProfileStatus = "draft" | "active" | "disabled" | "archived";
-export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "review";
-export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
+export const POLICY_PROFILE_STATUSES = ["draft", "active", "disabled", "archived"] as const;
+export type PolicyProfileStatus = (typeof POLICY_PROFILE_STATUSES)[number];
+export const POLICY_DEFAULT_ACTIONS = ["allow", "deny", "approval_required", "review"] as const;
+export type PolicyDefaultAction = (typeof POLICY_DEFAULT_ACTIONS)[number];
+export const EFFECTIVE_POLICY_SOURCES = ["implicit_default_allow", "customer_profile"] as const;
+export type EffectivePolicySource = (typeof EFFECTIVE_POLICY_SOURCES)[number];
 
 export const WALLET_OPERATION_TYPES = [
   // Settling a DvP trade moves BOTH legs in one transaction and closes the
@@ -56,22 +59,34 @@ export const WALLET_OPERATION_FAMILIES = [
 
 export type WalletOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
 
-export type WalletOperationStatus =
-  | "created"
-  | "evaluated"
-  | "pending_approval"
-  | "executing"
-  | "completed"
-  | "failed"
-  | "canceled";
+export const WALLET_OPERATION_STATUSES = [
+  "created",
+  "evaluated",
+  "pending_approval",
+  "executing",
+  "completed",
+  "failed",
+  "canceled",
+] as const;
+export type WalletOperationStatus = (typeof WALLET_OPERATION_STATUSES)[number];
+export const FAILABLE_WALLET_OPERATION_STATUSES = [
+  "created",
+  "pending_approval",
+] as const satisfies readonly WalletOperationStatus[];
+/** The from-state an approved/rejected transition may leave. */
+export const APPROVAL_PENDING_WALLET_OPERATION_STATUSES = [
+  "pending_approval",
+] as const satisfies readonly WalletOperationStatus[];
 
-export type PolicyDecision =
-  | "allow"
-  | "deny"
-  | "approval_required"
-  | "provider_approval_required"
-  | "review"
-  | "not_evaluated";
+export const POLICY_DECISIONS = [
+  "allow",
+  "deny",
+  "approval_required",
+  "provider_approval_required",
+  "review",
+  "not_evaluated",
+] as const;
+export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
 
 export type PolicyEvaluationReasonCode =
   | "implicit_default_allow"
@@ -149,23 +164,43 @@ export type PolicyRule =
   | ApprovalPolicyRule
   | AlwaysPolicyRule;
 
-export type ApiKeyWalletPolicyBindingScope = "all" | "selected";
-export type PolicyProviderSyncStatus =
-  | "not_applicable"
-  | "pending"
-  | "synced"
-  | "partial"
-  | "failed";
+export const API_KEY_WALLET_POLICY_BINDING_SCOPES = ["all", "selected"] as const;
+export type ApiKeyWalletPolicyBindingScope = (typeof API_KEY_WALLET_POLICY_BINDING_SCOPES)[number];
+export const POLICY_PROVIDER_SYNC_STATUSES = [
+  "not_applicable",
+  "pending",
+  "synced",
+  "partial",
+  "failed",
+] as const;
+export type PolicyProviderSyncStatus = (typeof POLICY_PROVIDER_SYNC_STATUSES)[number];
 export type PolicyControlInventoryTarget = "wallet" | "api_key" | "all";
-export type PolicyControlInventoryStatus = "default_allow" | "draft" | "active" | "disabled";
-export type ApprovalGroupStatus = "active" | "archived";
-export type ApprovalRequestStatus =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "canceled"
-  | "expired"
-  | "failed";
+export const POLICY_CONTROL_INVENTORY_STATUSES = [
+  "default_allow",
+  "draft",
+  "active",
+  "disabled",
+] as const;
+export type PolicyControlInventoryStatus = (typeof POLICY_CONTROL_INVENTORY_STATUSES)[number];
+export const APPROVAL_GROUP_STATUSES = ["active", "archived"] as const;
+export type ApprovalGroupStatus = (typeof APPROVAL_GROUP_STATUSES)[number];
+export const APPROVAL_REQUEST_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "canceled",
+  "expired",
+  "failed",
+] as const;
+export type ApprovalRequestStatus = (typeof APPROVAL_REQUEST_STATUSES)[number];
+export function isApprovalRequestStatus(status: string): status is ApprovalRequestStatus {
+  return APPROVAL_REQUEST_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Reports whether an approval request is still awaiting a decision. */
+export function isPendingApprovalRequestStatus(status: ApprovalRequestStatus): boolean {
+  return status === "pending";
+}
 
 /**
  * Historical read model: rows predating a vocabulary trim keep their retired

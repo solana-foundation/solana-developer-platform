@@ -1,11 +1,17 @@
 import {
   COUNTERPARTY_ENTITY_TYPES,
+  EFFECTIVE_POLICY_SOURCES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  POLICY_DECISIONS,
+  POLICY_DEFAULT_ACTIONS,
+  POLICY_PROFILE_STATUSES,
+  POLICY_PROVIDER_SYNC_STATUSES,
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
   WALLET_OPERATION_FAMILIES,
+  WALLET_OPERATION_STATUSES,
 } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -85,7 +91,7 @@ const walletControlProfileSummarySchema = z
   .object({
     id: z.string().openapi({ description: "Wallet control profile ID." }),
     status: z
-      .enum(["draft", "active", "disabled", "archived"])
+      .enum(POLICY_PROFILE_STATUSES)
       .openapi({ description: "Wallet control profile status." }),
     activeRevisionId: z.string().nullable().openapi({
       description: "Currently active immutable revision ID.",
@@ -97,12 +103,12 @@ const walletControlProfileSummarySchema = z
     commitMessage: z.string().nullable().openapi({
       description: "Message describing the returned revision's changes, when provided.",
     }),
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+    defaultAction: z.enum(POLICY_DEFAULT_ACTIONS).openapi({
       description: "Decision used when no rule matches.",
     }),
     rules: z.array(policyRuleSchema).openapi({ description: "Active policy rules." }),
     providerMappingStatus: z
-      .enum(["not_applicable", "pending", "synced", "partial", "failed"])
+      .enum(POLICY_PROVIDER_SYNC_STATUSES)
       .openapi({ description: "Provider mapping status for this policy profile." }),
     createdAt: isoDateTimeSchema.openapi({ description: "Profile creation timestamp." }),
     updatedAt: isoDateTimeSchema.openapi({ description: "Profile update timestamp." }),
@@ -112,26 +118,11 @@ const walletControlProfileSummarySchema = z
   })
   .openapi({ description: "Wallet control profile summary." });
 
-const policyDecisionSchema = z.enum([
-  "allow",
-  "deny",
-  "approval_required",
-  "provider_approval_required",
-  "review",
-  "not_evaluated",
-]);
+const policyDecisionSchema = z.enum(POLICY_DECISIONS);
 
 const walletOperationFamilySchema = z.enum(WALLET_OPERATION_FAMILIES);
 
-const walletOperationStatusSchema = z.enum([
-  "created",
-  "evaluated",
-  "pending_approval",
-  "executing",
-  "completed",
-  "failed",
-  "canceled",
-]);
+const walletOperationStatusSchema = z.enum(WALLET_OPERATION_STATUSES);
 
 const walletPolicyAuditEntrySchema = z
   .object({
@@ -213,7 +204,7 @@ const walletControlProfileRevisionSchema = z
       description: "Monotonically increasing profile revision number.",
     }),
     rules: z.array(policyRuleSchema).openapi({ description: "Rules stored in this revision." }),
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+    defaultAction: z.enum(POLICY_DEFAULT_ACTIONS),
     commitMessage: updateWalletPolicySchemaBase.shape.commitMessage
       .unwrap()
       .nullable()
@@ -234,7 +225,7 @@ const walletControlProfileHistoryProfileSchema = z
     projectId: z.string().nullable(),
     custodyWalletId: z.string(),
     name: z.string(),
-    status: z.enum(["draft", "active", "disabled", "archived"]),
+    status: z.enum(POLICY_PROFILE_STATUSES),
     activeRevisionId: z.string().nullable(),
     createdBy: z.string().nullable(),
     createdAt: isoDateTimeSchema,
@@ -252,10 +243,10 @@ export const walletControlProfileRevisionHistorySchema = z
   .openapi({ description: "Wallet control profile and its immutable revision history." });
 
 const policyEvaluationPolicyContextSchema = z.object({
-  source: z.enum(["implicit_default_allow", "customer_profile"]),
+  source: z.enum(EFFECTIVE_POLICY_SOURCES),
   profileId: z.string().nullable(),
   revisionId: z.string().nullable(),
-  defaultAction: z.enum(["allow", "deny", "approval_required", "review"]),
+  defaultAction: z.enum(POLICY_DEFAULT_ACTIONS),
   decision: policyDecisionSchema,
   requiresApproval: z.boolean(),
 });
@@ -330,7 +321,7 @@ export const walletPolicyEvaluationResponseSchema = z.object({
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema,
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
+    defaultAction: z.enum(POLICY_DEFAULT_ACTIONS).openapi({
       description:
         "Wallet control profile default action when no rule matches. A wallet without an active profile is implicitly allow.",
     }),

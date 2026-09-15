@@ -19,6 +19,7 @@ import type {
   CachedApiKey,
   Permission,
 } from "@sdp/types";
+import { isRevokedApiKeyStatus } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import {
@@ -314,7 +315,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   }
 
   // Check status
-  if (cachedKey.status === "revoked" || cachedKey.status === "deactivated") {
+  if (isRevokedApiKeyStatus(cachedKey.status)) {
     throw new AppError("REVOKED_API_KEY");
   }
 

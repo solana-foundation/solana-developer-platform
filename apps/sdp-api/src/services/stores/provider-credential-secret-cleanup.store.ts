@@ -1,3 +1,4 @@
+import { TERMINAL_PROVIDER_CREDENTIAL_STATUSES } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 
 export interface RetainedProviderCredentialSecretRow {
@@ -31,7 +32,7 @@ const GCP_UNREFERENCED = `NOT EXISTS (
 const RETENTION_DUE = `(pc.secret_retention_expires_at::timestamptz <= clock_timestamp()
   OR NOT EXISTS (SELECT 1 FROM provider_credentials child
     WHERE child.rotated_from_provider_credential_id = pc.id AND child.status = 'active'))`;
-const GCP_TERMINAL = `(pc.status IN ('failed_validation', 'deactivated')
+const GCP_TERMINAL = `(pc.status = ANY(?::text[])
   OR (pc.status = 'retired' AND (pc.secret_retention_expires_at IS NULL OR ${RETENTION_DUE})))`;
 const COLUMNS = `pc.id, pc.organization_id, pc.provider, pc.storage_backend, pc.status,
   pc.secret_ref, pc.secret_version_ref, pc.secret_retention_expires_at`;
@@ -126,7 +127,7 @@ export class ProviderCredentialSecretCleanupStore {
          AND pc.secret_version_ref IS NOT NULL AND pc.secret_retention_expires_at IS NOT NULL
          AND ${GCP_TERMINAL} AND ${GCP_UNREFERENCED}
        ORDER BY pc.updated_at, pc.id LIMIT ?`,
-      [owner.organization_id, owner.secret_ref, limit]
+      [owner.organization_id, owner.secret_ref, [...TERMINAL_PROVIDER_CREDENTIAL_STATUSES], limit]
     );
   }
 
@@ -144,7 +145,7 @@ export class ProviderCredentialSecretCleanupStore {
              AND regexp_replace(other.secret_version_ref, '^projects/[^/]+/', '') =
                  regexp_replace(pc.secret_version_ref, '^projects/[^/]+/', ''))
        RETURNING ${COLUMNS}`,
-      [params.id, params.expectedSecretVersionRef]
+      [params.id, params.expectedSecretVersionRef, [...TERMINAL_PROVIDER_CREDENTIAL_STATUSES]]
     );
   }
 
@@ -161,7 +162,12 @@ export class ProviderCredentialSecretCleanupStore {
        WHERE pc.id = ? AND pc.provider = 'privy' AND pc.source = 'stored'
          AND pc.storage_backend = 'gcp_secret_manager' AND pc.secret_version_ref = ?
          AND pc.secret_retention_expires_at = ? AND ${GCP_TERMINAL} AND ${GCP_UNREFERENCED}`,
-        [params.id, params.expectedSecretVersionRef, params.expectedRetentionExpiresAt]
+        [
+          params.id,
+          params.expectedSecretVersionRef,
+          params.expectedRetentionExpiresAt,
+          [...TERMINAL_PROVIDER_CREDENTIAL_STATUSES],
+        ]
       )) === 1
     );
   }

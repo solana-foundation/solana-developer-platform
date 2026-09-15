@@ -6,18 +6,9 @@ export const TRANSACTION_TYPES = [
   "offramp",
 ] as const;
 
-export const TRANSACTION_STATUSES = [
-  "pending",
-  "processing",
-  "confirmed",
-  "finalized",
-  "failed",
-  "awaiting_payment",
-  "settling",
-  "completed",
-  "canceled",
-  "expired",
-] as const;
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+
+export const TRANSACTION_STATUSES = PAYMENT_TRANSFER_STATUSES;
 
 export const TRANSACTION_SORT_FIELDS = ["createdAt", "updatedAt", "amount", "status"] as const;
 

@@ -1,7 +1,7 @@
 import type { MosaicService } from "@sdp/issuance/mosaic/service";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import { isSuccessfulTokenTransactionStatus, type TokenTransaction } from "@sdp/types";
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
@@ -103,10 +103,7 @@ function updateAuthorityIdempotencyMetadata(
 }
 
 function isSettledAuthorityTransaction(transaction: TokenTransaction): boolean {
-  return (
-    (transaction.status === "confirmed" || transaction.status === "finalized") &&
-    transaction.signature !== null
-  );
+  return isSuccessfulTokenTransactionStatus(transaction.status) && transaction.signature !== null;
 }
 
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
@@ -522,8 +519,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
     if (
       approvedWalletOperationId(c) &&
-      (!transaction.signature ||
-        (transaction.status !== "confirmed" && transaction.status !== "finalized"))
+      (!transaction.signature || !isSuccessfulTokenTransactionStatus(transaction.status))
     ) {
       // Settlement recovery above may repair a pending row from durable audit
       // evidence. If it cannot, fail closed rather than presenting an

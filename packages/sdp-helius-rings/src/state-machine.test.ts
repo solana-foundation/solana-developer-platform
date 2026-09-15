@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { failEdgeFor, nextState, TRANSITIONS, type TransitionGuard } from "./state-machine";
-import type { OperationState } from "./types";
-
-const TERMINAL_STATES: OperationState[] = ["completed", "failed"];
-const NON_TERMINAL_WITHOUT_FAIL_EDGE: OperationState[] = ["draft"];
+import { TERMINAL_OPERATION_STATES } from "./constants";
+import {
+  failEdgeFor,
+  nextState,
+  OPERATION_STATES_WITHOUT_FAIL_EDGE,
+  TRANSITIONS,
+  type TransitionGuard,
+} from "./state-machine";
 
 describe("nextState", () => {
   it("advances draft to preparing without a guard", () => {
@@ -31,7 +34,7 @@ describe("nextState", () => {
   });
 
   it("returns null from every terminal state", () => {
-    for (const state of TERMINAL_STATES) {
+    for (const state of TERMINAL_OPERATION_STATES) {
       expect(nextState(state)).toBeNull();
       expect(nextState(state, "signed")).toBeNull();
     }
@@ -58,7 +61,7 @@ describe("failEdgeFor", () => {
   });
 
   it("returns null from terminal states and from draft", () => {
-    for (const state of [...TERMINAL_STATES, ...NON_TERMINAL_WITHOUT_FAIL_EDGE]) {
+    for (const state of OPERATION_STATES_WITHOUT_FAIL_EDGE) {
       expect(failEdgeFor(state)).toBeNull();
     }
   });

@@ -1,4 +1,11 @@
-import type { RpcConnectionLifecycle, RpcConnectionNetwork, RpcConnectionScope } from "@sdp/types";
+import {
+  ACTIVATABLE_PROVIDER_CREDENTIAL_STATUSES,
+  NON_DEACTIVATED_CONNECTION_STATUSES,
+  RESOLVED_RPC_CONNECTION_STATUSES,
+  type RpcConnectionLifecycle,
+  type RpcConnectionNetwork,
+  type RpcConnectionScope,
+} from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 
 /** The organization-scope sentinel `scope_key` is generated as. */
@@ -108,8 +115,8 @@ export class RpcConnectionStore {
          FROM rpc_connections
         WHERE id = ?
           AND organization_id = ?
-          AND scope_key IN (${scopeKeys.map(() => "?").join(", ")})`,
-      [connectionId, organizationId, ...scopeKeys]
+          AND scope_key = ANY(?::text[])`,
+      [connectionId, organizationId, scopeKeys]
     );
   }
 
@@ -223,10 +230,16 @@ export class RpcConnectionStore {
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
-          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
-          AND status IN ('pending', 'checking', 'failed', 'active')
+          AND scope_key = ANY(?::text[])
+          AND status = ANY(?::text[])
         RETURNING ${CONNECTION_COLUMNS}`,
-      [params.makeDefault, params.connectionId, params.organizationId, ...params.scopeKeys]
+      [
+        params.makeDefault,
+        params.connectionId,
+        params.organizationId,
+        params.scopeKeys,
+        [...NON_DEACTIVATED_CONNECTION_STATUSES],
+      ]
     );
   }
 
@@ -262,10 +275,15 @@ export class RpcConnectionStore {
                   FROM rpc_connections c
                  WHERE c.id = ?
                    AND c.organization_id = ?
-                   AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+                   AND c.scope_key = ANY(?::text[])
               )
-          AND status IN ('pending', 'failed_validation', 'active')`,
-      [params.connectionId, params.organizationId, ...params.scopeKeys]
+          AND status = ANY(?::text[])`,
+      [
+        params.connectionId,
+        params.organizationId,
+        params.scopeKeys,
+        [...ACTIVATABLE_PROVIDER_CREDENTIAL_STATUSES],
+      ]
     );
   }
 
@@ -288,10 +306,10 @@ export class RpcConnectionStore {
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
-          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+          AND scope_key = ANY(?::text[])
           AND status <> 'deactivated'
         RETURNING ${CONNECTION_COLUMNS}`,
-      [params.connectionId, params.organizationId, ...params.scopeKeys]
+      [params.connectionId, params.organizationId, params.scopeKeys]
     );
   }
 
@@ -330,7 +348,7 @@ export class RpcConnectionStore {
               updated_at = sdp_iso_now()
         WHERE id = ?
           AND organization_id = ?
-          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+          AND scope_key = ANY(?::text[])
           AND status <> 'deactivated'
           AND provider_credential_id = ?
         RETURNING ${CONNECTION_COLUMNS}`,
@@ -339,7 +357,7 @@ export class RpcConnectionStore {
         params.nextCredentialScopeKey,
         params.connectionId,
         params.organizationId,
-        ...params.scopeKeys,
+        params.scopeKeys,
         params.expectedCredentialId,
       ]
     );
@@ -469,10 +487,10 @@ export class RpcConnectionStore {
       `DELETE FROM rpc_connections
         WHERE id = ?
           AND organization_id = ?
-          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+          AND scope_key = ANY(?::text[])
           AND status = 'deactivated'
         RETURNING id, provider_credential_id`,
-      [params.connectionId, params.organizationId, ...params.scopeKeys]
+      [params.connectionId, params.organizationId, params.scopeKeys]
     );
   }
 
@@ -524,10 +542,10 @@ export class RpcConnectionStore {
                   FROM rpc_connections c
                  WHERE c.id = ?
                    AND c.organization_id = ?
-                   AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})
+                   AND c.scope_key = ANY(?::text[])
               )
           AND status <> 'deactivated'`,
-      [params.connectionId, params.organizationId, ...params.scopeKeys]
+      [params.connectionId, params.organizationId, params.scopeKeys]
     );
   }
 
@@ -568,8 +586,8 @@ export class RpcConnectionStore {
         WHERE id = ?
           AND organization_id = ?
           AND provider_credential_id = ?
-          AND scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})`,
-      [params.connectionId, params.organizationId, params.providerCredentialId, ...params.scopeKeys]
+          AND scope_key = ANY(?::text[])`,
+      [params.connectionId, params.organizationId, params.providerCredentialId, params.scopeKeys]
     );
   }
 
@@ -606,8 +624,8 @@ export class RpcConnectionStore {
          JOIN provider_credentials pc ON pc.id = c.provider_credential_id
         WHERE c.id = ?
           AND c.organization_id = ?
-          AND c.scope_key IN (${params.scopeKeys.map(() => "?").join(", ")})`,
-      [params.connectionId, params.organizationId, ...params.scopeKeys]
+          AND c.scope_key = ANY(?::text[])`,
+      [params.connectionId, params.organizationId, params.scopeKeys]
     );
   }
 
@@ -654,8 +672,13 @@ export class RpcConnectionStore {
         WHERE c.organization_id = ?
           AND c.scope_key = ?
           AND c.network = ?
-          AND c.status NOT IN ('deactivated', 'pending', 'checking')`,
-      [params.organizationId, params.scopeKey, params.network]
+          AND c.status = ANY(?::text[])`,
+      [
+        params.organizationId,
+        params.scopeKey,
+        params.network,
+        [...RESOLVED_RPC_CONNECTION_STATUSES],
+      ]
     );
 
     if (rows.length === 0) {

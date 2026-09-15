@@ -8,9 +8,10 @@
  * status-specific cadence.
  */
 
+import { DVP_TRADE_STATUSES, RECENTLY_CLOSED_DVP_TRADE_STATUSES } from "@sdp/types";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
 
 const recordObservation = vi.hoisted(() => vi.fn());
@@ -33,19 +34,12 @@ vi.mock("./observe", async (importOriginal) => ({
   deriveDvpTradeState: () => ({ status: "funded" }),
 }));
 
-const { observeDvpTradeIfStale } = await import("./observe-now");
+const { observeDvpTradeIfStale, shouldObserveDvpTradeStatus } = await import("./observe-now");
 
 const NOW = Date.parse("2026-09-03T21:00:00.000Z");
-const NEVER_REREAD_STATUSES = [
-  "expired",
-  "create_failed",
-] as const satisfies readonly DvpTradeStatus[];
-const CLOSED_REREAD_STATUSES = [
-  "settled",
-  "cancelled",
-  "rejected",
-  "closed_unknown",
-] as const satisfies readonly DvpTradeStatus[];
+const NEVER_REREAD_DVP_TRADE_STATUSES = DVP_TRADE_STATUSES.filter(
+  (status) => !shouldObserveDvpTradeStatus(status)
+);
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   return {
@@ -106,13 +100,16 @@ describe("observeDvpTradeIfStale", () => {
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
 
-  it.each(NEVER_REREAD_STATUSES)("never spends a chain read on a %s trade", async (status) => {
-    await observeDvpTradeIfStale(env, trade({ status }), NOW);
+  it.each(NEVER_REREAD_DVP_TRADE_STATUSES)(
+    "never spends a chain read on a %s trade",
+    async (status) => {
+      await observeDvpTradeIfStale(env, trade({ status }), NOW);
 
-    expect(readDvpTradeObservation).not.toHaveBeenCalled();
-  });
+      expect(readDvpTradeObservation).not.toHaveBeenCalled();
+    }
+  );
 
-  it.each(CLOSED_REREAD_STATUSES)(
+  it.each(RECENTLY_CLOSED_DVP_TRADE_STATUSES)(
     "answers a recently observed %s trade from the row",
     async (status) => {
       await observeDvpTradeIfStale(
@@ -125,7 +122,7 @@ describe("observeDvpTradeIfStale", () => {
     }
   );
 
-  it.each(CLOSED_REREAD_STATUSES)(
+  it.each(RECENTLY_CLOSED_DVP_TRADE_STATUSES)(
     "re-reads a %s trade after the closed cadence elapses",
     async (status) => {
       await observeDvpTradeIfStale(

@@ -39,14 +39,12 @@
  */
 
 import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import { getPermissionsForApiKeyRole, isTerminalApiKeyStatus, type Permission } from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 
 export const API_KEY_CACHE_TTL_SECONDS = 3600; // 1 hour
-
-const TERMINAL_STATUSES: ReadonlySet<ApiKeyStatus> = new Set(["revoked", "deactivated", "expired"]);
 
 const CACHE_KEY_PREFIX = "key:";
 
@@ -62,10 +60,6 @@ export function apiKeyCacheKey(keyHash: string): string {
  */
 export function apiKeyHashFromCacheKey(name: string): string | null {
   return name.startsWith(CACHE_KEY_PREFIX) ? name.slice(CACHE_KEY_PREFIX.length) : null;
-}
-
-function isTerminalStatus(status: ApiKeyStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
 }
 
 /** Read the authoritative key row (and wallet bindings) from Postgres. */
@@ -284,7 +278,7 @@ async function resolveContendedFill(
 ): Promise<CachedApiKey> {
   const authoritative = await loadCachedApiKeyFromDb(db, keyHash);
   if (authoritative) {
-    if (!isTerminalStatus(authoritative.status)) {
+    if (!isTerminalApiKeyStatus(authoritative.status)) {
       // Fence the re-read: a revocation can commit right after it, and
       // terminal states land in the slot with an unconditional write. Check
       // the slot once more and let any terminal entry observed there win —
@@ -382,7 +376,7 @@ async function readTerminalSlotEntry(kv: KVStore, cacheKey: string): Promise<Cac
     return null;
   }
   const parsed = tryParseAuthoritativeEntry(raw);
-  return parsed && isTerminalStatus(parsed.status) ? parsed : null;
+  return parsed && isTerminalApiKeyStatus(parsed.status) ? parsed : null;
 }
 
 function tryParseStatus(raw: string): ApiKeyStatus | null {
@@ -475,7 +469,7 @@ export async function refreshApiKeyCache(
   // empty the slot instead of writing one. New-code fills skip this key
   // class too, so the slot stays a miss rather than inviting a stale fill.
   if (
-    !isTerminalStatus(fresh.status) &&
+    !isTerminalApiKeyStatus(fresh.status) &&
     fresh.walletScope === "selected" &&
     (fresh.walletBindings ?? []).length === 0
   ) {
@@ -554,7 +548,7 @@ async function overwriteWithAuthoritativeState(
   fresh: CachedApiKey
 ): Promise<OverwriteResult> {
   const value = JSON.stringify(fresh);
-  const freshIsTerminal = isTerminalStatus(fresh.status);
+  const freshIsTerminal = isTerminalApiKeyStatus(fresh.status);
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const current = await kv.get(cacheKey);
@@ -575,14 +569,17 @@ async function overwriteWithAuthoritativeState(
     }
     if (!freshIsTerminal) {
       const currentStatus = tryParseStatus(current);
-      if (currentStatus !== null && isTerminalStatus(currentStatus)) {
+      if (currentStatus !== null && isTerminalApiKeyStatus(currentStatus)) {
         // Terminal states are sticky: this refresh raced a revocation whose
         // DB write our own read pre-dated. Keep the revoked entry. Legacy
         // and pending terminal payloads reject via a synthesized entry.
         const kept = tryParseAuthoritativeEntry(current);
         return {
           outcome: "kept-terminal",
-          entry: kept && isTerminalStatus(kept.status) ? kept : { ...fresh, status: currentStatus },
+          entry:
+            kept && isTerminalApiKeyStatus(kept.status)
+              ? kept
+              : { ...fresh, status: currentStatus },
         };
       }
     }

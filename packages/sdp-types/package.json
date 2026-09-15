@@ -113,6 +113,11 @@
       "types": "./src/policy.ts",
       "import": "./src/policy.ts",
       "default": "./src/policy.ts"
+    },
+    "./sponsorship": {
+      "types": "./src/sponsorship.ts",
+      "import": "./src/sponsorship.ts",
+      "default": "./src/sponsorship.ts"
     }
   },
   "scripts": {

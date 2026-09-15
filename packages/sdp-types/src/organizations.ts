@@ -11,9 +11,12 @@ export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
-export type MemberStatus = "active" | "suspended" | "removed";
+export const MEMBER_STATUSES = ["active", "suspended", "removed"] as const;
+export type MemberStatus = (typeof MEMBER_STATUSES)[number];
 
-export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
+export const MEMBER_ROLES = ["admin", "member"] as const;
 export const ORGANIZATION_RPC_PROVIDERS = [
   "alchemy",
   "default",

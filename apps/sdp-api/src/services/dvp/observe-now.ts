@@ -195,6 +195,10 @@ const OBSERVATION_MAX_AGE_BY_STATUS = {
   closed_unknown: CLOSED_OBSERVATION_MAX_AGE_MS,
 } as const satisfies Record<DvpTradeStatus, number | null>;
 
+export function shouldObserveDvpTradeStatus(status: DvpTradeStatus): boolean {
+  return OBSERVATION_MAX_AGE_BY_STATUS[status] !== null;
+}
+
 /**
  * Re-reads a trade if the last observation is too old to answer with.
  *

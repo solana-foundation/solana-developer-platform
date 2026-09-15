@@ -1,18 +1,17 @@
+import {
+  API_KEY_WALLET_POLICY_BINDING_SCOPES,
+  POLICY_CONTROL_INVENTORY_STATUSES,
+  POLICY_DECISIONS,
+  POLICY_DEFAULT_ACTIONS,
+} from "@sdp/types";
 import { policyControlInventoryQuerySchema as policyControlInventoryQuerySchemaBase } from "../../routes/policies/schemas";
 import { isoDateTimeSchema, withOpenApi, z } from "./base";
 
-const policyControlInventoryStatusSchema = z.enum(["default_allow", "draft", "active", "disabled"]);
+const policyControlInventoryStatusSchema = z.enum(POLICY_CONTROL_INVENTORY_STATUSES);
 
-const policyDefaultActionSchema = z.enum(["allow", "deny", "approval_required", "review"]);
+const policyDefaultActionSchema = z.enum(POLICY_DEFAULT_ACTIONS);
 
-const policyDecisionSchema = z.enum([
-  "allow",
-  "deny",
-  "approval_required",
-  "provider_approval_required",
-  "review",
-  "not_evaluated",
-]);
+const policyDecisionSchema = z.enum(POLICY_DECISIONS);
 
 const latestEvaluationSchema = z
   .object({
@@ -71,7 +70,7 @@ const apiKeyPolicyControlInventoryItemSchema = z
     apiKeyPrefix: z.string().openapi({
       description: "Redacted API-key prefix. Secret key material is never returned.",
     }),
-    bindingScope: z.enum(["all", "selected"]).nullable().openapi({
+    bindingScope: z.enum(API_KEY_WALLET_POLICY_BINDING_SCOPES).nullable().openapi({
       description: "Whether policy bindings apply to all or selected wallets, when configured.",
     }),
     selectedWalletCount: z.number().int().nonnegative().openapi({

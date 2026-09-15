@@ -12,6 +12,7 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
+import { CLOSED_DVP_TRADE_STATUSES } from "@sdp/types";
 import {
   address,
   getSignatureFromTransaction,
@@ -373,7 +374,7 @@ describe("fundDvpTradeLeg", () => {
   });
 
   it("refuses a trade that can no longer be funded", async () => {
-    for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
+    for (const status of CLOSED_DVP_TRADE_STATUSES) {
       await expect(fundDvpTradeLeg(context, trade({ status }), FUNDER_A)).rejects.toThrow(
         /can no longer be funded/
       );

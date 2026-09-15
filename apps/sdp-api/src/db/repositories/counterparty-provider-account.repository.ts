@@ -3,7 +3,12 @@ import {
   BVNK_NETWORKS,
   type BvnkOnrampRequestSpec,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
+import {
+  COUNTERPARTY_ACCOUNT_STATUSES,
+  COUNTERPARTY_PROVIDER_ACCOUNT_KINDS,
+  COUNTRY_CODES,
+  type CountryCode,
+} from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -19,13 +24,13 @@ export const counterpartyProviderAccountRowSchema = z.object({
   counterparty_id: z.string(),
   provider: z.enum(RAMP_PROVIDERS),
   provider_customer_reference: z.string(),
-  kind: z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
+  kind: z.enum(COUNTERPARTY_PROVIDER_ACCOUNT_KINDS),
   external_account_reference: z.string().nullable(),
   fiat_currency: z.string().nullable(),
   destination_country: z.enum(COUNTRY_CODES).nullable(),
   payment_rail: z.string().nullable(),
   provider_status: z.string().nullable(),
-  status: z.enum(["active", "archived"]),
+  status: z.enum(COUNTERPARTY_ACCOUNT_STATUSES),
   metadata: z.record(z.string(), z.unknown()),
   created_at: z.string(),
   updated_at: z.string(),

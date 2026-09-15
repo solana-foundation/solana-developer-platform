@@ -29,6 +29,7 @@ export * from "./provider-access";
 export * from "./rpc-connections";
 export * from "./sessions";
 export * from "./site";
+export * from "./sponsorship";
 export * from "./tokens";
 export * from "./veda-programs";
 export * from "./well-known-programs";

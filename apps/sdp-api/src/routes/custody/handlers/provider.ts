@@ -2,6 +2,7 @@ import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
+import { BLOCKING_CUSTODY_CONNECTION_STATUSES } from "@sdp/types";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
@@ -435,10 +436,10 @@ async function assertFreshPrivyLegacySetupAllowed(
        WHERE organization_id = ?
          AND project_id = ?
          AND provider = 'privy'
-         AND status IN ('pending', 'checking', 'active')
+         AND status = ANY(?::text[])
        LIMIT 1`
     )
-    .bind(organizationId, projectId)
+    .bind(organizationId, projectId, [...BLOCKING_CUSTODY_CONNECTION_STATUSES])
     .first<{ id: string }>();
   if (blockingConnection) {
     throw conflict("Privy custody setup already exists for this project");

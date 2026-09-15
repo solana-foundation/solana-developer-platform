@@ -3,6 +3,10 @@ import type {
   PaymentTransferBatchStatus,
   PaymentTransferStatus,
 } from "@sdp/types";
+import {
+  isInFlightPaymentTransferBatchMemberStatus,
+  isSuccessfulPaymentTransferBatchMemberStatus,
+} from "@sdp/types";
 
 /**
  * Rolls member statuses (chunk transfers or recipient rows) up into the parent
@@ -15,12 +19,10 @@ import type {
 export function deriveTransferBatchStatus(
   statuses: ReadonlyArray<PaymentTransferStatus | PaymentTransferBatchRecipientStatus>
 ): PaymentTransferBatchStatus {
-  if (statuses.some((status) => status === "pending" || status === "processing")) {
+  if (statuses.some(isInFlightPaymentTransferBatchMemberStatus)) {
     return "processing";
   }
-  const settled = statuses.filter(
-    (status) => status === "confirmed" || status === "finalized"
-  ).length;
+  const settled = statuses.filter(isSuccessfulPaymentTransferBatchMemberStatus).length;
   if (settled === statuses.length) {
     return "confirmed";
   }

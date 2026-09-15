@@ -1,18 +1,19 @@
 import { randomUUID } from "node:crypto";
+import {
+  BUDGET_HOLDING_SPONSORSHIP_RESERVATION_STATUSES,
+  LEDGER_SETTLED_SPONSORSHIP_RESERVATION_STATUSES,
+  RECONCILABLE_SPONSORSHIP_RESERVATION_STATUSES,
+  SIGNABLE_SPONSORSHIP_RESERVATION_STATUSES,
+  type SponsorshipReservationStatus,
+} from "@sdp/types";
 import type { AppDb, DatabaseExecutor } from "@/db";
+
+export type { SponsorshipReservationStatus } from "@sdp/types";
 
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
 
 export type SponsorshipNetwork = "devnet" | "mainnet";
 export type SponsorshipBudgetScopeType = "global" | "organization" | "project";
-export type SponsorshipReservationStatus =
-  | "reserved"
-  | "signed"
-  | "submitted"
-  | "committed"
-  | "released"
-  | "charged_unknown";
-
 export interface SponsorshipBudgetPolicy {
   id: string;
   network: SponsorshipNetwork;
@@ -461,8 +462,8 @@ export class SponsorshipBudgetRepository {
       const updated = await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'submitted', signature = ?, submitted_at = sdp_iso_now(), updated_at = sdp_iso_now()
-       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
-        [signature, id, expectedAttempt]
+       WHERE id = ? AND attempt = ? AND status = ANY(?::text[])`,
+        [signature, id, expectedAttempt, [...SIGNABLE_SPONSORSHIP_RESERVATION_STATUSES]]
       );
       return updated === 1 ? "persisted" : "stale";
     } catch (error) {
@@ -476,8 +477,13 @@ export class SponsorshipBudgetRepository {
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
        SET status = 'charged_unknown', failure_reason = ?, updated_at = sdp_iso_now()
-       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed', 'submitted')`,
-        [reason.slice(0, 500), id, expectedAttempt]
+       WHERE id = ? AND attempt = ? AND status = ANY(?::text[])`,
+        [
+          reason.slice(0, 500),
+          id,
+          expectedAttempt,
+          [...BUDGET_HOLDING_SPONSORSHIP_RESERVATION_STATUSES],
+        ]
       )) === 1
     );
   }
@@ -488,8 +494,8 @@ export class SponsorshipBudgetRepository {
         `UPDATE sponsorship_budget_reservations
        SET status = 'released', actual_lamports = 0, failure_reason = ?,
            reconciled_at = sdp_iso_now(), updated_at = sdp_iso_now()
-       WHERE id = ? AND attempt = ? AND status IN ('reserved', 'signed')`,
-        [reason.slice(0, 500), id, expectedAttempt]
+       WHERE id = ? AND attempt = ? AND status = ANY(?::text[])`,
+        [reason.slice(0, 500), id, expectedAttempt, [...SIGNABLE_SPONSORSHIP_RESERVATION_STATUSES]]
       )) === 1
     );
   }
@@ -505,7 +511,7 @@ export class SponsorshipBudgetRepository {
     executor: DatabaseExecutor = this.db,
     excludeReservationId?: string
   ): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
-    const params: Array<string | null> = [
+    const params: unknown[] = [
       input.hourBucket,
       input.hourBucket,
       input.organizationId,
@@ -563,7 +569,12 @@ export class SponsorshipBudgetRepository {
     hour: SponsorshipLiveWindowReservation[];
     day: SponsorshipLiveWindowReservation[];
   }> {
-    const params: Array<string | null> = [input.network, input.hourBucket, input.dayBucket];
+    const params: unknown[] = [
+      input.network,
+      [...BUDGET_HOLDING_SPONSORSHIP_RESERVATION_STATUSES],
+      input.hourBucket,
+      input.dayBucket,
+    ];
     if (excludeReservationId) params.push(excludeReservationId);
     const rows = await executor.queryMany<{
       id: string;
@@ -576,7 +587,7 @@ export class SponsorshipBudgetRepository {
     }>(
       `SELECT id, attempt, reserved_lamports, organization_id, project_id, hour_bucket, day_bucket
        FROM sponsorship_budget_reservations
-       WHERE network = ? AND status IN ('reserved', 'signed', 'submitted')
+       WHERE network = ? AND status = ANY(?::text[])
          AND (hour_bucket = ? OR day_bucket = ?)${excludeReservationId ? " AND id <> ?" : ""}`,
       params
     );
@@ -658,12 +669,18 @@ export class SponsorshipBudgetRepository {
               miss_count, updated_at, redis_settled_at
        FROM sponsorship_budget_reservations
        WHERE network = ? AND (
-         (status IN ('reserved', 'signed', 'submitted') AND updated_at <= ?)
-         OR (status IN ('committed', 'released') AND redis_settled_at IS NULL)
+         (status = ANY(?::text[]) AND updated_at <= ?)
+         OR (status = ANY(?::text[]) AND redis_settled_at IS NULL)
        )
        ORDER BY updated_at, id
        LIMIT ?`,
-      [network, updatedBefore, limit]
+      [
+        network,
+        [...BUDGET_HOLDING_SPONSORSHIP_RESERVATION_STATUSES],
+        updatedBefore,
+        [...LEDGER_SETTLED_SPONSORSHIP_RESERVATION_STATUSES],
+        limit,
+      ]
     );
     return rows.map((row) => ({
       id: row.id,
@@ -696,8 +713,8 @@ export class SponsorshipBudgetRepository {
       (await this.db.execute(
         `UPDATE sponsorship_budget_reservations
          SET miss_count = miss_count + 1, updated_at = sdp_iso_now()
-         WHERE id = ? AND attempt = ? AND miss_count = ? AND status IN ('signed', 'submitted')`,
-        [id, expectedAttempt, expectedMissCount]
+         WHERE id = ? AND attempt = ? AND miss_count = ? AND status = ANY(?::text[])`,
+        [id, expectedAttempt, expectedMissCount, [...RECONCILABLE_SPONSORSHIP_RESERVATION_STATUSES]]
       )) === 1
     );
   }
@@ -714,8 +731,15 @@ export class SponsorshipBudgetRepository {
         `UPDATE sponsorship_budget_reservations
          SET status = ?, actual_lamports = ?, failure_reason = ?, reconciled_at = sdp_iso_now(),
              updated_at = sdp_iso_now()
-         WHERE id = ? AND attempt = ? AND status IN ('signed', 'submitted')`,
-        [status, actualLamports, reason ?? null, id, expectedAttempt]
+         WHERE id = ? AND attempt = ? AND status = ANY(?::text[])`,
+        [
+          status,
+          actualLamports,
+          reason ?? null,
+          id,
+          expectedAttempt,
+          [...RECONCILABLE_SPONSORSHIP_RESERVATION_STATUSES],
+        ]
       )) === 1
     );
   }
@@ -726,8 +750,8 @@ export class SponsorshipBudgetRepository {
         `UPDATE sponsorship_budget_reservations
          SET redis_settled_at = COALESCE(redis_settled_at, sdp_iso_now()),
              updated_at = sdp_iso_now()
-         WHERE id = ? AND attempt = ? AND status IN ('committed', 'released')`,
-        [id, expectedAttempt]
+         WHERE id = ? AND attempt = ? AND status = ANY(?::text[])`,
+        [id, expectedAttempt, [...LEDGER_SETTLED_SPONSORSHIP_RESERVATION_STATUSES]]
       )) === 1
     );
   }

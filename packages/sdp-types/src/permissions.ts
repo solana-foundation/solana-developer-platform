@@ -182,6 +182,7 @@ export const API_KEY_ROLES = {
   },
 } as const;
 
+export const API_KEY_ROLE_VALUES = ["api_admin", "api_developer", "api_readonly"] as const;
 export type ApiKeyRole = keyof typeof API_KEY_ROLES;
 
 /**
@@ -266,6 +267,7 @@ export const PROJECT_ROLES = {
   },
 } as const;
 
+export const PROJECT_ROLE_VALUES = ["admin", "developer", "viewer"] as const;
 export type ProjectRole = keyof typeof PROJECT_ROLES;
 
 /**
