@@ -116,7 +116,7 @@ jobs:
 
   notify-end:
     needs: [changes, deploy-api-stage, deploy-api-prod]
-    if: always() && needs.deploy-api-stage.result != 'skipped' && vars.CONTINUOUS_PROD_DEPLOY == 'true'
+    if: always() && needs.deploy-api-stage.result != 'skipped' && (vars.CONTINUOUS_PROD_DEPLOY == 'true' || contains('failure cancelled', needs.deploy-api-stage.result))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     continue-on-error: true

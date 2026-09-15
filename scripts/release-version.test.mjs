@@ -30,11 +30,31 @@ test("combines the overridden commit with features as a minor release", () => {
   assert.equal(nextReleaseVersion("0.56.0", [overriddenCommit, featureCommit]), "0.57.0");
 });
 
-test("keeps major bumps for every other breaking commit", () => {
+test("keeps major bumps for every other breaking commit once past 1.0", () => {
   const breakingCommit = { breaking: true, sha: "different-commit", type: "fix" };
 
-  assert.equal(nextReleaseVersion("0.56.0", [breakingCommit]), "1.0.0");
+  assert.equal(nextReleaseVersion("1.0.0", [breakingCommit]), "2.0.0");
   assert.equal(nextReleaseVersion("2.56.0", [breakingCommit]), "3.0.0");
+});
+
+test("holds a breaking commit to the minor line while below 1.0", () => {
+  const breakingCommit = { breaking: true, sha: "different-commit", type: "fix" };
+
+  assert.equal(nextReleaseVersion("0.56.0", [breakingCommit]), "0.57.0");
+  assert.equal(nextReleaseVersion("0.0.9", [breakingCommit]), "0.1.0");
+});
+
+test("does not reach 1.0.0 from a breaking marker alone", () => {
+  // 2026-09-14: #1770's `feat(api)!` subject generated a 1.0.0 release PR with
+  // nobody having decided to ship 1.0. This pins that it cannot happen again.
+  const breakingCommit = {
+    breaking: true,
+    // biome-ignore lint/security/noSecrets: Public Git commit SHA, not a secret.
+    sha: "cbc9486bfaa85fc1e2a3447289236148bddcfa87",
+    type: "feat",
+  };
+
+  assert.equal(nextReleaseVersion("0.75.0", [breakingCommit]), "0.76.0");
 });
 
 test("keeps normal feature and patch bumps unchanged", () => {

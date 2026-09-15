@@ -108,6 +108,9 @@
     "approvalRequiredByPolicy": "Chính sách yêu cầu phê duyệt",
     "copyRequestId": "Sao chép ID yêu cầu",
     "requestIdCopied": "Đã sao chép ID yêu cầu",
-    "loading": "Đang tải phê duyệt..."
+    "loading": "Đang tải phê duyệt...",
+    "runtimePaused": "Việc thực thi Wallet đang tạm dừng. Yêu cầu này vẫn đang chờ xử lý. Hãy phê duyệt lại khi thực thi khả dụng.",
+    "runtimeUnavailable": "Wallet hiện không khả dụng. Yêu cầu này vẫn đang chờ xử lý. Kiểm tra Wallet trước khi phê duyệt lại.",
+    "providerAccessDenied": "Tổ chức của bạn không có quyền truy cập nhà cung cấp Wallet này. Yêu cầu này vẫn đang chờ xử lý. Hãy phê duyệt lại sau khi quyền truy cập được khôi phục."
   }
 }

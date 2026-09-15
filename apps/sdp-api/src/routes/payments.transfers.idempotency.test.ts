@@ -594,4 +594,62 @@ describe("Payments routes — transfer idempotency", () => {
     const bJson = await readTransferResponse(b);
     expect(bJson.data.transfer.id).not.toBe(aJson.data.transfer.id);
   });
+  it("refuses a privateTransfer replay of a public transfer's idempotency key", async () => {
+    const idempotencyKey = "retired-private-transfer-replay";
+    const transferBody = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "1",
+    };
+    const db = getDb(env);
+    const scope = createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id });
+    await createPostgresPaymentsRepository(db, scope).createTransfer({
+      id: generatePaymentTransferId(),
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: SOL_MINT,
+      amount: "1",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "confirmed",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: "already-broadcast-public-signature",
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey,
+      idempotencyFingerprint: buildPaymentTransferFingerprint({
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        token: SOL_MINT,
+        amount: "1",
+        memo: null,
+        type: "transfer",
+      }),
+    });
+
+    const publicReplay = await postTransfer(transferBody, { idempotencyKey });
+    expect(publicReplay.status).toBe(200);
+
+    const privateReplay = await postTransfer(
+      { ...transferBody, privateTransfer: { provider: "magicblock", magicBlock: {} } },
+      { idempotencyKey }
+    );
+    expect(privateReplay.status).toBe(503);
+    const replayBody = await readErrorResponse(privateReplay);
+    expect(replayBody.error.code).toBe("PROVIDER_UNAVAILABLE");
+  });
 });

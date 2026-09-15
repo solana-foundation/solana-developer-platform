@@ -11,6 +11,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
+  createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   fullySignTestTransaction,
   installPaymentsRouteTestHooks,
@@ -323,5 +324,25 @@ describe("Payments routes — on-chain transfers", () => {
     expect(transfers).toHaveLength(1);
     expect(transfers[0]?.status).toBe("failed");
     expect(transfers[0]?.error).toBeTruthy();
+  });
+  it("refuses a privateTransfer request instead of downgrading it to a public transfer", async () => {
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: DEVNET_USDC_MINT,
+        amount: "1",
+        privateTransfer: { provider: "magicblock", magicBlock: {} },
+      },
+      {}
+    );
+
+    expect(res.status).toBe(503);
+    const body = await readErrorResponse(res);
+    expect(body.error.code).toBe("PROVIDER_UNAVAILABLE");
+    expect(body.error.message).toContain("privateTransfer is retired");
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
   });
 });
