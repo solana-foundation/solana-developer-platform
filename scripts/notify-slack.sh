@@ -20,6 +20,7 @@ case "$STATUS" in
   started)   MARKER="[STARTED] Deploy $LABEL";   COLOR="#dbab09" ;;
   success)   MARKER="[SUCCESS] Deploy $LABEL";   COLOR="#36a64f" ;;
   cancelled) MARKER="[CANCELLED] Deploy $LABEL"; COLOR="#808080" ;;
+  canary-failed) MARKER="[DEPLOYED, CANARY FAILED] Deploy $LABEL"; COLOR="#e36209" ;;
   *)         MARKER="[FAILED] Deploy $LABEL";    COLOR="#cc0000" ;;
 esac
 
