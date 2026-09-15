@@ -1,4 +1,4 @@
-import type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { type DvpPartyRef, type DvpTrade, dvpActionWalletSchema } from "./dvp-trade";
@@ -17,16 +17,22 @@ export const DVP_TRADES_PAGE_SIZE = 50;
 
 /**
  * The list filters the API narrows SERVER-SIDE. `statuses` maps the UI's status
- * group to the real statuses behind it; `q` is the search text. `null` means
+ * group to the real statuses behind it; `settlementAvailability` narrows a
+ * group that means "can settle now"; `q` is the search text. `null` means
  * unfiltered on that axis, explicit because the house has no default params.
  */
 export interface DvpTradesFilters {
   statuses: DvpTradeStatus[] | null;
+  settlementAvailability: DvpSettlementAvailability[] | null;
   q: string | null;
 }
 
 /** The explicit no-filter filters: unfiltered is a choice, never a default. */
-export const UNFILTERED_DVP_TRADES: DvpTradesFilters = { statuses: null, q: null };
+export const UNFILTERED_DVP_TRADES: DvpTradesFilters = {
+  statuses: null,
+  settlementAvailability: null,
+  q: null,
+};
 
 export interface DvpTradesResult {
   trades: DvpTrade[];
@@ -85,6 +91,9 @@ export async function fetchDvpTrades(
     // no statuses of its own) parses to one.
     if (filters.statuses !== null && filters.statuses.length > 0) {
       query.set("status", filters.statuses.join(","));
+    }
+    if (filters.settlementAvailability !== null && filters.settlementAvailability.length > 0) {
+      query.set("settlementAvailability", filters.settlementAvailability.join(","));
     }
     if (filters.q !== null) {
       query.set("q", filters.q);

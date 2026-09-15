@@ -1,62 +1,16 @@
-import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import { buildDvpTradeRow } from "@/test/fixtures/dvp";
 import { deriveDvpLegOutcome } from "./leg-outcome";
 
-const ADDRESS = address("11111111111111111111111111111111");
-
-/** Builds a complete persisted trade for outcome derivation tests. */
+/** A persisted trade with every address the same, which outcome derivation never reads. */
 function trade(overrides: Partial<DvpTradeRow>): DvpTradeRow {
-  return {
+  return buildDvpTradeRow({
     id: "dvp_outcome",
-    organizationId: "org_test",
-    projectId: "prj_test",
-    swapDvp: ADDRESS,
-    settlementAuthority: ADDRESS,
-    userA: ADDRESS,
-    userB: ADDRESS,
-    mintA: ADDRESS,
-    mintB: ADDRESS,
-    nonce: "1",
-    tokenProgramA: ADDRESS,
-    tokenProgramB: ADDRESS,
-    decimalsA: 6,
-    decimalsB: 6,
-    symbolA: "A",
-    symbolB: "B",
-    nameA: "Asset A",
-    nameB: "Asset B",
-    closeSignature: null,
-    closeResolutionAttempts: 0,
-    closeResolutionAfter: null,
-    closedAt: null,
     amountA: "100",
     amountB: "200",
-    expiryTimestamp: "1900000000",
-    earliestSettlementTimestamp: null,
-    userASettlementDestination: ADDRESS,
-    userBSettlementDestination: ADDRESS,
-    refString: null,
-    escrowA: ADDRESS,
-    escrowB: ADDRESS,
-    counterpartyAccountIdA: null,
-    counterpartyAccountIdB: null,
-    status: "created",
-    observedAt: null,
-    idempotencyKey: null,
-    idempotencyFingerprint: null,
-    createSignature: null,
-    createLastValidBlockHeight: null,
-    escrowAAmount: null,
-    escrowBAmount: null,
-    escrowAPeakAmount: null,
-    escrowBPeakAmount: null,
-    escrowAFrozen: null,
-    escrowBFrozen: null,
-    createdAt: "2026-09-10T00:00:00.000Z",
-    updatedAt: "2026-09-10T00:00:00.000Z",
     ...overrides,
-  };
+  });
 }
 
 const CLOSED_AND_OBSERVED = {

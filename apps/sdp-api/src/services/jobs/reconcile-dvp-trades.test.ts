@@ -44,6 +44,7 @@ function observation(overrides: Record<string, unknown> = {}) {
     legA: leg(0n),
     legB: leg(0n),
     blockHeight: 1_000n,
+    clusterUnixTimestamp: BigInt(Math.floor(Date.now() / 1000)),
     closeResolution: null,
     ...overrides,
   };
@@ -139,7 +140,7 @@ async function seedTrade(
 async function statusOf(id: string): Promise<Record<string, unknown> | null> {
   return getDb(env)
     .prepare(
-      "SELECT status, escrow_a_amount, escrow_b_amount, escrow_a_frozen, observed_at, close_signature, close_resolution_attempts, close_resolution_after FROM dvp_trades WHERE id = ?"
+      "SELECT status, escrow_a_amount, escrow_b_amount, escrow_a_frozen, observed_at, observed_cluster_timestamp, close_signature, close_resolution_attempts, close_resolution_after FROM dvp_trades WHERE id = ?"
     )
     .bind(id)
     .first<Record<string, unknown>>();
@@ -221,6 +222,21 @@ describe("reconcileDvpTrades", () => {
     // The observation timestamp is part of the answer: a status with no
     // recorded reading time is a claim with no provenance.
     expect(row?.observed_at).toBeTruthy();
+    expect(row?.observed_cluster_timestamp).toBe(String(Math.floor(Date.now() / 1000)));
+  });
+
+  // The program judges expiry by its own Clock. A cluster clock already past
+  // expiry expires the trade even while the host's is an hour short of it.
+  it("expires a trade by the cluster clock read with the observation", async () => {
+    await seedTrade("dvp_cluster_expired", "funded");
+    const expiry = Math.floor(Date.now() / 1000) + 3600;
+    readDvpTradeObservation.mockResolvedValue(
+      observation({ legA: leg(1000n), legB: leg(2000n), clusterUnixTimestamp: BigInt(expiry + 1) })
+    );
+
+    await reconcileDvpTrades(env);
+
+    await expect(statusOf("dvp_cluster_expired")).resolves.toMatchObject({ status: "expired" });
   });
 
   it("resolves a creating trade once its create blockhash has expired", async () => {
@@ -428,6 +444,7 @@ describe("reconcileDvpTrades", () => {
       escrowBFrozen: null,
       closeSignature: null,
       observedAt: new Date().toISOString(),
+      observedClusterTimestamp: "1800000000",
     });
 
     expect(lost).toBeNull();
@@ -561,6 +578,65 @@ describe("reconcileDvpTrades", () => {
 
     const after = await claims.listForTrade("dvp_failed_broadcast");
     expect(after).toHaveLength(0);
+  });
+
+  // A processed failure can be re-executed on the surviving fork, so it is not
+  // yet an answer; only a confirmed one is.
+  it("keeps an expired broadcast claim whose failure is only processed", async () => {
+    await seedTrade("dvp_processed_failure", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_processed_failure",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "900",
+    });
+    await db
+      .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
+      .bind(SIG, "dvp_processed_failure")
+      .run();
+    getSignatureStatusesMock.mockResolvedValue([
+      {
+        slot: 5n,
+        confirmations: 0n,
+        confirmationStatus: "processed",
+        err: { InstructionError: [0, "Custom"] },
+      },
+    ]);
+
+    await reconcileDvpTrades(env);
+
+    expect(await claims.listForTrade("dvp_processed_failure")).toHaveLength(1);
+  });
+
+  // An expired trade's escrows still exist; a receipt that never landed on one
+  // is cleared like any other, not left linking a dropped transaction.
+  it("releases a never-landed receipt on an expired trade", async () => {
+    await seedTrade("dvp_expired_receipt", "expired");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_expired_receipt",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "900",
+    });
+    await db
+      .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
+      .bind(SIG, "dvp_expired_receipt")
+      .run();
+    getSignatureStatusesMock.mockResolvedValue([null]);
+
+    await reconcileDvpTrades(env);
+
+    expect(await claims.listForTrade("dvp_expired_receipt")).toHaveLength(0);
   });
 
   // The other branch of the same check: the transfer DID land, which is a

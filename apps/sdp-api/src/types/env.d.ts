@@ -220,10 +220,6 @@ export interface Env {
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
-  // Recurring payment collection controls
-  PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
-  PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
-
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   SDP_FLAG_ASSET_PROFILES?: string;
 
@@ -322,8 +318,6 @@ export interface Env {
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
   PERENA_SANDBOX_API_KEY?: string;
-  GROUND_API_KEY?: string;
-  GROUND_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings

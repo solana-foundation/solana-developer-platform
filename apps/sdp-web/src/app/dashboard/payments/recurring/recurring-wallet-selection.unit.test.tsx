@@ -22,6 +22,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
     selectedProjectId: "proj_test",
     sdpEnvironment: "sandbox",
+    flags: { custody: true },
   }),
   useOptionalDashboardWorkspace: () => null,
 }));
@@ -35,7 +36,7 @@ const source: PaymentsDashboardWallet = {
   isRuntimeExecutionAllowed: true,
   balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
 };
-const recurring: PaymentRecurringPayment = {
+const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   id: "prp_test",
   organizationId: "org_test",
   projectId: "proj_test",

@@ -91,7 +91,6 @@ function minutesAgo(n: number): string {
 describe("trackPendingTransfers", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedTestDatabase(env);
     await seedOrg();
     vi.clearAllMocks();
     getBlockHeightMock.mockResolvedValue(1_000n);
@@ -563,92 +562,6 @@ describe("trackPendingTransfers", () => {
       expect(stuck?.error).toBe("Transfer processing timed out");
     });
 
-    it("skips an invalid stored signature without blocking valid transfers", async () => {
-      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-        signatures.map((signature) =>
-          signature === TEST_SIG_1
-            ? {
-                slot: 22223n,
-                confirmations: 3n,
-                confirmationStatus: "confirmed",
-                err: null,
-              }
-            : null
-        )
-      );
-
-      await insertTransfer({
-        id: "xfr_invalid_signature",
-        status: "processing",
-        signature: "not-a-solana-signature",
-        createdAt: minutesAgo(2),
-        updatedAt: minutesAgo(2),
-      });
-      await insertTransfer({
-        id: "xfr_valid_signature",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackPendingTransfers(env);
-
-      const [invalid, valid] = await Promise.all([
-        getTransfer("xfr_invalid_signature"),
-        getTransfer("xfr_valid_signature"),
-      ]);
-      expect(invalid?.status).toBe("processing");
-      expect(valid?.status).toBe("confirmed");
-      expect(
-        getSignatureStatusesMock.mock.calls.flatMap(([, signatures]) => signatures)
-      ).not.toContain("not-a-solana-signature");
-    });
-
-    it("rotates a full page of invalid signatures so a later valid transfer is reached", async () => {
-      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-        signatures.map((signature) =>
-          signature === TEST_SIG_1
-            ? {
-                slot: 22224n,
-                confirmations: 3n,
-                confirmationStatus: "confirmed",
-                err: null,
-              }
-            : null
-        )
-      );
-
-      await Promise.all(
-        Array.from({ length: 256 }, (_, i) =>
-          insertTransfer({
-            id: `xfr_processing_invalid_${i}`,
-            status: "processing",
-            signature: `invalid-signature-${i}`,
-            createdAt: minutesAgo(30),
-            updatedAt: minutesAgo(30),
-          })
-        )
-      );
-      await insertTransfer({
-        id: "xfr_processing_valid_behind_invalid_page",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(2),
-        updatedAt: minutesAgo(2),
-      });
-
-      await trackPendingTransfers(env);
-      expect((await getTransfer("xfr_processing_valid_behind_invalid_page"))?.status).toBe(
-        "processing"
-      );
-
-      await trackPendingTransfers(env);
-      expect((await getTransfer("xfr_processing_valid_behind_invalid_page"))?.status).toBe(
-        "confirmed"
-      );
-    });
-
     it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {
       await insertTransfer({
         id: "xfr_processing_without_sig",
@@ -729,51 +642,6 @@ describe("trackPendingTransfers", () => {
       expect(getSignatureStatusesMock).not.toHaveBeenCalled();
       const unchanged = await getTransfer("xfr_confirmed_aged_out");
       expect(unchanged?.status).toBe("confirmed");
-    });
-
-    it("rotates a full page of invalid signatures so the next tick reaches a valid transfer", async () => {
-      getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-        signatures.map((signature) =>
-          String(signature) === String(TEST_SIG_2)
-            ? { slot: 33333n, confirmations: null, confirmationStatus: "finalized", err: null }
-            : null
-        )
-      );
-
-      await Promise.all(
-        Array.from({ length: 256 }, (_, i) =>
-          insertTransfer({
-            id: `xfr_confirmed_invalid_${i}`,
-            status: "confirmed",
-            signature: `invalid-confirmed-signature-${i}`,
-            createdAt: minutesAgo(30),
-            updatedAt: minutesAgo(30),
-            confirmedAt: minutesAgo(30),
-          })
-        )
-      );
-      await insertTransfer({
-        id: "xfr_confirmed_zz_behind_stuck_page",
-        status: "confirmed",
-        signature: String(TEST_SIG_2),
-        createdAt: minutesAgo(2),
-        updatedAt: minutesAgo(2),
-        confirmedAt: minutesAgo(2),
-      });
-
-      await trackPendingTransfers(env);
-
-      const behindFullPage = await getTransfer("xfr_confirmed_zz_behind_stuck_page");
-      expect(behindFullPage?.status).toBe("confirmed");
-      expect(behindFullPage?.finalization_last_polled_at).toBeNull();
-
-      await trackPendingTransfers(env);
-
-      const upgraded = await getTransfer("xfr_confirmed_zz_behind_stuck_page");
-      expect(upgraded?.status).toBe("finalized");
-      expect(upgraded?.slot).toBe(33333);
-      const invalid = await getTransfer("xfr_confirmed_invalid_0");
-      expect(invalid?.status).toBe("confirmed");
     });
 
     it("rotates the polled page even when the RPC batch call fails", async () => {

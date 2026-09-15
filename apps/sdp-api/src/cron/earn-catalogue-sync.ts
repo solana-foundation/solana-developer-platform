@@ -282,9 +282,9 @@ async function syncNonProductionEnvironment(
       // Accepted cap, recorded in ADR 0002 (PRO-1742 addendum): this skip
       // means the mirror only fully materializes for providers whose
       // references are cluster-distinct (address-keyed, like Kamino). A
-      // provider keying both catalogues by a shared slug (Ground's source ids)
-      // collides on every pass and its mirror under-reports by exactly those
-      // references. Deliberate: extending the upsert key to the cluster would
+      // provider keying both catalogues by a shared slug collides on every
+      // pass and its mirror under-reports by exactly those references.
+      // Deliberate: extending the upsert key to the cluster would
       // double-write every bare-triple consumer (updateStrategyMetrics above
       // all).
       collidedReferences.push(snapshot.providerReference);

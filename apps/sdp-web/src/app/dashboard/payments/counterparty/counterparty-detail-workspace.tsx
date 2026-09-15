@@ -1,12 +1,14 @@
 "use client";
 
-import type {
-  Counterparty,
-  CounterpartyAccount,
-  CounterpartyProviderAccount,
-  CounterpartyProviderCustomerLink,
-  PaymentTransferSummary,
-  RampProviderId,
+import {
+  type Counterparty,
+  type CounterpartyAccount,
+  type CounterpartyProviderAccount,
+  type CounterpartyProviderCustomerLink,
+  PAYMENT_TRANSFER_STATUS_TONE,
+  type PaymentTransferStatus,
+  type PaymentTransferSummary,
+  type RampProviderId,
 } from "@sdp/types";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import {
@@ -63,6 +65,7 @@ import {
   resolveTransferFlow,
   resolveTransferTypeLabel,
   shortenAddress,
+  statusMessageKey,
 } from "../payments-overview.utils";
 import { providerTransferDetailRows } from "../provider-transfer-details";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
@@ -75,37 +78,34 @@ interface CounterpartyDetailWorkspaceProps {
   initialTransfers: PaymentTransferSummary[];
 }
 
-const TRANSFER_STATUS_TONE = {
-  completed: "success",
-  confirmed: "success",
-  finalized: "success",
-  failed: "error",
-  expired: "error",
-  pending: "pending",
-  processing: "pending",
-  awaiting_payment: "pending",
-  settling: "pending",
-} as const satisfies Record<string, "success" | "error" | "pending">;
-
-function resolveTransferStatusTone(status: string): "success" | "error" | "pending" {
-  if (status in TRANSFER_STATUS_TONE) {
-    return TRANSFER_STATUS_TONE[status as keyof typeof TRANSFER_STATUS_TONE];
+function transferStatusClassName(status: PaymentTransferStatus): string {
+  const tone = PAYMENT_TRANSFER_STATUS_TONE[status];
+  switch (tone) {
+    case "success":
+      return "bg-success-bg text-success";
+    case "pending":
+      return "bg-fill-strong text-secondary";
+    case "danger":
+      return "bg-error-bg text-error";
+    case "neutral":
+      return "bg-fill-subtle text-tertiary";
+    default: {
+      const exhaustiveTone: never = tone;
+      return exhaustiveTone;
+    }
   }
-  return "pending";
 }
 
-function TransferStatusBadge({ status }: { status: string }) {
-  const tone = resolveTransferStatusTone(status);
+function TransferStatusBadge({ status }: { status: PaymentTransferStatus }) {
+  const t = useTranslations();
   return (
     <span
       className={cn(
         "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        tone === "success" && "bg-success-bg text-success",
-        tone === "error" && "bg-error-bg text-error",
-        tone === "pending" && "bg-fill-strong text-secondary"
+        transferStatusClassName(status)
       )}
     >
-      {toTitleCase(status)}
+      {t(statusMessageKey(status))}
     </span>
   );
 }

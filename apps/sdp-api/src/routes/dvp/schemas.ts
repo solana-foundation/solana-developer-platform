@@ -1,4 +1,10 @@
-import { DVP_TRADE_SIDES, DVP_TRADE_STATUSES, type DvpTradeStatus } from "@sdp/types";
+import {
+  DVP_SETTLEMENT_AVAILABILITY,
+  DVP_TRADE_SIDES,
+  DVP_TRADE_STATUSES,
+  type DvpSettlementAvailability,
+  type DvpTradeStatus,
+} from "@sdp/types";
 import { address } from "@solana/kit";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
@@ -119,10 +125,27 @@ const dvpTradeStatusListSchema = z
       .transform((statuses): DvpTradeStatus[] => Array.from(new Set(statuses)))
   );
 
+/** Comma-separated settlement availabilities, parsed like `status`. */
+const dvpSettlementAvailabilityListSchema = z
+  .string()
+  .min(1)
+  .transform((value) => value.split(","))
+  .pipe(
+    z
+      .array(z.enum(DVP_SETTLEMENT_AVAILABILITY))
+      .min(1)
+      .transform((values): DvpSettlementAvailability[] => Array.from(new Set(values)))
+  );
+
 export const listDvpTradesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
   /** Comma-separated trade statuses to filter to; absent means unfiltered. */
   status: dvpTradeStatusListSchema.optional(),
+  /**
+   * Comma-separated settlement availabilities to filter to, judged by the cluster
+   * clock read with each trade's last observation; absent means unfiltered.
+   */
+  settlementAvailability: dvpSettlementAvailabilityListSchema.optional(),
   /**
    * Case-insensitive substring search over id, swap_dvp, both parties, both
    * escrows, both mints and both leg symbols. Absent means unfiltered.

@@ -210,9 +210,11 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       walletsError={null}
       onPrimary={onPrimary}
       onSecondary={onSecondary}
-      counterpartyDialogOpen={counterpartyDialogOpen}
-      setCounterpartyDialogOpen={setCounterpartyDialogOpen}
-      onCounterpartyCreated={handleCounterpartyCreated}
+      counterpartyDialog={{
+        open: counterpartyDialogOpen,
+        setOpen: setCounterpartyDialogOpen,
+        onCreated: handleCounterpartyCreated,
+      }}
       header={
         mode === "send" && phase === "counterparty" ? (
           <SendModeToggle value={sendMode} onChange={setSendMode} />

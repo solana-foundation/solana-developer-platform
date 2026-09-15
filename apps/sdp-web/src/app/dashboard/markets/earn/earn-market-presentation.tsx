@@ -1,12 +1,15 @@
 "use client";
 
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type EarnStrategy, SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
-import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { earnProviderLabel } from "./earn-format";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnDepositAvailabilityLabel,
+  earnProviderLabel,
+} from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
@@ -85,15 +88,13 @@ export function EarnDepositAvailabilityBadge({
   strategy,
 }: {
   availability: EarnVaultDepositAvailability;
-  labels: Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  labels: EarnDepositAvailabilityLabels;
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
   return (
     <Badge variant={availability === "available" ? "default" : "outline"}>
-      {availability === "cluster_unavailable"
-        ? t(labels.cluster_unavailable, { cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster] })
-        : t(labels[availability])}
+      {earnDepositAvailabilityLabel(availability, labels, strategy, t)}
     </Badge>
   );
 }

@@ -1,3 +1,4 @@
+import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -6,7 +7,6 @@ import type {
   ListPaymentSubscriptionPlansResponse,
   ListPaymentSubscriptionsResponse,
   PaymentSubscription,
-  PaymentSubscriptionCollectionAttempt,
   PaymentSubscriptionPlan,
   PaymentSubscriptionPlanResponse,
   PaymentSubscriptionResponse,
@@ -42,7 +42,6 @@ import {
 import { z } from "zod";
 import { createCounterpartiesRepository } from "@/db/repositories";
 import type {
-  PaymentSubscriptionCollectionAttemptRow,
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
@@ -63,6 +62,7 @@ import {
   getPaymentSubscriptionsRepository,
   getSponsoredFeePayer,
 } from "../context";
+import { mapCollectionAttemptRow } from "../mappers";
 import {
   type createSubscriptionPlanSchema,
   type createSubscriptionSchema,
@@ -124,43 +124,6 @@ function mapSubscription(row: PaymentSubscriptionRow): PaymentSubscription {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function mapCollectionAttempt(
-  row: PaymentSubscriptionCollectionAttemptRow
-): PaymentSubscriptionCollectionAttempt {
-  return {
-    id: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    subscriptionId: row.subscription_id,
-    transferId: row.transfer_id,
-    token: row.token,
-    amount: row.amount,
-    dueAt: row.due_at,
-    attemptedAt: row.attempted_at,
-    status: row.status,
-    signature: row.signature,
-    error: row.error,
-    metadata: row.metadata,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function generateProgramPlanId(): string {
-  const bytes = new Uint8Array(8);
-  let value = 0n;
-
-  while (value === 0n) {
-    crypto.getRandomValues(bytes);
-    value = 0n;
-    for (const byte of bytes) {
-      value = (value << 8n) | BigInt(byte);
-    }
-  }
-
-  return value.toString();
 }
 
 function assertSubscriptionTokenMint(token: string): Address {
@@ -954,7 +917,7 @@ export const listSubscriptionCollectionAttempts = async (c: AppContext) => {
   });
 
   const response: ListPaymentSubscriptionCollectionAttemptsResponse = {
-    collectionAttempts: rows.map(mapCollectionAttempt),
+    collectionAttempts: rows.map(mapCollectionAttemptRow),
     total,
     page,
     pageSize,

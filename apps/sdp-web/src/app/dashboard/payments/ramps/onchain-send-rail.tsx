@@ -55,9 +55,7 @@ export function OnchainSendRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
+      counterpartyDialog={null}
       summary={
         <WizardSummaryList
           details={[

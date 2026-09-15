@@ -230,7 +230,7 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
  * out of date. A settled `ready` wallet still carries provider-live balances,
  * so it refreshes at a quieter cadence instead of freezing at page load.
  *
- * Ground is hit live on every program read, so `busy` is deliberately slower
+ * The provider is hit live on every program read, so `busy` is deliberately slower
  * than `creating`: against a ~40s observed settle the reader loses nothing
  * perceptible and the provider takes a quarter of the requests.
  */

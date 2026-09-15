@@ -411,4 +411,71 @@ describe("API key privilege guards", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("being used for this request");
   });
+
+  it("refuses a key replacing its own policy bindings", async () => {
+    await reseedActor();
+    const res = await app.request(
+      `/v1/api-keys/${WRITER_KEY.id}/policy-bindings`,
+      {
+        method: "PUT",
+        headers: headers(),
+        body: JSON.stringify({ mode: "clear" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("being used for this request");
+  });
+
+  it("refuses a key creating a control profile for itself", async () => {
+    await reseedActor();
+    const res = await app.request(
+      `/v1/api-keys/${WRITER_KEY.id}/policy-profiles`,
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ name: "self-authored profile" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("being used for this request");
+  });
+
+  it("refuses a key writing a control-profile revision for itself", async () => {
+    await reseedActor();
+    const res = await app.request(
+      `/v1/api-keys/${WRITER_KEY.id}/policy-profiles/prof_self/revisions`,
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ rules: [], defaultAction: "allow" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("being used for this request");
+  });
+
+  it("refuses a key activating a control-profile revision for itself", async () => {
+    await reseedActor();
+    const res = await app.request(
+      `/v1/api-keys/${WRITER_KEY.id}/policy-profiles/prof_self/revisions/rev_self/activate`,
+      {
+        method: "POST",
+        headers: headers(),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("being used for this request");
+  });
 });

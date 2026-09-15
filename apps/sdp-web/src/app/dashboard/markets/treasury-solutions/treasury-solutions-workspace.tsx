@@ -44,7 +44,6 @@ import {
   useDashboardWorkspace,
   useOptionalDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
@@ -52,7 +51,11 @@ import {
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
-import { earnProviderLabel, formatUsd } from "../earn/earn-format";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnProviderLabel,
+  formatUsd,
+} from "../earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
   earnMintAsset,
@@ -95,6 +98,17 @@ import {
   EarnVaultWithdrawModal,
 } from "../earn/earn-vault-withdraw-modal";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
+import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
+import { useKaminoVaultAllocations } from "./kamino-allocations";
+import {
+  formatAllocationWeight,
+  formatKaminoAsOf,
+  hasKaminoAllocationContent,
+  kaminoDeployedWeightPct,
+  kaminoDisclosureRows,
+  kaminoMarketLabel,
+} from "./kamino-allocations-format";
+import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import {
   availableTreasuryCashForWallet,
   estimatedTreasuryApy,
@@ -144,7 +158,8 @@ const TREASURY_AVAILABILITY_LABELS = {
   environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
   access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
   provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
-} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  production_only: "DashboardMarkets.treasury.sandboxUnavailable",
+} as const satisfies EarnDepositAvailabilityLabels;
 
 type NumericSortDirection = "ascending" | "descending";
 type NumericSortState = NumericSortDirection | "none";
@@ -729,6 +744,139 @@ function strategyNetworkRank(strategy: EarnStrategy): number {
   return 2;
 }
 
+function KaminoAllocationsTooltipContent({
+  allocations,
+  locale,
+}: {
+  allocations: KaminoVaultAllocations;
+  locale: string;
+}) {
+  const t = useTranslations();
+  const rows = kaminoDisclosureRows(allocations);
+  const asOfLabel = formatKaminoAsOf(allocations.asOf, locale);
+
+  return (
+    <>
+      {/* Two columns in a FIXED layout inside the cell's fixed-width content
+      box: the market column truncates on its child span (never the cell, see
+      CLAUDE.md), the weight column is sized for "100.0%" and never wraps, so
+      no market name or figure can run past the tooltip's edge. The caption
+      names the table for assistive technology; the trigger's own summary is
+      the visible title. */}
+      <table className="w-full table-fixed border-collapse">
+        <caption className="sr-only">{t("DashboardMarkets.treasury.allocationsTitle")}</caption>
+        <colgroup>
+          <col />
+          <col className="w-16" />
+        </colgroup>
+        <thead>
+          <tr className="text-tertiary">
+            <th scope="col" className="pb-1.5 text-left font-normal">
+              {t("DashboardMarkets.treasury.allocationsMarket")}
+            </th>
+            <th scope="col" className="pb-1.5 text-right font-normal">
+              {t("DashboardMarkets.treasury.allocationsAllocation")}
+            </th>
+          </tr>
+        </thead>
+        <tbody className="border-t border-border-subtle">
+          {rows.map((row) =>
+            row.kind === "market" ? (
+              <tr key={row.reserve}>
+                <td className="pt-1.5 pe-4">
+                  <span className="block truncate" title={row.marketName}>
+                    {kaminoMarketLabel(row.marketName)}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap pt-1.5 text-right tabular-nums">
+                  {formatAllocationWeight(row.pct, locale)}
+                </td>
+              </tr>
+            ) : (
+              <tr key="idle" className="text-tertiary">
+                <td className="pt-1.5 pe-4">
+                  <span className="block truncate">
+                    {t("DashboardMarkets.treasury.allocationsIdle")}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap pt-1.5 text-right tabular-nums">
+                  {formatAllocationWeight(row.pct, locale)}
+                </td>
+              </tr>
+            )
+          )}
+        </tbody>
+      </table>
+      {asOfLabel ? (
+        <span className="mt-2 block truncate text-tertiary">
+          {t("DashboardMarkets.treasury.allocationsAsOf", { date: asOfLabel })}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The strategies table's "Information" cell. Kamino rows disclose how the
+ * vault's capital is deployed (the vault's own allocation weights, condensed
+ * behind a summary line); every other provider renders the same plain
+ * placeholder as an unavailable read, and issues no request.
+ */
+function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const vaultAddress = strategy.provider === "kamino" ? strategy.providerReference : undefined;
+  // Kamino's allocations source is mainnet-only: devnet vaults are an
+  // unsupported read, so they take the same no-request placeholder path as
+  // non-Kamino rows instead of a doomed upstream call.
+  const { allocations, error, isLoading } = useKaminoVaultAllocations(
+    vaultAddress,
+    strategy.hostCluster
+  );
+
+  const placeholder = (
+    <span className="text-sm text-tertiary" role="note">
+      —
+    </span>
+  );
+
+  if (isLoading) return <SkeletonBlock className="h-4 w-24 rounded-md" />;
+  if (error || !vaultAddress || !allocations || !hasKaminoAllocationContent(allocations)) {
+    return placeholder;
+  }
+
+  const deployedPct = kaminoDeployedWeightPct(allocations.unallocated?.pct);
+  // A missing unallocated share only hides the SUMMARY weight; the per-reserve
+  // rows in the disclosure are still a real read worth disclosing.
+  const summaryLabel =
+    deployedPct !== undefined
+      ? t("DashboardMarkets.treasury.allocationsSummary", {
+          weight: formatAllocationWeight(deployedPct, locale),
+        })
+      : t("DashboardMarkets.treasury.allocationsSummaryUnavailable");
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className="inline-flex items-center gap-1 rounded-md text-sm text-secondary transition-colors hover:text-primary"
+            type="button"
+          >
+            <span className={deployedPct !== undefined ? "tabular-nums" : undefined}>
+              {summaryLabel}
+            </span>
+            <InfoIcon aria-hidden="true" className="size-3.5 shrink-0 text-tertiary" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="w-64 text-xs leading-5">
+          <KaminoAllocationsTooltipContent allocations={allocations} locale={locale} />
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function StrategyDepositAction({
   availability,
   environment,
@@ -818,28 +966,29 @@ function StrategyTable({
     <div className="overflow-x-auto">
       <Table
         className="!rounded-none !border-0 [&_table]:table-fixed"
-        style={{ minWidth: "56rem" }}
+        style={{ minWidth: "64rem" }}
       >
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[26%]">{t("DashboardMarkets.treasury.position")}</TableHead>
-            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
-            <TableHead className="w-[16%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
+            <TableHead className="w-[22%]">{t("DashboardMarkets.treasury.position")}</TableHead>
+            <TableHead className="w-[12%]">{t("DashboardMarkets.treasury.asset")}</TableHead>
+            <TableHead className="w-[14%]">{t("DashboardMarkets.treasury.yourPosition")}</TableHead>
             <SortableNumericTableHead
-              className="w-[12%]"
+              className="w-[10%]"
               direction={strategySort.field === "apy" ? strategySort.direction : "none"}
               onToggle={() => toggleStrategySort("apy")}
             >
               {t("DashboardMarkets.treasury.apy")}
             </SortableNumericTableHead>
             <SortableNumericTableHead
-              className="w-[18%]"
+              className="w-[14%]"
               direction={strategySort.field === "tvl" ? strategySort.direction : "none"}
               onToggle={() => toggleStrategySort("tvl")}
             >
               {t("DashboardMarkets.treasury.tvl")}
             </SortableNumericTableHead>
-            <TableHead align="right" className="w-[14%]">
+            <TableHead className="w-[16%]">{t("DashboardMarkets.treasury.information")}</TableHead>
+            <TableHead align="right" className="w-[12%]">
               {t("DashboardMarkets.treasury.actions")}
             </TableHead>
           </TableRow>
@@ -895,6 +1044,9 @@ function StrategyTable({
                 </TableCell>
                 <TableCell className="text-sm text-primary tabular-nums">
                   {formatUsd(tvlUsd, locale, 2)}
+                </TableCell>
+                <TableCell>
+                  <StrategyInformationCell strategy={strategy} />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex flex-col items-end gap-2">
@@ -1227,7 +1379,7 @@ function ExistingProgramsCard({
         </div>
         <div className="flex items-start gap-2 bg-fill-subtle px-6 py-3 text-xs leading-5 text-secondary">
           <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          {/* Ground can require customer-side approval, but SDP has no
+          {/* A provider can require customer-side approval, but SDP has no
            * provider-approval route or signer UI yet. Never imply the
            * dashboard can release a withdrawal that is parked there. */}
           <p>{t("DashboardMarkets.treasury.withdrawalApprovalUnavailable")}</p>
@@ -1252,6 +1404,8 @@ interface TreasuryStrategiesCardProps {
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
+  mainnetError: unknown;
+  mainnetLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   positions: readonly EarnVaultPosition[] | undefined;
@@ -1260,14 +1414,23 @@ interface TreasuryStrategiesCardProps {
   unrecordedShareMints: ReadonlySet<string> | undefined;
 }
 
-function DevnetCatalogueStatus({
+type CatalogueShelf = "devnet" | "mainnet";
+
+/**
+ * Inline state for one shelf of the Sandbox catalogue. Either shelf can load
+ * or fail on its own without taking the other's rows off the screen; the
+ * full-card states are reserved for when neither shelf has anything to show.
+ */
+function CatalogueShelfStatus({
   error,
   hasStrategies,
   isLoading,
+  shelf,
 }: {
   error: unknown;
   hasStrategies: boolean;
   isLoading: boolean;
+  shelf: CatalogueShelf;
 }) {
   const t = useTranslations();
   if (!hasStrategies) return null;
@@ -1278,7 +1441,11 @@ function DevnetCatalogueStatus({
         role="alert"
       >
         <InfoIcon aria-hidden="true" className="size-4 shrink-0" />
-        <p>{t("DashboardMarkets.treasury.devnetStrategiesUnavailable")}</p>
+        <p>
+          {shelf === "devnet"
+            ? t("DashboardMarkets.treasury.devnetStrategiesUnavailable")
+            : t("DashboardMarkets.treasury.mainnetStrategiesUnavailable")}
+        </p>
       </div>
     );
   }
@@ -1289,7 +1456,11 @@ function DevnetCatalogueStatus({
       role="status"
     >
       <RefreshCwIcon aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
-      <p>{t("DashboardMarkets.treasury.devnetStrategiesLoading")}</p>
+      <p>
+        {shelf === "devnet"
+          ? t("DashboardMarkets.treasury.devnetStrategiesLoading")
+          : t("DashboardMarkets.treasury.mainnetStrategiesLoading")}
+      </p>
     </div>
   );
 }
@@ -1300,6 +1471,8 @@ function TreasuryStrategiesCardBody({
   environment,
   error,
   isLoading,
+  mainnetError,
+  mainnetLoading,
   onDeposit,
   positions,
   providerAccess,
@@ -1328,10 +1501,17 @@ function TreasuryStrategiesCardBody({
   const availableStrategies = strategies ?? [];
   return (
     <>
-      <DevnetCatalogueStatus
+      <CatalogueShelfStatus
+        error={mainnetError}
+        hasStrategies={availableStrategies.length > 0}
+        isLoading={mainnetLoading}
+        shelf="mainnet"
+      />
+      <CatalogueShelfStatus
         error={devnetError}
         hasStrategies={availableStrategies.length > 0}
         isLoading={devnetLoading}
+        shelf="devnet"
       />
       {availableStrategies.length === 0 ? (
         <ListEmptyState
@@ -1510,6 +1690,8 @@ interface TreasuryWorkspaceContentProps {
   devnetCatalogueError: unknown;
   devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
+  mainnetCatalogueError: unknown;
+  mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
   onWithdrawPosition: (position: EarnVaultPosition) => void;
@@ -1539,6 +1721,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     devnetCatalogueError,
     devnetCatalogueLoading,
     environment,
+    mainnetCatalogueError,
+    mainnetCatalogueLoading,
     onDeposit,
     onRefresh,
     onWithdrawPosition,
@@ -1591,6 +1775,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         environment={environment}
         error={catalogueError}
         isLoading={catalogueLoading}
+        mainnetError={mainnetCatalogueError}
+        mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
         positions={positionsError ? undefined : positions}
@@ -1613,11 +1799,16 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   );
 }
 
+/**
+ * Sandbox lists the mirrored mainnet shelf above the depositable devnet shelf.
+ * Neither shelf gates the other: whichever has loaded renders, and only when
+ * both are missing is the catalogue itself unavailable.
+ */
 function mergeStrategyCatalogues(
   mainnet: readonly EarnStrategy[] | undefined,
   devnet: readonly EarnStrategy[] | undefined
 ): EarnStrategy[] | undefined {
-  if (!mainnet) return undefined;
+  if (!mainnet) return devnet ? [...devnet] : undefined;
   if (!devnet) return [...mainnet];
 
   const combined = [...mainnet];
@@ -1628,6 +1819,95 @@ function mergeStrategyCatalogues(
     combined.push(strategy);
   }
   return combined;
+}
+
+/**
+ * The strategy list the treasury page renders. Production shows its own
+ * shelf; Sandbox shows the mirrored mainnet shelf above the depositable
+ * devnet shelf. Each Sandbox shelf drops its rows behind its own failed read,
+ * so a stale list never outlives the error that should have replaced it, and
+ * neither shelf's failure or slow load takes the other's rows off the screen.
+ */
+function combinedCatalogueStrategies({
+  sandboxCatalogue,
+  baseCatalogueStrategies,
+  baseCatalogueError,
+  strategies,
+  strategiesError,
+}: {
+  sandboxCatalogue: boolean;
+  baseCatalogueStrategies: readonly EarnStrategy[] | undefined;
+  baseCatalogueError: unknown;
+  strategies: readonly EarnStrategy[] | undefined;
+  strategiesError: unknown;
+}): readonly EarnStrategy[] | undefined {
+  if (!sandboxCatalogue) return baseCatalogueStrategies;
+  const mainnetShelf = baseCatalogueError ? undefined : baseCatalogueStrategies;
+  return mergeStrategyCatalogues(
+    mainnetShelf,
+    // The devnet rows show only where the mainnet shelf actually offers the
+    // recorded counterpart (see `devnet-mainnet-intersection.ts`); the
+    // allocation summary and the share-mint vocabulary keep the unfiltered
+    // shelf, because this is a browse decision and never a money gate.
+    strategiesError ? undefined : filterSandboxDevnetStrategies(strategies, mainnetShelf)
+  );
+}
+
+// The allocation summary reads the environment's actionable shelf, so the
+// shelves a workspace needs depend on the environment. Sandbox automatically
+// combines the devnet shelf with the mirrored mainnet catalogue, preserving
+// the API's `fundable: false` response on mainnet rows. Production's default
+// shelf is already mainnet.
+function useTreasuryCatalogueShelves(sdpEnvironment: SdpEnvironment) {
+  const sandboxCatalogue = sdpEnvironment === "sandbox";
+  const catalogueCluster = sandboxCatalogue ? "mainnet-beta" : undefined;
+  const {
+    strategies,
+    error: strategiesError,
+    isLoading: strategiesLoading,
+    refresh: refreshStrategies,
+  } = useEarnStrategies();
+  const {
+    strategies: baseCatalogueStrategies,
+    error: baseCatalogueError,
+    isLoading: baseCatalogueLoading,
+    refresh: refreshCatalogue,
+  } = useEarnStrategies({ cluster: catalogueCluster });
+  const catalogueStrategies = useMemo(
+    () =>
+      combinedCatalogueStrategies({
+        sandboxCatalogue,
+        baseCatalogueStrategies,
+        baseCatalogueError,
+        strategies,
+        strategiesError,
+      }),
+    [baseCatalogueError, baseCatalogueStrategies, sandboxCatalogue, strategies, strategiesError]
+  );
+  // Sandbox reserves the full-card error for both shelves failing; a single
+  // failed shelf is reported inline above the rows the other shelf still has.
+  const bothShelvesFailed = Boolean(baseCatalogueError && strategiesError);
+  const catalogueError = !sandboxCatalogue || bothShelvesFailed ? baseCatalogueError : undefined;
+  const mainnetCatalogueError = sandboxCatalogue ? baseCatalogueError : undefined;
+  const mainnetCatalogueLoading = sandboxCatalogue && baseCatalogueLoading;
+  const devnetCatalogueError = sandboxCatalogue ? strategiesError : undefined;
+  const devnetCatalogueLoading = sandboxCatalogue && strategiesLoading;
+  const catalogueLoading = baseCatalogueLoading || (sandboxCatalogue && strategiesLoading);
+  return {
+    catalogueCluster,
+    catalogueStrategies,
+    catalogueError,
+    catalogueLoading,
+    mainnetCatalogueError,
+    mainnetCatalogueLoading,
+    devnetCatalogueError,
+    devnetCatalogueLoading,
+    refreshCatalogue,
+    refreshStrategies,
+    strategies,
+    strategiesError,
+    strategiesLoading,
+  };
 }
 
 export function TreasurySolutionsWorkspace({
@@ -1643,34 +1923,20 @@ export function TreasurySolutionsWorkspace({
     refreshBalances: refreshWalletBalances,
   } = useEarnFundingWallets();
   const {
+    catalogueCluster,
+    catalogueStrategies,
+    catalogueError,
+    catalogueLoading,
+    mainnetCatalogueError,
+    mainnetCatalogueLoading,
+    devnetCatalogueError,
+    devnetCatalogueLoading,
+    refreshCatalogue,
+    refreshStrategies,
     strategies,
-    error: strategiesError,
-    isLoading: strategiesLoading,
-    refresh: refreshStrategies,
-  } = useEarnStrategies();
-  // The allocation summary still reads the environment's actionable shelf.
-  // Sandbox automatically combines that devnet shelf with the mirrored
-  // mainnet catalogue, preserving the API's `fundable: false` response on
-  // mainnet rows. Production's default shelf is already mainnet.
-  const catalogueCluster = sdpEnvironment === "sandbox" ? "mainnet-beta" : undefined;
-  const {
-    strategies: baseCatalogueStrategies,
-    error: baseCatalogueError,
-    isLoading: baseCatalogueLoading,
-    refresh: refreshCatalogue,
-  } = useEarnStrategies({ cluster: catalogueCluster });
-  const catalogueStrategies = useMemo(
-    () =>
-      sdpEnvironment === "sandbox"
-        ? mergeStrategyCatalogues(baseCatalogueStrategies, strategiesError ? undefined : strategies)
-        : baseCatalogueStrategies,
-    [baseCatalogueStrategies, sdpEnvironment, strategies, strategiesError]
-  );
-  const catalogueError = baseCatalogueError;
-  const devnetCatalogueError = sdpEnvironment === "sandbox" ? strategiesError : undefined;
-  const devnetCatalogueLoading = sdpEnvironment === "sandbox" && strategiesLoading;
-  const catalogueLoading =
-    baseCatalogueLoading || (sdpEnvironment === "sandbox" && strategiesLoading);
+    strategiesError,
+    strategiesLoading,
+  } = useTreasuryCatalogueShelves(sdpEnvironment);
   const {
     positions,
     error: positionsError,
@@ -1941,6 +2207,8 @@ export function TreasurySolutionsWorkspace({
         devnetCatalogueError={devnetCatalogueError}
         devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
+        mainnetCatalogueError={mainnetCatalogueError}
+        mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
         onRefresh={() => {
           refreshWalletBalances();

@@ -1,4 +1,4 @@
-import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,44 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+/**
+ * Portfolio-capable test double installed under `upshift`, a registered stub id
+ * the API composition root never overrides — same pattern as
+ * `earn-program.test.ts`: typed as the real contract so per-case spies see the
+ * provider signatures, with the no-op literal itself unchecked.
+ */
+const portfolioClient = vi.hoisted(
+  () =>
+    ({
+      provider: "upshift",
+      declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
+      // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
+      // `restoreAllMocks` puts the no-op back, so no call history can leak
+      // between tests through the shared double.
+      listStrategies: async () => [],
+      createPortfolioWallet: async () => {},
+      getPortfolioWallet: async () => {},
+      updatePortfolioStrategy: async () => {},
+      getPortfolioYield: async () => {},
+      listPortfolioDeposits: async () => {},
+      previewPortfolioWithdrawal: async () => {},
+      createPortfolioWithdrawal: async () => {},
+      getPortfolioWithdrawal: async () => {},
+      createPortfolioAddressBookEntry: async () => {},
+    }) as unknown as EarnPortfolioWalletProvider
+);
+
+vi.mock("@sdp/earn", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/earn")>();
+  return {
+    ...actual,
+    EARN_PROVIDER_CLIENTS: {
+      ...actual.EARN_PROVIDER_CLIENTS,
+      upshift: portfolioClient,
+    },
+  };
+});
 
 /**
  * Pins the PRO-1628 crash-window contract in isolation: once the provider has
@@ -62,16 +100,16 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
-let originalGroundSandboxApiKey: string | undefined;
+let originalUpshiftSandboxApiKey: string | undefined;
 let program: EarnProviderWalletRow;
 
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
-  originalGroundSandboxApiKey = env.GROUND_SANDBOX_API_KEY;
+  originalUpshiftSandboxApiKey = env.UPSHIFT_SANDBOX_API_KEY;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
-  env.GROUND_SANDBOX_API_KEY = "ground-sandbox-test-api-key";
+  env.UPSHIFT_SANDBOX_API_KEY = "upshift-sandbox-test-api-key";
   await seedTestDatabase(env);
 
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -85,7 +123,7 @@ beforeEach(async () => {
         TEST_ORG.id,
         TEST_ORG.name,
         TEST_ORG.slug,
-        JSON.stringify({ providerOverrides: { earn: { ground: true } } })
+        JSON.stringify({ providerOverrides: { earn: { upshift: true } } })
       ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
@@ -121,7 +159,7 @@ beforeEach(async () => {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
     environment: "sandbox",
-    provider: "ground",
+    provider: "upshift",
     providerWalletRef: WALLET_REF,
     label: null,
     createdBy: TEST_USER.id,
@@ -136,15 +174,13 @@ afterEach(async () => {
   vi.restoreAllMocks();
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
-  env.GROUND_SANDBOX_API_KEY = originalGroundSandboxApiKey;
+  env.UPSHIFT_SANDBOX_API_KEY = originalUpshiftSandboxApiKey;
   await clearKVStores(env);
 });
 
 describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () => {
   it("still returns 201 with the provider's withdrawal when every ledger write fails", async () => {
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const res = await app.request(
       `/v1/earn/programs/${program.id}/withdrawals`,

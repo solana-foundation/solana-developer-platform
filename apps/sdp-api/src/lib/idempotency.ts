@@ -19,13 +19,12 @@ import { conflict } from "@/lib/errors";
  * another.
  *
  * The result is stamped as version FOUR even though it is derived rather than
- * random, because providers validate the shape: Ground answers a version-5
- * UUID with `400 requestId must be a valid UUID v4` (verified against their
- * sandbox, 2026-08-05), which would turn every header-keyed withdrawal into a
- * rejected request. Version 5 is the semantically correct label for a
- * name-derived value, so this is a deliberate concession to the wire format,
- * not a claim of randomness. Collision resistance comes from SHA-256, not from
- * the version nibble.
+ * random, because providers validate the shape: a provider answered a version-5
+ * UUID with `400 requestId must be a valid UUID v4`, which would turn every
+ * header-keyed withdrawal into a rejected request. Version 5 is the
+ * semantically correct label for a name-derived value, so this is a deliberate
+ * concession to the wire format, not a claim of randomness. Collision
+ * resistance comes from SHA-256, not from the version nibble.
  */
 export function deriveProviderRequestId(scope: readonly string[], key: string): string {
   const material = [...scope, key].map((part) => `${part.length}:${part}`).join("|");
@@ -86,18 +85,13 @@ export async function resolveIdentityBoundIdempotencyReplay<
 >(
   findExisting: () => Promise<Row | null>,
   fingerprint: string,
-  legacyFingerprint: string,
   identityMatches: (row: Row) => boolean
 ): Promise<Row | null> {
   const existing = await findExisting();
   if (!existing || existing.idempotency_fingerprint === null) {
     return null;
   }
-  if (
-    identityMatches(existing) &&
-    (existing.idempotency_fingerprint === fingerprint ||
-      existing.idempotency_fingerprint === legacyFingerprint)
-  ) {
+  if (identityMatches(existing) && existing.idempotency_fingerprint === fingerprint) {
     return existing;
   }
   throw conflict("Idempotency key already used with different request payload");
@@ -137,7 +131,6 @@ export interface PaymentTransferFingerprintInput {
   amount: string | null;
   memo: string | null | undefined;
   type: string;
-  privateTransfer?: unknown;
 }
 
 export interface TransferBatchFingerprintRecipientInput {
@@ -170,17 +163,12 @@ function paymentTransferFingerprint(
       amount: input.amount,
       memo: input.memo ?? null,
       type: input.type,
-      privateTransfer: input.privateTransfer ?? null,
     })
   );
 }
 
 export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
   paymentTransferFingerprint(input, input.custodyWalletId);
-
-export const buildLegacyPaymentTransferFingerprint = (
-  input: PaymentTransferFingerprintInput
-): string => paymentTransferFingerprint(input);
 
 function transferBatchFingerprint(
   input: TransferBatchFingerprintInput,
@@ -200,9 +188,6 @@ function transferBatchFingerprint(
 
 export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
   transferBatchFingerprint(input, input.sourceCustodyWalletId);
-
-export const buildLegacyTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
-  transferBatchFingerprint(input);
 
 export interface EarnVaultDepositFingerprintInput {
   environment: string;

@@ -1,4 +1,8 @@
-import type { PaymentRecurringPaymentStatus, PaymentsDashboardWallet } from "@sdp/types";
+import {
+  isEditableRecurringPaymentStatus,
+  type PaymentRecurringPaymentStatus,
+  type PaymentsDashboardWallet,
+} from "@sdp/types";
 
 export function getRecurringPaymentDetailState({
   sourceCustodyWalletId,
@@ -35,7 +39,8 @@ export function getRecurringPaymentDetailState({
     // the current wallet's signature; a pending edit only saves data.
     isEditable:
       !sourceWalletUnresolved &&
-      (status === "pending_activation" || (status === "active" && !signingUnavailable)),
+      isEditableRecurringPaymentStatus(status) &&
+      (status !== "active" || !signingUnavailable),
     controlsDisabled,
     signingUnavailable,
     signingDisabled,

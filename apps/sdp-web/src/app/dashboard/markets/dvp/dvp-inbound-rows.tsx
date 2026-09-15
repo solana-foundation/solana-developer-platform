@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
@@ -56,17 +57,21 @@ function InboundLegCell({ leg, yours }: { leg: DvpInboundLeg; yours: boolean }) 
 function InboundFundAction({
   frozen,
   side,
+  symbol,
   tradeId,
   party,
 }: {
   frozen: boolean;
   /** The leg the custody lookup made this caller's. */
   side: "a" | "b";
+  /** That leg's token symbol, so a refusal names the token. */
+  symbol: string | null;
   tradeId: string;
   party: DvpPartyRef;
 }) {
   const t = useTranslations();
-  const { act, pending } = useDvpTradeActions(tradeId);
+  const cluster = useSolanaCluster();
+  const { act, pending } = useDvpTradeActions(tradeId, cluster);
   const wallet = party.actionWallet;
   const shownWallet = wallet ?? party.wallet;
   const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
@@ -91,7 +96,7 @@ function InboundFundAction({
         disabled={unavailable || frozen || pending.has(`fund:${side}`)}
         onClick={() => {
           if (wallet?.isRuntimeExecutionAllowed === true) {
-            void act("fund", { side, walletId: wallet.id });
+            void act("fund", { side, walletId: wallet.id, symbol });
           }
         }}
         size="sm"
@@ -167,6 +172,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
             <InboundFundAction
               frozen={yours.frozen === true}
               side={trade.yourSide}
+              symbol={yours.symbol}
               tradeId={trade.id}
               party={yours.party}
             />

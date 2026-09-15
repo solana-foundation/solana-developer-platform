@@ -7,7 +7,6 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { getDraftDeploymentBlocker } from "../../draft-permissions";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
 import { TokenDeployWalletDialog } from "../token-deploy-wallet-dialog";
@@ -91,13 +90,7 @@ export function AssetManagementWorkspace({
     metadataSignerSelection: ops.metadataSignerSelection,
     draftWallets: ops.authorityWalletsError ? [] : ops.authorityWallets,
   });
-  const draftDeploymentBlockerKey = getDraftDeploymentBlocker(
-    form.draft.authorityWalletIds,
-    form.draft.signingWalletId
-  );
-  const draftDeploymentBlocker =
-    form.errors.authorityWalletIds ??
-    (draftDeploymentBlockerKey ? t(draftDeploymentBlockerKey) : null);
+  const draftDeploymentBlocker = form.errors.authorityWalletIds ?? null;
   const showSection = useCallback(
     (section: AssetManagementTab) => {
       setOpenSections((current) => ({ ...current, [section]: true }));
@@ -136,7 +129,12 @@ export function AssetManagementWorkspace({
             void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
           }
           onDeploy={() => {
-            if (!form.dirty && !draftDeploymentBlocker) ops.deployToken();
+            if (!form.dirty && !draftDeploymentBlocker) {
+              ops.deployToken({
+                ...form.draft.authorityWalletIds,
+                "mint-authority": form.draft.signingWalletId,
+              });
+            }
           }}
           onUnpause={() => ops.handlePause(false)}
           onRefreshSupply={ops.handleRefreshSupply}

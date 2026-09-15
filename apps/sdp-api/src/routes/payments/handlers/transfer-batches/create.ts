@@ -7,10 +7,7 @@ import type {
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { AppError, badRequest, internalError } from "@/lib/errors";
-import {
-  buildLegacyTransferBatchFingerprint,
-  buildTransferBatchFingerprint,
-} from "@/lib/idempotency";
+import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
@@ -40,7 +37,6 @@ type TransferBatchResponse = Awaited<ReturnType<typeof buildTransferBatchRespons
 
 interface TransferBatchGateResolved extends ResolvedBatchRequest {
   idempotencyFingerprint: string;
-  legacyIdempotencyFingerprint: string;
 }
 
 async function assertApprovedBatchReplayCompleted(
@@ -147,7 +143,6 @@ export async function extractTransferBatchPolicyCandidate(
     resolved: {
       ...resolved,
       idempotencyFingerprint: buildBatchIdempotencyFingerprint(resolved, input.options),
-      legacyIdempotencyFingerprint: buildLegacyBatchIdempotencyFingerprint(resolved, input.options),
     },
     // HOO-1023: remove this legacy envelope when K2 rollback support ends.
     executionRequestBody: { ...legacyBody, source: resolved.sourceWallet.walletId },
@@ -207,25 +202,6 @@ function buildBatchIdempotencyFingerprint(
   });
 }
 
-function buildLegacyBatchIdempotencyFingerprint(
-  resolved: ResolvedBatchRequest,
-  options: CreateTransferBatchInput["options"]
-): string {
-  return buildLegacyTransferBatchFingerprint({
-    sourceCustodyWalletId: resolved.sourceWallet.id,
-    sourceAddress: resolved.sourceAddress,
-    token: resolved.tokenContext.token,
-    recipients: resolved.recipients.map((recipient) => ({
-      externalId: recipient.externalId,
-      counterpartyId: recipient.counterpartyId,
-      counterpartyAccountId: recipient.counterpartyAccountId,
-      destinationAddress: recipient.destinationAddress,
-      amount: recipient.amount,
-    })),
-    options,
-  });
-}
-
 /**
  * Resolve an Idempotency-Key replay before transfer-batch policy enforcement.
  *
@@ -246,7 +222,6 @@ export async function findTransferBatchIdempotentKeyReplay(
     resolved.projectId,
     idempotencyKey,
     resolved.idempotencyFingerprint,
-    resolved.legacyIdempotencyFingerprint,
     resolved.sourceWallet.id
   );
   if (replay === null) {
@@ -340,8 +315,7 @@ export async function createTransferBatch(c: AppContext) {
           options: body.options === undefined ? {} : body.options,
           initiatedByKeyId: resolved.scope.auth.id,
           idempotencyKey,
-          // HOO-1023: persist the K2 shape until rollback support ends.
-          idempotencyFingerprint: idempotencyKey ? resolved.legacyIdempotencyFingerprint : null,
+          idempotencyFingerprint: idempotencyKey ? resolved.idempotencyFingerprint : null,
         },
         recipients: resolved.recipients.map((recipient) => ({
           organizationId: resolved.scope.auth.organizationId,
@@ -366,7 +340,6 @@ export async function createTransferBatch(c: AppContext) {
         resolved.projectId,
         idempotencyKey,
         idempotencyFingerprint,
-        resolved.legacyIdempotencyFingerprint,
         resolved.sourceWallet.id
       );
       if (replay) {

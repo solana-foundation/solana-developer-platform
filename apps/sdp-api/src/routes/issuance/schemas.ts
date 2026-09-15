@@ -269,6 +269,14 @@ export const updateAuthoritySchema = z
 export const deployTokenSchema = z
   .object({
     signingCustodyWalletId: z.string().min(1).optional(),
+    authorityCustodyWalletIds: z
+      .object({
+        metadata: z.string().min(1).optional(),
+        freeze: z.string().min(1).optional(),
+        permanentDelegate: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
   })
   .strict();

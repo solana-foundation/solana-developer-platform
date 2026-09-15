@@ -89,6 +89,7 @@ export type ResourceType =
   | "provider_credential"
   | "custody_connection"
   | "earn_movement"
+  | "payment_request"
   | "audit_ledger";
 
 export interface AuditLogEntry {

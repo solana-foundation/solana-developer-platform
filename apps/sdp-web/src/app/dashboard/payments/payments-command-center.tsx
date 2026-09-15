@@ -11,7 +11,7 @@ import {
 import Link from "next/link";
 import { Suspense } from "react";
 import { TokenMark } from "@/components/token-mark";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import {
@@ -41,6 +41,8 @@ import {
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
   shortenAddress,
+  statusMessageKey,
+  statusVariant,
 } from "./payments-overview.utils";
 import {
   fetchIssuedTokensByMint,
@@ -201,22 +203,6 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
   );
 }
 
-function statusVariant(status: string): BadgeVariant {
-  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
-  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
-    return "warning";
-  }
-  if (status === "failed") return "danger";
-  return "default";
-}
-
-function formatStatus(status: string): string {
-  return status
-    .split("_")
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join(" ");
-}
-
 function compactAmount(
   transfer: PaymentTransferSummary,
   issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
@@ -233,7 +219,6 @@ function compactAmount(
 }
 
 function compactType(transfer: PaymentTransferSummary): string {
-  if (transfer.type === "transfer_confidential") return "Confidential";
   if (transfer.type === "transfer_batch") return "Batch";
   if (transfer.type === "onramp") return "Deposit";
   if (transfer.type === "offramp") return "Payout";
@@ -313,7 +298,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                   >
                     <span>
                       <Badge variant={statusVariant(transfer.status)}>
-                        {formatStatus(transfer.status)}
+                        {t(statusMessageKey(transfer.status))}
                       </Badge>
                     </span>
                     <span
@@ -355,7 +340,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                       {formatDirection(transfer.direction, t)}
                     </span>
                     <Badge variant={statusVariant(transfer.status)}>
-                      {formatStatus(transfer.status)}
+                      {t(statusMessageKey(transfer.status))}
                     </Badge>
                   </span>
                   <span className="flex min-w-0 items-center justify-between gap-3">
@@ -399,7 +384,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
     {
       href: "/dashboard/payments/recurring",
       icon: CalendarClockIcon,
-      count: recurring.ok ? recurring.total : null,
+      count: recurring.ok ? recurring.data.total : null,
       label: t("DashboardPayments.commandCenter.activeSchedules"),
     },
     {

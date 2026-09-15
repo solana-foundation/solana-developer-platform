@@ -11,6 +11,7 @@
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
+import { buildDvpTradeRow } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
 const recordObservation = vi.hoisted(() => vi.fn());
@@ -36,10 +37,7 @@ vi.mock("./observe", async (importOriginal) => ({
 const { observeDvpTradeIfStale } = await import("./observe-now");
 
 const NOW = Date.parse("2026-09-03T21:00:00.000Z");
-const NEVER_REREAD_STATUSES = [
-  "expired",
-  "create_failed",
-] as const satisfies readonly DvpTradeStatus[];
+const NEVER_REREAD_STATUSES = ["create_failed"] as const satisfies readonly DvpTradeStatus[];
 const CLOSED_REREAD_STATUSES = [
   "settled",
   "cancelled",
@@ -48,20 +46,12 @@ const CLOSED_REREAD_STATUSES = [
 ] as const satisfies readonly DvpTradeStatus[];
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
-  return {
+  return buildDvpTradeRow({
     id: "dvp_observe",
     status: "partially_funded",
-    swapDvp: "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
-    escrowA: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
-    escrowB: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
-    closeResolutionAttempts: 0,
-    closeResolutionAfter: null,
-    closedAt: null,
-    tokenProgramA: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-    tokenProgramB: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
     observedAt: new Date(NOW - 60_000).toISOString(),
     ...overrides,
-  } as DvpTradeRow;
+  });
 }
 
 describe("observeDvpTradeIfStale", () => {
@@ -72,6 +62,7 @@ describe("observeDvpTradeIfStale", () => {
       legA: { exists: true, amount: 1n, frozen: false },
       legB: { exists: true, amount: 2n, frozen: false },
       blockHeight: 100n,
+      clusterUnixTimestamp: 1_800_000_000n,
       closeResolution: null,
     });
     resolveDvpClose.mockResolvedValue({ kind: "absent" });
@@ -103,6 +94,24 @@ describe("observeDvpTradeIfStale", () => {
   it("reads a trade that has never been observed", async () => {
     await observeDvpTradeIfStale(env, trade({ observedAt: null }), NOW);
 
+    expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
+  });
+
+  // An expired trade's escrows still exist: a reclaim can drain one and a
+  // deposit can land, and the counterparty's page has no other way to see it.
+  it("re-reads an expired trade on the open cadence", async () => {
+    await observeDvpTradeIfStale(
+      env,
+      trade({ status: "expired", observedAt: new Date(NOW - 5_000).toISOString() }),
+      NOW
+    );
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+
+    await observeDvpTradeIfStale(
+      env,
+      trade({ status: "expired", observedAt: new Date(NOW - 11_000).toISOString() }),
+      NOW
+    );
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
 
@@ -144,6 +153,7 @@ describe("observeDvpTradeIfStale", () => {
       legA: { exists: false, tampered: false },
       legB: { exists: false, tampered: false },
       blockHeight: 100n,
+      clusterUnixTimestamp: 1_800_000_000n,
       closeResolution: null,
     });
 

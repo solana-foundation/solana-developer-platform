@@ -7,8 +7,9 @@ Status: Accepted — implemented on `main` (`earn-initial` merged as
 ## Context
 
 Solana Earn (SDP Markets V1) fronts yield strategies through external
-vault-infra providers (Veda, Upshift, Perena, Ground today) and surfaces
-curator risk frameworks (Gauntlet, Steakhouse, Sentora today). Both lists are
+vault-infra providers (Veda, Upshift, Perena, Kamino, Jupiter Lend, Ondo today;
+the Ground integration was removed 2026-09 — see the final addendum) and
+surfaces curator risk frameworks (Gauntlet, Steakhouse, Sentora today). Both lists are
 expected to churn: new partners must be insertable with minimal lift, and
 existing ones must be enable/disable-able — per environment and per
 organization — without breaking existing integrations or trapping customer
@@ -508,10 +509,11 @@ is "what this deployment can talk to", the former is "what we offer today".
   store what a provider reports.
 
 **First application: Ground un-surfaced, Kamino the only offered provider.**
-Ground is the only portfolio-capable provider, so with it un-surfaced nothing
-can create a program and Earn is browse-only — a Kamino comparison catalogue
-plus whatever programs already exist. That is a product consequence of the
-switch, not a property of it; re-surfacing Ground is a one-line change.
+Ground was the only portfolio-capable provider, so with it un-surfaced nothing
+could create a program and Earn was browse-only — a Kamino comparison catalogue
+plus whatever programs already existed. That is a product consequence of the
+switch, not a property of it. (Ground was later removed entirely; see the
+2026-09 addendum below.)
 
 Two consequences worth naming, because both are load-bearing and neither is
 obvious:
@@ -582,7 +584,7 @@ about cluster deployment. Check the chain for a per-cluster program id.
 
 `hostCluster`, `fundable`, and `isClusterFundableInEnvironment` all stay. They
 stop *firing* for Kamino — its rows now match their environment's cluster in
-both — but they still guard Ground, production Kamino, rows already stored under
+both — but they still guard production Kamino, rows already stored under
 the old behaviour, and the next genuinely single-cluster provider. The
 simplification here is to the mental model ("catalogued but not fundable" was a
 Kamino-shaped special case), not to the safety machinery.
@@ -947,6 +949,30 @@ collide on every shared slug once surfaced. Decision: keep the bare triple.
 Extending the key to the cluster would make every bare-triple consumer
 (`updateStrategyMetrics` above all) hit both rows; revisit only if a slug-keyed
 provider ever needs a faithful mirror.
+
+## Addendum (2026-09) — Ground removed entirely
+
+The Ground integration was retired: the provider will no longer be shown, and
+no actions are supported against it — not even withdrawals. This is a stronger
+step than the un-surfacing above (which had deliberately kept every money-OUT
+route open): the product decided Ground positions go away completely, and
+existing balances are zeroed by migration rather than remain payable. What was
+removed:
+
+- The `GroundEarnClient`, the `ground` id in `EARN_PROVIDERS` and every
+  per-provider registry map (`EARN_PROGRAM_SOLANA_PAYOUT_TOKENS`, surfacing,
+  deposit styles, slippage floors, availability credentials), the
+  `GROUND[_SANDBOX]_API_KEY` secrets, and the catalogue inventory tooling.
+- All Ground rows in the database: strategies, provider wallets (programs) and
+  their movements (migration 0099).
+
+The provider-neutral seams this ADR established are what made the removal
+mechanical: the capability guard, the fail-closed registry and the open-TEXT
+provider columns mean no code outside the registry maps needed to know Ground
+by name. The portfolio-wallet capability, program routes and custodial ledger
+STAY — they are provider-neutral, and the next custodial provider inherits them
+with zero route changes. `resolveEarnProviderClient` answers a clean 503 for
+the retired id, so a row that somehow survived the migration can never dispatch.
 
 **Accepted staleness, and one fidelity gap.** Mirrored rows refresh at the
 HOURLY catalogue cadence: the mirror upsert carries the snapshot's

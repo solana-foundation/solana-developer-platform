@@ -36,6 +36,7 @@ packages/*
 !packages/sdp-jupiter-lend
 !packages/bigint-buffer
 !packages/sdp-veda
+!packages/sdp-ondo
 docs
 infra
 scripts

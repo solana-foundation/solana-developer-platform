@@ -11,9 +11,10 @@
  * `symbolA`/`symbolB` ARE included; they are read off the mint on chain.
  */
 
-import type { DvpLegOutcome } from "@sdp/types";
+import type { DvpLegOutcome, DvpSettlementAvailability } from "@sdp/types";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
+import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import type { DvpActionWallet } from "./action-wallets";
 
 /** One party of the trade, as a party who is not the author may see it. */
@@ -61,6 +62,8 @@ export interface DvpInboundTradeResponse {
   legs: { a: DvpInboundLegResponse; b: DvpInboundLegResponse };
   expiryTimestamp: string;
   earliestSettlementTimestamp: string | null;
+  /** Whether the trade can settle, by the cluster clock read with the last observation. */
+  settlementAvailability: DvpSettlementAvailability | null;
   createdAt: string;
   /** When the escrow balances below were last confirmed against the chain. */
   observedAt: string | null;
@@ -148,6 +151,7 @@ export function toDvpInboundResponse(
     },
     expiryTimestamp: trade.expiryTimestamp,
     earliestSettlementTimestamp: trade.earliestSettlementTimestamp,
+    settlementAvailability: deriveDvpSettlementAvailability(trade),
     createdAt: trade.createdAt,
     observedAt: trade.observedAt,
   };
