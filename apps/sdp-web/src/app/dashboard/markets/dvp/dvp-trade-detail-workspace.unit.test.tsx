@@ -67,6 +67,13 @@ function renderDetail(value: DvpTrade): string {
   );
 }
 
+/** Each transfer row's label, in page order. */
+function transferLabels(html: string): string[] {
+  return [
+    ...html.matchAll(/<li[^>]*><span[^>]*><span[^>]*><svg[^>]*>.*?<\/svg>([^<]+)<\/span>/g),
+  ].map((match) => match[1] ?? "");
+}
+
 describe("DvpTradeDetailWorkspace", () => {
   it.each(["fund", "reclaim"] as const)(
     "shows and uses the server-selected exact wallet for %s",
@@ -177,14 +184,23 @@ describe("DvpTradeDetailWorkspace", () => {
     const DEPOSIT = {
       signature: "sig_deposit",
       direction: "in",
+      kind: "deposit",
       amount: "1000000000",
       slot: "420",
       blockTime: "2026-09-10T00:26:40.000Z",
       feePayer: OTHER_ADDRESS,
     };
-    const DELIVERY = { ...DEPOSIT, signature: "sig_settle", direction: "out", slot: "421" };
+    const DELIVERY = {
+      ...DEPOSIT,
+      signature: "sig_settle",
+      direction: "out",
+      kind: "delivery",
+      slot: "421",
+    };
+    const REFUND_IN = { ...DEPOSIT, signature: "sig_redeposit", slot: "422" };
 
-    it("lists each movement in and out of a closed leg with its transaction", () => {
+    // The API names each movement; the card says what it was and links it.
+    it("labels each movement by its kind, with each transaction linked", () => {
       const html = renderDetail(
         trade({
           status: "settled",
@@ -201,10 +217,32 @@ describe("DvpTradeDetailWorkspace", () => {
       );
 
       expect(html).toContain("Transfers");
-      expect(html).toContain("Received 1,000 ATD");
-      expect(html).toContain("Paid out 1,000 ATD");
+      expect(transferLabels(html)).toEqual(["Deposit", "Delivered"]);
+      expect(html).toContain("1,000 ATD");
       expect(html).toContain("tx/sig_deposit?cluster=devnet");
       expect(html).toContain("tx/sig_settle?cluster=devnet");
+    });
+
+    it("lists a reclaim between two deposits in order", () => {
+      const html = renderDetail(
+        trade({
+          status: "funded",
+          legs: {
+            a: testLeg({
+              funding: FUNDED,
+              outcome: "funded",
+              transfers: [
+                DEPOSIT,
+                { ...DELIVERY, signature: "sig_reclaim", kind: "reclaim" },
+                REFUND_IN,
+              ],
+            }),
+            b: testLeg({ funding: FUNDED, outcome: "funded" }),
+          },
+        })
+      );
+
+      expect(transferLabels(html)).toEqual(["Deposit", "Reclaimed", "Deposit"]);
     });
 
     // A partly paid leg still shows where to pay, with what arrived beneath it.
@@ -220,7 +258,10 @@ describe("DvpTradeDetailWorkspace", () => {
       );
 
       expect(html).toContain("Funding instructions");
-      expect(html.indexOf("Funding instructions")).toBeLessThan(html.indexOf("Received 1,000 ATD"));
+      expect(html.indexOf("Funding instructions")).toBeLessThan(
+        html.indexOf("</svg>Deposit</span>")
+      );
+      expect(transferLabels(html)).toEqual(["Deposit"]);
     });
 
     // An answer the page cannot read is not "nothing moved": no list, and the
@@ -241,7 +282,7 @@ describe("DvpTradeDetailWorkspace", () => {
       );
 
       expect(html).not.toContain("Transfers");
-      expect(html).not.toContain("Received");
+      expect(transferLabels(html)).toEqual([]);
       expect(html).toContain("Sent by the counterparty");
     });
   });

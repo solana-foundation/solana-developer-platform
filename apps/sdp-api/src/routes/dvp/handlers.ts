@@ -15,7 +15,6 @@ import {
 } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import {
   createPostgresDvpLegTransferRepository,
-  type DvpLegTransfer,
   type DvpTradeLegTransfers,
 } from "@/db/repositories/dvp-leg-transfer.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -49,7 +48,11 @@ import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { type DvpActionWallet, readDvpActionWallets } from "./action-wallets";
-import { toDvpInboundResponse, toDvpLegTransfersResponse } from "./inbound-response";
+import {
+  type DvpLegTransferResponse,
+  toDvpInboundResponse,
+  toDvpLegTransfersResponse,
+} from "./inbound-response";
 import {
   type createDvpTradeSchema,
   type fundDvpTradeSchema,
@@ -187,7 +190,7 @@ function legResponse(
   leg: LegInput,
   party: PartyRef,
   fundingSignature: string | null,
-  transfers: readonly DvpLegTransfer[]
+  transfers: DvpLegTransferResponse[]
 ) {
   const funding =
     leg.observedAmount === null
@@ -223,8 +226,8 @@ function legResponse(
     funding,
     /** The transfer this organization sent into the escrow. @see {@link fundingSignatureFor} */
     fundingSignature,
-    /** Every token movement in and out of the escrow, whoever sent it, oldest first. */
-    transfers: toDvpLegTransfersResponse(transfers),
+    /** Every token movement in and out of the escrow, whoever sent it, oldest first, each named. */
+    transfers,
   };
 }
 
@@ -272,7 +275,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           name: row.nameA,
           imageUrl: mintAImage === undefined ? null : mintAImage,
           frozen: row.escrowAFrozen,
-          outcome: deriveDvpLegOutcome(row, "a"),
+          outcome: deriveDvpLegOutcome(row, "a", context.legTransfers.a),
         },
         resolveParty(
           row.userA,
@@ -282,7 +285,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           context.actionWallets
         ),
         fundingSignatureFor(context.fundingClaims, "a"),
-        context.legTransfers.a
+        toDvpLegTransfersResponse(row, context.legTransfers.a)
       ),
       b: legResponse(
         {
@@ -297,7 +300,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           name: row.nameB,
           imageUrl: mintBImage === undefined ? null : mintBImage,
           frozen: row.escrowBFrozen,
-          outcome: deriveDvpLegOutcome(row, "b"),
+          outcome: deriveDvpLegOutcome(row, "b", context.legTransfers.b),
         },
         resolveParty(
           row.userB,
@@ -307,7 +310,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           context.actionWallets
         ),
         fundingSignatureFor(context.fundingClaims, "b"),
-        context.legTransfers.b
+        toDvpLegTransfersResponse(row, context.legTransfers.b)
       ),
     },
     /** The caller's standing, derived per caller. @see {@link deriveDvpTradeKind} */

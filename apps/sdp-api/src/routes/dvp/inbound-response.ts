@@ -11,7 +11,8 @@
  * `symbolA`/`symbolB` ARE included; they are read off the mint on chain.
  */
 
-import type { DvpLegOutcome, DvpSettlementAvailability } from "@sdp/types";
+import type { DvpLegOutcome, DvpLegTransferKind, DvpSettlementAvailability } from "@sdp/types";
+import type { DvpTradeRow } from "@/db/repositories";
 import type {
   DvpLegTransfer,
   DvpLegTransferDirection,
@@ -19,6 +20,7 @@ import type {
 } from "@/db/repositories/dvp-leg-transfer.repository";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
+import { deriveDvpLegTransferKinds } from "@/services/dvp/leg-transfer-kind";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import type { DvpActionWallet } from "./action-wallets";
 
@@ -26,6 +28,8 @@ import type { DvpActionWallet } from "./action-wallets";
 export interface DvpLegTransferResponse {
   signature: string;
   direction: DvpLegTransferDirection;
+  /** What the movement was, as far as the trade can tell. */
+  kind: DvpLegTransferKind;
   /** Base units moved, always positive. */
   amount: string;
   slot: string;
@@ -35,18 +39,21 @@ export interface DvpLegTransferResponse {
 }
 
 /**
- * A leg's transfers, oldest first. The escrow's history is public on chain, so
- * the trade's organization and a party see the same list.
+ * A leg's transfers, oldest first, each named. The escrow's history is public
+ * on chain, so the trade's organization and a party see the same list.
  *
+ * @param trade - The trade's status and closing transaction, which name each outflow.
  * @param transfers - The leg's recorded transfers.
  * @returns The wire shape.
  */
 export function toDvpLegTransfersResponse(
+  trade: Pick<DvpTradeRow, "status" | "closeSignature">,
   transfers: readonly DvpLegTransfer[]
 ): DvpLegTransferResponse[] {
-  return transfers.map((transfer) => ({
+  return deriveDvpLegTransferKinds(trade, transfers).map(({ transfer, kind }) => ({
     signature: transfer.signature,
     direction: transfer.direction,
+    kind,
     amount: transfer.amount,
     slot: transfer.slot,
     blockTime:
@@ -175,8 +182,8 @@ export function toDvpInboundResponse(
         settlementDestination: trade.userASettlementDestination,
         observedAmount: trade.escrowAAmount,
         frozen: trade.escrowAFrozen,
-        outcome: deriveDvpLegOutcome(trade, "a"),
-        transfers: toDvpLegTransfersResponse(transfers.a),
+        outcome: deriveDvpLegOutcome(trade, "a", transfers.a),
+        transfers: toDvpLegTransfersResponse(trade, transfers.a),
       },
       b: {
         party: inboundParty(trade.userB, callerAddresses, actionWallets),
@@ -191,8 +198,8 @@ export function toDvpInboundResponse(
         settlementDestination: trade.userBSettlementDestination,
         observedAmount: trade.escrowBAmount,
         frozen: trade.escrowBFrozen,
-        outcome: deriveDvpLegOutcome(trade, "b"),
-        transfers: toDvpLegTransfersResponse(transfers.b),
+        outcome: deriveDvpLegOutcome(trade, "b", transfers.b),
+        transfers: toDvpLegTransfersResponse(trade, transfers.b),
       },
     },
     expiryTimestamp: trade.expiryTimestamp,

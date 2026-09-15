@@ -7,15 +7,23 @@
  */
 
 import {
+  DVP_LEG_TRANSFER_KINDS,
   DVP_TRADE_SIDES,
   type DvpLegOutcome,
+  type DvpLegTransferKind,
   type DvpSettlementAvailability,
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types";
 import { z } from "zod";
 
-export { DVP_TRADE_SIDES, type DvpSettlementAvailability, type DvpTradeSide, type DvpTradeStatus };
+export {
+  DVP_TRADE_SIDES,
+  type DvpLegTransferKind,
+  type DvpSettlementAvailability,
+  type DvpTradeSide,
+  type DvpTradeStatus,
+};
 
 /**
  * The caller's standing on a trade, derived per caller by the API.
@@ -67,6 +75,8 @@ export interface DvpPartyRef {
 export const dvpLegTransferSchema = z.object({
   signature: z.string().min(1),
   direction: z.enum(["in", "out"]),
+  /** What the movement was, named by the API from the trade's close. */
+  kind: z.enum(DVP_LEG_TRANSFER_KINDS),
   /** Base units moved, always positive. */
   amount: z.string().regex(/^[1-9]\d*$/),
   slot: z.string(),

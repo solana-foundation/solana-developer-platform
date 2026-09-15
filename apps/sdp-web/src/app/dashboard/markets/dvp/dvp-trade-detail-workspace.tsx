@@ -2,6 +2,8 @@
 
 import type { DvpLegOutcome, DvpTradeSide, SolanaCluster } from "@sdp/types";
 import {
+  ArrowDownLeftIcon,
+  ArrowUpRightIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleCheckIcon,
@@ -42,6 +44,7 @@ import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpLegTransfer,
+  type DvpLegTransferKind,
   type DvpPartyRef,
   type DvpTrade,
   type DvpTradeKind,
@@ -324,10 +327,63 @@ function LegFooterFrame({
   );
 }
 
+/** Each movement's label, by what the trade can tell it was. */
+const TRANSFER_KIND_KEYS = {
+  deposit: "DashboardMarkets.dvp.transferDeposit",
+  reclaim: "DashboardMarkets.dvp.transferReclaim",
+  delivery: "DashboardMarkets.dvp.transferDelivery",
+  refund: "DashboardMarkets.dvp.transferRefund",
+  recovery: "DashboardMarkets.dvp.transferRecovery",
+  withdrawal: "DashboardMarkets.dvp.transferWithdrawal",
+} as const satisfies Record<DvpLegTransferKind, MessageKey>;
+
+/** One movement: what it was, how much, when, and its transaction. */
+function LegTransferRow({
+  cluster,
+  leg,
+  transfer,
+}: {
+  cluster: SolanaCluster;
+  leg: DvpTradeLeg;
+  transfer: DvpLegTransfer;
+}) {
+  const t = useTranslations();
+  const DirectionIcon = transfer.direction === "in" ? ArrowDownLeftIcon : ArrowUpRightIcon;
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-1 text-xs">
+      {/* What and how much wrap as two whole units on a phone, never mid-amount,
+          and the time keeps its own column. */}
+      <span className="flex flex-wrap items-center gap-x-3">
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-primary">
+          <DirectionIcon aria-hidden className="h-3 w-3 shrink-0 text-tertiary" />
+          {t(TRANSFER_KIND_KEYS[transfer.kind])}
+        </span>
+        <span className="whitespace-nowrap text-secondary tabular-nums">
+          {formatLegAmount(transfer.amount, leg.decimals)}
+          {leg.symbol ? ` ${leg.symbol}` : ""}
+        </span>
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-tertiary tabular-nums">
+        {transfer.blockTime === null ? null : (
+          <span suppressHydrationWarning>{formatTimestamp(transfer.blockTime, t)}</span>
+        )}
+        <a
+          aria-label={t("DashboardMarkets.dvp.viewTransaction")}
+          className="text-secondary hover:text-primary"
+          href={explorerTxUrl(transfer.signature, cluster)}
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+        </a>
+      </span>
+    </li>
+  );
+}
+
 /**
- * Every movement in and out of the escrow, oldest first: who paid in, and what
- * settle, cancel or a reclaim took out, whoever sent it. Each row links its
- * transaction.
+ * Every movement in and out of the escrow, oldest first: each deposit, whoever
+ * sent it, and what a reclaim, the settlement or the cancellation took out.
  */
 function LegTransferList({
   cluster,
@@ -338,42 +394,11 @@ function LegTransferList({
   leg: DvpTradeLeg;
   transfers: readonly DvpLegTransfer[];
 }) {
-  const t = useTranslations();
   return (
     <ul className="flex flex-col">
-      {transfers.map((transfer) => {
-        const amount = `${formatLegAmount(transfer.amount, leg.decimals)}${leg.symbol ? ` ${leg.symbol}` : ""}`;
-        return (
-          <li
-            className="flex flex-wrap items-center gap-x-3 py-1 text-secondary text-xs"
-            key={transfer.signature}
-          >
-            {/* Wraps rather than truncates: the amount is the point of the row. */}
-            <span>
-              {t(
-                transfer.direction === "in"
-                  ? "DashboardMarkets.dvp.transferIn"
-                  : "DashboardMarkets.dvp.transferOut",
-                { amount }
-              )}
-            </span>
-            <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 tabular-nums">
-              {transfer.blockTime === null ? null : (
-                <span suppressHydrationWarning>{formatTimestamp(transfer.blockTime, t)}</span>
-              )}
-              <a
-                aria-label={t("DashboardMarkets.dvp.viewTransaction")}
-                className="text-secondary hover:text-primary"
-                href={explorerTxUrl(transfer.signature, cluster)}
-                rel="noreferrer noopener"
-                target="_blank"
-              >
-                <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-              </a>
-            </span>
-          </li>
-        );
-      })}
+      {transfers.map((transfer) => (
+        <LegTransferRow cluster={cluster} key={transfer.signature} leg={leg} transfer={transfer} />
+      ))}
     </ul>
   );
 }

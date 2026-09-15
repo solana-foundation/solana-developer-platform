@@ -172,6 +172,7 @@ describe("toDvpInboundResponse", () => {
       {
         signature: deposit.signature,
         direction: "in",
+        kind: "deposit",
         amount: "250000000",
         slot: "420",
         blockTime: "2026-09-10T00:26:40.000Z",
@@ -180,6 +181,8 @@ describe("toDvpInboundResponse", () => {
       {
         signature: deposit.signature,
         direction: "out",
+        // Out of an open trade's escrow: only a reclaim moves tokens there.
+        kind: "reclaim",
         amount: "250000000",
         slot: "421",
         blockTime: null,
@@ -189,7 +192,42 @@ describe("toDvpInboundResponse", () => {
     // The documented shape is the served shape.
     expect(dvpInboundTradeSchema.parse(response).legs.b.transfers).toHaveLength(2);
     // The creator's view goes through the same mapping.
-    expect(toDvpLegTransfersResponse([deposit])).toEqual([response.legs.b.transfers[0]]);
+    expect(toDvpLegTransfersResponse(inbound().trade, [deposit])).toEqual([
+      response.legs.b.transfers[0],
+    ]);
+  });
+
+  // PRO-1941. A party reads the same leg state the creator does, from the
+  // same ledger: the peak on the row decides nothing.
+  it("derives each leg's outcome from its own transfers", () => {
+    const entry = inbound();
+    const deposit = {
+      tradeId: entry.trade.id,
+      side: "a" as const,
+      signature: signature(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+      ),
+      direction: "in" as const,
+      amount: "100000000",
+      slot: "420",
+      blockTime: "1789000000",
+      feePayer: address(USER_A),
+      finalized: true,
+    };
+    const reclaim = { ...deposit, direction: "out" as const, amount: "60000000", slot: "421" };
+    const shortLeg = { ...entry, trade: { ...entry.trade, escrowAAmount: "40000000" } };
+
+    const reclaimed = toDvpInboundResponse(shortLeg, CALLER_ADDRESSES, NO_MINT_IMAGES, {
+      a: [deposit, reclaim],
+      b: [],
+    });
+    const refunded = toDvpInboundResponse(shortLeg, CALLER_ADDRESSES, NO_MINT_IMAGES, {
+      a: [deposit, reclaim, { ...reclaim, direction: "in", amount: "20000000", slot: "422" }],
+      b: [],
+    });
+
+    expect(reclaimed.legs.a.outcome).toBe("reclaimed");
+    expect(refunded.legs.a.outcome).toBe("partial");
   });
 
   // The image is the CALLER's organization's fact, resolved against its own

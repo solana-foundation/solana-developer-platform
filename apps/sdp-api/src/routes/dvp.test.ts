@@ -1315,6 +1315,7 @@ describe("DvP routes", () => {
               {
                 signature: FUNDING_TRANSFER_SIGNATURE,
                 direction: "in",
+                kind: "deposit",
                 amount: "1000",
                 slot: "420",
                 blockTime: "2026-09-10T00:26:40.000Z",

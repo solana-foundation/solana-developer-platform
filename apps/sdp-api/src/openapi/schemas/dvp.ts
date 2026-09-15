@@ -11,6 +11,7 @@
 import {
   DVP_LEG_OUTCOMES,
   DVP_LEG_REFUSAL,
+  DVP_LEG_TRANSFER_KINDS,
   DVP_SETTLEMENT_AVAILABILITY,
   DVP_TRADE_SIDES,
   DVP_TRADE_STATUSES,
@@ -74,7 +75,7 @@ const dvpSettlementAvailabilitySchema = z.enum(DVP_SETTLEMENT_AVAILABILITY).null
 
 const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
   description:
-    "Server-derived leg state: awaiting, partial, funded, overfunded, frozen, reclaimed, expired, delivered, refunded, recoverable after a late deposit, or closed without a recoverable balance.",
+    "Server-derived leg state: awaiting, partial, funded, overfunded, frozen, reclaimed, expired, delivered, refunded, recoverable after a late deposit, or closed without a recoverable balance. An open leg reads from its escrow balance against its amount, and reads reclaimed while the escrow's latest recorded transfer took tokens out and the balance is short of the amount.",
 });
 
 const dvpCallerWalletSchema = z
@@ -121,6 +122,10 @@ const dvpLegTransferSchema = z
     signature: z.string().openapi({ description: "The transaction that moved the tokens." }),
     direction: z.enum(["in", "out"]).openapi({
       description: "Into the escrow or out of it.",
+    }),
+    kind: z.enum(DVP_LEG_TRANSFER_KINDS).openapi({
+      description:
+        "What the movement was: a deposit into the escrow; a reclaim out of it before any close; the settlement's delivery or the cancellation's refund; a recovery of a late deposit after the close; or a withdrawal from a closed trade whose closing transaction is not among the transfers, which cannot be placed against the close.",
     }),
     amount: z.string().openapi({
       description: "Base units moved, always positive, as a decimal string (u64).",
