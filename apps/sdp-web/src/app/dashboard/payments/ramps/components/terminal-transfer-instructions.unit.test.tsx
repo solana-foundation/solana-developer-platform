@@ -168,7 +168,7 @@ function offrampWizard(
     canSendOnchain: false,
     onchainSendLoading: false,
     onchainSendResult: null,
-    onchainSendHeldForApproval: false,
+    heldApprovalRequestId: null,
     sendCryptoToDeposit: asyncNoop,
     quoteExpired: false,
   };

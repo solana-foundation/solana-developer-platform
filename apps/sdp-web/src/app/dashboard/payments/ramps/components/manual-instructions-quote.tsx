@@ -227,8 +227,6 @@ export interface InstructionAction {
   disabled?: boolean;
   onClick: () => void;
   icon: ReactNode;
-  /** Shown once succeeded; a check unless the outcome is not yet final. */
-  doneIcon?: ReactNode;
   idleLabel: string;
   busyLabel: string;
   doneLabel: string;
@@ -248,7 +246,7 @@ export function InstructionActionButton({
       type="button"
       variant={variant}
       size={size}
-      iconLeft={action.succeeded ? (action.doneIcon ?? <CheckCircle2Icon />) : action.icon}
+      iconLeft={action.succeeded ? <CheckCircle2Icon /> : action.icon}
       onClick={action.onClick}
       disabled={action.disabled || action.loading || action.succeeded}
     >
