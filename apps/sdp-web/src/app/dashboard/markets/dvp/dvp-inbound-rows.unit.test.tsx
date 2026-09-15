@@ -132,7 +132,8 @@ describe("InboundRows", () => {
 
       const button = within(container).getByRole("button", { name: "Fund your leg" });
       expect(button.hasAttribute("disabled")).toBe(true);
-      expect(container.textContent).toContain("Signing is disabled for this wallet.");
+      expect(container.textContent).toContain("Signing is disabled");
+      expect(container.textContent).not.toContain("for this wallet");
       expect(container.textContent).toContain(YOUR_ESCROW);
       fireEvent.click(button);
       expect(fetchMock).not.toHaveBeenCalled();

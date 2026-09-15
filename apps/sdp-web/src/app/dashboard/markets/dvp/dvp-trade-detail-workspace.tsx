@@ -324,7 +324,11 @@ function LegCard({
   const held = leg.funding ? formatLegAmount(leg.funding.observedAmount, leg.decimals) : "0";
 
   return (
-    <section className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5">
+    // Side by side, the two cards share row tracks (subgrid), so a taller row in
+    // one — the signing hint, a token name, an escrow box — never shifts the
+    // other. Spacing stays on the rows' own margins; the parent's row gap is
+    // zeroed at md so the shared tracks add none of their own.
+    <section className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 md:row-span-5 md:grid md:grid-rows-subgrid">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h3 className="flex flex-wrap items-center gap-x-2 font-medium text-base text-primary leading-6">
           {t(side === "a" ? "DashboardMarkets.dvp.legA" : "DashboardMarkets.dvp.legB")}
@@ -352,7 +356,7 @@ function LegCard({
               wallet, and the disabled button already says the action is off. */}
           {action !== undefined && leg.party.actionWallet?.isRuntimeExecutionAllowed !== true ? (
             <span className="text-warning text-xs">
-              {t("DashboardPayments.signingUnavailable")}
+              {t("DashboardCustody.signingDisabledTitle")}
             </span>
           ) : null}
         </span>
@@ -872,7 +876,7 @@ export function DvpTradeDetailWorkspace({
             <span aria-hidden className="hidden h-px flex-1 bg-border-subtle sm:block" />
             <ExchangeSummary trade={trade} />
           </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-4 md:grid-cols-2 md:gap-y-0">
             {sides.map((side) => (
               <LegCard
                 action={fundActionFor(side)}

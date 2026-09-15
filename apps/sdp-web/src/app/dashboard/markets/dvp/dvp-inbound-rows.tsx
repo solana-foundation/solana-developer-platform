@@ -83,7 +83,7 @@ function InboundFundAction({
         </Link>
       ) : null}
       {unavailable ? (
-        <span className="text-warning text-xs">{t("DashboardPayments.signingUnavailable")}</span>
+        <span className="text-warning text-xs">{t("DashboardCustody.signingDisabledTitle")}</span>
       ) : null}
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
