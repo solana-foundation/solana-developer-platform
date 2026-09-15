@@ -27,6 +27,20 @@ api/dashboard/markets/earn/
                                      treasury-solutions/. Auth comes from the
                                      proxy middleware; failures answer 502 so
                                      the cell degrades to its placeholder.
+                                     The handler is a PURE PASSTHROUGH — the
+                                     store module is the server boundary:
+                                     Kamino would answer any well-formed
+                                     mainnet vault, so the store admits a
+                                     vault only if it is a public key AND the
+                                     strategy catalogue fronts it. The
+                                     allowlist is resolved from
+                                     `/v1/earn/strategies` (provider kamino,
+                                     mainnet-beta) through
+                                     `createSdpApiClient`, cached beside the
+                                     allocations cache, and a failed catalogue
+                                     read fails closed into the same generic
+                                     502 — a refused vault is
+                                     indistinguishable from an outage.
                                      Answers the BARE parsed payload, never an
                                      envelope: `dashboardFetch` hands the body
                                      straight to the SWR hook, which re-parses

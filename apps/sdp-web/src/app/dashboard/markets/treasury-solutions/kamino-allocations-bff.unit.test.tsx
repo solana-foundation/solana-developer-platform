@@ -15,6 +15,13 @@ import { useKaminoVaultAllocations } from "./kamino-allocations";
  * failed every Information cell while both unit suites stayed green).
  */
 
+// Own vault per test: the route's module-level TTL caches outlive a test.
+// Hoisted because the SDP client mock below needs the same vaults.
+const VAULTS = vi.hoisted(() => ({
+  happy: "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
+  upstreamDown: "BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5",
+}));
+
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
 }));
@@ -23,13 +30,29 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
+// The route resolves its vault allowlist from the strategy catalogue through
+// the SDP API client; the seam stands in for that client with a catalogue
+// that fronts this file's vaults. It never touches global fetch, so the
+// `seenUrls` assertions below still see exactly the browser→BFF and BFF→
+// Kamino hops.
+vi.mock("@/lib/sdp-api", () => ({
+  createSdpApiClient: async () => ({
+    request: () => {
+      throw new Error("Unexpected SDP API request");
+    },
+    fetch: async () => ({
+      strategies: Object.values(VAULTS).map((providerReference) => ({
+        provider: "kamino",
+        providerReference,
+        hostCluster: "mainnet-beta",
+      })),
+      total: Object.keys(VAULTS).length,
+    }),
+  }),
+}));
+
 const BFF_PATH = "/api/dashboard/markets/earn/kamino-allocations";
 const UPSTREAM_BASE = "https://api.kamino.finance/kvaults/vaults";
-// Own vault per test: the route's module-level TTL cache outlives a test.
-const VAULTS = {
-  happy: "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
-  upstreamDown: "BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5",
-} as const;
 
 function upstreamPayload() {
   return {
