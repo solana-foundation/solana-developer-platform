@@ -1,3 +1,4 @@
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/markets/base58-address";
 import {
   type KaminoVaultAllocations,
   kaminoVaultAllocationsSchema,
@@ -8,9 +9,12 @@ import {
  * per-vault allocations from Kamino's public REST API, TTL-cached in memory.
  *
  * Kamino's kvaults REST source is mainnet-only; the SWR hook keeps a
- * non-mainnet row from issuing a read at all, and this module forwards
- * whatever vault it is handed — an address that cannot resolve there fails
- * upstream like any other miss.
+ * non-mainnet row from issuing a read at all. The vault is interpolated into
+ * the upstream URL, so it must already BE a public key: this module refuses
+ * anything else before it can reach the URL, because a value carrying `/`,
+ * `?`, `#` or `.` would alter the requested resource instead of identifying
+ * one vault. A well-formed address that cannot resolve there fails upstream
+ * like any other miss.
  *
  * All cache mutation lives here, deliberately outside the route handler: the
  * module-level map is a private memoization of an otherwise stateless public
@@ -67,8 +71,15 @@ async function readKaminoAllocations(vault: string): Promise<KaminoVaultAllocati
  * how many concurrent callers arrive: cache hits resolve immediately, misses
  * coalesce on the in-flight read, and a failed read is rejected to every
  * waiter without being cached.
+ *
+ * The refusal of a non-key vault happens before the cache: junk is never a
+ * real entry, and a malformed read must not evict a live one from the bounded
+ * map or share an in-flight read with it.
  */
 export function readVaultAllocations(vault: string): Promise<KaminoVaultAllocations> {
+  if (!BASE58_ADDRESS_PATTERN.test(vault)) {
+    return Promise.reject(new Error("vault must be a Solana public key"));
+  }
   const cached = allocationsCache.get(vault);
   if (cached && cached.expiresAt > Date.now()) {
     return Promise.resolve(cached.payload);

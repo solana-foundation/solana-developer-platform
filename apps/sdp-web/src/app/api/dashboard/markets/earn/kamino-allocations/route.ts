@@ -14,11 +14,12 @@ import { readVaultAllocations } from "./kamino-allocations-store";
  * session into a JSON 401 instead of an HTML redirect for fetch().
  *
  * The handler is a pure passthrough and validates nothing: the vault travels
- * to the upstream read exactly as the client sent it, and a malformed or
- * unknown address simply fails upstream and answers 502 like any other miss.
- * The TTL cache, the in-flight read dedup, and every other piece of module
- * state live in the store module, a private memoization of this public read
- * rather than a client-visible side effect.
+ * to the upstream read exactly as the client sent it, and the store refuses
+ * anything that is not a public key when it builds the upstream URL, so a
+ * malformed or unknown address answers 502 like any other miss. The TTL
+ * cache, the in-flight read dedup, and every other piece of module state live
+ * in the store module, a private memoization of this public read rather than
+ * a client-visible side effect.
  */
 
 function jsonError(status: number, message: string): NextResponse {

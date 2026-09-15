@@ -26,6 +26,8 @@ const VAULTS = {
   upstreamFail: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
   malformed: `Kamino${"1".repeat(33)}`,
   badJson: "So11111111111111111111111111111111111111112",
+  passthrough: "Passthrough11111111111111111111111111111111",
+  unknown: "UpstreamMiss11111111111111111111111111111111",
 } as const;
 
 function upstreamPayload() {
@@ -134,42 +136,67 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
-  it("forwards the vault parameter exactly as sent: the route validates nothing", async () => {
-    const response = await GET(request("not-a-real-vault"));
+  it("forwards a well-formed vault exactly as sent: the route validates nothing", async () => {
+    const response = await GET(request(VAULTS.passthrough));
 
     expect(response.status).toBe(200);
     expect(mocks.fetch).toHaveBeenCalledWith(
-      "https://api.kamino.finance/kvaults/vaults/not-a-real-vault/allocations",
+      `https://api.kamino.finance/kvaults/vaults/${VAULTS.passthrough}/allocations`,
       expect.objectContaining({ cache: "no-store" })
     );
   });
 
-  it("answers 502 when the upstream cannot resolve the vault it was handed", async () => {
+  it.each([
+    "not-a-real-vault",
+    "5YxwKgsvyTdT8q2CBgwA4L9BKbnKNrB66K9wUzij5wH!",
+    `${"a".repeat(70)}`,
+    "",
+    "../7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+    "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF/allocations?vault=",
+    "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF#",
+  ])(
+    "refuses a vault that is not a bare public key before it can alter the upstream URL",
+    async (vault) => {
+      const response = await GET(request(vault));
+
+      expect(response.status).toBe(502);
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it("answers 502 when the upstream cannot resolve a well-formed vault it was handed", async () => {
     mocks.fetch.mockResolvedValue(new Response("not found", { status: 404 }));
 
-    const response = await GET(request("VaultTheUpstreamDoesNotKnow"));
+    const response = await GET(request(VAULTS.unknown));
 
     expect(response.status).toBe(502);
-  });
-
-  it("forwards a missing vault parameter as the empty read it is", async () => {
-    const response = await GET(new Request("https://dashboard.example.test/api/kamino"));
-
     expect(mocks.fetch).toHaveBeenCalledWith(
-      "https://api.kamino.finance/kvaults/vaults//allocations",
+      `https://api.kamino.finance/kvaults/vaults/${VAULTS.unknown}/allocations`,
       expect.objectContaining({ cache: "no-store" })
     );
-    expect(response.status).toBe(200);
   });
 
-  it.each(["missing", "devnet", "testnet", "mainnet", "sneaky-mainnet-beta"])(
+  it("answers 502 for a missing vault parameter without an upstream read", async () => {
+    const response = await GET(new Request("https://dashboard.example.test/api/kamino"));
+
+    expect(response.status).toBe(502);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", `C1ustersMissing${"1".repeat(19)}`],
+    ["devnet", `C1ustersDevnet${"1".repeat(19)}`],
+    ["testnet", `C1ustersTestnet${"1".repeat(19)}`],
+    ["mainnet", `C1ustersMainnet${"1".repeat(19)}`],
+    ["sneaky-mainnet-beta", `C1ustersSneakyMainnetBeta${"1".repeat(9)}`],
+  ])(
     "passes a %s cluster parameter through: the cluster is the caller's concern",
-    async (cluster) => {
-      const response = await GET(request(`cluster-${cluster}`));
+    async (cluster, vault) => {
+      const response = await GET(request(vault, cluster));
 
       expect(response.status).toBe(200);
       expect(mocks.fetch).toHaveBeenCalledWith(
-        `https://api.kamino.finance/kvaults/vaults/cluster-${cluster}/allocations`,
+        `https://api.kamino.finance/kvaults/vaults/${vault}/allocations`,
         expect.objectContaining({ cache: "no-store" })
       );
     }
