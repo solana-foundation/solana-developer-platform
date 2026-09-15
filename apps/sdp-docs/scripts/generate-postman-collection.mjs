@@ -140,9 +140,19 @@ function buildExampleFromSchema(spec, schema, visitedRefs = new Set()) {
   return null;
 }
 
-function getNamedExampleValue(examples) {
+function getNamedExampleValue(examples, preferredName) {
   if (!examples || typeof examples !== "object") {
     return undefined;
+  }
+
+  const preferredExample = preferredName ? examples[preferredName] : undefined;
+  if (
+    preferredExample &&
+    typeof preferredExample === "object" &&
+    "value" in preferredExample &&
+    preferredExample.value !== undefined
+  ) {
+    return preferredExample.value;
   }
 
   for (const example of Object.values(examples)) {
@@ -173,7 +183,7 @@ function getRequestHeaders(operation) {
   return headers;
 }
 
-function getRequestBody(spec, operation) {
+function getRequestBody(spec, operation, preferredExampleName) {
   const jsonBody = operation.requestBody?.content?.["application/json"];
   if (!jsonBody) {
     return undefined;
@@ -181,7 +191,7 @@ function getRequestBody(spec, operation) {
 
   const example =
     jsonBody.example ??
-    getNamedExampleValue(jsonBody.examples) ??
+    getNamedExampleValue(jsonBody.examples, preferredExampleName) ??
     buildExampleFromSchema(spec, jsonBody.schema);
 
   return {
@@ -213,6 +223,7 @@ function allowsAnonymousAccess(security) {
 }
 
 function createRequestItem(spec, baseUrl, routePath, method, operation) {
+  const allowsAnonymous = allowsAnonymousAccess(operation.security);
   const request = {
     method: method.toUpperCase(),
     header: getRequestHeaders(operation),
@@ -223,11 +234,11 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
   // Collection auth is inherited by default. Optional-auth operations must
   // override it so the placeholder API key does not turn a valid anonymous
   // request into an INVALID_API_KEY response.
-  if (allowsAnonymousAccess(operation.security)) {
+  if (allowsAnonymous) {
     request.auth = { type: "noauth" };
   }
 
-  const body = getRequestBody(spec, operation);
+  const body = getRequestBody(spec, operation, allowsAnonymous ? "anonymous" : undefined);
   if (body) {
     request.body = body;
   }
