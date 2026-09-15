@@ -7,7 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { earnProviderLabel } from "./earn-format";
-import type { EarnVaultDepositAvailability } from "./earn-surfacing";
+import {
+  type EarnVaultDepositAvailability,
+  earnVaultDepositOnlyEnvironment,
+} from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
   decimals?: number;
@@ -79,21 +82,48 @@ export function shortenMarketAddress(value: string): string {
  * (PRO-1742) from the row's own hostCluster, the server's `fundable` verdict,
  * with no cluster comparison re-derived here.
  */
+/**
+ * Label keys per availability verdict, plus `production_only`: the
+ * `environment_unavailable` verdict is about the CURRENT project, so the label
+ * names the other side. Providers that deposit only in production (Jupiter
+ * Lend, Ondo) read "Production only"; the sandbox-era providers keep
+ * "Sandbox only".
+ */
+export type EarnDepositAvailabilityLabels = Readonly<
+  Record<EarnVaultDepositAvailability | "production_only", MessageKey>
+>;
+
+export function earnDepositAvailabilityLabel(
+  availability: EarnVaultDepositAvailability,
+  labels: EarnDepositAvailabilityLabels,
+  strategy: Pick<EarnStrategy, "hostCluster" | "provider">,
+  t: (key: MessageKey, values?: Record<string, string>) => string
+): string {
+  if (availability === "cluster_unavailable") {
+    return t(labels.cluster_unavailable, { cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster] });
+  }
+  if (
+    availability === "environment_unavailable" &&
+    earnVaultDepositOnlyEnvironment(strategy.provider) === "production"
+  ) {
+    return t(labels.production_only);
+  }
+  return t(labels[availability]);
+}
+
 export function EarnDepositAvailabilityBadge({
   availability,
   labels,
   strategy,
 }: {
   availability: EarnVaultDepositAvailability;
-  labels: Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  labels: EarnDepositAvailabilityLabels;
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
   return (
     <Badge variant={availability === "available" ? "default" : "outline"}>
-      {availability === "cluster_unavailable"
-        ? t(labels.cluster_unavailable, { cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster] })
-        : t(labels[availability])}
+      {earnDepositAvailabilityLabel(availability, labels, strategy, t)}
     </Badge>
   );
 }

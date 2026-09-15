@@ -44,7 +44,6 @@ import {
   useDashboardWorkspace,
   useOptionalDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
@@ -55,6 +54,7 @@ import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { earnProviderLabel, formatUsd } from "../earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
+  type EarnDepositAvailabilityLabels,
   earnMintAsset,
   earnStrategyAsset,
   earnStrategyReferenceKey,
@@ -155,7 +155,8 @@ const TREASURY_AVAILABILITY_LABELS = {
   environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
   access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
   provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
-} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  production_only: "DashboardMarkets.treasury.sandboxUnavailable",
+} as const satisfies EarnDepositAvailabilityLabels;
 
 type NumericSortDirection = "ascending" | "descending";
 type NumericSortState = NumericSortDirection | "none";

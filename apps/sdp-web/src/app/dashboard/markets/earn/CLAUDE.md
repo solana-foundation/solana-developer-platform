@@ -135,8 +135,11 @@ program create still sends the body `requestId` form.
 
 - `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
   `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER` and `earnVaultDepositAvailability`, all DERIVED
-  from `@sdp/types` — **no provider id is hand-set here**. Carries no
+  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+  `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
+  verdict points at, so Jupiter/Ondo read "Production only" rather than the
+  sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
+  is hand-set here**. Carries no
   `"use client"` directive, on purpose (see "The client/server boundary bug").
 - `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads
   `/v1/onboarding/status` then provider availability for that organization.

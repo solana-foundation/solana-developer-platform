@@ -108,6 +108,7 @@
       "accessUnavailable": "Access unavailable",
       "providerUnavailable": "Setup required",
       "productionUnavailable": "Sandbox only",
+      "sandboxUnavailable": "Production only",
       "clusterUnavailable": "{cluster} only",
       "mainnetDepositUnavailable": "Mainnet vaults are view-only in Sandbox.",
       "devnetStrategiesLoading": "Loading Devnet strategies. Mainnet strategies remain available.",
@@ -191,6 +192,7 @@
       "accessUnavailable": "Access unavailable",
       "providerUnavailable": "Setup required",
       "productionUnavailable": "Sandbox only",
+      "sandboxUnavailable": "Production only",
       "clusterUnavailable": "{cluster} only",
       "select": "Select",
       "selected": "Selected",
@@ -241,6 +243,7 @@
       "unavailableStrategyTitle": "Strategy deposits unavailable",
       "unavailableStrategyDescription": "This strategy is inactive, unsupported for Embedded Yield buttons, or unavailable on the selected project's cluster.",
       "unavailableEnvironmentDescription": "New Embedded Yield vault deposits are sandbox-only until vault positions are surfaced in the production portfolio.",
+      "unavailableEnvironmentProductionDescription": "This provider accepts new vault deposits from Production projects only. Switch to a Production project to integrate it.",
       "unavailableAccessDescription": "Provider access could not be verified for this organization, so the strategy cannot be configured safely.",
       "unavailableProviderDescription": "This provider is not enabled for the selected organization and project environment.",
       "returnToEarn": "Return to Embedded Yield"

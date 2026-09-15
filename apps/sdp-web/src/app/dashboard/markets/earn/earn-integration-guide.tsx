@@ -30,12 +30,18 @@ import {
   buildEarnServerIntegration,
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
-import { EarnDepositAvailabilityBadge, formatProviderApy } from "./earn-market-presentation";
+import {
+  EarnDepositAvailabilityBadge,
+  type EarnDepositAvailabilityLabels,
+  earnDepositAvailabilityLabel,
+  formatProviderApy,
+} from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
 import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
+  earnVaultDepositOnlyEnvironment,
 } from "./earn-surfacing";
 
 type EarnIntegrationGuideProps = {
@@ -86,12 +92,18 @@ const PROGRAM_AVAILABILITY_LABELS = {
   environment_unavailable: "DashboardMarkets.earnProgram.productionUnavailable",
   access_unavailable: "DashboardMarkets.earnProgram.accessUnavailable",
   provider_unavailable: "DashboardMarkets.earnProgram.providerUnavailable",
-} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  production_only: "DashboardMarkets.earnProgram.sandboxUnavailable",
+} as const satisfies EarnDepositAvailabilityLabels;
 
-function unavailableDescriptionKey(availability: EarnVaultDepositAvailability): MessageKey {
+function unavailableDescriptionKey(
+  availability: EarnVaultDepositAvailability,
+  provider: string
+): MessageKey {
   switch (availability) {
     case "environment_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableEnvironmentDescription";
+      return earnVaultDepositOnlyEnvironment(provider) === "production"
+        ? "DashboardMarkets.earnProgram.unavailableEnvironmentProductionDescription"
+        : "DashboardMarkets.earnProgram.unavailableEnvironmentDescription";
     case "access_unavailable":
       return "DashboardMarkets.earnProgram.unavailableAccessDescription";
     case "provider_unavailable":
@@ -177,7 +189,7 @@ export function EarnIntegrationGuide({
     (selectedStrategyId === null ? options.find(({ selectable }) => selectable) : undefined);
   const selectionIssue =
     selectedOption && !selectedOption.selectable
-      ? unavailableDescriptionKey(selectedOption.availability)
+      ? unavailableDescriptionKey(selectedOption.availability, selectedOption.strategy.provider)
       : undefined;
   const initialStrategyMissing = Boolean(initialStrategyId && !requestedStrategy);
 
@@ -378,11 +390,12 @@ function StrategyPickerCard({
                   {!selectable ? (
                     <>
                       {" · "}
-                      {availability === "cluster_unavailable"
-                        ? t(PROGRAM_AVAILABILITY_LABELS.cluster_unavailable, {
-                            cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
-                          })
-                        : t(PROGRAM_AVAILABILITY_LABELS[availability])}
+                      {earnDepositAvailabilityLabel(
+                        availability,
+                        PROGRAM_AVAILABILITY_LABELS,
+                        strategy,
+                        t
+                      )}
                     </>
                   ) : null}
                 </span>

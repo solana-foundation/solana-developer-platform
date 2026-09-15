@@ -52,6 +52,19 @@ const secondLiveStrategy: EarnStrategy = {
   currentApy: "0.081",
 };
 
+/** Jupiter deposits are production-only; its sandbox mirror is browse-only. */
+const productionOnlyStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_jupiter",
+  provider: "jupiter_lend",
+  providerReference: "JupiterUSDT111111111111111111111111111111",
+  name: "Jupiter Lend USDT",
+  shareMint: "ShareJupiter111111111111111111111111111111",
+  currentApy: "0.0378",
+  depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+  withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+};
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
   strategyClusters: [] as Array<SolanaCluster | undefined>,
@@ -68,7 +81,7 @@ vi.mock("./earn-program-data", () => ({
       strategies:
         options?.cluster === "mainnet-beta"
           ? [mainnetStrategy]
-          : [liveStrategy, secondLiveStrategy],
+          : [liveStrategy, secondLiveStrategy, productionOnlyStrategy],
       error: undefined,
       isLoading: false,
     };
@@ -312,6 +325,32 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("earn_strategy_growth")).toBeTruthy();
     expect(screen.getByText(/"id": "earn_strategy_growth"/)).toBeTruthy();
     expect(screen.queryByText("earn_strategy_live")).toBeNull();
+  });
+
+  it("names production-only providers as such instead of the sandbox-era label", async () => {
+    const user = userEvent.setup();
+    renderWithEnglish(
+      <EarnIntegrationGuide
+        earnHref="/dashboard/markets/embedded-yield"
+        providerAccess={{
+          ...providerAccess,
+          jupiter_lend: { entitled: true, configured: true, enabled: true },
+        }}
+        strategyId={productionOnlyStrategy.id}
+      />
+    );
+
+    // Deep link: the explanation says production-only, not sandbox-only.
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/Production projects only/)).toBeTruthy();
+    expect(screen.queryByText(/sandbox-only/)).toBeNull();
+
+    // Dropdown: the disabled row carries the same verdict.
+    await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
+    expect(
+      await screen.findByRole("option", { name: /Jupiter Lend USDT.*Production only/ })
+    ).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Jupiter Lend USDT.*Sandbox only/ })).toBeNull();
   });
 
   it("refuses a deep link when the selected environment cannot fund the strategy", () => {
