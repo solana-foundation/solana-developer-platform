@@ -3,18 +3,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   fetch: vi.fn(),
+  catalogue: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
+vi.mock("@/lib/sdp-api", () => ({
+  createSdpApiClient: vi.fn(async () => ({
+    request: vi.fn(),
+    fetch: mocks.catalogue,
+  })),
+}));
+
 import { kaminoVaultAllocationsSchema } from "@/app/dashboard/markets/treasury-solutions/kamino-allocations-schema";
+import { resetAllowedVaultsForTests } from "./kamino-allocations-store";
 import { GET } from "./route";
 
-// The route keeps a module-level TTL cache, so every test that reaches the
-// upstream read uses its OWN vault address and never collides with another
-// test's cache entry.
+// The route keeps module-level TTL caches (allocations per vault, the vault
+// allowlist for the whole catalogue), so every test that reaches the upstream
+// read uses its OWN vault address and never collides with another test's
+// cache entry; the allowlist itself is reset between tests below.
 const VAULTS = {
   happy: "5YxwKgsvyTdT8q2CBgwA4L9BKbnKNrB66K9wUzij5wH",
   ttl: "3pzSpGttmKXtWVAQuksDCbMv5gWcAyLoixJRXCvbAZBc",
@@ -26,6 +36,14 @@ const VAULTS = {
   upstreamFail: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
   malformed: `Kamino${"1".repeat(33)}`,
   badJson: "So11111111111111111111111111111111111111112",
+  allowlisted: `Gatechecked${"1".repeat(22)}`,
+  absent: `Absent${"1".repeat(27)}`,
+  catalogueDown: `FrontDeskDown${"1".repeat(19)}`,
+  coalesced: `Merged${"1".repeat(27)}`,
+  allowlistTtl: `GateTimer${"1".repeat(24)}`,
+  paged1: `FirstRow${"1".repeat(26)}`,
+  paged2: `PagedTwo${"1".repeat(25)}`,
+  shortPage: `ShortPage${"1".repeat(24)}`,
 } as const;
 
 function upstreamPayload() {
@@ -65,12 +83,33 @@ function request(vault: string, cluster = "mainnet-beta"): Request {
   return new Request(`https://dashboard.example.test/api/kamino?${params.toString()}`);
 }
 
+/**
+ * The strategy-catalogue page the allowlist resolver reads through the SDP
+ * API client: every named vault surfaced as a Kamino mainnet-beta strategy.
+ * Deliberately minimal — the resolver parses this shape, not a full strategy.
+ */
+function cataloguePage(providerReferences: readonly string[], total = providerReferences.length) {
+  return {
+    strategies: providerReferences.map((providerReference) => ({
+      provider: "kamino",
+      providerReference,
+      hostCluster: "mainnet-beta",
+    })),
+    total,
+  };
+}
+
 describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("fetch", mocks.fetch);
+    resetAllowedVaultsForTests();
     mocks.auth.mockResolvedValue({ userId: "user_1", orgId: "org_1" });
-    mocks.fetch.mockResolvedValue(Response.json(upstreamPayload()));
+    // A fresh Response per upstream call: one Response body is consumable
+    // exactly once, and several tests below read the same vault twice.
+    mocks.fetch.mockImplementation(async () => Response.json(upstreamPayload()));
+    // Default: the catalogue fronts every vault a test might reach for.
+    mocks.catalogue.mockResolvedValue(cataloguePage(Object.values(VAULTS)));
   });
 
   afterEach(() => {
@@ -105,6 +144,20 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     await GET(request(VAULTS.ttl));
     await GET(request(VAULTS.ttl));
 
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.catalogue).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves an allowlisted vault through the catalogue-gated cache path", async () => {
+    const first = await GET(request(VAULTS.allowlisted));
+    expect(first.status).toBe(200);
+    expect(mocks.catalogue).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+
+    // A second caller costs neither the catalogue nor Kamino anything.
+    const second = await GET(request(VAULTS.allowlisted));
+    expect(second.status).toBe(200);
+    expect(mocks.catalogue).toHaveBeenCalledTimes(1);
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -234,5 +287,108 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     const response = await GET(request(VAULTS.badJson));
 
     expect(response.status).toBe(502);
+  });
+
+  it("refuses a vault the catalogue does not list, indistinguishably from any other failure", async () => {
+    // A genuine upstream failure, for the shape comparison below.
+    mocks.catalogue.mockResolvedValue(cataloguePage([VAULTS.upstreamFail]));
+    mocks.fetch.mockResolvedValue(new Response("rate limited", { status: 429 }));
+    const upstreamFailure = await GET(request(VAULTS.upstreamFail));
+    expect(upstreamFailure.status).toBe(502);
+
+    const refused = await GET(request(VAULTS.absent));
+
+    // A vault absent from the catalogue wears exactly what an upstream outage
+    // wears — same status, same envelope, same cache headers — so the browser
+    // cannot tell the two apart.
+    expect(refused.status).toBe(upstreamFailure.status);
+    expect(await refused.json()).toEqual(await upstreamFailure.json());
+    expect(refused.headers.get("Cache-Control")).toBe(upstreamFailure.headers.get("Cache-Control"));
+    // And it cost no upstream traffic: only the allowlisted vault's read ran.
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the catalogue read fails, without caching the outage", async () => {
+    mocks.catalogue.mockRejectedValue(new Error("sdp api unavailable"));
+
+    const response = await GET(request(VAULTS.catalogueDown));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: { message: "Vault allocations could not be read" },
+    });
+    // Fail closed: an unavailable catalogue means no Kamino traffic either.
+    expect(mocks.fetch).not.toHaveBeenCalled();
+
+    // The failure was not cached: a recovered catalogue serves the vault.
+    mocks.catalogue.mockResolvedValue(cataloguePage([VAULTS.catalogueDown]));
+    const retry = await GET(request(VAULTS.catalogueDown));
+    expect(retry.status).toBe(200);
+  });
+
+  it("coalesces concurrent allowlist resolutions into one catalogue read", async () => {
+    // Hold the catalogue answer open so every caller piles onto the same
+    // in-flight resolution instead of starting its own.
+    let releaseCatalogue: (page: unknown) => void = () => {};
+    mocks.catalogue.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCatalogue = resolve;
+        })
+    );
+    const first = GET(request(VAULTS.coalesced));
+    const second = GET(request(VAULTS.coalesced));
+    await vi.waitFor(() => expect(mocks.catalogue).toHaveBeenCalledTimes(1));
+    releaseCatalogue(cataloguePage([VAULTS.coalesced]));
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+    expect(mocks.catalogue).toHaveBeenCalledTimes(1);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    // The settled resolution is cached: the caller after the burst re-reads
+    // neither the catalogue nor Kamino.
+    await GET(request(VAULTS.coalesced));
+    expect(mocks.catalogue).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-resolves the allowlist once its TTL has expired", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    await GET(request(VAULTS.allowlistTtl));
+    vi.setSystemTime(45_001);
+    await GET(request(VAULTS.allowlistTtl));
+
+    expect(mocks.catalogue).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("allowlists vaults from every page of a multi-page catalogue", async () => {
+    // Page one is exactly one full window; total pushes the resolver to page
+    // two, where the vault under test actually lives. Filler entries never
+    // reach a request, so only the vaults under test need real key shapes.
+    const firstPage = cataloguePage(
+      [...Array.from({ length: 99 }, (_, index) => `filler-${index}`), VAULTS.paged1],
+      101
+    );
+    mocks.catalogue.mockImplementation(async (path: string) => {
+      const page = Number(new URL(path, "https://sdp-api.test").searchParams.get("page"));
+      return page === 1 ? firstPage : cataloguePage([VAULTS.paged2], 101);
+    });
+
+    expect((await GET(request(VAULTS.paged2))).status).toBe(200);
+    expect(mocks.catalogue).toHaveBeenCalledTimes(2);
+    // A page-one vault is allowlisted by the same resolution.
+    expect((await GET(request(VAULTS.paged1))).status).toBe(200);
+    expect(mocks.catalogue).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed when catalogue pagination ends before the reported total", async () => {
+    mocks.catalogue.mockResolvedValue(cataloguePage([VAULTS.shortPage], 3));
+
+    const response = await GET(request(VAULTS.shortPage));
+
+    expect(response.status).toBe(502);
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });

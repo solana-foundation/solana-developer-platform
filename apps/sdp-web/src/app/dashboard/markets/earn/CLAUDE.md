@@ -19,22 +19,32 @@ api/dashboard/markets/earn/
   provider-query.ts                  allowlisted query passthrough — lives at
                                      the earn/ ROOT because its importers sit
                                      at several depths under programs/
-  kamino-allocations/route.ts        NOT a proxy: the one route that fetches a
-                                     THIRD PARTY (Kamino's public allocations
-                                     endpoint) server-side for the Treasury
-                                     "Information" column, TTL-cached 45s and
-                                     zod-parsed through the schema module in
-                                     treasury-solutions/. Auth comes from the
-                                     proxy middleware; failures answer 502 so
-                                     the cell degrades to its placeholder.
-                                     Answers the BARE parsed payload, never an
-                                     envelope: `dashboardFetch` hands the body
-                                     straight to the SWR hook, which re-parses
-                                     it with the same schema (an envelope once
-                                     failed every cell to "—" while both unit
-                                     suites stayed green; the seam test in
-                                     treasury-solutions/kamino-allocations-bff
-                                     wires route → dashboardFetch → hook).
+   kamino-allocations/route.ts        NOT a proxy: the one route that fetches a
+                                      THIRD PARTY (Kamino's public allocations
+                                      endpoint) server-side for the Treasury
+                                      "Information" column, TTL-cached 45s and
+                                      zod-parsed through the schema module in
+                                      treasury-solutions/. Auth comes from the
+                                      proxy middleware; failures answer 502 so
+                                      the cell degrades to its placeholder.
+                                      Kamino would answer any well-formed
+                                      mainnet vault, so the route admits a
+                                      vault only if the strategy catalogue
+                                      lists it: the allowlist is resolved from
+                                      `/v1/earn/strategies` (provider kamino,
+                                      mainnet-beta) through `createSdpApiClient`,
+                                      cached beside the allocations cache, and a
+                                      failed catalogue read fails closed into
+                                      the same generic 502 — a refused vault is
+                                      indistinguishable from an outage.
+                                      Answers the BARE parsed payload, never an
+                                      envelope: `dashboardFetch` hands the body
+                                      straight to the SWR hook, which re-parses
+                                      it with the same schema (an envelope once
+                                      failed every cell to "—" while both unit
+                                      suites stayed green; the seam test in
+                                      treasury-solutions/kamino-allocations-bff
+                                      wires route → dashboardFetch → hook).
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target
