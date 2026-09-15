@@ -547,6 +547,29 @@ describe("Unified earn movement ledger (postgres)", () => {
       await db.prepare("DELETE FROM projects WHERE id = 'prj_earn_mv_other'").run();
     });
 
+    it("runs the admission hook inside the transaction, before the claim, and rolls back on its throw", async () => {
+      let positionsSeenByHook = -1;
+      await expect(
+        ledger.createSignedVaultDepositIntent(
+          intent({
+            admit: async (transaction) => {
+              const row = await transaction.queryOne<{ n: number }>(
+                "SELECT count(*)::int AS n FROM earn_positions WHERE organization_id = ?",
+                [ORG]
+              );
+              positionsSeenByHook = Number(row?.n);
+              throw new Error("admission refused");
+            },
+          })
+        )
+      ).rejects.toThrow("admission refused");
+
+      // Nothing was claimed before the hook ran, and nothing survived its throw.
+      expect(positionsSeenByHook).toBe(0);
+      expect(await positions()).toEqual([]);
+      expect(await movements()).toEqual([]);
+    });
+
     it("keeps exactly one ledger row for an idempotent replay", async () => {
       const first = await ledger.createSignedVaultDepositIntent(intent({ requestId: "same-key" }));
       const replay = await ledger.createSignedVaultDepositIntent(

@@ -520,9 +520,24 @@ organization's own custody wallets.
     token units against a USD TVL, which is dollar-for-dollar only because V1
     vaults are stablecoins. Previews read a 30s in-process cache; the
     ADMISSION always reads the ledger fresh and folds the admitted amount back
-    into the cache, so an enforced verdict is never decided on a stale figure
-    (residual overshoot is bounded by deposits admitted before their own
-    `requested` row lands).
+    into the cache, so an enforced verdict is never decided on a stale figure.
+    **The cap is decided twice.** Admission is the early half and cannot see a
+    deposit admitted a moment earlier whose row has not landed, so the ledger
+    write decides again: `ledgerVaultExposureGate`
+    (`services/earn/vault-exposure.ts`) is the `admit` hook both
+    `createSignedVaultDepositIntent` and
+    `createSignedExternalWalletDepositIntent` run inside their transaction.
+    The ledger first takes a per-vault `pg_advisory_xact_lock`
+    (`earnVaultDepositWriteLockKey`) and re-checks the idempotency replay
+    under it (a same-key twin that committed while this write waited is a
+    replay, never a 409), then the hook re-reads the aggregate on the SAME
+    connection (`earn_vault_deposit_exposure`, migration 0101, a SQL function
+    that widens its own read to the system identity and is registered in
+    `tenant-isolation-coverage.test.ts`), and refuses with the same 409; a
+    refusal rolls the write back with nothing recorded or broadcast. Events
+    carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
+    `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
+    race on Postgres).
   - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
     binding must not be able to spend. Note this is the first `earn:*` scope
     asserted on a BINDING: a selected-scope key provisioned only with

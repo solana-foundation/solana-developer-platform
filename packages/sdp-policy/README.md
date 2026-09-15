@@ -45,7 +45,12 @@ A rolling-window volume cap (ADR 0004, layer 2):
 ```
 
 - `scope`: whose history the window sums. `wallet` (default), `organization`
-  or `api_key`.
+  or `api_key`. A wallet or key lives in one environment, so those scopes are
+  environment-bound by construction; `organization` sums the org's operations
+  in the asset across BOTH its environments, because `wallet_operations` has no
+  environment column. Mint addresses differ per cluster, so in practice a
+  sandbox operation only reaches a production window when a rule names an
+  asset whose mint string is the same on both.
 - `window`: ISO 8601 duration in the `PnD` / `PTnH` / `PTnM` subset,
   combinations allowed (`P1DT12H`). Weeks, months, years, seconds and
   fractions are rejected.

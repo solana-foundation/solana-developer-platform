@@ -296,6 +296,7 @@ describe("assessVaultExposure", () => {
       environment: "sandbox",
       strategy,
       amount: "10",
+      stage: "admission" as const,
       readExposure: async () => "50",
     });
     expect(verdict).toEqual({
@@ -309,6 +310,7 @@ describe("assessVaultExposure", () => {
         {
           event: EARN_VOLUME_CAP_EVALUATED_EVENT,
           cap: "vault_exposure",
+          stage: "admission",
           environment: "sandbox",
           provider: "kamino",
           vault_address: CAPPED_VAULT,
@@ -330,6 +332,7 @@ describe("assessVaultExposure", () => {
       environment: "sandbox" as const,
       strategy,
       amount: "10",
+      stage: "admission" as const,
       readExposure: async () => "95",
     };
     const shadow = await assessVaultExposure({ ...input, env: {} as Env });
@@ -369,6 +372,7 @@ describe("assessVaultExposure", () => {
         environment: "sandbox",
         strategy,
         amount: "10",
+        stage: "admission" as const,
         readExposure: read,
       })
     ).rejects.toMatchObject({ statusCode: 503, code: "SERVICE_UNAVAILABLE" });
@@ -394,6 +398,7 @@ describe("assessVaultExposure", () => {
       environment: "sandbox",
       strategy: { ...strategy, risk_metadata: { tvlUsd: 100 } },
       amount: "1",
+      stage: "admission" as const,
       readExposure: async () => "50",
     });
     // Explicit devnet cap: 50% of a 100 TVL is 50, tighter than the 100 ceiling.
@@ -413,6 +418,7 @@ describe("assessVaultExposure", () => {
       environment: "sandbox",
       strategy,
       amount: "1000",
+      stage: "admission" as const,
       readExposure: async () => "0",
     });
     expect(verdict.evaluation.wouldBlock).toBe(true);

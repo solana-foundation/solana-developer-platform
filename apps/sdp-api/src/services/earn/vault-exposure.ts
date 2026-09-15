@@ -7,9 +7,9 @@ import {
 } from "@sdp/solana/amount";
 import type { EarnProviderId, SdpEnvironment, SolanaCluster } from "@sdp/types";
 import type { Context } from "hono";
-import { type AppDb, getDb } from "@/db";
-import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { type AppDb, asTransactionalClient, type DatabaseExecutor, getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { serviceUnavailable, vaultExposureCapExceeded } from "@/lib/errors";
 import { isEarnVolumeCapsEnforced } from "@/lib/feature-flags";
@@ -30,10 +30,26 @@ import { earnClusterFor } from "./execution-registry";
  * vault's exploit, depeg or liquidity crunch costs SDP customers at most a
  * known number, and SDP stays a small enough share of any vault that its
  * customers can always leave (EARN-015). The config is curation-as-code beside
- * `CURATED_VAULTS` (`handlers/curation.ts`); the check runs as the LAST step of
- * the single money-in admission predicate (`assertVaultDepositAdmissible`), so
- * both the custody and the external-wallet deposit paths meet it with no new
- * gate ordering.
+ * `CURATED_VAULTS` (`handlers/curation.ts`).
+ *
+ * The cap is decided TWICE per deposit, on purpose:
+ *
+ * 1. **Admission** (`assertVaultExposureWithinCap`), the LAST step of the single
+ *    money-in predicate (`assertVaultDepositAdmissible`), before anything is
+ *    built or signed. Reads the ledger fresh. This is the refusal a caller
+ *    hears early and the figure the preview reports.
+ * 2. **Ledger write** (`ledgerVaultExposureGate`), inside the transaction that
+ *    records the deposit's `requested` row, under the ledger's per-vault
+ *    transaction advisory lock (`earnVaultDepositWriteLockKey`). Two deposits
+ *    admitted a moment apart each read the same headroom at step 1; only a
+ *    check serialized at the write, on committed rows, can refuse the second.
+ *    The lock is transaction-scoped, so it is held for the write and released
+ *    with it, and the aggregate runs on the same connection
+ *    (`earn_vault_deposit_exposure`, migration 0101) so nothing waits on a
+ *    second pooled connection while holding the lock.
+ *
+ * Both halves emit the same event with a `stage`, so shadow data can tell an
+ * early refusal from a race caught at the write.
  *
  * Posture, in the ADR's words:
  * - **Deposits only.** Nothing here is ever consulted on a withdrawal (ADR
@@ -62,6 +78,12 @@ export const EARN_VOLUME_CAP_EVALUATED_EVENT = "sdp_api_earn_volume_cap_evaluate
 
 /** How long one vault's exposure figure is reused before the ledger is re-read. */
 export const VAULT_EXPOSURE_CACHE_TTL_MS = 30_000;
+
+/**
+ * Which step evaluated: a preview (cached read, never refuses), the admission
+ * gate before the build (fresh read), or the ledger write under its lock.
+ */
+export type VaultExposureStage = "preview" | "admission" | "ledger_write";
 
 export interface VaultExposureKey {
   environment: SdpEnvironment;
@@ -177,14 +199,12 @@ interface CacheEntry {
  * cache, hits the ledger, and refreshes the cached figure, so an enforced cap
  * is never decided on a stale number. Admission also `reserve`s the admitted
  * amount into the cache, so previews issued right after an admission in the
- * same process already see it. What remains is the window between admission
- * and the deposit's own `requested` row landing in the ledger; two deposits
- * admitted inside that window can together overshoot by one deposit, which
- * is the bound a non-transactional check has and the failure direction ADR
- * 0004 accepts. A failed read is never cached. Negative sums cannot come out
- * of the current query (it sums deposits only) but are clamped and logged
- * anyway: a negative figure is ledger drift, and a cap must never be loosened
- * by it.
+ * same process already see it. The window between admission and the deposit's
+ * own `requested` row landing is closed at the write, not here: the ledger
+ * gate re-reads under a per-vault lock (`ledgerVaultExposureGate`). A failed
+ * read is never cached. Negative sums cannot come out of the current query (it
+ * sums deposits only) but are clamped and logged anyway: a negative figure is
+ * ledger drift, and a cap must never be loosened by it.
  */
 export function createVaultExposureReader(options: {
   sum: ExposureSum;
@@ -243,16 +263,16 @@ export function createVaultExposureReader(options: {
 }
 
 /**
- * SDP-wide exposure is a cross-tenant fact, so the aggregate runs under the
- * system database identity: under the request's tenant identity row-level
- * security would hide every other organization's deposits and the cap would
- * only ever see the caller's own. The read collapses into one number; no
- * other tenant's row reaches the response.
+ * SDP-wide exposure is a cross-tenant fact: under the request's tenant
+ * identity row-level security would hide every other organization's deposits
+ * and the cap would only ever see the caller's own. The aggregate widens its
+ * own read in SQL (`earn_vault_deposit_exposure`, migration 0101, registered
+ * in tenant-isolation-coverage.test.ts), so the same figure comes back on a
+ * pooled connection and inside a tenant-stamped ledger transaction. It
+ * collapses into one number; no other tenant's row reaches the caller.
  */
 const ledgerSum: ExposureSum = (db, key) =>
-  runWithSystemDatabaseIdentity("earn:vault-exposure-cap", () =>
-    createPostgresEarnMovementsRepository(db).sumVaultDepositExposure(key)
-  );
+  createPostgresEarnMovementsRepository(db).sumVaultDepositExposure(key);
 
 const defaultReader = createVaultExposureReader({ sum: ledgerSum });
 
@@ -296,9 +316,10 @@ export async function assessVaultExposure(input: {
   environment: SdpEnvironment;
   strategy: Pick<EarnStrategyRow, "provider" | "provider_reference" | "risk_metadata">;
   amount: string;
+  stage: VaultExposureStage;
   readExposure: (key: VaultExposureKey) => Promise<string>;
 }): Promise<VaultExposureVerdict> {
-  const { environment, strategy, amount } = input;
+  const { environment, strategy, amount, stage } = input;
   const enforced = isEarnVolumeCapsEnforced(input.env);
   const cap = resolveVaultExposureCap(
     earnClusterFor(environment),
@@ -319,6 +340,7 @@ export async function assessVaultExposure(input: {
     logEvent("error", {
       event: EARN_VOLUME_CAP_EVALUATED_EVENT,
       cap: "vault_exposure",
+      stage,
       environment,
       provider: key.provider,
       vault_address: key.vaultAddress,
@@ -338,6 +360,7 @@ export async function assessVaultExposure(input: {
   logEvent(evaluation.wouldBlock ? "warn" : "info", {
     event: EARN_VOLUME_CAP_EVALUATED_EVENT,
     cap: "vault_exposure",
+    stage,
     environment,
     provider: key.provider,
     vault_address: key.vaultAddress,
@@ -371,8 +394,32 @@ export function checkVaultExposure(
     environment: resolveSdpEnvironment(c),
     strategy,
     amount,
+    stage: options.fresh ? "admission" : "preview",
     readExposure: (key) => readVaultExposure(getDb(c.env), key, options),
   });
+}
+
+/**
+ * The one refusal: a blocking verdict under enforcement is the typed 409;
+ * anything else is admitted and folded into the preview cache. Shared by the
+ * admission gate and the ledger gate so the two halves cannot disagree on
+ * what a verdict means.
+ */
+function admitOrRefuse(verdict: VaultExposureVerdict, amount: string): VaultExposureVerdict {
+  if (verdict.evaluation.wouldBlock && verdict.enforced) {
+    throw vaultExposureCapExceeded(
+      "This deposit would take SDP's total holdings in the vault past its exposure cap. " +
+        "The vault is exit-only for new money until other positions leave; existing positions are unaffected.",
+      {
+        vaultAddress: verdict.key.vaultAddress,
+        limit: verdict.evaluation.limit,
+        exposure: verdict.evaluation.exposure,
+        projected: verdict.evaluation.projected,
+      }
+    );
+  }
+  reserveVaultExposure(verdict.key, amount);
+  return verdict;
 }
 
 /**
@@ -381,6 +428,11 @@ export function checkVaultExposure(
  * caps are enforced. An admitted deposit is reserved into the cache so the
  * next preview in this process sees it. In shadow mode this only ever emits.
  * Never call it on a withdrawal.
+ *
+ * This is the EARLY half. It runs before the build, so a refused caller pays
+ * for no simulation or signing, but it cannot see a deposit admitted a moment
+ * earlier whose row has not landed. The ledger write repeats the decision
+ * under a lock (`ledgerVaultExposureGate`).
  */
 export async function assertVaultExposureWithinCap(
   c: ExposureContext,
@@ -388,22 +440,71 @@ export async function assertVaultExposureWithinCap(
   amount: string
 ): Promise<VaultExposureVerdict> {
   const verdict = await checkVaultExposure(c, strategy, amount, { fresh: true });
-  if (!(verdict.evaluation.wouldBlock && verdict.enforced)) {
-    reserveVaultExposure(verdict.key, amount);
-  }
-  if (verdict.evaluation.wouldBlock && verdict.enforced) {
-    throw vaultExposureCapExceeded(
-      "This deposit would take SDP's total holdings in the vault past its exposure cap. " +
-        "The vault is exit-only for new money until other positions leave; existing positions are unaffected.",
-      {
-        vaultAddress: strategy.provider_reference,
-        limit: verdict.evaluation.limit,
-        exposure: verdict.evaluation.exposure,
-        projected: verdict.evaluation.projected,
-      }
-    );
-  }
-  return verdict;
+  return admitOrRefuse(verdict, amount);
+}
+
+/**
+ * The LATE half: the `admit` hook the ledger runs inside the transaction that
+ * records a deposit's `requested` row (`LedgerAdmissionHook`,
+ * earn-movements.repository.ts). Both deposit paths pass it: the custody
+ * deposit from `depositIntoVault`, the external-wallet deposit from
+ * `submitExternalWalletDeposit`.
+ *
+ * Order, and why each step is where it is:
+ *
+ * 1. The ledger has taken `pg_advisory_xact_lock` on the vault before calling
+ *    (`lockVaultDepositWrites`, earn-movements.repository.ts) and re-checked
+ *    replay under it. Every writer to this vault, in every process, queues
+ *    there until the holder commits or rolls back.
+ * 2. Re-read exposure on the SAME connection. READ COMMITTED gives this
+ *    statement a fresh snapshot, so the previous holder's committed row is in
+ *    the sum; a competing writer that has not yet committed is still queued at
+ *    step 1 and will see ours. The aggregate is the SQL function, which widens
+ *    its own read, so the tenant-stamped transaction needs no second pooled
+ *    connection while it holds the lock (a pool-exhaustion hazard under a
+ *    burst to one vault).
+ * 3. Evaluate against the catalogue row's cap and TVL, resolved by the identity
+ *    the ledger row carries (provider + address + environment). A row delisted
+ *    between admission and write evaluates with no TVL, which is the STRICTER
+ *    reading (absolute ceiling alone, never a looser share bound).
+ * 4. Emit with `stage: "ledger_write"`, and refuse or admit by the same rule as
+ *    admission. A refusal throws out of the ledger transaction with nothing
+ *    recorded and nothing broadcast: the custody path signed but did not send,
+ *    the external-wallet path verified the customer's signature but did not
+ *    send. Failing closed there is the ADR's direction; the alternative is a
+ *    deposit that lands over the cap.
+ *
+ * `amount` is what the ledger row records, in the deposit token: for a
+ * swap-funded custody deposit that is the derived floor rather than the source
+ * amount the admission gate saw, which is the figure the aggregate will sum.
+ */
+export function ledgerVaultExposureGate(
+  env: Env,
+  input: { environment: SdpEnvironment; provider: string; vaultAddress: string; amount: string }
+): (transaction: DatabaseExecutor) => Promise<void> {
+  return async (transaction) => {
+    // The repositories on THIS connection, so the catalogue read and the
+    // aggregate both run inside the locked transaction.
+    const db = asTransactionalClient(transaction);
+    const strategy = await createPostgresEarnRepository(db).getStrategyByReference({
+      provider: input.provider,
+      providerReference: input.vaultAddress,
+      environment: input.environment,
+    });
+    const verdict = await assessVaultExposure({
+      env,
+      environment: input.environment,
+      strategy: strategy ?? {
+        provider: input.provider,
+        provider_reference: input.vaultAddress,
+        risk_metadata: {},
+      },
+      amount: input.amount,
+      stage: "ledger_write",
+      readExposure: (exposureKey) => readVaultExposure(db, exposureKey, { fresh: true }),
+    });
+    admitOrRefuse(verdict, input.amount);
+  };
 }
 
 /**

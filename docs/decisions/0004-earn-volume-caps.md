@@ -70,7 +70,21 @@ stays a small enough fraction of any vault that its customers can always leave.
 - Enforced inside the single admission predicate
   (`assertVaultDepositAdmissible`, `routes/earn/handlers/admission.ts`), so
   both the custody and external-wallet deposit paths meet it with no new gate
-  ordering.
+  ordering. That admission check is the EARLY half: it runs before anything is
+  built or signed, on a fresh ledger read, but two deposits admitted a moment
+  apart each see the same headroom. The LATE half decides again inside the
+  ledger transaction that records the deposit's `requested` row
+  (`ledgerVaultExposureGate`, `services/earn/vault-exposure.ts`): the ledger
+  takes a per-vault transaction advisory lock that serializes every writer to
+  the vault across processes, re-checks the idempotency replay under it (a
+  same-key twin is a replay, never a refusal), then re-reads the aggregate on
+  committed rows, and a
+  blocking verdict under enforcement is the same typed 409 with nothing
+  recorded and nothing broadcast. The aggregate itself is a SQL function
+  (`earn_vault_deposit_exposure`, migration 0101) that widens its own read to
+  the system isolation identity for the duration of the sum, so the
+  tenant-stamped transaction needs no second connection while it holds the
+  lock. Both halves emit the evaluated event with a `stage`.
 - Config lives beside `CURATED_VAULTS` in `curation.ts`, keyed by vault
   address, and inherits the CODEOWNERS gate from PRO-1869. A missing entry
   means the platform default applies; `null` means uncapped (explicit, so a
@@ -90,7 +104,9 @@ Reuses the policy engine rather than adding a parallel limits system.
   runs over `wallet_operations`, the generic ledger every policy-gated route
   writes, not `earn_movements`, which is what makes the rule reusable by
   payments unchanged. On breach the rule's `action` is the decision (default
-  deny); within the limit it abstains.
+  deny); within the limit it abstains. The `organization` scope is the one
+  that is not environment-bound (`wallet_operations` carries no environment;
+  see the rule's README), which is acceptable because mints differ per cluster.
 - Tier defaults are synthesized as an implicit policy layer evaluated after the
   org's own policy and before `IMPLICIT_DEFAULT_ALLOW_POLICY`. Breaching a
   default yields the **approval** decision, never deny.
@@ -151,9 +167,15 @@ declares at STRIDE onboarding (PRD §4.4) times a generous multiple.
 - Partners see caps as preview blocking issues, the same channel that already
   carries slippage and liquidity issues.
 - One vault's failure costs SDP customers at most a known number.
-- Caps add one ledger aggregate per deposit admission, indexed for the
-  aggregate. Admissions read the ledger fresh so an enforced verdict never
-  rests on a cached figure; only previews use the short in-process cache.
+- Caps add two ledger aggregates per deposit (admission and the ledger write),
+  indexed for the aggregate. Admissions read the ledger fresh so an enforced
+  verdict never rests on a cached figure; only previews use the short
+  in-process cache. The ledger write re-decides under a per-vault lock, so
+  concurrent deposits cannot together overshoot the cap; the cost is that a
+  deposit admitted at build time can still be refused at its write when the
+  vault filled in between. On the external-wallet path that refusal reaches
+  the customer after signing (the transaction is never sent); the ADR takes
+  that over a deposit landing past the cap.
 - Velocity windows count only decided, still-live operations. An operation
   awaiting its own decision does not count, so concurrent requests cannot
   veto each other; the overshoot concurrency can cause is bounded by the
