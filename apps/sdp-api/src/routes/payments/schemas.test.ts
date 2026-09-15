@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
+  createSubscriptionSchema,
   createTransferBatchSchema,
   createTransferSchema,
   listTransferBatchesQuerySchema,
@@ -77,6 +78,21 @@ describe("payments schema inferred types", () => {
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
     expectTypeOf<UpdateWalletPolicy["rules"]>().toEqualTypeOf<PolicyRule[]>();
+  });
+});
+
+describe("subscription create schema", () => {
+  it("rejects client-controlled lifecycle fields", () => {
+    const result = createSubscriptionSchema.safeParse({
+      planId: "psp_test",
+      counterpartyId: "cp_test",
+      subscriberAddress: VALID_DESTINATION,
+      authorizationSignature: "client-controlled-signature",
+      nextCollectionDueAt: new Date().toISOString(),
+      status: "active",
+    });
+
+    expect(result.success).toBe(false);
   });
 });
 

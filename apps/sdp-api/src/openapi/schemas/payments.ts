@@ -2,6 +2,7 @@ import {
   COUNTERPARTY_ENTITY_TYPES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  paymentSubscriptionCollectionAttemptMetadataSchema,
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
@@ -1584,9 +1585,9 @@ export const paymentSubscriptionCollectionAttemptSchema = z
     status: paymentSubscriptionCollectionAttemptStatusSchema,
     signature: z.string().nullable().openapi({ description: "Solana transaction signature." }),
     error: z.string().nullable().openapi({ description: "Collection error, if any." }),
-    metadata: z.record(z.string(), z.unknown()).openapi({
-      description: "Provider/job metadata for the attempt.",
-    }),
+    metadata: paymentSubscriptionCollectionAttemptMetadataSchema.describe(
+      "Provider/job metadata for the attempt."
+    ),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })

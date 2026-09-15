@@ -3419,7 +3419,7 @@ describe("Payments routes — transfers", () => {
     });
 
     it("persists a signed outbox for an SPL transfer", async () => {
-      mockRecurringActivationRpc();
+      mockRecurringActivationRpc({});
 
       const res = await app.request(
         "/v1/payments/transfers",
@@ -3773,7 +3773,7 @@ describe("Payments routes — transfers", () => {
     });
 
     it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {
-      mockRecurringActivationRpc();
+      mockRecurringActivationRpc({});
       sendTransactionMock.mockRejectedValueOnce(
         new Error(
           "Failed to send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x11"

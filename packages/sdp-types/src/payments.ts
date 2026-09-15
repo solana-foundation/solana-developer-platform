@@ -1,4 +1,5 @@
 import type { Address } from "@solana/addresses";
+import { z } from "zod";
 import type { CountryCode } from "./countries";
 import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
@@ -13,6 +14,40 @@ import type {
 } from "./policy";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
+
+export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
+  batchSize: 25,
+  maxBatchSize: 100,
+  retryAfterMinutes: 30,
+  staleAfterMs: 15 * 60 * 1000,
+} as const satisfies Record<string, number>;
+
+export function assertNever(value: never): never {
+  throw new Error(`Unexpected value: ${String(value)}`);
+}
+
+export const recurringPaymentPolicyPayloadSchema = z.discriminatedUnion("operationType", [
+  z.object({
+    operationType: z.literal("recurring_payment_create"),
+    counterpartyId: z.string(),
+    counterpartyAccountId: z.string(),
+    periodHours: z.number().int().positive(),
+  }),
+  z.object({
+    operationType: z.literal("recurring_payment_update"),
+    recurringPaymentId: z.string(),
+    counterpartyId: z.string(),
+    counterpartyAccountId: z.string(),
+    periodHours: z.number().int().positive(),
+  }),
+  z.object({
+    operationType: z.literal("recurring_payment_collection"),
+    recurringPaymentId: z.string(),
+    subscriptionId: z.string(),
+    collectionDueAt: z.string(),
+  }),
+]);
+export type RecurringPaymentPolicyPayload = z.infer<typeof recurringPaymentPolicyPayloadSchema>;
 
 export interface PaymentsDashboardWallet {
   id: string;
@@ -451,31 +486,250 @@ export interface PaymentTransferBatchEstimateEnvelope {
   };
 }
 
-export type PaymentSubscriptionPlanStatus = "draft" | "active" | "archived";
-export type PaymentSubscriptionStatus =
-  | "pending_authorization"
-  | "active"
-  | "paused"
-  | "canceling"
-  | "canceled"
-  | "expired";
-export type PaymentSubscriptionCollectionAttemptStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "skipped";
+export const PAYMENT_SUBSCRIPTION_PLAN_STATUSES = ["draft", "active", "archived"] as const;
+export type PaymentSubscriptionPlanStatus = (typeof PAYMENT_SUBSCRIPTION_PLAN_STATUSES)[number];
 
-export type PaymentRecurringPaymentStatus =
-  | "pending_activation"
-  | "activating"
-  | "active"
-  | "updating"
-  | "canceling"
-  | "resuming"
-  | "paused"
-  | "canceled"
-  | "expired";
+export const PAYMENT_SUBSCRIPTION_STATUSES = [
+  "pending_authorization",
+  "active",
+  "paused",
+  "canceling",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentSubscriptionStatus = (typeof PAYMENT_SUBSCRIPTION_STATUSES)[number];
+
+export const PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "skipped",
+] as const;
+export type PaymentSubscriptionCollectionAttemptStatus =
+  (typeof PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES)[number];
+
+const collectionAttemptMetadataBaseSchema = z.object({
+  recurringPaymentId: z.string(),
+  initiatedByKeyId: z.string().nullable(),
+});
+export const paymentSubscriptionCollectionAttemptMetadataSchema = z.discriminatedUnion("source", [
+  collectionAttemptMetadataBaseSchema.extend({ source: z.literal("manual") }),
+  collectionAttemptMetadataBaseSchema.extend({ source: z.literal("automated") }),
+  collectionAttemptMetadataBaseSchema.extend({
+    source: z.literal("retry"),
+    collectionSource: z.enum(["manual", "automated"]),
+    transferId: z.string().nullable(),
+    error: z.string(),
+    retryAfterAt: z.string(),
+  }),
+  collectionAttemptMetadataBaseSchema.extend({
+    source: z.literal("linked_transfer"),
+    collectionSource: z.enum(["manual", "automated"]),
+    transferId: z.string(),
+  }),
+]);
+export type PaymentSubscriptionCollectionAttemptMetadata = z.infer<
+  typeof paymentSubscriptionCollectionAttemptMetadataSchema
+>;
+
+export const PAYMENT_RECURRING_PAYMENT_STATUSES = [
+  "pending_activation",
+  "activating",
+  "active",
+  "updating",
+  "canceling",
+  "resuming",
+  "paused",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRecurringPaymentStatus = (typeof PAYMENT_RECURRING_PAYMENT_STATUSES)[number];
+
+export const PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
+  "processing",
+  "confirmed",
+  "failed",
+] as const;
+export type PaymentRecurringPaymentAttemptStatus =
+  (typeof PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES)[number];
+
+export const PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES = [
+  "claim",
+  "create_plan",
+  "authorize_subscription",
+  "finalize",
+] as const;
+export type PaymentRecurringPaymentActivationAttemptStage =
+  (typeof PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES)[number];
+export const PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS = ["cancel", "resume"] as const;
+export type PaymentRecurringPaymentLifecycleOperation =
+  (typeof PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)[number];
+export const PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES = [
+  "claim",
+  "submit",
+  "finalize",
+] as const;
+export type PaymentRecurringPaymentLifecycleAttemptStage =
+  (typeof PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES)[number];
+export const PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES = [
+  "metadata_schedule",
+  "replacement",
+] as const;
+export type PaymentRecurringPaymentUpdateAttemptMode =
+  (typeof PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES)[number];
+export const PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES = [
+  "claim",
+  "update_plan",
+  "create_plan",
+  "authorize_subscription",
+  "cancel_old_subscription",
+  "finalize",
+] as const;
+export type PaymentRecurringPaymentUpdateAttemptStage =
+  (typeof PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES)[number];
+
+export const PAYMENT_RECURRING_PAYMENT_ACTIONS = [
+  "activate",
+  "collect",
+  "cancel",
+  "resume",
+] as const;
+export type PaymentRecurringPaymentAction = (typeof PAYMENT_RECURRING_PAYMENT_ACTIONS)[number];
+export const PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS = ["24", "168", "720", "custom"] as const;
+export type PaymentRecurringPaymentSchedulePreset =
+  (typeof PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS)[number];
+export const PAYMENT_RECURRING_PAYMENT_TRANSITION_RESULTS = [
+  "already_final",
+  "claimable",
+  "recoverable",
+  "processing",
+  "invalid",
+] as const;
+export type PaymentRecurringPaymentTransitionResult =
+  (typeof PAYMENT_RECURRING_PAYMENT_TRANSITION_RESULTS)[number];
+
+export const EDITABLE_RECURRING_PAYMENT_STATUSES = [
+  "pending_activation",
+  "active",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export function isEditableRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
+  return EDITABLE_RECURRING_PAYMENT_STATUSES.some((candidate) => candidate === status);
+}
+export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
+  "active",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export function isCollectableRecurringPaymentStatus(
+  status: PaymentRecurringPaymentStatus
+): boolean {
+  return COLLECTABLE_RECURRING_PAYMENT_STATUSES.some((candidate) => candidate === status);
+}
+export function isPendingActivationRecurringPaymentStatus(
+  status: PaymentRecurringPaymentStatus
+): boolean {
+  return status === PAYMENT_RECURRING_PAYMENT_STATUSES[0];
+}
+export function isActivatingRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
+  return status === PAYMENT_RECURRING_PAYMENT_STATUSES[1];
+}
+export function isUpdatingRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
+  return status === PAYMENT_RECURRING_PAYMENT_STATUSES[3];
+}
+export const RECURRING_PAYMENT_STATUSES_REQUIRING_REACTIVATION = [
+  "paused",
+  "expired",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export function doesRecurringPaymentStatusRequireReactivation(
+  status: PaymentRecurringPaymentStatus
+): boolean {
+  return RECURRING_PAYMENT_STATUSES_REQUIRING_REACTIVATION.some(
+    (candidate) => candidate === status
+  );
+}
+export const COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE = [
+  "pending",
+  "processing",
+  "confirmed",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+export const COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER = [
+  "processing",
+  "confirmed",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+export const FAILED_COLLECTION_ATTEMPT_STATUSES = [
+  "failed",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+export const COLLECTION_ATTEMPT_INITIAL_STATUSES = [
+  "processing",
+  "failed",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+export type PaymentSubscriptionCollectionAttemptInitialStatus =
+  (typeof COLLECTION_ATTEMPT_INITIAL_STATUSES)[number];
+export const IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
+  "processing",
+] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
+  "canceling",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export const RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON = [
+  "activating",
+  ...RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE,
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export const RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION = [
+  "active",
+  "canceling",
+  "canceled",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export function hasRecoverableRecurringPaymentCollection(
+  status: PaymentRecurringPaymentStatus
+): boolean {
+  return RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION.some(
+    (candidate) => candidate === status
+  );
+}
+export const RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS = {
+  cancel: { processingStatus: "canceling", claimableStatus: "active", finalStatus: "canceled" },
+  resume: { processingStatus: "resuming", claimableStatus: "canceled", finalStatus: "active" },
+} as const satisfies Record<
+  PaymentRecurringPaymentLifecycleOperation,
+  {
+    processingStatus: PaymentRecurringPaymentStatus;
+    claimableStatus: PaymentRecurringPaymentStatus;
+    finalStatus: PaymentRecurringPaymentStatus;
+  }
+>;
+
+export const RECURRING_PAYMENT_ACTIVATION_TRANSITION = {
+  processingStatus: "activating",
+  claimableStatus: "pending_activation",
+  finalStatus: "active",
+} as const satisfies Record<
+  "processingStatus" | "claimableStatus" | "finalStatus",
+  PaymentRecurringPaymentStatus
+>;
+
+export const RECURRING_PAYMENT_UPDATE_TRANSITION = {
+  processingStatus: "updating",
+  claimableStatuses: EDITABLE_RECURRING_PAYMENT_STATUSES,
+} as const satisfies {
+  processingStatus: PaymentRecurringPaymentStatus;
+  claimableStatuses: readonly PaymentRecurringPaymentStatus[];
+};
+
+export function isCanceledRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
+  return status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;
+}
+
+export function recurringPaymentInFlightLifecycleOperation(
+  status: PaymentRecurringPaymentStatus
+): PaymentRecurringPaymentLifecycleOperation | null {
+  for (const operation of PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS) {
+    if (status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation].processingStatus) {
+      return operation;
+    }
+  }
+  return null;
+}
 
 export interface PaymentSubscriptionPlan {
   id: string;
@@ -532,7 +786,7 @@ export interface PaymentSubscriptionCollectionAttempt {
   status: PaymentSubscriptionCollectionAttemptStatus;
   signature: string | null;
   error: string | null;
-  metadata: Record<string, unknown>;
+  metadata: PaymentSubscriptionCollectionAttemptMetadata;
   createdAt: string;
   updatedAt: string;
 }
@@ -786,6 +1040,7 @@ export interface LightsparkProviderPaymentRampInstruction {
     address?: Address;
     assetType?: CryptoAssetSymbol;
   };
+
   instructionsNotes?: string;
   isPlatformAccount?: boolean;
 }

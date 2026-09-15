@@ -375,10 +375,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     },
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Payments
-  // ═══════════════════════════════════════════════════════════════════════════
-
   registry.registerPath({
     method: "post",
     path: "/v1/payments/recurring-payments",
@@ -560,10 +556,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Subscriptions
-  // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
     method: "post",

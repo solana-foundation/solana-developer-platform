@@ -176,6 +176,7 @@ export type {
 } from "./kyc-wallet.repository";
 export { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 export type {
+  CollectibleRecurringPaymentRow,
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -188,17 +189,15 @@ export type {
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentActivationAttemptRow,
   PaymentRecurringPaymentActivationAttemptStage,
-  PaymentRecurringPaymentActivationAttemptStatus,
+  PaymentRecurringPaymentAttemptStatus,
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentLifecycleAttemptStage,
-  PaymentRecurringPaymentLifecycleAttemptStatus,
   PaymentRecurringPaymentLifecycleOperation,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateAttemptStage,
-  PaymentRecurringPaymentUpdateAttemptStatus,
   PaymentRecurringPaymentUpdateEventRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,

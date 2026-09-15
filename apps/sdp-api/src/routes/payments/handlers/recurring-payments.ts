@@ -3,10 +3,8 @@ import type {
   PaymentRecurringPayment,
   PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
-  PaymentSubscriptionCollectionAttempt,
 } from "@sdp/types";
 import { z } from "zod";
-import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -24,7 +22,7 @@ import {
 } from "@/services/payments/recurring-payments";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
-import { mapTransferRow } from "../mappers";
+import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
   type activateRecurringPaymentSchema,
   type collectRecurringPaymentSchema,
@@ -77,34 +75,17 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
 
 function resolvePinnedRecurringSourceWallet(
   scope: ResolvedScope,
-  recurringPayment: PaymentRecurringPaymentRow
+  recurringPayment: PaymentRecurringPaymentRow & { source_custody_wallet_id: string }
 ) {
-  if (!recurringPayment.source_custody_wallet_id) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
-  }
   return resolveWalletByCustodyWalletId(scope.wallets, recurringPayment.source_custody_wallet_id);
 }
 
-function mapCollectionAttempt(
-  row: PaymentSubscriptionCollectionAttemptRow
-): PaymentSubscriptionCollectionAttempt {
-  return {
-    id: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    subscriptionId: row.subscription_id,
-    transferId: row.transfer_id,
-    token: row.token,
-    amount: row.amount,
-    dueAt: row.due_at,
-    attemptedAt: row.attempted_at,
-    status: row.status,
-    signature: row.signature,
-    error: row.error,
-    metadata: row.metadata,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+function assertPinnedRecurringPayment(
+  recurringPayment: PaymentRecurringPaymentRow
+): asserts recurringPayment is PaymentRecurringPaymentRow & { source_custody_wallet_id: string } {
+  if (recurringPayment.source_custody_wallet_id === null) {
+    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+  }
 }
 
 export const createRecurringPayment = async (
@@ -128,8 +109,8 @@ export const createRecurringPayment = async (
     token: body.token,
     amount: body.amount,
     periodHours: body.periodHours,
-    firstCollectionAt: body.firstCollectionAt ?? null,
-    metadataUri: body.metadataUri ?? null,
+    firstCollectionAt: body.firstCollectionAt === undefined ? null : body.firstCollectionAt,
+    metadataUri: body.metadataUri === undefined ? null : body.metadataUri,
     createdBy: await resolveCreatorUserId(c),
     apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
@@ -161,14 +142,15 @@ export const updateRecurringPayment = async (
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
-    walletAuthorization: walletAuthorization ?? undefined,
+    walletAuthorization,
   });
 
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
 
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id ?? undefined);
+  assertPinnedRecurringPayment(recurringPayment);
+  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
@@ -218,14 +200,15 @@ export const activateRecurringPayment = async (
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
-    walletAuthorization: walletAuthorization ?? undefined,
+    walletAuthorization,
   });
 
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
 
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id ?? undefined);
+  assertPinnedRecurringPayment(recurringPayment);
+  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
@@ -261,14 +244,15 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
-    walletAuthorization: walletAuthorization ?? undefined,
+    walletAuthorization,
   });
 
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
 
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id ?? undefined);
+  assertPinnedRecurringPayment(recurringPayment);
+  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
@@ -320,14 +304,15 @@ export const collectRecurringPayment = async (
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
-    walletAuthorization: walletAuthorization ?? undefined,
+    walletAuthorization,
   });
 
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
 
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id ?? undefined);
+  assertPinnedRecurringPayment(recurringPayment);
+  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
@@ -343,7 +328,7 @@ export const collectRecurringPayment = async (
   });
   const response: PaymentRecurringPaymentCollectionResponse = {
     recurringPayment: mapRecurringPayment(collected.recurringPayment),
-    collectionAttempt: mapCollectionAttempt(collected.collectionAttempt),
+    collectionAttempt: mapCollectionAttemptRow(collected.collectionAttempt),
     transfer: mapTransferRow(collected.transfer),
   };
 
@@ -382,7 +367,7 @@ export const listRecurringPayments = async (c: AppContext) => {
     organizationId: auth.organizationId,
     projectId,
     counterpartyId,
-    walletAuthorization: walletAuthorization ?? undefined,
+    walletAuthorization,
     status,
     limit: pageSize,
     offset: (page - 1) * pageSize,
@@ -413,7 +398,7 @@ export const getRecurringPayment = async (c: AppContext) => {
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
-    walletAuthorization: walletAuthorization ?? undefined,
+    walletAuthorization,
   });
 
   if (!recurringPayment) {

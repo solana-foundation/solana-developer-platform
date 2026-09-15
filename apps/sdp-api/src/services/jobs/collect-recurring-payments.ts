@@ -1,12 +1,16 @@
+import {
+  isActivatingRecurringPaymentStatus,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  recurringPaymentInFlightLifecycleOperation,
+} from "@sdp/types";
 import { getDb } from "@/db";
-import type { PaymentRecurringPaymentRow } from "@/db/repositories";
-import { AppError } from "@/lib/errors";
+import {
+  createPostgresPaymentRecurringPaymentsRepository,
+  type PaymentRecurringPaymentRow,
+} from "@/db/repositories";
+import { AppError, conflict, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import {
-  DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
-  parsePositiveIntegerConfig,
-} from "@/services/payments/recurring-payment-config";
 import {
   activateRecurringPayment,
   cancelRecurringPayment,
@@ -17,10 +21,6 @@ import {
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
-const DEFAULT_BATCH_SIZE = 25;
-const MAX_BATCH_SIZE = 100;
-const STALE_AFTER_MS = 15 * 60 * 1000;
-
 export interface CollectDueRecurringPaymentsResult {
   recovered: number;
   collected: number;
@@ -28,42 +28,8 @@ export interface CollectDueRecurringPaymentsResult {
   skipped: number;
 }
 
-type StaleRecurringPaymentUpdateRow = Pick<
-  PaymentRecurringPaymentRow,
-  "id" | "organization_id" | "project_id" | "updated_at"
-> & {
-  oldest_updated_at: string;
-  stale_count: number;
-};
-
-function batchSize(env: Env): number {
-  return Math.min(
-    parsePositiveIntegerConfig(env.PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE, DEFAULT_BATCH_SIZE),
-    MAX_BATCH_SIZE
-  );
-}
-
-function retryAfterMinutes(env: Env): number {
-  return parsePositiveIntegerConfig(
-    env.PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES,
-    DEFAULT_RECURRING_COLLECTION_RETRY_AFTER_MINUTES
-  );
-}
-
 function emptyResult(): CollectDueRecurringPaymentsResult {
   return { recovered: 0, collected: 0, failed: 0, skipped: 0 };
-}
-
-async function rowsForQuery(
-  env: Env,
-  query: string,
-  ...bindings: Array<string | number>
-): Promise<PaymentRecurringPaymentRow[]> {
-  const result = await getDb(env)
-    .prepare(query)
-    .bind(...bindings)
-    .all<PaymentRecurringPaymentRow>();
-  return result.rows;
 }
 
 async function resolveSourceWallet(
@@ -112,14 +78,14 @@ async function resolveSourceWallet(
   return wallet;
 }
 
-function shouldSkipCollectionError(error: unknown): boolean {
+function shouldSkipCollectionError(error: Error): boolean {
   return error instanceof AppError && error.code === "CONFLICT";
 }
 
-function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error: unknown): void {
+function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error: Error): void {
   getLogger().error(
     {
-      error: error instanceof Error ? error.message : String(error),
+      error: error.message,
       organization_id: row.organization_id,
       project_id: row.project_id,
       recurring_payment_id: row.id,
@@ -141,8 +107,7 @@ async function collectRow(
         projectId: row.project_id,
         recurringPayment: row,
         initiatedByKeyId: null,
-        error: new AppError(
-          "CONFLICT",
+        error: conflict(
           row.source_custody_wallet_id
             ? "Recurring payment source wallet does not match its pin"
             : "Recurring payment source wallet is unresolved"
@@ -161,6 +126,7 @@ async function collectRow(
     });
     return "ok";
   } catch (error) {
+    if (!(error instanceof Error)) throw error;
     if (shouldSkipCollectionError(error)) {
       return "skipped";
     }
@@ -178,7 +144,7 @@ async function recoverLifecycleRow(
     if (!sourceWallet) {
       return "failed";
     }
-    if (row.status === "activating") {
+    if (isActivatingRecurringPaymentStatus(row.status)) {
       await activateRecurringPayment({
         env,
         organizationId: row.organization_id,
@@ -189,7 +155,8 @@ async function recoverLifecycleRow(
       });
       return "ok";
     }
-    if (row.status === "canceling") {
+    const operation = recurringPaymentInFlightLifecycleOperation(row.status);
+    if (operation === "cancel") {
       await cancelRecurringPayment({
         env,
         organizationId: row.organization_id,
@@ -199,7 +166,7 @@ async function recoverLifecycleRow(
       });
       return "ok";
     }
-    if (row.status === "resuming") {
+    if (operation === "resume") {
       await resumeRecurringPayment({
         env,
         organizationId: row.organization_id,
@@ -209,8 +176,9 @@ async function recoverLifecycleRow(
       });
       return "ok";
     }
-    return "skipped";
+    throw internalError(`Unhandled lifecycle status ${row.status}`);
   } catch (error) {
+    if (!(error instanceof Error)) throw error;
     if (shouldSkipCollectionError(error)) {
       return "skipped";
     }
@@ -228,148 +196,82 @@ function addOutcome(
   outcome: "ok" | "failed" | "skipped",
   okKey: "recovered" | "collected"
 ): void {
-  if (outcome === "ok") {
-    result[okKey] += 1;
-    return;
+  switch (outcome) {
+    case "ok":
+      result[okKey] += 1;
+      return;
+    case "skipped":
+      result.skipped += 1;
+      return;
+    case "failed":
+      result.failed += 1;
+      return;
+    default: {
+      const unreachable: never = outcome;
+      throw internalError(`Unhandled collection outcome ${String(unreachable)}`);
+    }
   }
-  if (outcome === "skipped") {
-    result.skipped += 1;
-    return;
-  }
-  result.failed += 1;
 }
 
 export async function collectDueRecurringPayments(
   env: Env,
-  now = new Date()
+  now: Date
 ): Promise<CollectDueRecurringPaymentsResult> {
   const result = emptyResult();
-  const limit = batchSize(env);
+  const limit = RECURRING_PAYMENT_COLLECTION_CONFIG.batchSize;
   const dueBefore = now.toISOString();
-  const staleBefore = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
-  const retryBefore = new Date(now.getTime() - retryAfterMinutes(env) * 60 * 1000).toISOString();
+  const staleBefore = new Date(
+    now.getTime() - RECURRING_PAYMENT_COLLECTION_CONFIG.staleAfterMs
+  ).toISOString();
+  const retryBefore = new Date(
+    now.getTime() - RECURRING_PAYMENT_COLLECTION_CONFIG.retryAfterMinutes * 60 * 1000
+  ).toISOString();
+  const recurringPaymentsRepo = createPostgresPaymentRecurringPaymentsRepository(getDb(env));
 
-  const staleLifecyclePayments = await rowsForQuery(
-    env,
-    `SELECT *
-       FROM payment_recurring_payments
-      WHERE status IN ('activating', 'canceling', 'resuming')
-        AND updated_at <= ?
-      ORDER BY updated_at ASC
-      LIMIT ?`,
+  const staleLifecyclePayments = await recurringPaymentsRepo.listStaleLifecyclePayments({
     staleBefore,
-    limit
-  );
+    limit,
+  });
   for (const row of staleLifecyclePayments) {
     addOutcome(result, await recoverLifecycleRow(env, row), "recovered");
   }
 
-  // Report only. Retrying the same update recovers it; automatic replay is
-  // separate reliability work because an on-chain stage may already have run.
-  const staleUpdatePayments = await getDb(env)
-    .prepare(
-      `SELECT organization_id,
-              project_id,
-              id,
-              updated_at,
-              COUNT(*) OVER () AS stale_count,
-              MIN(updated_at) OVER () AS oldest_updated_at
-         FROM payment_recurring_payments
-      WHERE status = 'updating'
-        AND updated_at <= ?
-      ORDER BY updated_at DESC, id DESC
-      LIMIT ?`
-    )
-    .bind(staleBefore, limit)
-    .all<StaleRecurringPaymentUpdateRow>();
-  const newestStaleUpdate = staleUpdatePayments.rows[0];
+  const staleUpdatePayments = await recurringPaymentsRepo.listStaleUpdatePayments({
+    staleBefore,
+    limit,
+  });
+  const newestStaleUpdate = staleUpdatePayments[0];
   if (newestStaleUpdate) {
     getLogger().warn(
       {
         oldest_updated_at: newestStaleUpdate.oldest_updated_at,
         reason: "stale_recurring_payment_updates",
-        recurring_payments: staleUpdatePayments.rows.map((row) => ({
+        recurring_payments: staleUpdatePayments.map((row) => ({
           organization_id: row.organization_id,
           project_id: row.project_id,
           recurring_payment_id: row.id,
           updated_at: row.updated_at,
         })),
         stale_count: newestStaleUpdate.stale_count,
-        truncated: newestStaleUpdate.stale_count > staleUpdatePayments.rows.length,
+        truncated: newestStaleUpdate.stale_count > staleUpdatePayments.length,
       },
       "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
     );
   }
 
-  const staleCollectionPayments = await rowsForQuery(
-    env,
-    `SELECT *
-       FROM (
-         SELECT
-           rp.*,
-           a.updated_at AS attempt_updated_at,
-           ROW_NUMBER() OVER (
-             PARTITION BY rp.id
-             ORDER BY
-               CASE WHEN a.status = 'confirmed' THEN 0 ELSE 1 END,
-               a.updated_at ASC
-           ) AS attempt_rank
-         FROM payment_recurring_payments rp
-         JOIN payment_subscription_collection_attempts a
-           ON a.organization_id = rp.organization_id
-          AND a.project_id = rp.project_id
-          AND a.subscription_id = rp.subscription_id
-          AND a.due_at = rp.next_collection_due_at
-        WHERE rp.status IN ('active', 'canceling', 'canceled')
-          AND rp.next_collection_due_at IS NOT NULL
-          AND a.status IN ('processing', 'confirmed')
-          AND (
-            (a.status = 'processing' AND a.updated_at <= ?)
-            OR (rp.status = 'active' AND a.status = 'confirmed')
-          )
-       ) recoverable_attempts
-      WHERE attempt_rank = 1
-      ORDER BY attempt_updated_at ASC
-      LIMIT ?`,
+  const staleCollectionPayments = await recurringPaymentsRepo.listRecoverableCollectionPayments({
     staleBefore,
-    limit
-  );
+    limit,
+  });
   for (const row of staleCollectionPayments) {
     addOutcome(result, await collectRow(env, row), "recovered");
   }
 
-  const duePayments = await rowsForQuery(
-    env,
-    `SELECT rp.*
-       FROM payment_recurring_payments rp
-      WHERE rp.status = 'active'
-        AND rp.next_collection_due_at IS NOT NULL
-        AND rp.next_collection_due_at <= ?
-        AND NOT EXISTS (
-          SELECT 1
-            FROM payment_subscription_collection_attempts active_attempt
-           WHERE active_attempt.organization_id = rp.organization_id
-             AND active_attempt.project_id = rp.project_id
-             AND active_attempt.subscription_id = rp.subscription_id
-             AND active_attempt.due_at = rp.next_collection_due_at
-             AND active_attempt.status IN ('pending', 'processing', 'confirmed')
-        )
-        AND NOT EXISTS (
-          SELECT 1
-            FROM payment_subscription_collection_attempts failed_attempt
-           WHERE failed_attempt.organization_id = rp.organization_id
-             AND failed_attempt.project_id = rp.project_id
-             AND failed_attempt.subscription_id = rp.subscription_id
-             AND failed_attempt.due_at = rp.next_collection_due_at
-             AND failed_attempt.status = 'failed'
-             AND failed_attempt.updated_at > ?
-        )
-      ORDER BY rp.next_collection_due_at ASC
-      LIMIT ?`,
+  const duePayments = await recurringPaymentsRepo.listDueCollectionPayments({
     dueBefore,
     retryBefore,
-    limit
-  );
+    limit,
+  });
   for (const row of duePayments) {
     addOutcome(result, await collectRow(env, row), "collected");
   }

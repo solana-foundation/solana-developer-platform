@@ -194,7 +194,7 @@ export function RecurringPaymentCollectionHistory({
                       />
                     </TableCell>
                     <TableCell>
-                      <ExplorerValue value={attempt.signature} />
+                      <ExplorerValue value={attempt.signature} kind="tx" />
                     </TableCell>
                   </TableRow>
                 ))}

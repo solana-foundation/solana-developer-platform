@@ -1,4 +1,4 @@
-import type { PaymentRecurringPaymentStatus } from "@sdp/types";
+import { isEditableRecurringPaymentStatus, type PaymentRecurringPaymentStatus } from "@sdp/types";
 
 export function getRecurringPaymentDetailState({
   sourceCustodyWalletId,
@@ -15,7 +15,7 @@ export function getRecurringPaymentDetailState({
 
   return {
     sourceWalletUnresolved,
-    isEditable: !sourceWalletUnresolved && (status === "pending_activation" || status === "active"),
+    isEditable: !sourceWalletUnresolved && isEditableRecurringPaymentStatus(status),
     controlsDisabled: sourceWalletUnresolved || hasPendingAction || savingPayment,
   };
 }

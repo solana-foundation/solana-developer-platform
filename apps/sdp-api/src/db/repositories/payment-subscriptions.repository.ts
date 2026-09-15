@@ -1,4 +1,5 @@
 import type {
+  PaymentSubscriptionCollectionAttemptMetadata,
   PaymentSubscriptionCollectionAttemptStatus,
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
@@ -60,7 +61,7 @@ export interface PaymentSubscriptionCollectionAttemptRow {
   status: PaymentSubscriptionCollectionAttemptStatus;
   signature: string | null;
   error: string | null;
-  metadata: Record<string, unknown>;
+  metadata: PaymentSubscriptionCollectionAttemptMetadata;
   created_at: string;
   updated_at: string;
 }
@@ -169,7 +170,7 @@ export interface CreatePaymentSubscriptionCollectionAttemptInput {
   status: PaymentSubscriptionCollectionAttemptStatus;
   signature: string | null;
   error: string | null;
-  metadata: Record<string, unknown>;
+  metadata: PaymentSubscriptionCollectionAttemptMetadata;
   createdAt: string;
   updatedAt: string;
 }
@@ -183,7 +184,7 @@ export interface UpdatePaymentSubscriptionCollectionAttemptInput {
   status?: PaymentSubscriptionCollectionAttemptStatus;
   signature?: string | null;
   error?: string | null;
-  metadata?: Record<string, unknown>;
+  metadata?: PaymentSubscriptionCollectionAttemptMetadata;
   updatedAt: string;
 }
 
@@ -201,7 +202,7 @@ export interface GetPaymentSubscriptionCollectionAttemptByDueInput {
   projectId: string;
   subscriptionId: string;
   dueAt: string;
-  statuses?: PaymentSubscriptionCollectionAttemptStatus[];
+  statuses?: readonly PaymentSubscriptionCollectionAttemptStatus[];
 }
 
 export interface ListPaymentSubscriptionPlansResult {

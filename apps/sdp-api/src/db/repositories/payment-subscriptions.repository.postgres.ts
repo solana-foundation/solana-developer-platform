@@ -1,3 +1,10 @@
+import {
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
+  PAYMENT_SUBSCRIPTION_STATUSES,
+  paymentSubscriptionCollectionAttemptMetadataSchema,
+} from "@sdp/types";
+import { z } from "zod";
 import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
@@ -19,71 +26,74 @@ import type {
   UpdatePaymentSubscriptionPlanInput,
 } from "./payment-subscriptions.repository";
 
+const planRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  owner_wallet_id: z.string(),
+  owner_address: z.string(),
+  token: z.string(),
+  amount: z.string(),
+  period_hours: z.number(),
+  program_plan_id: z.string(),
+  plan_pda: z.string().nullable(),
+  destination_address: z.string().nullable(),
+  puller_wallet_id: z.string().nullable(),
+  puller_address: z.string().nullable(),
+  metadata_uri: z.string().nullable(),
+  status: z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+const subscriptionRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  plan_id: z.string(),
+  counterparty_id: z.string(),
+  subscriber_address: z.string(),
+  subscriber_token_account: z.string().nullable(),
+  subscription_pda: z.string().nullable(),
+  subscription_authority_address: z.string().nullable(),
+  authorization_signature: z.string().nullable(),
+  status: z.enum(PAYMENT_SUBSCRIPTION_STATUSES),
+  current_period_start_at: z.string().nullable(),
+  next_collection_due_at: z.string().nullable(),
+  cancel_at: z.string().nullable(),
+  canceled_at: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+const attemptRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  subscription_id: z.string(),
+  transfer_id: z.string().nullable(),
+  token: z.string(),
+  amount: z.string(),
+  due_at: z.string(),
+  attempted_at: z.string().nullable(),
+  status: z.enum(PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES),
+  signature: z.string().nullable(),
+  error: z.string().nullable(),
+  metadata: paymentSubscriptionCollectionAttemptMetadataSchema,
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    owner_wallet_id: row.owner_wallet_id as string,
-    owner_address: row.owner_address as string,
-    token: row.token as string,
-    amount: row.amount as string,
-    period_hours: row.period_hours as number,
-    program_plan_id: row.program_plan_id as string,
-    plan_pda: (row.plan_pda as string | null | undefined) ?? null,
-    destination_address: (row.destination_address as string | null | undefined) ?? null,
-    puller_wallet_id: (row.puller_wallet_id as string | null | undefined) ?? null,
-    puller_address: (row.puller_address as string | null | undefined) ?? null,
-    metadata_uri: (row.metadata_uri as string | null | undefined) ?? null,
-    status: row.status as PaymentSubscriptionPlanRow["status"],
-    created_by: (row.created_by as string | null | undefined) ?? null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return planRowSchema.parse(row);
 }
 
 function mapSubscriptionRow(row: Record<string, unknown>): PaymentSubscriptionRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    plan_id: row.plan_id as string,
-    counterparty_id: row.counterparty_id as string,
-    subscriber_address: row.subscriber_address as string,
-    subscriber_token_account: (row.subscriber_token_account as string | null | undefined) ?? null,
-    subscription_pda: (row.subscription_pda as string | null | undefined) ?? null,
-    subscription_authority_address:
-      (row.subscription_authority_address as string | null | undefined) ?? null,
-    authorization_signature: (row.authorization_signature as string | null | undefined) ?? null,
-    status: row.status as PaymentSubscriptionRow["status"],
-    current_period_start_at: (row.current_period_start_at as string | null | undefined) ?? null,
-    next_collection_due_at: (row.next_collection_due_at as string | null | undefined) ?? null,
-    cancel_at: (row.cancel_at as string | null | undefined) ?? null,
-    canceled_at: (row.canceled_at as string | null | undefined) ?? null,
-    created_by: (row.created_by as string | null | undefined) ?? null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return subscriptionRowSchema.parse(row);
 }
 
 function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollectionAttemptRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    subscription_id: row.subscription_id as string,
-    transfer_id: (row.transfer_id as string | null | undefined) ?? null,
-    token: row.token as string,
-    amount: row.amount as string,
-    due_at: row.due_at as string,
-    attempted_at: (row.attempted_at as string | null | undefined) ?? null,
-    status: row.status as PaymentSubscriptionCollectionAttemptRow["status"],
-    signature: (row.signature as string | null | undefined) ?? null,
-    error: (row.error as string | null | undefined) ?? null,
-    metadata: (row.metadata as Record<string, unknown> | null | undefined) ?? {},
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return attemptRowSchema.parse(row);
 }
 
 async function getPlanByIdInternal(
