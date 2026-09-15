@@ -48,9 +48,13 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
-  ids and `allow_create_account = true`, so the harness needs no edit (deployed
-  devnet Kora carries the same allowlist since sdp-infra#64, asserted by the
-  `Kora / Live Smoke` shard on secret-bearing CI runs). Its
+  ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
+  `allow_create_account = true`, so the harness needs no edit (deployed devnet
+  Kora carries the same allowlist and token set since sdp-infra#64 and
+  PRO-1962, asserted by the `Kora / Live Smoke` shard on secret-bearing CI
+  runs). The harness image (e9bc391) has no `transfer_hook_policy`; the
+  deployed f0377c0 configs set it to `allow_all` so sign-only PYUSD/USDG
+  movements pass, see the comment in the toml before bumping the image. Its
   `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
   share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an

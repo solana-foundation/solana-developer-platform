@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   updateStrategyMetrics: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
+  guardDepositMints: vi.fn(async (_env: unknown, _cluster: string) => 0),
 }));
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
@@ -36,6 +37,12 @@ vi.mock("@/db/repositories", () => ({
     updateStrategyMetrics: mocks.updateStrategyMetrics,
     listStrategyFigures: mocks.listStrategyFigures,
   })),
+}));
+
+// The deposit-mint guard has its own suite; here it only has to be invoked once
+// per refreshed environment's cluster, after the provider passes.
+vi.mock("@/services/earn/deposit-mint-guard", () => ({
+  guardDepositMints: mocks.guardDepositMints,
 }));
 
 const env = { DATABASE_URL: "postgres://unit" } as Env;
@@ -138,6 +145,25 @@ describe("refreshEarnStrategyMetrics", () => {
 
     expect(mocks.logEvent).not.toHaveBeenCalled();
     expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
+  });
+
+  it("guards the Token-2022 deposit mints on each refreshed environment's cluster, after the provider passes (PRO-1962)", async () => {
+    const order: string[] = [];
+    mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => {
+      order.push("metrics");
+      return [metrics("vault-a", "0.051")];
+    });
+    mocks.guardDepositMints.mockImplementation(async (_env: unknown, cluster: string) => {
+      order.push(`guard:${cluster}`);
+      return 0;
+    });
+
+    await refreshEarnStrategyMetrics(env);
+
+    expect(mocks.guardDepositMints).toHaveBeenCalledTimes(2);
+    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env, "devnet");
+    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env, "mainnet-beta");
+    expect(order).toEqual(["metrics", "metrics", "guard:devnet", "guard:mainnet-beta"]);
   });
 
   it("skips providers without the live-metrics capability", async () => {

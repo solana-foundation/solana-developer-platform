@@ -1258,6 +1258,17 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   Events only: the check never blocks a write, and a failed figures read costs
   the pass its diff, not its write. Do not "fix" an anomaly by clamping the
   write; the alert exists so a human looks at the provider.
+- **Token-2022 deposit mints are watched, not trusted blindly** (PRO-1962).
+  Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
+  "allow_all"` (both mints keep a mutable Paxos hook authority), so the metrics
+  refresh ends by reading each Token-2022 deposit mint per cluster and emitting
+  `sdp_api_earn_deposit_mint_drift` when the hook program, hook authority or
+  permanent delegate differs from the pins in
+  `services/earn/deposit-mint-guard.ts`. Report-only. Adding a Token-2022
+  stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
+  guard's unit suite; adding any deposit token without its devnet mint in
+  `infra/kora/kora.toml` `allowed_tokens` fails
+  `vault-sponsorship-allowlist.test.ts`.
 - Whole-stack local setup (ports, flags, provider credentials, entitlement,
   troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** No registered

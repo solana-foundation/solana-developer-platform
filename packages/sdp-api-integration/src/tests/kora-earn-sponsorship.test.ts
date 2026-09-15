@@ -27,6 +27,7 @@
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
+import { EARN_DEPOSIT_TOKEN_SYMBOLS, SOL_MINT, wellKnownMint } from "@sdp/types";
 import {
   type Address,
   address,
@@ -100,6 +101,26 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
     expect(declared.length).toBeGreaterThan(0);
 
     expect(declared.filter(({ program }) => !allowed.has(program))).toEqual([]);
+  });
+
+  /**
+   * `allowed_tokens` is the operator's declared mint set (PRO-1962). Kora does
+   * not gate signing on it on the deployed tag, so a gap here breaks nothing
+   * today and everything the day something starts reading it (token-fee
+   * pricing, a Kora upgrade). Same stale-instance caveat as the allowlist
+   * assertion above: the list ships as config, not code.
+   */
+  it("declares every devnet Earn deposit mint as a supported token, wSOL first", async () => {
+    const { tokens } = await client.getSupportedTokens();
+
+    // The fee-payment adapter's `resolveFeeToken` takes `tokens[0]`.
+    expect(tokens[0]).toBe(SOL_MINT);
+
+    const missing = EARN_DEPOSIT_TOKEN_SYMBOLS.map((symbol) => ({
+      symbol,
+      mint: wellKnownMint(symbol, CLUSTER),
+    })).filter(({ mint }) => mint !== undefined && !tokens.includes(mint));
+    expect(missing).toEqual([]);
   });
 
   /**
