@@ -54,6 +54,43 @@ export function withdrawalRequestSignature(
   return JSON.stringify([programId, amountUsd, token, destinationAddress]);
 }
 
+/**
+ * The idempotency key identifies ONE intended withdrawal, so it is bound to
+ * the parameters that define it. Retrying an unchanged confirm reuses the key
+ * (the provider collapses the duplicate instead of paying twice); editing the
+ * amount, token, or destination after a failed attempt mints a new key, so a
+ * corrected withdrawal can never be answered with the cached result of the
+ * one the user just fixed — which would settle funds to the old address while
+ * reporting success.
+ *
+ * A ref, not `useMemo`: React may discard a memo cache and recompute, which
+ * would hand the same parameters a fresh key and reintroduce the
+ * double-withdraw risk on retry.
+ *
+ * `programId` is part of the signature because one modal instance can be
+ * re-pointed at another program without unmounting. Without it, a key minted
+ * for a withdrawal from program A would be carried into an identical-looking
+ * withdrawal from program B.
+ */
+function useWithdrawalRequestId(
+  programId: string,
+  amountUsd: string,
+  token: EarnPortfolioToken | undefined,
+  destinationAddress: string
+): string {
+  const requestSignature = withdrawalRequestSignature(
+    programId,
+    amountUsd,
+    token,
+    destinationAddress
+  );
+  const requestRef = useRef<{ signature: string; id: string } | null>(null);
+  if (requestRef.current?.signature !== requestSignature) {
+    requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
+  }
+  return requestRef.current.id;
+}
+
 const PREVIEW_DEBOUNCE_MS = 400;
 
 const WITHDRAWAL_STATUS_BADGES = {
@@ -384,6 +421,111 @@ function WithdrawalCreatedView({
   );
 }
 
+function AmountField({
+  amountInput,
+  amountValid,
+  amountFormatValid,
+  laneCeiling,
+  laneLiquidity,
+  maxFillAmount,
+  submitting,
+  token,
+  onAmountInputChange,
+}: {
+  amountInput: string;
+  amountValid: boolean;
+  amountFormatValid: boolean;
+  laneCeiling: string | undefined;
+  laneLiquidity: LaneLiquidity;
+  maxFillAmount: string | undefined;
+  submitting: boolean;
+  token: EarnPortfolioToken;
+  onAmountInputChange: (value: string) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="mt-4 space-y-2">
+      <Label htmlFor="earn-withdraw-amount">{t("DashboardEarn.withdraw.amountLabel")}</Label>
+      <Input
+        size="lg"
+        id="earn-withdraw-amount"
+        inputMode="decimal"
+        placeholder="0.00"
+        disabled={submitting}
+        value={amountInput}
+        aria-invalid={Boolean(amountInput && !amountValid)}
+        aria-describedby={
+          amountInput && !amountValid
+            ? "earn-withdraw-available earn-withdraw-error"
+            : "earn-withdraw-available"
+        }
+        onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountInputChange(event.target.value)}
+        iconRight={
+          // Disabled until the ceiling resolves: a Max with nothing
+          // authoritative behind it is the exact affordance this removed.
+          <button
+            type="button"
+            disabled={
+              submitting ||
+              maxFillAmount === undefined ||
+              compareUsdDecimals(maxFillAmount, "0") !== 1
+            }
+            onClick={() => {
+              if (maxFillAmount !== undefined) onAmountInputChange(maxFillAmount);
+            }}
+            className="pointer-events-auto text-xs font-medium text-primary disabled:text-tertiary"
+          >
+            {t("DashboardEarn.withdraw.useMax")}
+          </button>
+        }
+      />
+      <LaneAvailableLine liquidity={laneLiquidity} token={token} />
+      {amountInput && !amountValid ? (
+        <AmountError formatValid={amountFormatValid} laneCeiling={laneCeiling} token={token} />
+      ) : null}
+    </div>
+  );
+}
+
+function DestinationField({
+  destinationInput,
+  destinationValid,
+  submitting,
+  onDestinationInputChange,
+}: {
+  destinationInput: string;
+  destinationValid: boolean;
+  submitting: boolean;
+  onDestinationInputChange: (value: string) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="mt-4 space-y-2">
+      <Label htmlFor="earn-withdraw-destination">
+        {t("DashboardEarn.withdraw.destinationLabel")}
+      </Label>
+      <Input
+        id="earn-withdraw-destination"
+        placeholder={t("DashboardEarn.withdraw.destinationPlaceholder")}
+        disabled={submitting}
+        value={destinationInput}
+        aria-invalid={Boolean(destinationInput && !destinationValid)}
+        aria-describedby={
+          destinationInput && !destinationValid ? "earn-withdraw-destination-error" : undefined
+        }
+        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+          onDestinationInputChange(event.target.value)
+        }
+      />
+      {destinationInput && !destinationValid ? (
+        <p id="earn-withdraw-destination-error" className="text-xs text-error" role="alert">
+          {t("DashboardEarn.withdraw.errorDestinationInvalid")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 interface EarnWithdrawModalProps {
   /** The program the money leaves. One modal instance serves one program. */
   programId: string;
@@ -486,30 +628,7 @@ export function EarnWithdrawModal({
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 
-  /**
-   * The idempotency key identifies ONE intended withdrawal, so it is bound to
-   * the parameters that define it. Retrying an unchanged confirm reuses the key
-   * (the provider collapses the duplicate instead of paying twice); editing the
-   * amount, token, or destination after a failed attempt mints a new key, so a
-   * corrected withdrawal can never be answered with the cached result of the
-   * one the user just fixed — which would settle funds to the old address while
-   * reporting success.
-   *
-   * A ref, not `useMemo`: React may discard a memo cache and recompute, which
-   * would hand the same parameters a fresh key and reintroduce the
-   * double-withdraw risk on retry.
-   *
-   * `programId` is part of the signature because one modal instance can be
-   * re-pointed at another program without unmounting. Without it, a key minted
-   * for a withdrawal from program A would be carried into an identical-looking
-   * withdrawal from program B.
-   */
-  const requestSignature = withdrawalRequestSignature(programId, amount, token, destination);
-  const requestRef = useRef<{ signature: string; id: string } | null>(null);
-  if (requestRef.current?.signature !== requestSignature) {
-    requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
-  }
-  const requestId = requestRef.current.id;
+  const requestId = useWithdrawalRequestId(programId, amount, token, destination);
 
   useEffect(() => {
     if (submitting) contentRef.current?.focus();
@@ -745,80 +864,24 @@ export function EarnWithdrawModal({
               </Select>
             </div>
 
-            <div className="mt-4 space-y-2">
-              <Label htmlFor="earn-withdraw-amount">
-                {t("DashboardEarn.withdraw.amountLabel")}
-              </Label>
-              <Input
-                size="lg"
-                id="earn-withdraw-amount"
-                inputMode="decimal"
-                placeholder="0.00"
-                disabled={submitting}
-                value={amountInput}
-                aria-invalid={Boolean(amountInput && !amountValid)}
-                aria-describedby={
-                  amountInput && !amountValid
-                    ? "earn-withdraw-available earn-withdraw-error"
-                    : "earn-withdraw-available"
-                }
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setAmountInput(event.target.value)
-                }
-                iconRight={
-                  // Disabled until the ceiling resolves: a Max with nothing
-                  // authoritative behind it is the exact affordance this removed.
-                  <button
-                    type="button"
-                    disabled={
-                      submitting ||
-                      maxFillAmount === undefined ||
-                      compareUsdDecimals(maxFillAmount, "0") !== 1
-                    }
-                    onClick={() => {
-                      if (maxFillAmount !== undefined) setAmountInput(maxFillAmount);
-                    }}
-                    className="pointer-events-auto text-xs font-medium text-primary disabled:text-tertiary"
-                  >
-                    {t("DashboardEarn.withdraw.useMax")}
-                  </button>
-                }
-              />
-              <LaneAvailableLine liquidity={laneLiquidity} token={token} />
-              {amountInput && !amountValid ? (
-                <AmountError
-                  formatValid={amountFormatValid}
-                  laneCeiling={laneCeiling}
-                  token={token}
-                />
-              ) : null}
-            </div>
+            <AmountField
+              amountInput={amountInput}
+              amountValid={amountValid}
+              amountFormatValid={amountFormatValid}
+              laneCeiling={laneCeiling}
+              laneLiquidity={laneLiquidity}
+              maxFillAmount={maxFillAmount}
+              submitting={submitting}
+              token={token}
+              onAmountInputChange={setAmountInput}
+            />
 
-            <div className="mt-4 space-y-2">
-              <Label htmlFor="earn-withdraw-destination">
-                {t("DashboardEarn.withdraw.destinationLabel")}
-              </Label>
-              <Input
-                id="earn-withdraw-destination"
-                placeholder={t("DashboardEarn.withdraw.destinationPlaceholder")}
-                disabled={submitting}
-                value={destinationInput}
-                aria-invalid={Boolean(destinationInput && !destinationValid)}
-                aria-describedby={
-                  destinationInput && !destinationValid
-                    ? "earn-withdraw-destination-error"
-                    : undefined
-                }
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setDestinationInput(event.target.value)
-                }
-              />
-              {destinationInput && !destinationValid ? (
-                <p id="earn-withdraw-destination-error" className="text-xs text-error" role="alert">
-                  {t("DashboardEarn.withdraw.errorDestinationInvalid")}
-                </p>
-              ) : null}
-            </div>
+            <DestinationField
+              destinationInput={destinationInput}
+              destinationValid={destinationValid}
+              submitting={submitting}
+              onDestinationInputChange={setDestinationInput}
+            />
 
             <WithdrawPreviewPanel preview={preview} token={token} />
           </>
