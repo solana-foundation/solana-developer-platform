@@ -47,9 +47,11 @@ export async function postTransfer(
   if (options.idempotencyKey !== undefined) {
     headers["Idempotency-Key"] = options.idempotencyKey;
   }
-  const query = options.dryRun === true ? "?dryRun=true" : "";
+  if (options.dryRun === true) {
+    headers["Dry-Run"] = "true";
+  }
   return app.request(
-    `/v1/payments/transfers${query}`,
+    "/v1/payments/transfers",
     { method: "POST", headers, body: JSON.stringify(body) },
     env
   );
