@@ -185,12 +185,19 @@ describe("provider-data mapping", () => {
 });
 
 describe("rail catalogue", () => {
-  it("declares the EUR-only, on-ramp-only launch corridor", async () => {
+  it("declares EUR, USD and GBP into USDC, USDT and SOL, on-ramp only", async () => {
     const { snapshot } = await new HercleRampClient().discoverCurrencyAndRails(
       {} as RampDiscoveryContext
     );
 
-    assert.deepEqual(Object.keys(snapshot.onramp.currencies), ["EUR"]);
+    assert.deepEqual(Object.keys(snapshot.onramp.currencies).sort(), ["EUR", "GBP", "USD"]);
+    // The gateway prices no GBP pair for USDG and no pair at all for PYUSD, so the cross
+    // product must leave them out rather than offer an order that fails.
+    assert.deepEqual([...snapshot.onramp.cryptos].sort(), [
+      "sol.solana",
+      "usdc.solana",
+      "usdt.solana",
+    ]);
     // Mural's shape: an empty off-ramp side keeps the pair out of the catalogue altogether.
     assert.deepEqual(snapshot.offramp, { currencies: {}, cryptos: [] });
   });

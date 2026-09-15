@@ -331,7 +331,7 @@
       "verificationInReviewDescription": "Hercle is reviewing your business details. There's nothing for you to do — feel free to come back later; your instructions will show up here as soon as you're approved.",
       "verificationFailedTitle": "Business verification was not approved",
       "verificationFailedDescription": "Hercle could not verify your business, so payments can't be settled through them. This isn't retryable from here — contact Hercle if you believe this is a mistake.",
-      "onrampProvisioningDetail": "Opening your dedicated EUR account at Hercle's bank",
+      "onrampProvisioningDetail": "Opening your dedicated account at Hercle's bank",
       "payerAccountHolder": "Pay from an account held in the name of",
       "offrampProvisioningDetail": "Hercle does not offer an off-ramp.",
       "readyTitle": "Preparing your instructions",

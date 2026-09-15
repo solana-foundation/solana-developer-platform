@@ -39,13 +39,37 @@ import type { HercleSettlementStatus } from "./provider-data";
 /**
  * Hercle — headless fiat on-ramp provider (Signed Key v1 lane, /partner/v1).
  * Business counterparties become Hercle sub-accounts; every scoped call rides one
- * platform credential plus the `on-behalf-of` header. Launch corridor: EUR -> USDC (Solana).
+ * platform credential plus the `on-behalf-of` header. Corridors: EUR, USD and GBP into
+ * USDC, USDT and SOL on Solana (see HERCLE_RAIL_SUPPORT).
  * There is no off-ramp (Mural's shape): the rail declares none, and the off-ramp methods refuse.
  */
 export const HERCLE_DECLARED_RAIL_SUPPORT = {
   onramp: { countrySupport: UNREPORTED_COUNTRY_SUPPORT, entityTypes: ["business"] },
   offramp: { countrySupport: UNREPORTED_COUNTRY_SUPPORT, entityTypes: [] },
 } as const satisfies ProviderDeclaredRailSupport;
+
+/**
+ * Declared, not fetched: the partner surface has no discovery endpoint, and limits come back on
+ * the quote. The set is what Hercle's partner gateway prices in every environment — EUR, USD and
+ * GBP into USDC, USDT and SOL on Solana. USDG has no GBP pair and PYUSD is not priced at all, so
+ * neither is offered: the snapshot is a cross product, and a pair listed here that the gateway
+ * refuses with CORRIDOR_NOT_SUPPORTED would be offered by the wizard and fail at the order.
+ */
+const HERCLE_RAIL_SUPPORT: ProviderRailSupportDistillation = {
+  snapshot: {
+    onramp: {
+      currencies: {
+        EUR: unreportedCurrencyLimit(),
+        GBP: unreportedCurrencyLimit(),
+        USD: unreportedCurrencyLimit(),
+      },
+      cryptos: ["sol.solana", "usdc.solana", "usdt.solana"],
+    },
+    offramp: { currencies: {}, cryptos: [] },
+  },
+  droppedCurrencyCodes: [],
+  droppedCountryCodes: [],
+};
 
 interface HercleConfig {
   clientId: string;
@@ -178,21 +202,10 @@ export class HercleRampClient implements RampProvider {
   readonly id = "hercle";
   readonly declaredRailSupport = HERCLE_DECLARED_RAIL_SUPPORT;
 
-  /** Declared, not fetched: the partner surface has no discovery endpoint, and limits come back on the quote. */
   async discoverCurrencyAndRails(
     _context: RampDiscoveryContext
   ): Promise<ProviderRailSupportDistillation> {
-    return {
-      snapshot: {
-        onramp: {
-          currencies: { EUR: unreportedCurrencyLimit() },
-          cryptos: ["usdc.solana", "sol.solana"],
-        },
-        offramp: { currencies: {}, cryptos: [] },
-      },
-      droppedCurrencyCodes: [],
-      droppedCountryCodes: [],
-    };
+    return HERCLE_RAIL_SUPPORT;
   }
 
   private async request<T>(
@@ -318,28 +331,6 @@ export class HercleRampClient implements RampProvider {
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
     return hercleCounterpartyRequirements(counterparty, options);
-  }
-
-  // ── Rails: static launch corridor (EUR -> USDC on Solana, on-ramp only) ──
-  // Hercle's currencies endpoint ships with the ramps surface; until then the corridor
-  // is an explicit tested snapshot (Stripe pattern) refreshed via this distillation.
-
-  async _discoverRails(): Promise<void> {
-    // No discovery API at launch — the snapshot below is authoritative.
-  }
-
-  async distillRailSupport(): Promise<ProviderRailSupportDistillation> {
-    return {
-      snapshot: {
-        onramp: {
-          currencies: { EUR: unreportedCurrencyLimit() },
-          cryptos: ["usdc.solana"],
-        },
-        offramp: { currencies: {}, cryptos: [] },
-      },
-      droppedCurrencyCodes: [],
-      droppedCountryCodes: [],
-    };
   }
 
   // ── Estimates ──

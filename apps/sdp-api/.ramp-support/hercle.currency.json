@@ -4,12 +4,17 @@
       "EUR": {
         "min": null,
         "max": null
+      },
+      "GBP": {
+        "min": null,
+        "max": null
+      },
+      "USD": {
+        "min": null,
+        "max": null
       }
     },
-    "cryptos": [
-      "usdc.solana",
-      "sol.solana"
-    ]
+    "cryptos": ["sol.solana", "usdc.solana", "usdt.solana"]
   },
   "offramp": {
     "currencies": {},
