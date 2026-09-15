@@ -31,7 +31,11 @@ export function getRecurringPaymentDetailState({
 
   return {
     sourceWalletUnresolved,
-    isEditable: !sourceWalletUnresolved && (status === "pending_activation" || status === "active"),
+    // Editing an active payment replaces its on-chain subscription, which needs
+    // the current wallet's signature; a pending edit only saves data.
+    isEditable:
+      !sourceWalletUnresolved &&
+      (status === "pending_activation" || (status === "active" && !signingUnavailable)),
     controlsDisabled,
     signingUnavailable,
     signingDisabled,

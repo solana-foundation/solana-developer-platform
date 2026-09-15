@@ -236,7 +236,20 @@ describe("Recurring Payment exact source selection", () => {
       );
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "Actions" }));
-      await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+      const edit = screen.getByRole("menuitem", { name: "Edit payment" });
+      if (unavailableWallet === "current") {
+        // Nothing about an active payment can be saved without its wallet's
+        // signature, so the editor stays shut and the band carries the reason.
+        expect(edit.getAttribute("aria-disabled")).toBe("true");
+        expect(
+          screen.getByText(
+            /You cannot collect, change, or cancel this payment until signing is enabled for Treasury/
+          )
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+        return;
+      }
+      await user.click(edit);
       await user.click(screen.getByRole("button", { name: "Funding wallet" }));
       await user.click(screen.getByRole("button", { name: /Replacement/ }));
       const save = screen.getByRole("button", { name: "Save" });

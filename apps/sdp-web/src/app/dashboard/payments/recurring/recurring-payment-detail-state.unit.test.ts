@@ -23,6 +23,20 @@ describe("getRecurringPaymentDetailState", () => {
     });
   });
 
+  it("locks editing of an active payment while its wallet cannot sign", () => {
+    expect(
+      getRecurringPaymentDetailState({
+        sourceCustodyWalletId: "cwlt_source",
+        selectedCustodyWalletId: "cwlt_source",
+        status: "active",
+        hasPendingAction: false,
+        savingPayment: false,
+        sourceWallet: { isRuntimeExecutionAllowed: false },
+        selectedWallet: { isRuntimeExecutionAllowed: false },
+      })
+    ).toMatchObject({ isEditable: false, signingActionsDisabled: true, cancelDisabled: true });
+  });
+
   it("does not report a signing restriction for a wallet it cannot see", () => {
     expect(
       getRecurringPaymentDetailState({

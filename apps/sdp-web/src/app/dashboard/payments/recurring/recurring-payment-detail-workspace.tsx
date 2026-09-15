@@ -322,12 +322,14 @@ function RecurringPaymentLifecycleBand({
   walletsError,
   signingUnavailable,
   signingDisabled,
+  walletLabel,
 }: {
   status: PaymentRecurringPaymentStatus;
   actionError: DetailActionError | null;
   walletsError: string | null;
   signingUnavailable: boolean;
   signingDisabled: boolean;
+  walletLabel: string;
 }) {
   const t = useTranslations();
   if (actionError) {
@@ -346,7 +348,13 @@ function RecurringPaymentLifecycleBand({
   if (signingDisabled) {
     return (
       <ActionBand variant="warning" title={t("DashboardPayments.recurring.signingDisabledTitle")}>
-        {t("DashboardPayments.recurring.signingDisabledBody")}
+        {/* Cancel stays open for a pending payment, so its body promises activation only. */}
+        {t(
+          status === "pending_activation"
+            ? "DashboardPayments.recurring.signingDisabledPendingBody"
+            : "DashboardPayments.recurring.signingDisabledBody",
+          { wallet: walletLabel }
+        )}
       </ActionBand>
     );
   }
@@ -639,6 +647,7 @@ export function RecurringPaymentDetailWorkspace({
             walletsError={liveWalletsError}
             signingUnavailable={signingUnavailable}
             signingDisabled={signingDisabled}
+            walletLabel={sourceWalletLabel}
           />
         )}
 
