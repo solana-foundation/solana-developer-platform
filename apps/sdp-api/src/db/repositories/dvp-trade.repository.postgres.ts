@@ -1,4 +1,4 @@
-import { DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_TRADE_STATUSES, type DvpSettlementAvailability } from "@sdp/types";
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
 import type { AppDb } from "@/db";
@@ -44,6 +44,7 @@ const dvpTradeRowSchema = z.object({
   counterparty_account_id_b: z.string().nullable(),
   status: z.enum(DVP_TRADE_STATUSES),
   observed_at: z.string().nullable(),
+  observed_cluster_timestamp: z.string().nullable(),
   closed_at: z.string().nullable(),
   idempotency_key: z.string().nullable(),
   idempotency_fingerprint: z.string().nullable(),
@@ -61,6 +62,22 @@ const dvpTradeRowSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
+
+/**
+ * `deriveDvpSettlementAvailability` (`services/dvp/observe.ts`) restated as SQL,
+ * so the list can narrow before its LIMIT. Constant fragments, no bindings. The
+ * repository test runs every case through both and requires the same answer.
+ */
+const SETTLEMENT_AVAILABILITY_SQL: Record<DvpSettlementAvailability, string> = {
+  available: `(status = 'funded' AND observed_cluster_timestamp IS NOT NULL
+      AND (earliest_settlement_timestamp IS NULL
+        OR earliest_settlement_timestamp::numeric <= observed_cluster_timestamp::numeric))`,
+  too_early: `(status = 'funded' AND observed_cluster_timestamp IS NOT NULL
+      AND earliest_settlement_timestamp IS NOT NULL
+      AND earliest_settlement_timestamp::numeric > observed_cluster_timestamp::numeric)`,
+  unfunded: `status IN ('created', 'partially_funded')`,
+  expired: `status = 'expired'`,
+};
 
 /** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
 function escapeLikePattern(value: string): string {
@@ -111,6 +128,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
 
     status: parsed.status,
     observedAt: parsed.observed_at,
+    observedClusterTimestamp: parsed.observed_cluster_timestamp,
     closedAt: parsed.closed_at,
     idempotencyKey: parsed.idempotency_key,
     idempotencyFingerprint: parsed.idempotency_fingerprint,
@@ -134,7 +152,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          amount_a, amount_b, expiry_timestamp, earliest_settlement_timestamp,
          user_a_settlement_destination, user_b_settlement_destination, ref_string,
          escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
-         status, observed_at, closed_at,
+         status, observed_at, observed_cluster_timestamp, closed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
          close_resolution_attempts, close_resolution_after,
@@ -348,6 +366,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                   close_resolution_after = CASE WHEN ?::text IS NOT NULL AND ?::text IN ('settled', 'cancelled', 'rejected') THEN NULL ELSE close_resolution_after END,
                   closed_at = CASE WHEN closed_at IS NULL AND ?::text IN ('settled', 'cancelled', 'rejected', 'closed_unknown') THEN ?::text ELSE closed_at END,
                   observed_at = ?,
+                  observed_cluster_timestamp = ?,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND status = ?
             RETURNING ${SELECT_COLUMNS}`
@@ -372,6 +391,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           input.status,
           input.observedAt,
           input.observedAt,
+          input.observedClusterTimestamp,
           input.id,
           input.expectedStatus
         )
@@ -481,6 +501,12 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         const placeholders = filters.statuses.map(() => "?").join(", ");
         clauses.push(`status IN (${placeholders})`);
         bindings.push(...filters.statuses);
+      }
+
+      if (filters.settlementAvailability !== null) {
+        clauses.push(
+          `(${filters.settlementAvailability.map((value) => SETTLEMENT_AVAILABILITY_SQL[value]).join(" OR ")})`
+        );
       }
 
       // Same semantics as the dashboard's `matchesAddressQuery`, as close as SQL

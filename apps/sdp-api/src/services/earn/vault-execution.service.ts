@@ -29,7 +29,6 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import { assertSponsorSignedSameMessage } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./execution-registry";
 import type { VaultDeadline } from "./vault-deadline";
@@ -301,11 +300,6 @@ export async function signVaultPlan(
     signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
       feePayment.signAsFeePayer(ownerSignedBytes)
     );
-    await assertSponsorSignedSameMessage({
-      unsignedOrPartiallySigned: ownerSigned,
-      sponsorSigned: signedBytes,
-      sponsor: feePayer,
-    });
   } else if (input.fee.kind === "caller-provided") {
     // Unreachable from the custody paths by construction; asserted so a new
     // caller cannot silently fall through to wallet-pays and sign the custody

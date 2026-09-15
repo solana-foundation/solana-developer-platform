@@ -10,6 +10,7 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -27,6 +28,7 @@ function withI18n({ children }: { children: ReactNode }) {
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 
 const T22 = SPL_TOKEN_PROGRAMS["token-2022"];
 const WALLET_A = "cwlt_a";
@@ -62,11 +64,11 @@ async function requestFor(overrides: Partial<DvpCreateRequest> = {}): Promise<{
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
-    json: async () => ({ data: { trade: { id: "dvp_1" } } }),
+    json: async () => ({ data: { trade: { id: "dvp_1", createSignature: "sig_create" } } }),
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
+  const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
   await act(async () => {
     await result.current.submit(request(overrides));
   });
@@ -145,10 +147,21 @@ describe("useDvpCreateSubmit idempotency key", () => {
           json: async () => ({ error: { message: "no" } }),
         }),
     ],
+    // The trade may exist, but nothing readable says which. The same key makes
+    // the next press return that trade rather than draw a second one.
+    [
+      "a success answer that cannot be read",
+      () =>
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 201,
+          json: async () => ({ data: {} }),
+        }),
+    ],
   ])("reuses the key after %s, so the retry replays", async (_label, mockFetch) => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
     await act(async () => {
       await result.current.submit(request());
     });
@@ -163,10 +176,10 @@ describe("useDvpCreateSubmit idempotency key", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ data: { trade: { id: "dvp_1" } } }),
+      json: async () => ({ data: { trade: { id: "dvp_1", createSignature: "sig_create" } } }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useDvpCreateSubmit(), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
     await act(async () => {
       await result.current.submit(request());
     });
@@ -175,5 +188,67 @@ describe("useDvpCreateSubmit idempotency key", () => {
     });
 
     expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
+  });
+});
+
+describe("useDvpCreateSubmit confirmation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("says an unreadable success answer is unconfirmed, and stays on the form", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => {
+          throw new SyntaxError("Unexpected token <");
+        },
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "The trade may have been created, but SDP couldn't read the answer. Press Create again to open it; it won't create a second one."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // A refusal whose body is not the error envelope still says something true.
+  it("names the status when a refusal carries no readable message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => "<html>" })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe("Request failed (502).");
+  });
+
+  // The create is SDP's own broadcast, so the toast reporting it links it.
+  it("links the create transaction from the toast and opens the new trade", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    await requestFor();
+
+    expect(push).toHaveBeenCalledWith("/dashboard/markets/dvp/dvp_1");
+    const [, options] = vi.mocked(toast.success).mock.calls[0] as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(options.action.label).toBe("View transaction");
+    options.action.onClick();
+    expect(open).toHaveBeenCalledWith(
+      "https://explorer.solana.com/tx/sig_create?cluster=devnet",
+      "_blank",
+      "noopener,noreferrer"
+    );
   });
 });

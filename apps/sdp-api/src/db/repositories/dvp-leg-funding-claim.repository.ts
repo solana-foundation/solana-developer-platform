@@ -99,6 +99,27 @@ export interface DvpLegFundingClaimRepository {
    * unbroadcast lock, which only `releaseExpired` may release.
    */
   deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
+  /**
+   * Takes the leg's lock for a reclaim, the same lock funding takes.
+   *
+   * Reclaiming and funding one leg at once is a race either way round, so both
+   * go through this row. With `receipt` null the slot must be empty and this is
+   * an ordinary claim. With `receipt` set, the caller has already asked the
+   * chain about that exact funding transaction and found it landed (or moved
+   * nothing); the row is turned into the reclaim's lock in one UPDATE guarded
+   * on that signature, so a receipt that changed since the chain read, or a
+   * funding still in flight (`funding_tx IS NULL`), is never taken over.
+   *
+   * The lock is released by signature like any claim, so a reclaim can only
+   * ever remove its own row, never a newer funding's receipt. One left behind by
+   * an unconfirmed broadcast expires through `releaseExpired`.
+   *
+   * @param input - The reclaim's lock.
+   * @param receipt - The funding signature the caller resolved on chain, or null
+   *   when the leg had no row.
+   * @returns Whether this call now holds the leg.
+   */
+  claimForReclaim(input: DvpLegFundingClaimInsert, receipt: string | null): Promise<boolean>;
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
@@ -118,31 +139,33 @@ function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim 
 export function createPostgresDvpLegFundingClaimRepository(
   db: RepositoryDbClient
 ): DvpLegFundingClaimRepository {
+  async function insertClaim(input: DvpLegFundingClaimInsert): Promise<boolean> {
+    // ON CONFLICT DO NOTHING rather than an upsert: a conflict means somebody
+    // else holds this leg, and overwriting their claim is exactly the
+    // double-broadcast this table exists to prevent.
+    const result = await db
+      .prepare(
+        `INSERT INTO dvp_leg_funding_claims
+           (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (trade_id, side) DO NOTHING
+         RETURNING trade_id`
+      )
+      .bind(
+        input.tradeId,
+        input.side,
+        input.organizationId,
+        input.projectId,
+        input.custodyWalletId,
+        input.signature,
+        input.expiryHeight
+      )
+      .first<{ trade_id: string }>();
+    return result !== null;
+  }
+
   return {
-    async claim(input) {
-      // ON CONFLICT DO NOTHING rather than an upsert: a conflict means somebody
-      // else holds this leg, and overwriting their claim is exactly the
-      // double-broadcast this table exists to prevent.
-      const result = await db
-        .prepare(
-          `INSERT INTO dvp_leg_funding_claims
-             (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (trade_id, side) DO NOTHING
-           RETURNING trade_id`
-        )
-        .bind(
-          input.tradeId,
-          input.side,
-          input.organizationId,
-          input.projectId,
-          input.custodyWalletId,
-          input.signature,
-          input.expiryHeight
-        )
-        .first<{ trade_id: string }>();
-      return result !== null;
-    },
+    claim: insertClaim,
 
     async release(tradeId, side, signature) {
       // Only an unbroadcast claim. Once `funding_tx` is set the transfer is on
@@ -219,9 +242,12 @@ export function createPostgresDvpLegFundingClaimRepository(
     },
 
     async listExpiredBroadcast(blockHeight) {
-      // Open trades only: a closed trade's leg can never be funded again, so
-      // its claims are history — without this bound every landed receipt would
-      // be re-checked on chain every tick forever.
+      // Trades whose escrows still exist only: a closed trade's leg can never be
+      // funded again, so its claims are history, and without this bound every
+      // landed receipt would be re-checked on chain every tick forever. Expired
+      // counts as open here: its escrows are still on chain, a reclaim can still
+      // run on them, and a never-landed receipt left on one would otherwise link
+      // a dropped transaction from the trade page for good.
       const result = await db
         .prepare(
           `SELECT c.trade_id, c.side, c.organization_id, c.project_id, c.custody_wallet_id,
@@ -230,11 +256,37 @@ export function createPostgresDvpLegFundingClaimRepository(
              JOIN dvp_trades t ON t.id = c.trade_id
             WHERE c.funding_tx IS NOT NULL
               AND CAST(c.expiry_height AS NUMERIC) < ?
-              AND t.status IN ('created', 'partially_funded', 'funded')`
+              AND t.status IN ('created', 'partially_funded', 'funded', 'expired')`
         )
         .bind(blockHeight.toString())
         .all<Record<string, unknown>>();
       return result.results.map(toDvpLegFundingClaim);
+    },
+
+    async claimForReclaim(input, receipt) {
+      if (receipt === null) {
+        return insertClaim(input);
+      }
+      const takenOver = await db
+        .prepare(
+          `UPDATE dvp_leg_funding_claims
+              SET organization_id = ?, project_id = ?, custody_wallet_id = ?,
+                  signature = ?, expiry_height = ?, funding_tx = NULL, updated_at = sdp_iso_now()
+            WHERE trade_id = ? AND side = ? AND funding_tx = ?
+            RETURNING trade_id`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.custodyWalletId,
+          input.signature,
+          input.expiryHeight,
+          input.tradeId,
+          input.side,
+          receipt
+        )
+        .first<{ trade_id: string }>();
+      return takenOver !== null;
     },
 
     async deleteBroadcastClaim(tradeId, side, signature) {

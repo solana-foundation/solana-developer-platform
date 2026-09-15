@@ -10,7 +10,8 @@
  * inferred from account state, and is only ever a description of one moment.
  */
 
-import type { DvpTradeStatus } from "@/db/repositories";
+import type { DvpSettlementAvailability } from "@sdp/types";
+import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
 import type { DvpCloseResolution } from "./closing-transaction";
 
 /** One escrow, as read. `exists: false` means the account is not on chain. */
@@ -32,6 +33,12 @@ export interface DvpTradeObservation {
   legB: DvpLegObservation;
   /** Current cluster block height, for judging create-transaction expiry. */
   blockHeight: bigint;
+  /**
+   * The cluster's `Clock.unix_timestamp`, read in the same request as the
+   * accounts. Expiry and the earliest settlement time are judged by this, the
+   * clock the program reads, never by the host's.
+   */
+  clusterUnixTimestamp: bigint;
   /** Decoded close for a vanished trade account, or null when none was found. */
   closeResolution: DvpCloseResolution | null;
 }
@@ -126,7 +133,8 @@ function deriveMissingTradeAccountStatus(
  *
  * @param observation - What the chain showed.
  * @param trade - The stored trade, for its targets and current status.
- * @param nowMs - Wall clock, injected so the time branches are testable.
+ * @param nowMs - Wall clock, used only to age an unsigned create claim, which is a
+ *   host-side fact. Trade expiry is judged by the observation's cluster clock.
  * @returns The derived status plus the two flags that are facts, not states.
  */
 export function deriveDvpTradeState(
@@ -162,16 +170,68 @@ export function deriveDvpTradeState(
   }
 
   // The account is there, so whatever else is true, the create landed.
+  //
+  // Expiry wins over funding. Past it the program refuses Settle, so a fully
+  // funded trade can no longer do what "funded" promises and Cancel is the only
+  // way forward. The held balances still reach the page through each leg's
+  // outcome and observed amount, so calling it expired hides no money.
+  if (isPastDvpExpiry(trade.expiryTimestamp, observation.clusterUnixTimestamp)) {
+    return { status: "expired", ...flags };
+  }
+
   if (legAFunded && legBFunded) {
     return { status: "funded", ...flags };
   }
 
-  // Expiry is only meaningful while the trade is short: a fully funded trade
-  // past its expiry still needs unwinding rather than being written off, and
-  // the program itself decides that at settle time.
-  if (BigInt(Math.floor(nowMs / 1000)) > BigInt(trade.expiryTimestamp)) {
-    return { status: "expired", ...flags };
-  }
-
   return { status: anyDeposit ? "partially_funded" : "created", ...flags };
+}
+
+/**
+ * Whether a trade is past the last moment the program will settle it.
+ *
+ * `settle_dvp.rs:142-143` requires `now <= expiry_timestamp`, so the expiry
+ * second itself still settles. `now` is always the cluster's `Clock`, never a
+ * host or browser clock, so the status, the settle gate and the page agree.
+ *
+ * @param expiryTimestamp - The trade's expiry, Unix seconds as a string.
+ * @param nowSeconds - The clock to judge by, in Unix seconds.
+ * @returns True once Settle would fail with `DvpExpired`.
+ */
+export function isPastDvpExpiry(expiryTimestamp: string, nowSeconds: bigint): boolean {
+  return nowSeconds > BigInt(expiryTimestamp);
+}
+
+/**
+ * Whether the trade can settle, as of its last observation.
+ *
+ * Expiry is already folded into the status by `deriveDvpTradeState`, judged by
+ * the same cluster clock. What is left is the earliest settlement time
+ * (`settle_dvp.rs:144-146`), judged by the clock recorded with that observation.
+ * The list filter in `dvp-trade.repository.postgres.ts` restates these rules in
+ * SQL; the repository test holds the two together.
+ *
+ * @param trade - The stored trade.
+ * @returns The availability, or null for a trade that is not open, or a funded
+ *   trade not yet observed with a cluster clock (never guessed from a host clock).
+ */
+export function deriveDvpSettlementAvailability(
+  trade: Pick<DvpTradeRow, "status" | "earliestSettlementTimestamp" | "observedClusterTimestamp">
+): DvpSettlementAvailability | null {
+  switch (trade.status) {
+    case "expired":
+      return "expired";
+    case "created":
+    case "partially_funded":
+      return "unfunded";
+    case "funded":
+      if (trade.observedClusterTimestamp === null) {
+        return null;
+      }
+      return trade.earliestSettlementTimestamp !== null &&
+        BigInt(trade.observedClusterTimestamp) < BigInt(trade.earliestSettlementTimestamp)
+        ? "too_early"
+        : "available";
+    default:
+      return null;
+  }
 }

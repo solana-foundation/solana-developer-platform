@@ -66,6 +66,7 @@ export function testTrade(overrides: Partial<DvpTrade> = {}): DvpTrade {
     nonce: "42",
     expiryTimestamp: "1900000000",
     earliestSettlementTimestamp: null,
+    settlementAvailability: "unfunded",
     refString: null,
     createSignature: null,
     closeSignature: null,

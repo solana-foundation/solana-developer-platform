@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { OTHER_ADDRESS, OWN_WALLET_ID, ownParty, testLeg, testTrade } from "./dvp.fixtures";
 import {
   canCancelDvpTrade,
-  canSettleDvpTrade,
   custodiedSidesOf,
   frozenLegs,
   legFundingRatio,
@@ -66,14 +65,10 @@ describe("legFundingRatio", () => {
   });
 });
 
+// Whether settle can go out is the API's answer (`settlementAvailability`), by the
+// cluster clock; the dashboard never re-derives it. Cancel is the one decision
+// left to the page.
 describe("trade actions", () => {
-  it("allows settling only a fully funded trade", () => {
-    expect(canSettleDvpTrade(trade({ status: "funded" }))).toBe(true);
-    for (const status of ["created", "partially_funded", "expired"] as const) {
-      expect(canSettleDvpTrade(trade({ status }))).toBe(false);
-    }
-  });
-
   // Cancel is the escape hatch. Requiring funding would make an abandoned
   // half-funded trade impossible to unwind from the dashboard.
   it("allows cancelling any open trade, funded or not", () => {
@@ -82,10 +77,9 @@ describe("trade actions", () => {
     }
   });
 
-  it("offers neither action on a closed trade", () => {
+  it("offers no cancel on a closed trade", () => {
     for (const status of ["settled", "cancelled", "rejected", "closed_unknown"] as const) {
       expect(canCancelDvpTrade(trade({ status }))).toBe(false);
-      expect(canSettleDvpTrade(trade({ status }))).toBe(false);
     }
   });
 });

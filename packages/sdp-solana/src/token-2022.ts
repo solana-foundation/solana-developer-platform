@@ -21,10 +21,12 @@ import {
   createNoopSigner,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
+  getBase64Encoder,
   getTransactionEncoder,
   type Rpc,
   type Signature,
   type SolanaRpcApi,
+  signature,
   signTransactionMessageWithSigners,
   type TransactionSigner,
 } from "@solana/kit";
@@ -47,9 +49,9 @@ import { safeStringify } from "./token-2022.utils";
 
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
-declare const Buffer: {
-  from(data: string, encoding: "base64"): Uint8Array;
-};
+const MOCK_SIGNATURE = signature(
+  "1111111111111111111111111111111111111111111111111111111111111111"
+);
 
 /**
  * Environment bindings required by the Token-2022 service.
@@ -370,7 +372,7 @@ export class Token2022Service {
    */
   async prepareCreateMint(
     options: CreateMintOptions,
-    requestSimulation = false
+    requestSimulation?: boolean
   ): Promise<PreparedTransaction & { mint: Address }> {
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const mintKeypair = await generateKeyPairSigner();
@@ -390,17 +392,11 @@ export class Token2022Service {
 
     const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
-    const lifetimeConstraint = (
-      fullTx as {
-        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
-      }
-    ).lifetimeConstraint;
-    const blockhash = lifetimeConstraint?.blockhash ?? "";
-    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
+    const { blockhash, lastValidBlockHeight } = fullTx.lifetimeConstraint;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
-      const txBytes = Buffer.from(serializedTx, "base64");
+      const txBytes = new Uint8Array(getBase64Encoder().encode(serializedTx));
       simulation = await simulateTransaction(rpc, txBytes);
     }
 
@@ -448,7 +444,7 @@ export class Token2022Service {
    */
   async prepareMintTo(
     options: Omit<MintToOptions, "mintAuthority"> & { mintAuthority: Address },
-    requestSimulation = false
+    requestSimulation?: boolean
   ): Promise<PreparedTransaction & { tokenAccount: Address }> {
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
@@ -464,17 +460,11 @@ export class Token2022Service {
 
     const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
-    const lifetimeConstraint = (
-      fullTx as {
-        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
-      }
-    ).lifetimeConstraint;
-    const blockhash = lifetimeConstraint?.blockhash ?? "";
-    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
+    const { blockhash, lastValidBlockHeight } = fullTx.lifetimeConstraint;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
-      const txBytes = Buffer.from(serializedTx, "base64");
+      const txBytes = new Uint8Array(getBase64Encoder().encode(serializedTx));
       simulation = await simulateTransaction(rpc, txBytes);
     }
 
@@ -531,7 +521,7 @@ export class Token2022Service {
    */
   async prepareBurn(
     options: Omit<BurnOptions, "authority"> & { authority: Address },
-    requestSimulation = false
+    requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
@@ -556,17 +546,11 @@ export class Token2022Service {
 
     const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
-    const lifetimeConstraint = (
-      fullTx as {
-        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
-      }
-    ).lifetimeConstraint;
-    const blockhash = lifetimeConstraint?.blockhash ?? "";
-    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
+    const { blockhash, lastValidBlockHeight } = fullTx.lifetimeConstraint;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
-      const txBytes = Buffer.from(serializedTx, "base64");
+      const txBytes = new Uint8Array(getBase64Encoder().encode(serializedTx));
       simulation = await simulateTransaction(rpc, txBytes);
     }
 
@@ -588,7 +572,7 @@ export class Token2022Service {
   async freezeAccount(options: FreezeOptions): Promise<FreezeResult> {
     if (this.env.SOLANA_MOCK === "true") {
       return {
-        signature: `mock_${crypto.randomUUID()}` as Signature,
+        signature: MOCK_SIGNATURE,
         slot: BigInt(Date.now()),
       };
     }
@@ -617,7 +601,7 @@ export class Token2022Service {
   async thawAccount(options: FreezeOptions): Promise<FreezeResult> {
     if (this.env.SOLANA_MOCK === "true") {
       return {
-        signature: `mock_${crypto.randomUUID()}` as Signature,
+        signature: MOCK_SIGNATURE,
         slot: BigInt(Date.now()),
       };
     }
@@ -645,7 +629,7 @@ export class Token2022Service {
    */
   async prepareFreezeAccount(
     options: Omit<FreezeOptions, "freezeAuthority"> & { freezeAuthority: Address },
-    requestSimulation = false
+    requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
@@ -660,17 +644,11 @@ export class Token2022Service {
 
     const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
-    const lifetimeConstraint = (
-      fullTx as {
-        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
-      }
-    ).lifetimeConstraint;
-    const blockhash = lifetimeConstraint?.blockhash ?? "";
-    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
+    const { blockhash, lastValidBlockHeight } = fullTx.lifetimeConstraint;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
-      const txBytes = Buffer.from(serializedTx, "base64");
+      const txBytes = new Uint8Array(getBase64Encoder().encode(serializedTx));
       simulation = await simulateTransaction(rpc, txBytes);
     }
 
@@ -687,7 +665,7 @@ export class Token2022Service {
    */
   async prepareThawAccount(
     options: Omit<FreezeOptions, "freezeAuthority"> & { freezeAuthority: Address },
-    requestSimulation = false
+    requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
@@ -702,17 +680,11 @@ export class Token2022Service {
 
     const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
-    const lifetimeConstraint = (
-      fullTx as {
-        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
-      }
-    ).lifetimeConstraint;
-    const blockhash = lifetimeConstraint?.blockhash ?? "";
-    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
+    const { blockhash, lastValidBlockHeight } = fullTx.lifetimeConstraint;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
-      const txBytes = Buffer.from(serializedTx, "base64");
+      const txBytes = new Uint8Array(getBase64Encoder().encode(serializedTx));
       simulation = await simulateTransaction(rpc, txBytes);
     }
 

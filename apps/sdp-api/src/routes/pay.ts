@@ -1,3 +1,4 @@
+import { hashString } from "@sdp/payments/hash";
 import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -12,6 +13,8 @@ import {
   createTransactionMessage,
   getBase64Decoder,
   getBase64Encoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
   getTransactionEncoder,
   type Instruction,
   pipe,
@@ -22,9 +25,11 @@ import { encodeURL } from "@solana/pay";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, notFound, rateLimited } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
+import { AuditService } from "@/services/audit.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
@@ -152,7 +157,24 @@ pay.post(
       const feePayment = await getFeePayment();
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
+      // /pay bytes are partially signed by design: the payer signs client-side.
+      const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
       const signedBase64 = getBase64Decoder().decode(sponsored);
+      await new AuditService(getDb(c.env)).log(c, {
+        organizationId: request.organization_id,
+        action: "sign",
+        resourceType: "payment_request",
+        resourceId: request.id,
+        metadata: {
+          sponsoredAccount: payer,
+          amount: request.amount,
+          token: request.token,
+          destination: request.destination_address,
+          walletId: request.wallet_id,
+          signature,
+          claimHash: await hashString(unsignedBase64),
+        },
+      });
       const stored = await repository.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: payer,

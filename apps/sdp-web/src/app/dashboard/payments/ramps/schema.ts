@@ -1,3 +1,4 @@
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { isCountryCode } from "@sdp/types/countries";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import type { RequirementField } from "@sdp/types/ramp-requirements";
@@ -78,9 +79,13 @@ export type RampFields = z.input<typeof rampSelectionSchema>;
 const onchainAmount = z
   .string()
   .trim()
-  .refine((value) => ONCHAIN_AMOUNT_PATTERN.test(value), "Enter a valid amount.")
-  .transform(Number)
-  .refine((value) => value > 0, "Enter an amount greater than 0.");
+  .refine((value) => ONCHAIN_AMOUNT_PATTERN.test(value), {
+    abort: true,
+    message: "Enter a valid amount.",
+  })
+  .refine((value) => compareDecimalAmounts(value, "0") > 0, "Enter an amount greater than 0.");
+
+export const cryptoWalletAccountDetailsSchema = z.object({ address: z.string().min(1) });
 
 export const onchainSendSelectionSchema = z.object({
   accountId: z.string().min(1, "Select a destination account."),

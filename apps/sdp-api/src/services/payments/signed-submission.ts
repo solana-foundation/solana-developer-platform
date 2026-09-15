@@ -1,5 +1,5 @@
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { AppError } from "@/lib/errors";
+import { internalError } from "@/lib/errors";
 import type { SignedSubmissionStore } from "@/services/sponsorship-submission";
 
 export type TransferSignedSubmissionStore = SignedSubmissionStore & {
@@ -24,10 +24,7 @@ export function createTransferSignedSubmissionStore(
         updatedAt: new Date().toISOString(),
       });
       if (!row) {
-        throw new AppError(
-          "INTERNAL_ERROR",
-          "Payment transfer signed submission was not persisted"
-        );
+        throw internalError("Payment transfer signed submission was not persisted");
       }
     },
     markStarted: async () => {
@@ -39,7 +36,7 @@ export function createTransferSignedSubmissionStore(
         startedAt: new Date().toISOString(),
       });
       if (!startedRow) {
-        throw new AppError("INTERNAL_ERROR", "Payment transfer submission was not started");
+        throw internalError("Payment transfer submission was not started");
       }
       row = startedRow;
       startState = "started";

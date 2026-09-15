@@ -9,12 +9,12 @@ import {
 } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
   type Address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
   getBase58Decoder,
-  getBase64Encoder,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -35,15 +35,13 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  assertSponsorSignedSameMessage,
-  createProjectSponsorshipFeePayment,
-} from "@/services/sponsorship.service";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { readMintDecimals } from "./mints";
 import { readDvpAccounts, readEscrowState } from "./read-chain";
 
@@ -152,6 +150,8 @@ export async function fundDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
+    /** Writes the signed transfer to the request's idempotency record before broadcast. */
+    recordAttempt: RecordDvpLegActionAttempt;
   }
 ): Promise<DvpFundResult> {
   return executeDvpFunding(
@@ -161,7 +161,8 @@ export async function fundDvpTradeLeg(
       organizationId: params.organizationId,
       projectId: params.projectId,
       custodyWalletId: params.custodyWalletId,
-    })
+    }),
+    params.recordAttempt
   );
 }
 
@@ -173,12 +174,15 @@ export async function fundDvpTradeLeg(
 export async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
-  plan: DvpFundingPlan
+  plan: DvpFundingPlan,
+  recordAttempt: RecordDvpLegActionAttempt
 ): Promise<DvpFundResult> {
   const env = c.env;
 
   if (!FUNDABLE.has(trade.status)) {
-    throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be funded`);
+    throw badRequest(`DvP trade ${trade.id} is ${trade.status} and can no longer be funded`, {
+      reason: DVP_LEG_REFUSAL.tradeNotFundable,
+    });
   }
 
   const { side, mint, tokenProgram, escrow, amount } = plan.leg;
@@ -205,7 +209,9 @@ export async function executeDvpFunding(
     await verifySwapDvpAccount(snapshot.trade);
   } catch (error) {
     if (error instanceof SwapDvpVerificationError) {
-      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`);
+      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`, {
+        reason: DVP_LEG_REFUSAL.tradeNotOnChain,
+      });
     }
     throw error;
   }
@@ -243,7 +249,8 @@ export async function executeDvpFunding(
         "dvp funding: on-chain trade does not match recorded terms"
       );
       throw conflict(
-        `DvP trade ${trade.id}: the on-chain trade does not match the recorded terms; nothing was sent`
+        `DvP trade ${trade.id}: the on-chain trade does not match the recorded terms; nothing was sent`,
+        { reason: DVP_LEG_REFUSAL.termsMismatch }
       );
     }
     throw error;
@@ -253,10 +260,13 @@ export async function executeDvpFunding(
   if (!legObservation.exists) {
     if (legObservation.tampered) {
       throw conflict(
-        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
+        { reason: DVP_LEG_REFUSAL.escrowMismatch }
       );
     }
-    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`, {
+      reason: DVP_LEG_REFUSAL.escrowMissing,
+    });
   }
   const escrowState = { amount: legObservation.amount, frozen: legObservation.frozen };
 
@@ -264,14 +274,16 @@ export async function executeDvpFunding(
     // The transfer would bounce. Saying so costs nothing; learning it from a
     // failed broadcast costs a signature and leaves an unexplained failure.
     throw badRequest(
-      `DvP trade ${trade.id}: the escrow for this leg is frozen, so a transfer into it would fail. The mint's freeze authority must thaw ${escrow} first.`
+      `DvP trade ${trade.id}: the escrow for this leg is frozen, so a transfer into it would fail. The mint's freeze authority must thaw ${escrow} first.`,
+      { reason: DVP_LEG_REFUSAL.escrowFrozen }
     );
   }
 
   const held = escrowState.amount;
   if (held >= amount) {
     throw conflict(
-      `DvP trade ${trade.id}: this leg already holds ${held} of ${amount}, so there is nothing left to fund.`
+      `DvP trade ${trade.id}: this leg already holds ${held} of ${amount}, so there is nothing left to fund.`,
+      { reason: DVP_LEG_REFUSAL.legAlreadyFunded }
     );
   }
 
@@ -300,20 +312,24 @@ export async function executeDvpFunding(
   // mismatch moving the wrong quantity.
   const decimals = await readMintDecimals(rpc, mint);
   if (decimals === null) {
-    throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`);
+    throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`, {
+      reason: DVP_LEG_REFUSAL.mintUnreadable,
+    });
   }
 
   const sourceAccount = await fetchMaybeToken(rpc, source);
   if (!sourceAccount.exists) {
     throw badRequest(
-      `DvP trade ${trade.id}: wallet ${signer.address} holds no ${mint} token account, so it cannot fund this leg; nothing was sent`
+      `DvP trade ${trade.id}: wallet ${signer.address} holds no ${mint} token account, so it cannot fund this leg; nothing was sent`,
+      { reason: DVP_LEG_REFUSAL.walletHoldsNoToken }
     );
   }
   if (sourceAccount.data.amount < outstanding) {
     const sourceAmount = formatDecimalAmount(sourceAccount.data.amount, decimals);
     const outstandingAmount = formatDecimalAmount(outstanding, decimals);
     throw badRequest(
-      `DvP trade ${trade.id}: wallet ${signer.address} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`
+      `DvP trade ${trade.id}: wallet ${signer.address} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`,
+      { reason: DVP_LEG_REFUSAL.walletBalanceShort }
     );
   }
 
@@ -338,11 +354,14 @@ export async function executeDvpFunding(
   // an over-funded escrow depends on the surplus-refund path working.
   const recheck = await readEscrowState(rpc, plan.leg, trade.swapDvp, trade.id);
   if (recheck === null) {
-    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`, {
+      reason: DVP_LEG_REFUSAL.escrowMissing,
+    });
   }
   if (recheck.amount !== held) {
     throw conflict(
-      `DvP trade ${trade.id}: the escrow balance changed while this funding was being prepared, so ${outstanding} is no longer the amount owed. Nothing was sent — retry to fund the current shortfall.`
+      `DvP trade ${trade.id}: the escrow balance changed while this funding was being prepared, so ${outstanding} is no longer the amount owed. Nothing was sent — retry to fund the current shortfall.`,
+      { reason: DVP_LEG_REFUSAL.escrowBalanceChanged }
     );
   }
 
@@ -379,7 +398,9 @@ export async function executeDvpFunding(
   // stayed unfundable until somebody edited the database.
   const claimed = await plan.claim(claimSignature, lastValidBlockHeight.toString());
   if (!claimed) {
-    throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`);
+    throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`, {
+      reason: DVP_LEG_REFUSAL.legFundingInProgress,
+    });
   }
 
   let heldSignature: Signature = claimSignature;
@@ -390,14 +411,14 @@ export async function executeDvpFunding(
       transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
       lastValidBlockHeight,
       store: {
-        persistSigned: async ({ signature, signedTransaction }) => {
-          await assertSponsorSignedSameMessage({
-            unsignedOrPartiallySigned: partiallySigned,
-            sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
-            sponsor,
-          });
+        persistSigned: async ({ signature }) => {
           await plan.rebindClaim(claimSignature, signature);
           heldSignature = signature;
+          await recordAttempt({
+            signature,
+            amount: outstanding.toString(),
+            expiryHeight: lastValidBlockHeight.toString(),
+          });
         },
         markStarted: async () => {},
         hasStarted: async () => plan.hasClaim(heldSignature),
@@ -415,9 +436,9 @@ export async function executeDvpFunding(
   }
 
   // On the wire, so the receipt is owed regardless of what the claim does next.
-  // The claim is released on a rejected broadcast and swept once its blockhash
-  // expires; a leg that funded correctly ends up with no claim at all, which is
-  // why this cannot be the same column.
+  // The row stays as the receipt and keeps the leg taken: a later funding of the
+  // same leg conflicts until a reclaim takes the row over (`claimForReclaim`)
+  // or the reconciler deletes a receipt whose transfer never landed.
   await plan.recordFundingTx(heldSignature);
 
   return { signature: heldSignature, leg: side, amount: outstanding.toString() };

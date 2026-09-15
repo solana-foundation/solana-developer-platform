@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { summarizeUpstreamErrorBody } from "@sdp/redaction";
+import { assertHttpsBaseUrl } from "../provisioning/common";
 import { SigningError } from "../signing";
 
 /**
@@ -313,7 +314,10 @@ function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): Df
     authToken,
     credentialId,
     privateKey,
-    baseUrl: options?.apiBaseUrl ?? env.DFNS_API_BASE_URL ?? DEFAULT_DFNS_API_BASE_URL,
+    baseUrl: assertHttpsBaseUrl(
+      options?.apiBaseUrl ?? env.DFNS_API_BASE_URL ?? DEFAULT_DFNS_API_BASE_URL,
+      "DFNS"
+    ),
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
   };
@@ -628,7 +632,10 @@ function resolveIbmHavenContext(
     authToken,
     credentialId,
     privateKey,
-    baseUrl: options?.apiBaseUrl ?? env.IBM_HAVEN_API_BASE_URL ?? DEFAULT_IBM_HAVEN_API_BASE_URL,
+    baseUrl: assertHttpsBaseUrl(
+      options?.apiBaseUrl ?? env.IBM_HAVEN_API_BASE_URL ?? DEFAULT_IBM_HAVEN_API_BASE_URL,
+      "IBM Digital Asset Haven"
+    ),
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
   };

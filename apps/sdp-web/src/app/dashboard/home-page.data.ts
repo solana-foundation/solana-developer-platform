@@ -1,7 +1,9 @@
 import type {
+  PaymentTransferStatus,
   PaymentTransferSummary,
   TokenTransaction,
   TokenTransactionListItem,
+  TokenTransactionStatus,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import type { SdpApiClient } from "@/lib/sdp-api";
@@ -29,12 +31,7 @@ export interface HomeActivityRow {
    */
   tokenMint: string | null;
   amount: string;
-  /**
-   * Raw source status ("confirmed", "failed", …). Both sources carry one, and
-   * without it a failed deploy rendered identically to a successful one — the
-   * only tell was the missing address.
-   */
-  status: string;
+  status: PaymentTransferStatus | TokenTransactionStatus;
   address: string;
   explorer: HomeActivityExplorerRef | null;
   sourceKind: "payments" | "issuance";

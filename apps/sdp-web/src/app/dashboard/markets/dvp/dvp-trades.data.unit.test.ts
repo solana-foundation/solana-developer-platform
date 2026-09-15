@@ -60,10 +60,27 @@ describe("fetchDvpTrades", () => {
   it("carries the status and search filters on the query string", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request, { statuses: ["created", "funded"], q: "USDC" });
+    await fetchDvpTrades(request, {
+      statuses: ["created", "funded"],
+      settlementAvailability: null,
+      q: "USDC",
+    });
 
     expect(request).toHaveBeenCalledWith(
       `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=created%2Cfunded&q=USDC`
+    );
+  });
+
+  // "Ready to settle" is what the program will settle now: funded AND inside the
+  // window by the cluster clock, which only the API can judge.
+  it("narrows Ready to settle by the API's settlement availability", async () => {
+    const request = ok({ data: { trades: [] } });
+    const { filters } = parseDvpTradesFilters({ status: "ready" });
+
+    await fetchDvpTrades(request, filters);
+
+    expect(request).toHaveBeenCalledWith(
+      `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=funded&settlementAvailability=available`
     );
   });
 
@@ -72,7 +89,7 @@ describe("fetchDvpTrades", () => {
   it("omits the filter params when unfiltered", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request, { statuses: null, q: null });
+    await fetchDvpTrades(request, { statuses: null, settlementAvailability: null, q: null });
 
     expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
   });
