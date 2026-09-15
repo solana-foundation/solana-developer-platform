@@ -238,6 +238,8 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       const firstActivityRow = page.locator("tbody tr").first();
       await expect(firstActivityRow).toBeVisible();
       expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
+    } else {
+      await expect(page.getByText("No recent activity found yet.", { exact: true })).toBeVisible();
     }
     await assertExactIdentityAndProject(page, fixture);
     expect(activityRequests).toHaveLength(1);
@@ -266,20 +268,18 @@ test.describe("GCP dev dashboard read-only smoke", () => {
   });
 
   test("wallet manage drill-down renders the wallet detail", async ({ page }) => {
-    test.skip(!fixture.populatedWallet, "reseeded stage has no funded fixture wallet yet");
-    const populatedWallet = fixture.populatedWallet;
-    if (!populatedWallet) return;
+    const drillDownWallet = fixture.populatedWallet ?? fixture.wallets[0];
     const capture = capturePageFailures(page);
 
     await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
     const walletCard = page
       .locator("article")
-      .filter({ hasText: populatedWallet.publicKey })
+      .filter({ hasText: drillDownWallet.publicKey })
       .first();
     await walletCard.getByRole("link", { name: "Manage" }).click();
 
     await expect(page).toHaveURL(/\/dashboard\/wallets\/./, { timeout: 20_000 });
-    const walletIdentity = populatedWallet.label ?? populatedWallet.publicKey;
+    const walletIdentity = drillDownWallet.label ?? drillDownWallet.publicKey;
     await expect(page.getByText(walletIdentity).first()).toBeVisible({ timeout: 20_000 });
     await assertExactIdentityAndProject(page, fixture);
     capture.assertClean();
