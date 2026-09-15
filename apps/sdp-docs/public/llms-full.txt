@@ -6027,6 +6027,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
 | `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
 | `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
+| `GET` | `/v1/transactions` | List transactions |
 
 ---
 

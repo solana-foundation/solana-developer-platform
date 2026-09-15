@@ -6,6 +6,7 @@ import {
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
+  UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
@@ -611,6 +612,10 @@ export const transferSchema = z
       .optional()
       .openapi({ description: "Project identifier for the transfer." }),
     type: transferTypeSchema,
+    kind: z.enum(UNIFIED_TRANSACTION_MODULE_CONTRACTS.payments.kinds).openapi({
+      description:
+        "Dashboard transaction kind derived from the transfer type and originating Payments resource.",
+    }),
     direction: transferDirectionSchema,
     status: transferStatusSchema,
     signature: z.string().nullable().openapi({

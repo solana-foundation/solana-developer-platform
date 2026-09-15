@@ -1,5 +1,6 @@
 import {
   isRampTransferType,
+  type PaymentTransactionKind,
   type PaymentTransferStatus,
   type PaymentTransferType,
   RAMP_TRANSFER_TYPES,
@@ -28,6 +29,7 @@ export interface PaymentTransferRow {
   amount: string | null;
   memo: string | null;
   type: PaymentTransferType;
+  kind: PaymentTransactionKind;
   direction: PaymentTransferDirection;
   status: PaymentTransferStatus;
   provider: RampProviderId | null;

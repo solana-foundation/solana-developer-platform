@@ -16,6 +16,7 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     amount: "25",
     memo: null,
     type: "offramp",
+    kind: "offramp",
     direction: "outbound",
     status: "completed",
     provider: "moneygram",

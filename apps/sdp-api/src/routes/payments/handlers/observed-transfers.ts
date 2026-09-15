@@ -4,6 +4,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
@@ -423,6 +424,7 @@ function buildObservedTransferRows(
         amount: formatDecimalAmount(lamports, 9),
         memo: null,
         type: "transfer",
+        kind: observedTransferKind(direction),
         direction,
         status,
         provider: null,
@@ -509,6 +511,7 @@ function buildObservedTransferRows(
         amount: resolvedUiAmount,
         memo: null,
         type: "transfer",
+        kind: observedTransferKind("inbound"),
         direction: "inbound",
         status,
         provider: null,
@@ -604,6 +607,7 @@ function buildObservedTransferRows(
       amount: resolvedUiAmount,
       memo: null,
       type: "transfer",
+      kind: observedTransferKind(direction),
       direction,
       status,
       provider: null,

@@ -1,13 +1,9 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { AppDb } from "@/db";
-import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { buildInClause, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type { ListTokensOptions, TokenRepository } from "./token.repository";
-
-function buildInClause(length: number): string {
-  return Array.from({ length }, () => "?").join(", ");
-}
 
 function parseExtensionValue(value: string | null): unknown {
   if (!value) {

@@ -3,6 +3,7 @@ import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
 import type { AppDb } from "@/db";
 import type { DatabaseExecutor } from "@/db/client";
+import { escapeLikePattern } from "@/db/postgres-utils";
 import type {
   DvpTradeInsert,
   DvpTradeListFilters,
@@ -78,11 +79,6 @@ const SETTLEMENT_AVAILABILITY_SQL: Record<DvpSettlementAvailability, string> = {
   unfunded: `status IN ('created', 'partially_funded')`,
   expired: `status = 'expired'`,
 };
-
-/** Escapes ILIKE wildcards in operator-supplied search text (`\`, `%`, `_`). */
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, "\\$&");
-}
 
 function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
   const parsed = dvpTradeRowSchema.parse(row);
