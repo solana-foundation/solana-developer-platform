@@ -144,7 +144,7 @@ describe("HercleRampClient on-ramp quote", () => {
         orderId: "ord_124",
         fiatCurrency: "EUR",
         fiatAmount: "250",
-        bankAccount: {},
+        bankAccount: { iban: "CH9300762011623852957", paymentReference: "HRC-PAY-124" },
       })
     );
 
@@ -160,6 +160,27 @@ describe("HercleRampClient on-ramp quote", () => {
     const headers = new Headers(init.headers);
     expect(headers.get("on-behalf-of")).toBe("hercle-account-1");
     expect(headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("refuses an order that names no account or reference to wire to", async () => {
+    // Without the IBAN the business cannot fund the order; without the reference Hercle cannot
+    // attribute the transfer. Either gap is a malformed order, not a quote to show.
+    const client = new HercleRampClient();
+    for (const bankAccount of [{}, { iban: "CH9300762011623852957" }, { paymentReference: "X" }]) {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        jsonResponse({ orderId: "ord_126", fiatCurrency: "EUR", fiatAmount: "250", bankAccount })
+      );
+
+      await expect(
+        client.createOnrampQuote(RUNTIME, {
+          assetRail: "usdc.solana",
+          fiatCurrency: "EUR",
+          fiatAmount: "250",
+          destinationWalletAddress: DEPOSIT_ADDRESS,
+          externalCustomerId: "hercle-account-1",
+        })
+      ).rejects.toThrow(/on-ramp order response is malformed/);
+    }
   });
 
   it("builds a fiat-funding instruction with the issued bank account", async () => {

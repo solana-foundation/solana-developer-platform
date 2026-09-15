@@ -116,16 +116,22 @@ const hercleEstimateResponseSchema = z.object({
   expiresAt: z.string().optional(),
 });
 
+/**
+ * The account attributes the wire to the business and the reference attributes it to this order, so an
+ * order without either cannot be funded or reconciled: refuse it as malformed rather than hand the
+ * business instructions with a blank IBAN. The bank identity fields and the payer name are descriptive
+ * and may be absent — Hercle sends an empty payer when the sub-account carries no company name.
+ */
 const hercleOnrampOrderResponseSchema = z.object({
   orderId: z.string().min(1),
   fiatCurrency: z.string(),
   fiatAmount: z.string(),
   bankAccount: z.object({
-    iban: z.string().optional(),
+    iban: z.string().min(1),
     bic: z.string().optional(),
     bankName: z.string().optional(),
     accountHolder: z.string().optional(),
-    paymentReference: z.string().optional(),
+    paymentReference: z.string().min(1),
     payerAccountHolder: z.string().optional(),
   }),
   expiresAt: z.string().optional(),

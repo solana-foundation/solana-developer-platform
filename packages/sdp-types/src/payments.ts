@@ -862,12 +862,13 @@ export interface MuralPaymentRampInstruction {
 }
 
 export interface HercleBankFundingDetails {
-  iban?: string;
+  /** The business's own account at Hercle's bank; the transfer is attributed by the account it lands on. */
+  iban: string;
   bic?: string;
   bankName?: string;
   accountHolder?: string;
   /** Wire reference the sender must include so Hercle can match the payment to the order. */
-  paymentReference?: string;
+  paymentReference: string;
   /** The name the wire must come from — the business itself; a wire from any other holder is returned by the bank and fails the order. */
   payerAccountHolder?: string;
 }
