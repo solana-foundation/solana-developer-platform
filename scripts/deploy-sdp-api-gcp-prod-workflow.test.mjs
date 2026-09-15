@@ -8,6 +8,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workflowPath = path.resolve(here, "../.github/workflows/deploy-sdp-api-gcp-prod.yml");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 
+test("a canary failure after promotion reports canary-failed, not a deploy failure", () => {
+  assert.match(
+    workflow,
+    /- name: Record canary outcome\n\s+id: canary_outcome\n\s+if: \$\{\{ always\(\) \}\}/
+  );
+  assert.match(workflow, /canary: \$\{\{ steps\.canary_outcome\.outputs\.result \}\}/);
+  assert.match(workflow, /needs\.deploy\.outputs\.canary == 'failure' && 'canary-failed'/);
+});
+
 test("manual production deploy requires an immutable SHA-tagged image", () => {
   assert.match(
     workflow,

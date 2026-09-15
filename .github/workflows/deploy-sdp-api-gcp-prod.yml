@@ -87,6 +87,8 @@ jobs:
       id-token: write
 
   deploy:
+    outputs:
+      canary: ${{ steps.canary_outcome.outputs.result }}
     name: Deploy production image
     needs: smoke
     if: >-
@@ -512,11 +514,17 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run prod canary against the promoted revision
+        id: canary
         if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
         timeout-minutes: 5
         run: |
           gcloud run jobs execute sdp-prod-canary \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
+
+      - name: Record canary outcome
+        id: canary_outcome
+        if: ${{ always() }}
+        run: echo "result=${{ steps.canary.outcome }}" >> "$GITHUB_OUTPUT"
 
       - name: Roll back incomplete rollout
         if: ${{ always() }}
@@ -590,6 +598,7 @@ jobs:
           ENV: production
           STATUS: >-
             ${{ needs.deploy.result == 'success' && 'success' ||
+                needs.deploy.outputs.canary == 'failure' && 'canary-failed' ||
                 (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
                 'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
