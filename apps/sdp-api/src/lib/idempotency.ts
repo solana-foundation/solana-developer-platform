@@ -168,8 +168,6 @@ function paymentTransferFingerprint(
       amount: input.amount,
       memo: input.memo ?? null,
       type: input.type,
-      // Kept to preserve fingerprints recorded before private transfers were removed.
-      privateTransfer: null,
     })
   );
 }

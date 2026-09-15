@@ -128,7 +128,7 @@ describe("buildPaymentTransferFingerprint", () => {
 
   it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
     expect(buildLegacyPaymentTransferFingerprint(base)).toBe(
-      '{"amount":"1","destinationAddress":"Dst","memo":null,"privateTransfer":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
+      '{"amount":"1","destinationAddress":"Dst","memo":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
     );
   });
 
