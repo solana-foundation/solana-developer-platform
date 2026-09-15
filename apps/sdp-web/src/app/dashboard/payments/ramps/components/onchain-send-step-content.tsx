@@ -4,12 +4,14 @@ import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
   CheckCircle2Icon,
+  ClockIcon,
   ExternalLinkIcon,
   PlusIcon,
   StickyNoteIcon,
   UserRoundIcon,
   WalletIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
@@ -260,7 +262,33 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
-  const { transferResult } = wizard;
+  const { transferResult, heldApprovalRequestId } = wizard;
+  if (heldApprovalRequestId !== null) {
+    // Same shape as a sent transfer: what happened, the payment, one way on.
+    return (
+      <div className="flex flex-col items-center gap-6">
+        <div className="flex size-16 items-center justify-center rounded-full bg-warning-bg text-warning">
+          <ClockIcon className="size-8" />
+        </div>
+        <div className="space-y-1 text-center">
+          <p className="text-2xl font-medium tracking-tight text-primary">
+            {t("DashboardPayments.onchainSend.approvalPendingTitle")}
+          </p>
+          <p className="text-sm text-tertiary">
+            {t("DashboardPayments.onchainSend.approvalPendingDescription")}
+          </p>
+        </div>
+        <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
+          <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
+        </section>
+        <Button asChild type="button" variant="secondary" className="w-full">
+          <Link href={`/dashboard/approvals/${encodeURIComponent(heldApprovalRequestId)}`}>
+            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
+          </Link>
+        </Button>
+      </div>
+    );
+  }
   if (transferResult === null) {
     return (
       <section className="space-y-4 rounded-2xl bg-fill-subtle p-5">

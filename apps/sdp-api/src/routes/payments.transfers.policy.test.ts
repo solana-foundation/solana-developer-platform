@@ -6,7 +6,10 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { walletApprovalRequestResponseSchema } from "@/openapi/schemas/custody";
+import {
+  walletApprovalRequestResponseSchema,
+  walletApprovalRequestsResponseSchema,
+} from "@/openapi/schemas/custody";
 import { walletPolicyResponseSchema } from "@/openapi/schemas/payments";
 import { SigningService } from "@/services/domain/signing.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
@@ -45,6 +48,7 @@ const TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID = "cwlt_payments_alias_authorized_
 const responseSchema = <T extends z.ZodType>(data: T) => z.object({ data });
 const walletPolicyHttpResponseSchema = responseSchema(walletPolicyResponseSchema);
 const walletApprovalHttpResponseSchema = responseSchema(walletApprovalRequestResponseSchema);
+const walletApprovalListHttpResponseSchema = responseSchema(walletApprovalRequestsResponseSchema);
 const dryRunResponseSchema = responseSchema(
   z.object({
     decision: z.string(),
@@ -709,6 +713,95 @@ describe("Payments routes — transfer policy", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
+  // The single-transfer dashboard retries with one stable key per payment. The
+  // gate does not collapse a retry into the pending approval (each POST opens
+  // its own request), so this pins what the key does guarantee: approving both
+  // requests executes the payment once, because the second execution replays
+  // the first transfer recorded under that key. Without a key it moves twice,
+  // which is why the dashboard sends one.
+  it.each([
+    ["under the same Idempotency-Key", 1, "pay-same-intent"],
+    ["with no Idempotency-Key", 2, undefined],
+  ] as const)(
+    "approving two requests opened %s executes the payment as %i transfer(s)",
+    async (_label, expectedTransfers, idempotencyKey) => {
+      const sessionId = "ses_same_key_payment_approver";
+      const approverUserId = "usr_same_key_payment_approver";
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+          )
+          .bind(approverUserId, "same-key-payment-approver@example.com"),
+        getDb(env)
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+          )
+          .bind("om_same_key_payment_approver", TEST_ORG.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+          )
+          .bind("pm_same_key_payment_approver", TEST_PROJECT.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+          )
+          .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      ]);
+      await seedWalletControlProfile({
+        rules: [
+          {
+            id: "approve-payment-execution",
+            kind: "approval",
+            operationTypes: ["payment_transfer_execute"],
+          },
+        ],
+      });
+      const payment = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "0.1",
+      };
+
+      const first = await postTransfer(payment, { idempotencyKey });
+      const retry = await postTransfer(payment, { idempotencyKey });
+      expect(first.status).toBe(202);
+      expect(retry.status).toBe(202);
+      const firstApproval = approvalErrorDetailsSchema.parse(
+        (await readErrorResponse(first)).error.details
+      ).approvalRequestId;
+      const retryApproval = approvalErrorDetailsSchema.parse(
+        (await readErrorResponse(retry)).error.details
+      ).approvalRequestId;
+      expect(retryApproval).not.toBe(firstApproval);
+      expect(await countTransferRows()).toBe(0);
+
+      const adminHeaders = {
+        Cookie: `sdp_session=${sessionId}`,
+        "x-project-id": TEST_PROJECT.id,
+      };
+      for (const approvalRequestId of [firstApproval, retryApproval]) {
+        const approved = await app.request(
+          `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+          { method: "POST", headers: adminHeaders },
+          env
+        );
+        expect(approved.status).toBe(200);
+      }
+
+      const transfers = await listTransferRows();
+      expect(transfers).toHaveLength(expectedTransfers);
+      // Each row is a separate execution attempt of the same payment. (With no key
+      // the second attempt fails in this harness only because the mocked RPC
+      // hands back the first signature; on a live cluster it would send.)
+    }
+  );
+
   it("fails an approved Payments replay whose route does not match its operation type", async () => {
     await seedWalletControlProfile({
       rules: [
@@ -1044,6 +1137,27 @@ describe("Payments routes — transfer policy", () => {
       Cookie: `sdp_session=${approverSessionId}`,
       "x-project-id": TEST_PROJECT.id,
     };
+
+    // Reads report the same owner check the decision routes enforce, so the
+    // dashboard can hide a decision the API would refuse. The request came from
+    // an API key the owner created, so the owner's session is its requester.
+    const detailPath = `/v1/wallets/approval-requests/${pendingDetails.approvalRequestId}`;
+    const ownerRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: ownerSessionHeaders }, env)).json()
+    );
+    expect(ownerRead.data.approvalRequest.viewerIsRequester).toBe(true);
+    const approverRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: approverSessionHeaders }, env)).json()
+    );
+    expect(approverRead.data.approvalRequest.viewerIsRequester).toBe(false);
+    const listed = walletApprovalListHttpResponseSchema.parse(
+      await (
+        await app.request("/v1/wallets/approval-requests", { headers: apiHeaders }, env)
+      ).json()
+    );
+    expect(
+      listed.data.approvalRequests.find((item) => item.id === pendingDetails.approvalRequestId)
+    ).toMatchObject({ viewerIsRequester: true });
 
     const apiKeyDecision = await app.request(
       approvalPath,

@@ -64,6 +64,8 @@ const baseWizard = {
   handleAccountAdded: vi.fn(),
   submitting: false,
   transferResult: null,
+  heldApprovalRequestId: null,
+  finished: false,
   handlePrimary: vi.fn(async () => undefined),
   handleSecondary: vi.fn(),
 } satisfies OnchainSendWizard;
@@ -241,4 +243,20 @@ describe("OnchainSendStepContent", () => {
       );
     }
   );
+
+  it("says a held payment waits for approval and links the request, with no explorer", () => {
+    renderStep({
+      ...baseWizard,
+      currentStepId: "REVIEW",
+      heldApprovalRequestId: "apr_test",
+      finished: true,
+    });
+
+    expect(screen.queryByText("Waiting for approval")).not.toBeNull();
+    expect(screen.queryByText("Transfer submitted")).toBeNull();
+    expect(screen.queryByRole("button", { name: "View on explorer" })).toBeNull();
+    expect(screen.getByRole("link", { name: "View approval request" }).getAttribute("href")).toBe(
+      "/dashboard/approvals/apr_test"
+    );
+  });
 });

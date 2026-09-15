@@ -44,6 +44,7 @@ const pendingRequest: WalletApprovalRequestSummary = {
     updatedAt: "2026-09-11T00:00:00.000Z",
   },
   policyEvaluation: null,
+  viewerIsRequester: false,
 };
 
 afterEach(() => {
@@ -128,4 +129,66 @@ describe("ApprovalRequestDetail", () => {
       ]);
     }
   );
+
+  // The API refuses a decision from whoever raised the request, so offering
+  // Approve or Reject to them only offers a 403.
+  it("offers the requester Cancel only, and says someone else decides", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={{ ...pendingRequest, viewerIsRequester: true }}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(
+      screen.getByText("You raised this request, so someone else has to approve or reject it.")
+    ).toBeTruthy();
+  });
+
+  // The API names the rule the caller did not meet; the role line was wrong
+  // for most of them.
+  it("shows the API's reason when a decision is forbidden", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json(
+          {
+            error: {
+              message: "Approval request must be decided by an active approval-group member",
+            },
+          },
+          { status: 403 }
+        )
+      )
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+        <Toaster theme="light" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+
+    expect(
+      await screen.findByText("Approval request must be decided by an active approval-group member")
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("Your role does not have permission to decide approval requests.")
+    ).toBeNull();
+  });
 });

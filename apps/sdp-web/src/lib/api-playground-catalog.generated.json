@@ -609,7 +609,8 @@
                   "matchedRules": [{}],
                   "requiresApproval": true,
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
-                }
+                },
+                "viewerIsRequester": false
               }
             ]
           },
@@ -684,7 +685,8 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false
             }
           },
           "meta": {
@@ -758,7 +760,8 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false
             }
           },
           "meta": {
@@ -832,7 +835,8 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false
             }
           },
           "meta": {
@@ -906,7 +910,8 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false
             }
           },
           "meta": {

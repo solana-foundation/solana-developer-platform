@@ -84,9 +84,10 @@ async function postWithSigningProviderRetry<T>(
     try {
       return await api.post<T>(path, body);
     } catch (error) {
+      // The fee sponsor (Kora) answers 503 while it warms up on Surfpool.
       const isRetryable =
         error instanceof Error &&
-        error.message.includes("signing provider is temporarily unavailable");
+        error.message.includes("Transaction fees can't be sponsored right now");
       if (!isRetryable || attempt === maxAttempts) {
         throw error;
       }

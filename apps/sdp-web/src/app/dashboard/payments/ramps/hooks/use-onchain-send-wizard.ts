@@ -17,7 +17,15 @@ import type { CreateTransferInput } from "@/app/dashboard/payments/payments-work
 import {
   createTransfer,
   fetchCounterpartyAccounts,
+  TransferRequestError,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import {
+  claimTransferIdempotencyKey,
+  holdTransferIdempotencyKey,
+  isTransferKeyConflict,
+  releaseTransferIdempotencyKey,
+  transferRequestFingerprint,
+} from "@/app/dashboard/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -167,6 +175,10 @@ export function useOnchainSendWizard({
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
+  // The approval request a policy parked this payment behind. Like a result,
+  // it ends the wizard: sending again would only open another approval.
+  const [heldApprovalRequestId, setHeldApprovalRequestId] = useState<string | null>(null);
+  const finished = transferResult !== null || heldApprovalRequestId !== null;
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
@@ -272,8 +284,29 @@ export function useOnchainSendWizard({
     const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
       position: "bottom-right",
     });
+    // Claimed BEFORE the await and durable per tab: a retry of this exact
+    // payment (double press, timeout, reload) carries the SAME key, so the API
+    // replays what it recorded instead of moving the money again.
+    const fingerprint = transferRequestFingerprint(submission);
+    const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
     try {
-      const transfer = await createTransfer(submission, t);
+      const outcome = await createTransfer(submission, t, idempotencyKey);
+      if (outcome.kind === "approval_pending") {
+        // The approval executor replays this request under the same key, so the
+        // key must outlive the person deciding.
+        holdTransferIdempotencyKey(fingerprint);
+        setHeldApprovalRequestId(outcome.approvalRequestId);
+        toast.info(t("DashboardPayments.onchainSend.approvalPendingTitle"), {
+          id: toastId,
+          description: t("DashboardPayments.onchainSend.approvalPendingDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
+      // The transfer row exists, so the key is spent: the next identical send is
+      // a new payment rather than a retry of this one.
+      releaseTransferIdempotencyKey(fingerprint);
+      const transfer = outcome.transfer;
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
@@ -283,6 +316,17 @@ export function useOnchainSendWizard({
         position: "bottom-right",
       });
     } catch (error) {
+      // A 4xx is a definitive refusal and retires the key. A 5xx or a network
+      // failure keeps it: the API may have recorded the transfer before the
+      // answer was lost. A 409 under our own key keeps it too.
+      if (
+        error instanceof TransferRequestError &&
+        error.status >= 400 &&
+        error.status < 500 &&
+        !isTransferKeyConflict(error.status)
+      ) {
+        releaseTransferIdempotencyKey(fingerprint);
+      }
       toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
         id: toastId,
         description:
@@ -301,7 +345,7 @@ export function useOnchainSendWizard({
       return;
     }
     if (isLastStep) {
-      if (transferResult) {
+      if (finished) {
         router.push("/dashboard/payments");
         return;
       }
@@ -314,7 +358,7 @@ export function useOnchainSendWizard({
   };
 
   const handleSecondary = () => {
-    if (submitting || transferResult) {
+    if (submitting || finished) {
       return;
     }
     if (stepIndex === 0) {
@@ -371,6 +415,8 @@ export function useOnchainSendWizard({
     handleAccountAdded,
     submitting,
     transferResult,
+    heldApprovalRequestId,
+    finished,
     handlePrimary,
     handleSecondary,
   };

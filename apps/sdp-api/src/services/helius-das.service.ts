@@ -8,7 +8,26 @@ import {
 import { getDb } from "@/db";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
+import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
+
+/** A symbol changes rarely, if ever; an hour keeps a renamed token from lingering long. */
+const TOKEN_SYMBOL_CACHE_TTL_MS = 60 * 60_000;
+/** Matches the Jupiter price TTL: a price older than this is not shown as current. */
+const USD_PRICE_CACHE_TTL_MS = 30_000;
+
+const tokenSymbolCache = createMintLookupCache<string>(TOKEN_SYMBOL_CACHE_TTL_MS);
+const usdPriceCache = createMintLookupCache<number>(USD_PRICE_CACHE_TTL_MS);
+
+/** @internal Test-only: forget cached symbols and prices so specs are order-independent. */
+export function clearHeliusDasCachesForTests(): void {
+  tokenSymbolCache.clearForTests();
+  usdPriceCache.clearForTests();
+}
+
+function clusterOf(env: Env): NonNullable<Env["SOLANA_NETWORK"]> {
+  return env.SOLANA_NETWORK ?? "devnet";
+}
 
 interface TrackedAssetDefinition {
   decimals: number;
@@ -71,7 +90,7 @@ interface HeliusGetAssetBatchResponse {
 }
 
 async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
-  const network = env.SOLANA_NETWORK ?? "devnet";
+  const network = clusterOf(env);
   const usdc = WELL_KNOWN_TOKENS.USDC;
   const usdcMint = usdc.mints[network];
   const trackedAssets: TrackedAssetDefinition[] = [
@@ -429,12 +448,11 @@ export async function attachTokenSymbolsToBalances(
     return balances;
   }
 
-  try {
-    const symbolsByMint = await fetchTokenSymbolsByMint(heliusDasUrl, unresolvedMints);
-    return enrichBalancesWithTokenSymbols(balances, symbolsByMint);
-  } catch {
-    return balances;
-  }
+  // A failed lookup answers no mints, so those balances keep their mint as the label.
+  const symbolsByMint = await tokenSymbolCache.lookup(clusterOf(env), unresolvedMints, (mints) =>
+    fetchTokenSymbolsByMint(heliusDasUrl, mints)
+  );
+  return enrichBalancesWithTokenSymbols(balances, symbolsByMint);
 }
 
 export async function attachTokenSymbolsToBalanceMap(
@@ -497,13 +515,12 @@ async function resolveUsdPricesForBalances(
     return { pricesByMint, trackedAssets };
   }
 
-  try {
-    const fetchedPrices = await fetchUsdPricesByMint(heliusDasUrl, stillUnresolved);
-    for (const [mint, price] of fetchedPrices) {
-      pricesByMint.set(mint, price);
-    }
-  } catch {
-    // Ignore price lookup failures; callers will fall back to unpriced balances.
+  // A failed lookup answers no mints; those balances stay unpriced.
+  const fetchedPrices = await usdPriceCache.lookup(clusterOf(env), stillUnresolved, (mints) =>
+    fetchUsdPricesByMint(heliusDasUrl, mints)
+  );
+  for (const [mint, price] of fetchedPrices) {
+    pricesByMint.set(mint, price);
   }
 
   return { pricesByMint, trackedAssets };

@@ -32,6 +32,7 @@ import type {
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -528,15 +529,60 @@ export interface CreateTransferInput {
   memo?: string;
 }
 
+export type CreateTransferOutcome =
+  | { kind: "submitted"; transfer: TransferRecord }
+  | { kind: "approval_pending"; approvalRequestId: string };
+
+/**
+ * An HTTP refusal from the transfer endpoint, carrying the status so the caller
+ * can decide the idempotency key's fate the way batches do: a 4xx retires it,
+ * a 5xx or a network failure keeps it.
+ */
+export class TransferRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "TransferRequestError";
+    this.status = status;
+  }
+}
+
+/**
+ * The 202 a policy approval answers with. The approval request id is the one
+ * thing the caller needs to point somebody at the decision.
+ */
+const signingPendingEnvelopeSchema = z.object({
+  error: z.object({
+    code: z.literal("SIGNING_PENDING"),
+    details: z.object({ approvalRequestId: z.string().min(1) }),
+  }),
+});
+
+/**
+ * Creates one transfer.
+ *
+ * A 202 is inside `response.ok` and is not a transfer: a wallet policy parked
+ * the payment until somebody approves it, and the body names that request.
+ * Reading it as a transfer turned a held payment into "Transfer failed", and a
+ * press of Send again opened a second approval for the same payment.
+ *
+ * The idempotency key is transport metadata, sent as a header and never in the
+ * body. Null for a caller whose request is already single-shot (a ramp transfer
+ * named by `transferId`).
+ */
 export async function createTransfer(
   input: CreateTransferInput,
-  t: Translate
-): Promise<TransferRecord> {
+  t: Translate,
+  idempotencyKey: string | null
+): Promise<CreateTransferOutcome> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (idempotencyKey !== null) {
+    headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
+  }
   const response = await fetch("/api/dashboard/payments/transfers", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
@@ -548,20 +594,34 @@ export async function createTransfer(
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
-    throw new Error(
+    throw new TransferRequestError(
       getApiError(
         body,
         t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
-      )
+      ),
+      response.status
     );
   }
 
-  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
-  if (!body.data?.transfer) {
+  const body: unknown = await response.json().catch(() => null);
+  if (response.status === 202) {
+    const held = signingPendingEnvelopeSchema.safeParse(body);
+    if (!held.success) {
+      throw new Error(t("DashboardPayments.workspace.transferMissing"));
+    }
+    return {
+      kind: "approval_pending",
+      approvalRequestId: held.data.error.details.approvalRequestId,
+    };
+  }
+  // SAFETY: the transfer endpoint's success envelope is `PaymentTransferEnvelope`
+  // (`@sdp/types`); only the presence of the transfer is checked here, as before.
+  const envelope = body as TransferEnvelope | null;
+  if (!envelope?.data?.transfer) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
-  return body.data.transfer;
+  return { kind: "submitted", transfer: envelope.data.transfer };
 }
 
 export async function fetchBatchRecipients(

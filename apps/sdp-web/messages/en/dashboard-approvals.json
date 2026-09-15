@@ -41,6 +41,7 @@
     "autoRefresh": "Refreshing every 5 seconds",
     "refreshFailed": "Approval requests could not be refreshed. Showing the last loaded results.",
     "viewOnly": "You can review approval requests, but your role cannot decide them.",
+    "requesterCannotDecide": "You raised this request, so someone else has to approve or reject it.",
     "noAccess": "Approval requests are not available for your role.",
     "noAccessDescription": "Ask an organization administrator for wallet read access.",
     "backToApprovals": "Back to approvals",
