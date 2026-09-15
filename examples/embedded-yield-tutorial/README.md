@@ -1,0 +1,37 @@
+# Embedded Yield, illustrated
+
+A standalone, interactive guide page for [`examples/embedded-yield-bank`](../embedded-yield-bank). It walks through the Embedded Yield story in three scrolling screens, each pairing explanatory text with a visual crafted in CSS and React:
+
+1. **Custody** — a faux mobile phone running the "Northstar Wallet" app, where a fintech custodies customer funds in USD, euros, and the USDC stablecoin. No blockchain anywhere on this screen.
+2. **Configure** — the real SDP Embedded Yield dashboard (screenshot) where the wallet team selects which Earn strategies to surface. The strategies are backed by real-world assets (RWAs) like tokenized treasuries and private credit, and the customer's stablecoins move with one API request.
+3. **Earn** — the same faux phone with an "Earn 4.8%" button on the USDC balance. The button presses itself, a confirmation shows the stablecoins are now earning, and a fast-forwarded 30-day simulation accrues yield with a balance chart rising up and to the right.
+
+There is no server, environment configuration, or chain access involved — it is a pure front-end page.
+
+## Run it
+
+From the repository root:
+
+```bash
+pnpm dev:example:embedded-yield-tutorial
+```
+
+or directly:
+
+```bash
+pnpm -C examples/embedded-yield-tutorial install
+pnpm -C examples/embedded-yield-tutorial dev
+```
+
+Then open `http://127.0.0.1:4175`.
+
+## Checks
+
+```bash
+pnpm -C examples/embedded-yield-tutorial lint
+pnpm -C examples/embedded-yield-tutorial typecheck
+pnpm -C examples/embedded-yield-tutorial test
+pnpm -C examples/embedded-yield-tutorial build
+```
+
+The yield math behind the animation is unit-tested in [`src/lib/yield.unit.test.ts`](src/lib/yield.unit.test.ts). For the real devnet integration — live balances, strategies, deposits, and movements — see the reference implementation in [`examples/embedded-yield-bank`](../embedded-yield-bank).

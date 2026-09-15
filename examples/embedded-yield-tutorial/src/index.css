@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Inter Variable", "Inter", sans-serif;
+  --color-app: var(--app);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-success: var(--success);
+}
+
+:root {
+  --app: #e9e7de;
+  --background: #ffffff;
+  --foreground: #1c1c1d;
+  --muted: rgba(28, 28, 29, 0.04);
+  --muted-foreground: rgba(28, 28, 29, 0.56);
+  --border: rgba(28, 28, 29, 0.1);
+  --success: #00875a;
+}
+
+@layer base {
+  html {
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-width: 320px;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+}
+
+/* Scroll-triggered entrance used by <Reveal />. */
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-reveal {
+  animation: reveal-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Toast card that pops in when yield is confirmed. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-toast {
+  animation: toast-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
