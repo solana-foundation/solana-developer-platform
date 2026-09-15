@@ -15,6 +15,7 @@ import {
 } from "./counterparty";
 import {
   hercleOnboardingRequirements,
+  isHercleSettlementStatus,
   mapHercleVerificationStatus,
   tryMapHercleVerificationStatus,
 } from "./provider-data";
@@ -181,6 +182,13 @@ describe("provider-data mapping", () => {
   it("offers a non-throwing lookup so a webhook can skip a foreign status", () => {
     assert.equal(tryMapHercleVerificationStatus("approved"), "ready");
     assert.equal(tryMapHercleVerificationStatus("something-new"), undefined);
+  });
+
+  it("narrows a settlement status read off a webhook without an assertion", () => {
+    for (const status of ["awaiting_payment", "settling", "settled", "failed", "expired"]) {
+      assert.equal(isHercleSettlementStatus(status), true);
+    }
+    assert.equal(isHercleSettlementStatus("half-settled"), false);
   });
 });
 

@@ -23,6 +23,11 @@ export const HERCLE_SETTLEMENT_STATUSES = [
 ] as const;
 export type HercleSettlementStatus = (typeof HERCLE_SETTLEMENT_STATUSES)[number];
 
+/** Narrows a status read off a webhook body at runtime, where a bare assertion is not allowed. */
+export function isHercleSettlementStatus(value: string): value is HercleSettlementStatus {
+  return (HERCLE_SETTLEMENT_STATUSES as readonly string[]).includes(value);
+}
+
 /**
  * What the handler resolves from the counterparty's provider-account rows before asking for the
  * requirements arm: the customer link's verification state.

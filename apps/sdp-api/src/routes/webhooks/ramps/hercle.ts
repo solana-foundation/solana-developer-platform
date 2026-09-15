@@ -1,5 +1,7 @@
 import {
+  type HercleSettlementStatus,
   type HercleVerificationStatus,
+  isHercleSettlementStatus,
   tryMapHercleVerificationStatus,
 } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
@@ -23,15 +25,6 @@ import type { AppContext, WebhookProcessor } from "./processor";
  * every event echoes the order reference Hercle minted at quote time (the providerReference
  * SDP persisted), so settlement lookups need no per-provider correlation state.
  */
-const HERCLE_SETTLEMENT_STATUSES = [
-  "awaiting_payment",
-  "settling",
-  "settled",
-  "failed",
-  "expired",
-] as const;
-type HercleSettlementStatus = (typeof HERCLE_SETTLEMENT_STATUSES)[number];
-
 export type HercleWebhookEvent =
   | {
       kind: "settlement";
@@ -111,13 +104,13 @@ export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
           provider: "hercle",
         });
       }
-      if (!(HERCLE_SETTLEMENT_STATUSES as readonly string[]).includes(status)) {
+      if (!isHercleSettlementStatus(status)) {
         return { kind: "ignore", reason: `unknown_settlement_status:${status}` };
       }
       return {
         kind: "settlement",
         reference,
-        status: status as HercleSettlementStatus,
+        status,
         receivedAmount: readString(data.receivedAmount),
         error: readString(data.error),
       };
