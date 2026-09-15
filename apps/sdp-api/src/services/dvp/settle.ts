@@ -29,7 +29,7 @@ import {
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { isPastDvpExpiry } from "./observe";
-import { readClusterUnixTimestamp, readDvpAccounts } from "./read-chain";
+import { readDvpAccounts } from "./read-chain";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import {
   buildCancelInstruction,
@@ -67,7 +67,7 @@ export interface DvpCloseResult {
  * between this read and execution, a slot or two later; that refusal is retryable.
  *
  * @param trade - The trade about to settle.
- * @param clusterNow - The cluster clock's `unixTimestamp`.
+ * @param clusterNow - The cluster clock's `unixTimestamp`, read with the escrows.
  */
 function assertInsideSettlementWindow(
   trade: Pick<DvpTradeRow, "id" | "expiryTimestamp" | "earliestSettlementTimestamp">,
@@ -111,13 +111,6 @@ export async function closeDvpTrade(
     );
   }
 
-  // After the local refusals, so a trade the row already rules out is answered
-  // without a chain read, and an unreachable RPC cannot mask that answer.
-  const rpc = solanaRpc.createRpc(env);
-  if (action === "settle") {
-    assertInsideSettlementWindow(trade, await readClusterUnixTimestamp(rpc));
-  }
-
   // The authority is a PDA seed, so a project that rotated its settlement
   // wallet cannot settle trades created under the old one. Better to say that
   // than to send a transaction the program will reject.
@@ -125,6 +118,26 @@ export async function closeDvpTrade(
     throw badRequest(
       `DvP trade ${trade.id} was created under settlement authority ${trade.settlementAuthority}, which is no longer this project's. The authority is part of the trade's address and cannot be changed.`
     );
+  }
+
+  // After the local refusals, so a trade the row already rules out is answered
+  // without a chain read, and an unreachable RPC cannot mask that answer. Before
+  // the custody signer, so a refusal here never calls the provider.
+  const rpc = solanaRpc.createRpc(env);
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
+    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+  });
+  if (
+    (!snapshot.legA.exists && snapshot.legA.tampered) ||
+    (!snapshot.legB.exists && snapshot.legB.tampered)
+  ) {
+    throw conflict(
+      `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+    );
+  }
+  if (action === "settle") {
+    assertInsideSettlementWindow(trade, snapshot.clusterUnixTimestamp);
   }
 
   const signer = await createOrgSignerForCustodyWallet(
@@ -147,18 +160,6 @@ export async function closeDvpTrade(
     tokenProgramB: trade.tokenProgramB,
   });
 
-  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
-    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
-    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
-  });
-  if (
-    (!snapshot.legA.exists && snapshot.legA.tampered) ||
-    (!snapshot.legB.exists && snapshot.legB.tampered)
-  ) {
-    throw conflict(
-      `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
-    );
-  }
   // Sponsorship is resolved only after every local refusal above, as in create.
   const feePayment = createRequestSponsorshipFeePayment(c);
   const sponsor = await feePayment.getFeePayer();

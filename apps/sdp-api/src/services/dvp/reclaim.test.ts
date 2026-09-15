@@ -1,11 +1,12 @@
 /**
  * Reclaiming one side of a trade.
  *
- * Two things matter here beyond the refusals. The account wiring, because a
- * reclaim built against the wrong mint or token program is refused on chain,
- * and the generated builders elsewhere once defaulted the token program. And
- * the receipt, because a leg SDP funded keeps its claim row, and unless the
- * reclaim clears it the next funding of that leg conflicts forever.
+ * Three things matter beyond the refusals. The account wiring, because a
+ * reclaim built against the wrong mint or token program is refused on chain.
+ * The receipt, because a funding row is written at broadcast and a reclaim that
+ * took over one whose transfer had not landed would drain today's balance and
+ * let that funding land afterwards. And the lock's lifetime: held until the
+ * reclaim confirms, so nothing reads the escrow as still full in between.
  */
 
 import assert from "node:assert/strict";
@@ -14,13 +15,11 @@ import { DVP_LEG_REFUSAL, MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import {
   address,
   getCompiledTransactionMessageDecoder,
-  getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
 } from "@solana/kit";
-import { generateKeyPairSigner, partiallySignTransactionWithSigners } from "@solana/signers";
+import { generateKeyPairSigner } from "@solana/signers";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
@@ -29,7 +28,7 @@ import {
 } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
-import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
+import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -40,23 +39,14 @@ const claimForReclaim = vi.hoisted(() => vi.fn());
 const rebindSignature = vi.hoisted(() => vi.fn());
 const hasClaim = vi.hoisted(() => vi.fn());
 const releaseClaim = vi.hoisted(() => vi.fn());
+const listForTrade = vi.hoisted(() => vi.fn());
+const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
+const confirmTransaction = vi.hoisted(() => vi.fn());
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeMint = vi.hoisted(() => vi.fn());
 
-let sponsorSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 let partySigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
-
-/** Co-signs a partially signed transaction as the sponsor, the way Kora would. */
-async function sponsorSign(transaction: Uint8Array, lifecycle: OwnedSubmissionLifecycle) {
-  const decoded = getTransactionDecoder().decode(transaction);
-  const signed = await partiallySignTransactionWithSigners([sponsorSigner], decoded);
-  const signature = getSignatureFromTransaction(signed);
-  const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
-  await lifecycle.persistSigned({ signature, signedTransaction });
-  await lifecycle.markStarted();
-  return { signature, signedTransaction, releaseDefinitelyUnbroadcast: vi.fn() };
-}
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
@@ -64,6 +54,7 @@ vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   createProjectSponsorshipFeePayment,
 }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
+vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/dvp")>()),
   verifySwapDvpAccount,
@@ -74,6 +65,7 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
     claimForReclaim,
     rebindSignature,
     hasClaim,
+    listForTrade,
     release: releaseClaim,
   }),
 }));
@@ -88,62 +80,38 @@ vi.mock("@sdp/rpc/solana", () => ({
     lastValidBlockHeight: 100n,
   }),
   sendTransaction,
+  confirmTransaction,
 }));
 
 const { reclaimDvpTradeLeg } = await import("./reclaim");
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
-  return {
+  return buildDvpTradeRow({
     id: "dvp_reclaim_test",
-    organizationId: "org_a",
-    projectId: "prj_a",
-    swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
-    settlementAuthority: address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY"),
     userA: partySigner.address,
-    userB: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
-    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
-    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
-    nonce: "42",
+    // Leg B is a legacy SPL mint, so the wiring test below has two programs to tell apart.
     tokenProgramA: TOKEN_2022_PROGRAM_ADDRESS,
     tokenProgramB: TOKEN_PROGRAM_ADDRESS,
-    decimalsA: 6,
-    decimalsB: 6,
-    symbolA: "ATD",
-    symbolB: "USDC",
-    nameA: "Acme Treasury Debt",
-    nameB: "USD Coin",
-    amountA: "1000",
-    amountB: "2000",
-    expiryTimestamp: "1900000000",
-    earliestSettlementTimestamp: null,
-    userASettlementDestination: partySigner.address,
-    userBSettlementDestination: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
-    refString: null,
-    escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
-    escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    counterpartyAccountIdA: null,
-    counterpartyAccountIdB: null,
-    status: "funded",
-    observedAt: null,
-    idempotencyKey: null,
-    idempotencyFingerprint: null,
-    createSignature: null,
-    createLastValidBlockHeight: null,
-    closeSignature: null,
-    closeResolutionAttempts: 0,
-    closeResolutionAfter: null,
-    closedAt: null,
-    escrowAAmount: "1000",
-    escrowBAmount: "2000",
-    escrowAPeakAmount: "1000",
-    escrowBPeakAmount: "2000",
-    escrowAFrozen: false,
-    escrowBFrozen: false,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
     ...overrides,
+  });
+}
+
+/** What a funding row on the leg looks like: a lock until `fundingTx` is set. */
+function claimRow(fundingTx: string | null) {
+  return {
+    tradeId: "dvp_reclaim_test",
+    side: "a",
+    organizationId: "org_a",
+    projectId: "prj_a",
+    custodyWalletId: "cwlt_a",
+    signature: RECEIPT,
+    expiryHeight: "90",
+    fundingTx,
   };
 }
+
+const RECEIPT =
+  "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
 const RECLAIMER_A = {
   side: "a" as const,
@@ -171,28 +139,34 @@ function sentInstructions() {
 describe("reclaimDvpTradeLeg", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    sponsorSigner = await generateKeyPairSigner();
+    const sponsor = await createTestSponsor();
     partySigner = await generateKeyPairSigner();
     createOrgSignerForCustodyWallet.mockResolvedValue(partySigner);
     readDvpAccounts.mockResolvedValue({
       trade: { address: trade().swapDvp, exists: true },
       legA: { exists: true, amount: 1000n, frozen: false },
       legB: { exists: true, amount: 2000n, frozen: false },
+      clusterUnixTimestamp: 1_800_000_000n,
     });
     verifySwapDvpAccount.mockResolvedValue({ address: trade().swapDvp });
     fetchMaybeMint.mockResolvedValue({ exists: true, data: { extensions: { __option: "None" } } });
+    listForTrade.mockResolvedValue([]);
     claimForReclaim.mockResolvedValue(true);
     rebindSignature.mockResolvedValue(true);
     hasClaim.mockResolvedValue(true);
     releaseClaim.mockResolvedValue(undefined);
-    prepareOwnedSubmission.mockImplementation(sponsorSign);
+    prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
     createProjectSponsorshipFeePayment.mockResolvedValue({
-      getFeePayer: async () => sponsorSigner.address,
+      getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });
-    sendTransaction.mockImplementation(async (_rpc, bytes) =>
-      getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
-    );
+    sendTransaction.mockImplementation(acceptTransaction);
+    confirmTransaction.mockImplementation(async (_rpc, signature) => ({
+      signature,
+      slot: 1n,
+      confirmationStatus: "confirmed",
+      err: null,
+    }));
   });
 
   it("drains leg A's escrow into the party's own token account for that mint", async () => {
@@ -236,19 +210,48 @@ describe("reclaimDvpTradeLeg", () => {
     expect(reclaim.accounts[5]).toBe(TOKEN_PROGRAM_ADDRESS);
   });
 
-  // The leg's lock is taken before anything is sent, so a funding can't start
-  // between a check and the broadcast, and it is released once the reclaim is
-  // on the wire, which is what lets the leg be funded again.
-  it("holds the leg's lock across the send, then releases its own signature", async () => {
+  // Taken before anything is sent, so a funding can't start between a check and
+  // the broadcast, and released once the reclaim confirms, which is what lets the
+  // leg be funded again without anything reading the escrow as still full.
+  it("holds the leg's lock from before the send until the reclaim confirms", async () => {
     const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
 
     expect(claimForReclaim).toHaveBeenCalledWith(
-      expect.objectContaining({ tradeId: "dvp_reclaim_test", side: "a", expiryHeight: "100" })
+      expect.objectContaining({ tradeId: "dvp_reclaim_test", side: "a", expiryHeight: "100" }),
+      null
     );
     expect(claimForReclaim.mock.invocationCallOrder[0]).toBeLessThan(
       sendTransaction.mock.invocationCallOrder[0]
     );
+    expect(confirmTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      releaseClaim.mock.invocationCallOrder[0]
+    );
     expect(releaseClaim).toHaveBeenCalledWith("dvp_reclaim_test", "a", result.signature);
+  });
+
+  // On the wire is not landed. A second reclaim, or a funding, let in now would
+  // read the escrow still full and send on top of this one.
+  it("keeps the lock when the reclaim does not confirm in time", async () => {
+    confirmTransaction.mockRejectedValue(new Error("confirmation timed out after 15000ms"));
+
+    const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+
+    expect(result.signature).toEqual(expect.any(String));
+    expect(releaseClaim).not.toHaveBeenCalled();
+  });
+
+  // A processed status can still be dropped with its fork.
+  it("keeps the lock when the reclaim is only processed", async () => {
+    confirmTransaction.mockImplementation(async (_rpc, signature) => ({
+      signature,
+      slot: 1n,
+      confirmationStatus: "processed",
+      err: { InstructionError: [1, { Custom: 1 }] },
+    }));
+
+    await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+
+    expect(releaseClaim).not.toHaveBeenCalled();
   });
 
   // It may still land, so a funding on top of it would be the race again.
@@ -303,7 +306,52 @@ describe("reclaimDvpTradeLeg", () => {
   });
 
   // A funding in flight holds the lock, and reclaiming over it is the race.
-  it("refuses, sending nothing, when the leg's lock is already held", async () => {
+  it("refuses, sending nothing, when a funding still holds the leg's lock", async () => {
+    listForTrade.mockResolvedValue([claimRow(null)]);
+
+    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+      details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
+    });
+    expect(readDvpFundingReceipt).not.toHaveBeenCalled();
+    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // The funding was written at broadcast and has not confirmed. Reclaiming now
+  // drains today's balance and the funding lands after, re-funding the leg.
+  it("refuses to take over a receipt whose funding has not landed yet", async () => {
+    listForTrade.mockResolvedValue([claimRow(RECEIPT)]);
+    readDvpFundingReceipt.mockResolvedValue("pending");
+
+    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+      details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
+    });
+    expect(readDvpFundingReceipt).toHaveBeenCalledWith(expect.anything(), {
+      fundingTx: RECEIPT,
+      expiryHeight: "90",
+    });
+    expect(claimForReclaim).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(["landed", "moved_nothing"] as const)(
+    "takes over a receipt whose funding %s, guarded on that exact signature",
+    async (state) => {
+      listForTrade.mockResolvedValue([claimRow(RECEIPT)]);
+      readDvpFundingReceipt.mockResolvedValue(state);
+
+      await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+
+      expect(claimForReclaim).toHaveBeenCalledWith(
+        expect.objectContaining({ tradeId: "dvp_reclaim_test", side: "a" }),
+        RECEIPT
+      );
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  // The receipt changed between the chain read and the guarded takeover.
+  it("refuses when the leg's row changed after it was checked", async () => {
     claimForReclaim.mockResolvedValue(false);
 
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
@@ -319,6 +367,7 @@ describe("reclaimDvpTradeLeg", () => {
       trade: { address: trade().swapDvp, exists: true },
       legA: { exists: true, amount: 0n, frozen: false },
       legB: { exists: true, amount: 2000n, frozen: false },
+      clusterUnixTimestamp: 1_800_000_000n,
     });
 
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
@@ -333,6 +382,7 @@ describe("reclaimDvpTradeLeg", () => {
       trade: { address: trade().swapDvp, exists: true },
       legA: { exists: false, tampered: true },
       legB: { exists: true, amount: 2000n, frozen: false },
+      clusterUnixTimestamp: 1_800_000_000n,
     });
 
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
@@ -359,9 +409,10 @@ describe("reclaimDvpTradeLeg", () => {
   it("refuses when the custody signer is not the party address", async () => {
     createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toThrow(
-      /no longer signs as side a's party/
-    );
+    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/no longer signs as side a's party/),
+      details: { reason: DVP_LEG_REFUSAL.signerNotParty },
+    });
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
   });
 });

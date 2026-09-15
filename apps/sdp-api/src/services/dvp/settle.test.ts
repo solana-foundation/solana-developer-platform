@@ -26,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import { type AppError, conflict } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import type { DvpSettlementWallet } from "./settlement-wallet";
@@ -36,8 +37,6 @@ const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
-// The settlement window is judged by the cluster clock, not the host's.
-const readClusterUnixTimestamp = vi.hoisted(() => vi.fn());
 const getRecentBlockhash = vi.hoisted(() =>
   vi.fn(async () => ({
     blockhash: "11111111111111111111111111111111",
@@ -61,7 +60,7 @@ vi.mock("@/services/sponsorship.service", async () => {
     }),
   };
 });
-vi.mock("./read-chain", () => ({ readDvpAccounts, readClusterUnixTimestamp }));
+vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash,
@@ -70,62 +69,17 @@ vi.mock("@sdp/rpc/solana", () => ({
 
 const { closeDvpTrade } = await import("./settle");
 
-let SETTLEMENT_AUTHORITY = "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY";
-const USER_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
-const USER_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
-const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+let SETTLEMENT_AUTHORITY = DVP_TEST_AUTHORITY;
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
-  return {
+  return buildFundedDvpTradeRow({
     id: "dvp_settle_test",
     organizationId: "org_x",
     projectId: "prj_x",
-    swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
-    settlementAuthority: address(SETTLEMENT_AUTHORITY),
-    userA: address(USER_A),
-    userB: address(USER_B),
-    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
-    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
-    nonce: "42",
-    tokenProgramA: address(T22),
-    tokenProgramB: address(T22),
-    decimalsA: 6,
-    decimalsB: 6,
-    symbolA: "ATD",
-    symbolB: "USDC",
-    nameA: "Acme Treasury Debt",
-    nameB: "USD Coin",
-    amountA: "1000",
-    amountB: "2000",
+    settlementAuthority: SETTLEMENT_AUTHORITY,
     expiryTimestamp: "1800003600",
-    earliestSettlementTimestamp: null,
-    userASettlementDestination: address(USER_A),
-    userBSettlementDestination: address(USER_B),
-    refString: null,
-    escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
-    escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    counterpartyAccountIdA: null,
-    counterpartyAccountIdB: null,
-    status: "funded",
-    observedAt: null,
-    idempotencyKey: null,
-    idempotencyFingerprint: null,
-    createSignature: null,
-    createLastValidBlockHeight: null,
-    closeSignature: null,
-    closeResolutionAttempts: 0,
-    closeResolutionAfter: null,
-    closedAt: null,
-    escrowAAmount: "1000",
-    escrowBAmount: "2000",
-    escrowAPeakAmount: "1000",
-    escrowBPeakAmount: "2000",
-    escrowAFrozen: false,
-    escrowBFrozen: false,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
     ...overrides,
-  };
+  });
 }
 
 const context = { env } as never;
@@ -156,11 +110,12 @@ describe("closeDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    readClusterUnixTimestamp.mockResolvedValue(NOW_SECONDS);
+    // The settlement window is judged by the cluster clock read with the escrows.
     readDvpAccounts.mockResolvedValue({
       trade: { exists: true, address: trade().swapDvp },
       legA: { exists: true, amount: 1000n, frozen: false },
       legB: { exists: true, amount: 2000n, frozen: false },
+      clusterUnixTimestamp: NOW_SECONDS,
     });
     authority = await generateKeyPairSigner();
     SETTLEMENT_AUTHORITY = authority.address;
@@ -320,23 +275,16 @@ describe("closeDvpTrade", () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  // The row already answers this one, so the cluster is not asked and an RPC
-  // outage cannot turn a 400 into a 500.
-  it("refuses an unfunded settle without reading the cluster clock", async () => {
-    readClusterUnixTimestamp.mockRejectedValue(new Error("rpc down"));
+  // Settle moves both legs, so both must be funded. The row already answers
+  // that, so the chain is not asked: no signature spent, and an RPC outage
+  // cannot turn the 400 into a 500.
+  it("refuses to settle a trade that is not fully funded, without reading the chain", async () => {
+    readDvpAccounts.mockRejectedValue(new Error("rpc down"));
 
     await expect(
       closeDvpTrade(context, trade({ status: "partially_funded" }), "settle", settlement)
     ).rejects.toThrow(/requires both legs funded/);
-    expect(readClusterUnixTimestamp).not.toHaveBeenCalled();
-  });
-
-  // Settle moves both legs, so both must be funded. Sending it on a half-funded
-  // trade costs a signature to learn what the status already said.
-  it("refuses to settle a trade that is not fully funded", async () => {
-    await expect(
-      closeDvpTrade(context, trade({ status: "partially_funded" }), "settle", settlement)
-    ).rejects.toThrow(/requires both legs funded/);
+    expect(readDvpAccounts).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -362,7 +310,7 @@ describe("closeDvpTrade", () => {
     await expect(
       closeDvpTrade(context, trade(), "settle", {
         ...settlement,
-        address: address(USER_B),
+        address: DVP_TEST_USER_B,
       })
     ).rejects.toThrow(/part of the trade's address and cannot be changed/);
     expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();

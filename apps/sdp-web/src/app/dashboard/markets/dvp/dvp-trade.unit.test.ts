@@ -3,7 +3,6 @@ import { OTHER_ADDRESS, OWN_WALLET_ID, ownParty, testLeg, testTrade } from "./dv
 import {
   canCancelDvpTrade,
   custodiedSidesOf,
-  dvpSettleAvailability,
   frozenLegs,
   legFundingRatio,
   matchesAddressQuery,
@@ -66,44 +65,10 @@ describe("legFundingRatio", () => {
   });
 });
 
-/** Inside the fixture's window: its expiry is 1_900_000_000. */
-const NOW_MS = 1_800_000_000_000;
-const NOW_SECONDS = NOW_MS / 1000;
-
+// Whether settle can go out is the API's answer (`settlementAvailability`), by the
+// cluster clock; the dashboard never re-derives it. Cancel is the one decision
+// left to the page.
 describe("trade actions", () => {
-  it("allows settling only a fully funded trade", () => {
-    expect(dvpSettleAvailability(trade({ status: "funded" }), NOW_MS)).toBe("available");
-    for (const status of ["created", "partially_funded", "expired"] as const) {
-      expect(dvpSettleAvailability(trade({ status }), NOW_MS)).not.toBe("available");
-    }
-  });
-
-  // The status trails the chain by one reading, so a trade that expired a
-  // moment ago can still say funded. The program refuses it either way.
-  it("reads a funded trade past its expiry as expired, not settleable", () => {
-    const expired = trade({ status: "funded", expiryTimestamp: String(NOW_SECONDS - 1) });
-
-    expect(dvpSettleAvailability(expired, NOW_MS)).toBe("expired");
-  });
-
-  // `settle_dvp.rs` checks `now <= expiry`, so the expiry second itself settles.
-  it("still settles during the exact expiry second", () => {
-    const edge = trade({ status: "funded", expiryTimestamp: String(NOW_SECONDS) });
-
-    expect(dvpSettleAvailability(edge, NOW_MS + 999)).toBe("available");
-  });
-
-  it("names an earliest settlement time that has not arrived yet", () => {
-    const early = trade({ status: "funded", earliestSettlementTimestamp: String(NOW_SECONDS + 1) });
-
-    expect(dvpSettleAvailability(early, NOW_MS)).toBe("too_early");
-    expect(dvpSettleAvailability(early, NOW_MS + 1000)).toBe("available");
-  });
-
-  it("says unfunded, not expired, for an open trade still short", () => {
-    expect(dvpSettleAvailability(trade({ status: "partially_funded" }), NOW_MS)).toBe("unfunded");
-  });
-
   // Cancel is the escape hatch. Requiring funding would make an abandoned
   // half-funded trade impossible to unwind from the dashboard.
   it("allows cancelling any open trade, funded or not", () => {
@@ -112,10 +77,9 @@ describe("trade actions", () => {
     }
   });
 
-  it("offers neither action on a closed trade", () => {
+  it("offers no cancel on a closed trade", () => {
     for (const status of ["settled", "cancelled", "rejected", "closed_unknown"] as const) {
       expect(canCancelDvpTrade(trade({ status }))).toBe(false);
-      expect(dvpSettleAvailability(trade({ status }), NOW_MS)).not.toBe("available");
     }
   });
 });

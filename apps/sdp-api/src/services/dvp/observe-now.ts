@@ -86,6 +86,7 @@ export async function observeDvpTradeNow(
       escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
       escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
       observedAt: new Date().toISOString(),
+      observedClusterTimestamp: observation.clusterUnixTimestamp.toString(),
       closeSignature:
         observation.closeResolution === null ? null : observation.closeResolution.signature,
     });
@@ -159,6 +160,7 @@ export async function observeDvpTradeWithoutRecording(
       escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
       escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
       observedAt: new Date().toISOString(),
+      observedClusterTimestamp: observation.clusterUnixTimestamp.toString(),
     };
   } catch (error) {
     getLogger().warn(
@@ -187,7 +189,9 @@ const OBSERVATION_MAX_AGE_BY_STATUS = {
   created: OBSERVATION_MAX_AGE_MS,
   partially_funded: OBSERVATION_MAX_AGE_MS,
   funded: OBSERVATION_MAX_AGE_MS,
-  expired: null,
+  // Still open on chain: a reclaim can drain it and a late deposit can land, and
+  // the counterparty's page has no other way to see either.
+  expired: OBSERVATION_MAX_AGE_MS,
   create_failed: null,
   settled: CLOSED_OBSERVATION_MAX_AGE_MS,
   cancelled: CLOSED_OBSERVATION_MAX_AGE_MS,
@@ -200,8 +204,9 @@ const OBSERVATION_MAX_AGE_BY_STATUS = {
  *
  * Open trades use a short freshness window so deposits appear promptly. Closed
  * trades use a slower cadence because their escrow can be re-created and paid
- * into after close, making the late deposit recoverable. Expired and failed
- * creates are never re-read here.
+ * into after close, making the late deposit recoverable. Expired trades keep the
+ * open window, since their escrows still exist. Failed creates are never re-read
+ * here.
  *
  * @param env - API process environment.
  * @param trade - The trade as it was last stored.

@@ -12,7 +12,7 @@
  * reaches the trades query string.
  */
 
-import type { DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
 import type { DvpTradesFilters } from "./dvp-trades.data";
 
 /**
@@ -37,6 +37,16 @@ export const STATUS_FILTERS = {
 } as const satisfies Record<string, readonly DvpTradeStatus[] | null>;
 
 export type StatusFilter = keyof typeof STATUS_FILTERS;
+
+/**
+ * The groups that also narrow by settlement availability. "Ready to settle" is
+ * a funded trade the program will settle now, so a funded trade whose earliest
+ * settlement time is still ahead is not in it. Judged server-side by the cluster
+ * clock read with each trade's last observation.
+ */
+const AVAILABILITY_FILTERS: Partial<Record<StatusFilter, readonly DvpSettlementAvailability[]>> = {
+  ready: ["available"],
+};
 
 /**
  * Parses the page's search params into the filters the trades fetch takes.
@@ -66,6 +76,8 @@ export function parseDvpTradesFilters(
     status,
     filters: {
       statuses: STATUS_FILTERS[status] === null ? null : [...STATUS_FILTERS[status]],
+      settlementAvailability:
+        AVAILABILITY_FILTERS[status] === undefined ? null : [...AVAILABILITY_FILTERS[status]],
       q,
     },
   };

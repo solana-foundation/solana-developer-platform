@@ -9,11 +9,12 @@
 import {
   DVP_TRADE_SIDES,
   type DvpLegOutcome,
+  type DvpSettlementAvailability,
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types";
 
-export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
+export { DVP_TRADE_SIDES, type DvpSettlementAvailability, type DvpTradeSide, type DvpTradeStatus };
 
 /**
  * The caller's standing on a trade, derived per caller by the API.
@@ -64,7 +65,10 @@ export interface DvpTradeLeg {
   escrow: string;
   settlementDestination: string;
   funding: DvpLegFunding | null;
-  /** What moved this leg into escrow: the receipt, else the claim, else null. */
+  /**
+   * The transfer SDP broadcast into this escrow, once it is on the wire. Null
+   * before that, and for deposits made outside SDP. Never the pre-broadcast claim.
+   */
   fundingSignature: string | null;
   outcome: DvpLegOutcome;
 }
@@ -79,6 +83,13 @@ export interface DvpTrade {
   nonce: string;
   expiryTimestamp: string;
   earliestSettlementTimestamp: string | null;
+  /**
+   * Whether Settle can go out, derived by the API from the cluster clock read
+   * with the last observation. The badge, the list filter and the Settle panel
+   * all read this rather than a browser clock. Null for a closed trade, or a
+   * funded one not yet observed with a cluster clock.
+   */
+  settlementAvailability: DvpSettlementAvailability | null;
   refString: string | null;
   createSignature: string | null;
   closeSignature: string | null;
@@ -149,36 +160,6 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
 
 export function isDvpTradeOpen(trade: DvpTrade): boolean {
   return OPEN.has(trade.status);
-}
-
-/**
- * Whether settle can go out now, and when it can't, the reason to name.
- *
- * The program refuses Settle outside `earliest <= now <= expiry`
- * (`settle_dvp.rs:142-146`), so time is checked here as well as the status: the
- * status is only as fresh as the last chain reading and can say `funded` for a
- * few seconds after the trade expired.
- */
-export type DvpSettleAvailability = "available" | "unfunded" | "too_early" | "expired";
-
-export function dvpSettleAvailability(
-  trade: Pick<DvpTrade, "status" | "expiryTimestamp" | "earliestSettlementTimestamp">,
-  nowMs: number
-): DvpSettleAvailability {
-  const now = BigInt(Math.floor(nowMs / 1000));
-  if (trade.status === "expired" || now > BigInt(trade.expiryTimestamp)) {
-    return "expired";
-  }
-  if (trade.status !== "funded") {
-    return "unfunded";
-  }
-  if (
-    trade.earliestSettlementTimestamp !== null &&
-    now < BigInt(trade.earliestSettlementTimestamp)
-  ) {
-    return "too_early";
-  }
-  return "available";
 }
 
 export function canCancelDvpTrade(trade: DvpTrade): boolean {

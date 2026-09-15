@@ -43,7 +43,7 @@ export function TreasurySolutionsSkeleton() {
       <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
         <div className="grid gap-2 sm:grid-cols-3">
           {BALANCE_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-[121px] rounded-xl" key={`summary-${id}`} />
+            <SkeletonBlock className="h-[7.5625rem] rounded-xl" key={`summary-${id}`} />
           ))}
         </div>
         <section>
@@ -53,7 +53,7 @@ export function TreasurySolutionsSkeleton() {
           </div>
           <div className="mt-4 grid gap-2 md:grid-cols-3">
             {BALANCE_SKELETON_IDS.map((id) => (
-              <SkeletonBlock className="h-[175px] rounded-2xl" key={`wallet-${id}`} />
+              <SkeletonBlock className="h-[10.9375rem] rounded-2xl" key={`wallet-${id}`} />
             ))}
           </div>
         </section>
@@ -62,7 +62,10 @@ export function TreasurySolutionsSkeleton() {
             <SkeletonBlock className="h-6 w-40" />
             <div className="mt-4 overflow-hidden rounded-2xl border border-border-default">
               {STRATEGY_SKELETON_IDS.slice(0, 3).map((id) => (
-                <SkeletonBlock className="h-[60px] w-full rounded-none" key={`${section}-${id}`} />
+                <SkeletonBlock
+                  className="h-[3.75rem] w-full rounded-none"
+                  key={`${section}-${id}`}
+                />
               ))}
             </div>
           </section>
@@ -88,7 +91,7 @@ export function EmbeddedYieldPortfolioSkeleton() {
             <SkeletonBlock className="h-44 rounded-2xl" key={`portfolio-${id}`} />
           ))}
         </div>
-        <SkeletonBlock className="h-[302px] w-full rounded-2xl" />
+        <SkeletonBlock className="h-[18.875rem] w-full rounded-2xl" />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
@@ -164,9 +167,9 @@ export function DvpTradesSkeleton() {
         {/* The toolbar grid the page opens with: search, status select, create. */}
         <div className="border-b border-border-default p-3">
           <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-[minmax(280px,1fr)_190px_auto]">
-            <SkeletonBlock className="h-10 w-full rounded-[10px]" />
-            <SkeletonBlock className="h-10 w-full rounded-[10px]" />
-            <SkeletonBlock className="h-9 w-full rounded-[8px] md:w-[91px]" />
+            <SkeletonBlock className="h-10 w-full rounded-[0.625rem]" />
+            <SkeletonBlock className="h-10 w-full rounded-[0.625rem]" />
+            <SkeletonBlock className="h-9 w-full rounded-[0.5rem] md:w-[5.6875rem]" />
           </div>
         </div>
         {/* The same Table the rows render into, so header height, cell padding
@@ -177,7 +180,7 @@ export function DvpTradesSkeleton() {
               {DVP_TABLE_COLUMN_IDS.map((id) => (
                 <TableHead className={id === "open" ? "w-10" : undefined} key={id}>
                   {id === "open" ? null : (
-                    <div className="flex h-[21px] items-center">
+                    <div className="flex h-[1.3125rem] items-center">
                       <SkeletonBlock className="h-3.5 w-16" />
                     </div>
                   )}
@@ -189,7 +192,7 @@ export function DvpTradesSkeleton() {
             {DVP_ROW_SKELETON_IDS.map((row) => (
               <TableRow key={row}>
                 <TableCell>
-                  <SkeletonBlock className="h-5 w-32 rounded-[6px]" />
+                  <SkeletonBlock className="h-5 w-32 rounded-[0.375rem]" />
                 </TableCell>
                 <TableCell>
                   <DvpLegCellSkeleton textClassName="h-4 w-40" />
@@ -254,7 +257,7 @@ function DvpLegCardSkeleton() {
       </div>
       <SkeletonBlock className="mt-1.5 h-1.5 w-full rounded-full" />
       <div className="mt-4 flex flex-col gap-1 rounded-lg bg-fill-subtle px-3 py-2">
-        <div className="flex h-[16.5px] items-center">
+        <div className="flex h-[1.03125rem] items-center">
           <SkeletonBlock className="h-2.5 w-24" />
         </div>
         <div className="flex h-6 items-center">
@@ -276,7 +279,7 @@ export function DvpTradeDetailSkeleton() {
         {/* Status badge and the created / expires facts, then whose move it is. */}
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <SkeletonBlock className="h-5 w-28 rounded-[6px]" />
+            <SkeletonBlock className="h-5 w-28 rounded-[0.375rem]" />
             {/* Created and Expires: two facts that wrap onto two lines when narrow. */}
             <div className="flex flex-wrap items-center gap-3">
               <SkeletonBlock className="h-4 w-40" />
@@ -284,13 +287,13 @@ export function DvpTradeDetailSkeleton() {
             </div>
           </div>
           <div>
-            <div className="flex h-[26px] items-center">
+            <div className="flex h-[1.625rem] items-center">
               <SkeletonBlock className="h-4 w-56 max-w-full" />
             </div>
-            <div className="mt-1 flex h-[22.75px] items-center">
+            <div className="mt-1 flex h-[1.421875rem] items-center">
               <SkeletonBlock className="h-3.5 w-[30rem] max-w-full" />
             </div>
-            <div className="flex h-[22.75px] items-center sm:hidden">
+            <div className="flex h-[1.421875rem] items-center sm:hidden">
               <SkeletonBlock className="h-3.5 w-2/3" />
             </div>
           </div>
@@ -323,12 +326,12 @@ export function DvpTradeDetailSkeleton() {
                 <div className="flex h-5 items-center">
                   <SkeletonBlock className="h-3.5 w-20" />
                 </div>
-                <div className="mt-0.5 flex h-[19.5px] items-center">
+                <div className="mt-0.5 flex h-[1.21875rem] items-center">
                   <SkeletonBlock className="h-3 w-80 max-w-full" />
                 </div>
                 {/* The hint runs to four lines beside the button when narrow. */}
                 {DVP_HINT_WRAP_LINE_IDS.map((line) => (
-                  <div className="flex h-[19.5px] items-center sm:hidden" key={line}>
+                  <div className="flex h-[1.21875rem] items-center sm:hidden" key={line}>
                     <SkeletonBlock className="h-3 w-4/5" />
                   </div>
                 ))}
@@ -336,8 +339,8 @@ export function DvpTradeDetailSkeleton() {
               <SkeletonBlock
                 className={
                   id === "settle"
-                    ? "h-10 w-[78px] shrink-0 rounded-[10px]"
-                    : "h-10 w-[132px] shrink-0 rounded-[10px]"
+                    ? "h-10 w-[4.875rem] shrink-0 rounded-[0.625rem]"
+                    : "h-10 w-[8.25rem] shrink-0 rounded-[0.625rem]"
                 }
               />
             </section>
@@ -359,21 +362,21 @@ function DvpCreateLegSkeleton() {
   return (
     <div className="grid gap-4" data-loading-create-leg>
       <div className="grid gap-1.5">
-        <div className="flex h-[37px] items-center justify-between gap-3 sm:h-[34px]">
+        <div className="flex h-[2.3125rem] items-center justify-between gap-3 sm:h-[2.125rem]">
           {/* The label wraps to two lines beside the tabs when narrow. */}
           <SkeletonBlock className="h-7 w-40 min-w-0 sm:h-3.5 sm:w-56" />
-          <SkeletonBlock className="h-[34px] w-72 shrink-0 rounded-lg sm:w-80" />
+          <SkeletonBlock className="h-[2.125rem] w-72 shrink-0 rounded-lg sm:w-80" />
         </div>
-        <SkeletonBlock className="h-12 w-full rounded-[12px]" />
+        <SkeletonBlock className="h-12 w-full rounded-[0.75rem]" />
       </div>
       <div className="grid items-start gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <SkeletonBlock className="h-3.5 w-24" />
-          <SkeletonBlock className="h-12 w-full rounded-[12px]" />
+          <SkeletonBlock className="h-12 w-full rounded-[0.75rem]" />
         </div>
         <div className="flex flex-col gap-2">
           <SkeletonBlock className="h-3.5 w-12" />
-          <SkeletonBlock className="h-12 w-full rounded-[12px]" />
+          <SkeletonBlock className="h-12 w-full rounded-[0.75rem]" />
         </div>
       </div>
     </div>
@@ -438,7 +441,7 @@ export function DvpCreateSkeleton() {
                 <div className="flex h-5 items-center">
                   <SkeletonBlock className="h-3.5 w-64 max-w-full" />
                 </div>
-                <div className="mt-1 flex h-[19.5px] items-center">
+                <div className="mt-1 flex h-[1.21875rem] items-center">
                   <SkeletonBlock className="h-3 w-48 max-w-full" />
                 </div>
               </div>
@@ -450,8 +453,8 @@ export function DvpCreateSkeleton() {
 
       <div className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <SkeletonBlock className="h-10 w-[71px] rounded-[10px]" />
-          <SkeletonBlock className="h-10 w-[100px] rounded-[10px]" />
+          <SkeletonBlock className="h-10 w-[4.4375rem] rounded-[0.625rem]" />
+          <SkeletonBlock className="h-10 w-[6.25rem] rounded-[0.625rem]" />
         </div>
       </div>
     </div>

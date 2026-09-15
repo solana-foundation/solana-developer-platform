@@ -237,7 +237,10 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
           className="inline-flex items-center gap-1.5 after:absolute after:inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
           href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${trade.id}`}
         >
-          <DvpStatusBadge status={trade.status} />
+          <DvpStatusBadge
+            settlementAvailability={trade.settlementAvailability}
+            status={trade.status}
+          />
           {attention ? (
             <TriangleAlertIcon
               aria-label={attention}

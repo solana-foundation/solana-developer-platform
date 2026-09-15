@@ -954,7 +954,10 @@ export function DvpTradeDetailWorkspace({
       <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-8">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <DvpStatusBadge status={trade.status} />
+            <DvpStatusBadge
+              settlementAvailability={trade.settlementAvailability}
+              status={trade.status}
+            />
             <TooltipProvider>
               <div className="flex flex-wrap items-center gap-3 text-tertiary text-xs">
                 <TimestampFact

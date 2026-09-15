@@ -147,6 +147,17 @@ describe("useDvpCreateSubmit idempotency key", () => {
           json: async () => ({ error: { message: "no" } }),
         }),
     ],
+    // The trade may exist, but nothing readable says which. The same key makes
+    // the next press return that trade rather than draw a second one.
+    [
+      "a success answer that cannot be read",
+      () =>
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 201,
+          json: async () => ({ data: {} }),
+        }),
+    ],
   ])("reuses the key after %s, so the retry replays", async (_label, mockFetch) => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
@@ -183,6 +194,43 @@ describe("useDvpCreateSubmit idempotency key", () => {
 describe("useDvpCreateSubmit confirmation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("says an unreadable success answer is unconfirmed, and stays on the form", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => {
+          throw new SyntaxError("Unexpected token <");
+        },
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "The trade may have been created, but SDP couldn't read the answer. Press Create again to open it; it won't create a second one."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // A refusal whose body is not the error envelope still says something true.
+  it("names the status when a refusal carries no readable message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => "<html>" })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe("Request failed (502).");
   });
 
   // The create is SDP's own broadcast, so the toast reporting it links it.

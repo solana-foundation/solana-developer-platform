@@ -1,5 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -30,7 +30,9 @@ import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
+import { runDvpLegActionOnce } from "@/services/dvp/leg-action-idempotency";
 import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
+import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import {
   observeDvpTradeIfStale,
   observeDvpTradeNow,
@@ -289,6 +291,8 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
     nonce: row.nonce,
     expiryTimestamp: row.expiryTimestamp,
     earliestSettlementTimestamp: row.earliestSettlementTimestamp,
+    /** Judged by the cluster clock read with the last observation. @see {@link deriveDvpSettlementAvailability} */
+    settlementAvailability: deriveDvpSettlementAvailability(row),
     refString: row.refString,
     createSignature: row.createSignature,
     /** The transaction that closed it, so settlement is verifiable after the fact. */
@@ -590,9 +594,17 @@ async function resolveLegAction(c: ValidatedBodyContext<typeof fundDvpTradeSchem
  */
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
   const { trade, params } = await resolveLegAction(c);
-  const result = await fundDvpTradeLeg(c, trade, params);
+  const { result, replayed } = await runDvpLegActionOnce(
+    c.env,
+    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    { action: "fund", tradeId: trade.id, ...params },
+    () => fundDvpTradeLeg(c, trade, params)
+  );
 
-  await observeDvpTradeNow(c.env, trade, result.signature);
+  // A replay moved nothing now, so there is no new effect to wait for.
+  if (!replayed) {
+    await observeDvpTradeNow(c.env, trade, result.signature);
+  }
 
   return success(c, {
     tradeId: trade.id,
@@ -611,9 +623,16 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
  */
 export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
   const { trade, params } = await resolveLegAction(c);
-  const result = await reclaimDvpTradeLeg(c, trade, params);
+  const { result, replayed } = await runDvpLegActionOnce(
+    c.env,
+    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    { action: "reclaim", tradeId: trade.id, ...params },
+    () => reclaimDvpTradeLeg(c, trade, params)
+  );
 
-  await observeDvpTradeNow(c.env, trade, result.signature);
+  if (!replayed) {
+    await observeDvpTradeNow(c.env, trade, result.signature);
+  }
 
   return success(c, {
     tradeId: trade.id,
@@ -667,6 +686,7 @@ export const listTrades = async (c: AppContext) => {
   const query = listDvpTradesQuerySchema.safeParse({
     limit: c.req.query("limit"),
     status: c.req.query("status"),
+    settlementAvailability: c.req.query("settlementAvailability"),
     q: c.req.query("q"),
   });
   if (!query.success) {
@@ -676,6 +696,11 @@ export const listTrades = async (c: AppContext) => {
     if (issue.path[0] === "status") {
       throw badRequest("Invalid status query parameter", {
         allowedStatuses: DVP_TRADE_STATUSES,
+      });
+    }
+    if (issue.path[0] === "settlementAvailability") {
+      throw badRequest("Invalid settlementAvailability query parameter", {
+        allowedSettlementAvailability: DVP_SETTLEMENT_AVAILABILITY,
       });
     }
     throw badRequest(
@@ -693,6 +718,8 @@ export const listTrades = async (c: AppContext) => {
     },
     {
       statuses: query.data.status === undefined ? null : query.data.status,
+      settlementAvailability:
+        query.data.settlementAvailability === undefined ? null : query.data.settlementAvailability,
       q: query.data.q === undefined || query.data.q === "" ? null : query.data.q,
     },
     query.data.limit

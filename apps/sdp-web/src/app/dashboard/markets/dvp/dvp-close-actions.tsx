@@ -20,7 +20,7 @@ import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import type { DvpTrade } from "./dvp-trade";
-import { canCancelDvpTrade, dvpSettleAvailability } from "./dvp-trade";
+import { canCancelDvpTrade } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
 
 /** Shown in place of a button's icon while its request is out. */
@@ -40,7 +40,9 @@ export function DvpCloseActions({
   if (!canCancelDvpTrade(trade)) {
     return null;
   }
-  const settle = dvpSettleAvailability(trade, Date.now());
+  // The API's answer, by the cluster clock the program checks. Null means it has
+  // not been observed with one yet, so Settle stays off until it has.
+  const settle = trade.settlementAvailability;
   const settling = pending.has("settle");
   const cancelling = pending.has("cancel");
 

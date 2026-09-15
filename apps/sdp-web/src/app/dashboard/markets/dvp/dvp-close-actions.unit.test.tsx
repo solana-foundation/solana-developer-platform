@@ -7,15 +7,23 @@
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { testLeg, testTrade } from "./dvp.fixtures";
 import { DvpCloseActions } from "./dvp-close-actions";
-import type { DvpTrade, DvpTradeStatus } from "./dvp-trade";
+import type { DvpSettlementAvailability, DvpTrade, DvpTradeStatus } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
 
-function trade(status: DvpTradeStatus, bothFunded: boolean): DvpTrade {
+/**
+ * A trade as the API answers for it: the availability is the server's,
+ * judged by the cluster clock, and follows from the status the way it would.
+ */
+function trade(
+  status: DvpTradeStatus,
+  bothFunded: boolean,
+  settlementAvailability: DvpSettlementAvailability | null = availabilityFor(status)
+): DvpTrade {
   const funding = (funded: boolean) => ({
     observedAmount: funded ? "1000" : "0",
     funded,
@@ -24,11 +32,26 @@ function trade(status: DvpTradeStatus, bothFunded: boolean): DvpTrade {
   });
   return testTrade({
     status,
+    settlementAvailability,
     legs: {
       a: testLeg({ funding: funding(bothFunded) }),
       b: testLeg({ funding: funding(bothFunded) }),
     },
   });
+}
+
+function availabilityFor(status: DvpTradeStatus): DvpSettlementAvailability | null {
+  switch (status) {
+    case "funded":
+      return "available";
+    case "created":
+    case "partially_funded":
+      return "unfunded";
+    case "expired":
+      return "expired";
+    default:
+      return null;
+  }
 }
 
 function renderActions(
@@ -42,20 +65,7 @@ function renderActions(
   );
 }
 
-/** Inside the fixture's window: its expiry is 1_900_000_000. */
-const NOW_MS = 1_800_000_000_000;
-const NOW_SECONDS = NOW_MS / 1000;
-
 describe("DvpCloseActions", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW_MS);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("offers both actions on a funded trade", () => {
     const html = renderActions(trade("funded", true));
 
@@ -82,22 +92,14 @@ describe("DvpCloseActions", () => {
     }
   );
 
-  // Expiry blocks settlement on chain but not the refund path, so cancel has
-  // to survive it.
-  it("still offers cancel after expiry", () => {
-    const html = renderActions(trade("expired", true));
-
-    expect(html).toContain("Cancel");
-  });
-
   // Settle can never go out again past expiry. A disabled panel saying "both
   // legs must be funded" was false for a funded trade and offered nothing.
+  // Expiry blocks settlement on chain but not the refund path, so cancel stays.
   it.each([
     ["an expired trade", trade("expired", true)],
-    [
-      "a funded trade whose expiry passed before the next reading",
-      { ...trade("funded", true), expiryTimestamp: String(NOW_SECONDS - 1) },
-    ],
+    // The row can still say funded for a few seconds after expiry; the API's
+    // availability, judged by the cluster clock, already says expired.
+    ["a funded trade the cluster clock has already expired", trade("funded", true, "expired")],
   ])("drops the settle panel on %s and keeps cancel", (_label, value) => {
     const html = renderActions(value);
 
@@ -106,10 +108,22 @@ describe("DvpCloseActions", () => {
     expect(html).toContain("Cancel Trade");
   });
 
+  // Not yet observed with a cluster clock: the window is unknown, so Settle is
+  // offered but held, with no reason made up for it.
+  it("holds settle without a reason while availability is unknown", () => {
+    const html = renderActions(trade("funded", true, null));
+
+    const settlePanel = html.slice(0, html.indexOf("Cancel Trade"));
+    expect(settlePanel).toContain("Delivers each leg");
+    expect(settlePanel).toContain('disabled=""');
+    expect(html).not.toContain("Both legs must be funded");
+    expect(html).not.toContain("This trade can settle from");
+  });
+
   it("says when settlement opens on a trade with an earliest settlement time", () => {
     const html = renderActions({
-      ...trade("funded", true),
-      earliestSettlementTimestamp: String(NOW_SECONDS + 3600),
+      ...trade("funded", true, "too_early"),
+      earliestSettlementTimestamp: "1800003600",
     });
 
     expect(html).toContain("This trade can settle from");

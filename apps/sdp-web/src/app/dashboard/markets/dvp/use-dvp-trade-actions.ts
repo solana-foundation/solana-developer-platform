@@ -6,9 +6,11 @@
  * Pulled out of the detail page so the page reads as layout. All four
  * operations go through one request shape and share success and failure handling.
  *
- * Funding is the one action that names a leg: the unified fund endpoint takes
- * `{ side: "a" | "b" }`, authorizing by the caller holding custody of that
- * side's party address — whoever holds it, on whichever org's trade.
+ * Funding and reclaiming name a leg: both endpoints take `{ side: "a" | "b" }`,
+ * authorizing by the caller holding custody of that side's party address,
+ * whoever holds it, on whichever org's trade. Each press of either carries its
+ * own Idempotency-Key, so a request the proxy or network retries is answered
+ * with the first result instead of moving the leg twice.
  */
 
 import {
@@ -24,6 +26,8 @@ import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
@@ -101,6 +105,7 @@ const LEG_REFUSAL_MESSAGE: Record<
   [DVP_LEG_REFUSAL.transferHookUnsupported]: sameCopy(
     "DashboardMarkets.dvp.reclaimRefusedTransferHook"
   ),
+  [DVP_LEG_REFUSAL.signerNotParty]: sameCopy("DashboardMarkets.dvp.reclaimRefusedSignerChanged"),
 };
 
 function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: MessageKey } {
@@ -117,8 +122,8 @@ const errorEnvelopeSchema = z.object({
   }),
 });
 
-/** Settle, cancel and fund all answer with the transaction they broadcast. */
-const broadcastEnvelopeSchema = z.object({ data: z.object({ signature: z.string() }) });
+/** Every action answers with the transaction it broadcast. */
+const broadcastEnvelopeSchema = z.object({ data: z.object({ signature: z.string().min(1) }) });
 
 /**
  * One in-flight key per action, per leg for the two that move one leg, so a
@@ -129,6 +134,21 @@ function pendingKey(call: DvpTradeActionCall): DvpPendingAction {
     return call[0];
   }
   return call[0] === "fund" ? `fund:${call[1].side}` : `reclaim:${call[1].side}`;
+}
+
+/**
+ * Fund and reclaim name the leg they move and carry their own Idempotency-Key;
+ * settle and cancel carry neither.
+ */
+function requestInit(action: DvpTradeActionName, leg: { side: DvpTradeSide } | null): RequestInit {
+  if (leg === null) {
+    return { method: "POST" };
+  }
+  return {
+    method: "POST",
+    body: JSON.stringify({ side: leg.side }),
+    headers: { [IDEMPOTENCY_KEY_HEADER]: freshDvpIdempotencyKey(`dvp-${action}`) },
+  };
 }
 
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
@@ -158,11 +178,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
     try {
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
-        {
-          method: "POST",
-          // Fund and reclaim name the leg they move; settle and cancel carry no body.
-          ...(leg === null ? {} : { body: JSON.stringify({ side: leg.side }) }),
-        }
+        requestInit(action, leg)
       );
       // Either way the body can fail to be JSON at all, such as a proxy's error
       // page. It reads as null, and each schema below treats null as not matching.
@@ -174,26 +190,31 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
         });
         return;
       }
-      // The single biggest source of "did anything happen?": all three of these
-      // succeeded and then said nothing, leaving the page to catch up on the
-      // reconciler's next sweep. A refresh is not an answer — it is the same
-      // screen again, a minute later.
+      // A success answer that cannot be read is not a success to report: nothing
+      // on it says what was sent. Say so, and let the refresh show what the
+      // chain now holds instead of guessing.
       const broadcast = broadcastEnvelopeSchema.safeParse(await response.json().catch(() => null));
+      if (!broadcast.success) {
+        toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), { position: "bottom-right" });
+        router.refresh();
+        return;
+      }
+      // The single biggest source of "did anything happen?": these used to
+      // succeed and then say nothing, leaving the page to catch up on the
+      // reconciler's next sweep. A refresh is not an answer.
       toast.success(t(DONE_MESSAGE[action]), {
         position: "bottom-right",
         // Whatever SDP just sent can be checked on chain from the toast that
         // reports it, without hunting for it on the page.
-        action: broadcast.success
-          ? {
-              label: t("DashboardMarkets.dvp.viewTransaction"),
-              onClick: () =>
-                window.open(
-                  explorerTxUrl(broadcast.data.data.signature, cluster),
-                  "_blank",
-                  "noopener,noreferrer"
-                ),
-            }
-          : undefined,
+        action: {
+          label: t("DashboardMarkets.dvp.viewTransaction"),
+          onClick: () =>
+            window.open(
+              explorerTxUrl(broadcast.data.data.signature, cluster),
+              "_blank",
+              "noopener,noreferrer"
+            ),
+        },
       });
       router.refresh();
     } catch (caught) {

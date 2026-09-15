@@ -770,9 +770,11 @@ describe("DvP routes", () => {
       expect(body.data.trade.legs.a.fundingSignature).toBe("sig_funding_receipt");
     });
 
-    // The claim's signature is computed before broadcast. Showing it while the
-    // funding is in flight links a transaction the cluster may drop.
-    it("reports null while a funding is in flight, never the pre-broadcast claim signature", async () => {
+    // The claim's signature is computed before broadcast, so showing it while the
+    // funding is in flight links a transaction the cluster may drop. A leg with
+    // no claim has nothing to show either. One trade carries both: leg A in
+    // flight, leg B never claimed.
+    it("reports null for a funding in flight and for a leg with no claim", async () => {
       await seedTradeFor({ tradeId: "dvp_inflight_leg" });
       await seedClaim("dvp_inflight_leg", "a", "sig_live_claim");
 
@@ -782,27 +784,18 @@ describe("DvP routes", () => {
         env
       );
       const body = (await res.json()) as {
-        data: { trade: { legs: { a: { fundingSignature: string | null } } } };
+        data: {
+          trade: {
+            legs: {
+              a: { fundingSignature: string | null };
+              b: { fundingSignature: string | null };
+            };
+          };
+        };
       };
 
       expect(body.data.trade.legs.a.fundingSignature).toBeNull();
-    });
-
-    // A leg with no claim at all has no transaction to show. Null, not a made
-    // up value — the two are the same answer to "what funded this leg".
-    it("reports null for a leg with no claim", async () => {
-      await seedTradeFor({ tradeId: "dvp_unclaimed_leg" });
-
-      const res = await app.request(
-        "/v1/dvp/trades/dvp_unclaimed_leg",
-        { headers: authHeaders() },
-        env
-      );
-      const body = (await res.json()) as {
-        data: { trade: { legs: { a: { fundingSignature: string | null } } } };
-      };
-
-      expect(body.data.trade.legs.a.fundingSignature).toBeNull();
+      expect(body.data.trade.legs.b.fundingSignature).toBeNull();
     });
   });
 
@@ -996,6 +989,8 @@ describe("DvP routes", () => {
         nonce: "42",
         expiryTimestamp: "1800003600",
         earliestSettlementTimestamp: null,
+        // Status `created`: a leg is short, which needs no clock to say.
+        settlementAvailability: "unfunded",
         refString: null,
         createSignature: null,
         closeSignature: null,
@@ -1084,6 +1079,8 @@ describe("DvP routes", () => {
         nonce: "42",
         expiryTimestamp: "1800003600",
         earliestSettlementTimestamp: null,
+        // Status `created`: a leg is short, which needs no clock to say.
+        settlementAvailability: "unfunded",
         refString: null,
         createSignature: null,
         closeSignature: null,
@@ -1225,6 +1222,53 @@ describe("DvP routes", () => {
         };
         expect(body.error?.message).toContain("status");
         expect(body.error?.details?.allowedStatuses).toContain("created");
+      });
+
+      // "Ready to settle" is what the program will settle now, judged by the
+      // cluster clock recorded with the last observation, not by status alone.
+      it("narrows by settlement availability and reports it on each trade", async () => {
+        await seedTradeFor({ tradeId: "dvp_filter_early" });
+        await getDb(env)
+          .prepare(
+            `UPDATE dvp_trades
+                SET status = 'funded', observed_cluster_timestamp = '1800000000',
+                    earliest_settlement_timestamp = CASE WHEN id = 'dvp_filter_early' THEN '1800000001' ELSE NULL END
+              WHERE id IN ('dvp_filter_open', 'dvp_filter_early')`
+          )
+          .run();
+
+        const res = await app.request(
+          "/v1/dvp/trades?settlementAvailability=available",
+          { headers: authHeaders() },
+          env
+        );
+        const body = (await res.json()) as {
+          data: { trades: { id: string; settlementAvailability: string | null }[] };
+        };
+        expect(body.data.trades).toEqual([
+          expect.objectContaining({ id: "dvp_filter_open", settlementAvailability: "available" }),
+        ]);
+
+        const early = await app.request(
+          "/v1/dvp/trades?settlementAvailability=too_early",
+          { headers: authHeaders() },
+          env
+        );
+        const earlyBody = (await early.json()) as { data: { trades: { id: string }[] } };
+        expect(earlyBody.data.trades.map((trade) => trade.id)).toEqual(["dvp_filter_early"]);
+      });
+
+      it("rejects an unknown settlement availability naming the allowed set", async () => {
+        const res = await app.request(
+          "/v1/dvp/trades?settlementAvailability=soon",
+          { headers: authHeaders() },
+          env
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as {
+          error?: { details?: { allowedSettlementAvailability?: string[] } };
+        };
+        expect(body.error?.details?.allowedSettlementAvailability).toContain("available");
       });
 
       it("matches q against the trade id and a party address, case-insensitively", async () => {

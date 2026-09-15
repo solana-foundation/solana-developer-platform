@@ -13,6 +13,7 @@ import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
+  type Address,
   appendTransactionMessageInstructions,
   createNoopSigner,
   createTransactionMessage,
@@ -43,8 +44,12 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import { readDvpFundingReceipt } from "./funding-receipt";
 import { readDvpAccounts } from "./read-chain";
 import { buildReclaimInstructions } from "./reclaim-instructions";
+
+/** How long a reclaim waits for its own confirmation before leaving the lock to the sweep. */
+const RECLAIM_CONFIRM_TIMEOUT_MS = 15_000;
 
 /** Statuses whose escrows are still on chain. Expired included: reclaim has no expiry gate. */
 const RECLAIMABLE: ReadonlySet<DvpTradeStatus> = new Set([
@@ -64,8 +69,9 @@ export interface DvpReclaimResult {
 /**
  * Reclaims one side's escrow into the custody wallet that holds its party address.
  *
- * Order: every local and chain refusal, then sign, then take the leg's lock,
- * then send, then release the lock. A crash before the lock costs nothing; a
+ * Order: every local and chain refusal (including what any funding receipt on
+ * the leg actually did), then sign, then take the leg's lock, then send, then
+ * confirm, then release the lock. A crash before the lock costs nothing; a
  * crash while holding it leaves a lock the expiry sweep frees.
  *
  * @param c - Request context, for the sponsorship budget.
@@ -98,63 +104,13 @@ export async function reclaimDvpTradeLeg(
   const tokenProgram = isA ? trade.tokenProgramA : trade.tokenProgramB;
   const escrow = isA ? trade.escrowA : trade.escrowB;
 
-  // A funding still in flight on this leg could land after the reclaim, leaving
-  // the leg funded again straight after somebody asked for it back.
   const rpc = solanaRpc.createRpc(env);
-  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
-    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
-    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
-  });
-  try {
-    await verifySwapDvpAccount(snapshot.trade);
-  } catch (error) {
-    if (error instanceof SwapDvpVerificationError) {
-      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`, {
-        reason: DVP_LEG_REFUSAL.tradeNotOnChain,
-      });
-    }
-    throw error;
-  }
+  const held = await readReclaimableEscrow(rpc, trade, side);
 
-  const leg = isA ? snapshot.legA : snapshot.legB;
-  if (!leg.exists) {
-    if (leg.tampered) {
-      throw conflict(
-        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
-        { reason: DVP_LEG_REFUSAL.escrowMismatch }
-      );
-    }
-    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`, {
-      reason: DVP_LEG_REFUSAL.escrowMissing,
-    });
-  }
-  // The program no-ops an empty escrow, so sending one would spend a sponsored
-  // fee to move nothing.
-  if (leg.amount === 0n) {
-    throw conflict(`DvP trade ${trade.id}: this leg's escrow holds nothing to reclaim`, {
-      reason: DVP_LEG_REFUSAL.nothingToReclaim,
-    });
-  }
+  await refuseTransferHookMint(rpc, trade.id, mint);
 
-  // `validate_mint_extensions` allows TransferHook, and the program forwards
-  // hook accounts as trailing extras. SDP does not resolve those, so the
-  // Token-2022 CPI would refuse the refund; say so instead of paying to find out.
-  const mintAccount = await fetchMaybeMint(rpc, mint);
-  if (!mintAccount.exists) {
-    throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`, {
-      reason: DVP_LEG_REFUSAL.mintUnreadable,
-    });
-  }
-  const extensions = mintAccount.data.extensions;
-  if (
-    extensions.__option === "Some" &&
-    extensions.value.some((extension) => extension.__kind === "TransferHook")
-  ) {
-    throw conflict(
-      `DvP trade ${trade.id}: mint ${mint} carries a transfer hook, which reclaim does not support yet; nothing was sent`,
-      { reason: DVP_LEG_REFUSAL.transferHookUnsupported }
-    );
-  }
+  const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
+  const receipt = await takeoverableReceipt(claims, rpc, trade.id, side);
 
   const signer = await createOrgSignerForCustodyWallet(
     env,
@@ -167,7 +123,8 @@ export async function reclaimDvpTradeLeg(
   // anything else would be a transaction it refuses.
   if (signer.address !== party) {
     throw conflict(
-      `DvP trade ${trade.id}: the custody wallet no longer signs as side ${side}'s party; nothing was sent`
+      `DvP trade ${trade.id}: the custody wallet no longer signs as side ${side}'s party; nothing was sent`,
+      { reason: DVP_LEG_REFUSAL.signerNotParty }
     );
   }
 
@@ -205,20 +162,22 @@ export async function reclaimDvpTradeLeg(
   const claimSignature = signature(getBase58Decoder().decode(walletSignatureBytes));
 
   // The leg's lock, the same one funding takes, held from before the broadcast
-  // until it is on the wire. Without it a funding could start between a check
-  // and the send, land after the reclaim, and have its receipt cleared by it.
-  // The expiry height rides with the lock so the sweep frees one an ambiguous
-  // failure leaves behind.
-  const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
-  const claimed = await claims.claimForReclaim({
-    tradeId: trade.id,
-    side,
-    organizationId: params.organizationId,
-    projectId: params.projectId,
-    custodyWalletId: params.custodyWalletId,
-    signature: claimSignature,
-    expiryHeight: lastValidBlockHeight.toString(),
-  });
+  // until the reclaim confirms. Without it a funding could start between a check
+  // and the send and land after the reclaim. Taking over is guarded on the exact
+  // receipt checked above, so a row that changed since then refuses. The expiry
+  // height rides with the lock so the sweep frees one an unconfirmed send leaves.
+  const claimed = await claims.claimForReclaim(
+    {
+      tradeId: trade.id,
+      side,
+      organizationId: params.organizationId,
+      projectId: params.projectId,
+      custodyWalletId: params.custodyWalletId,
+      signature: claimSignature,
+      expiryHeight: lastValidBlockHeight.toString(),
+    },
+    receipt
+  );
   if (!claimed) {
     throw conflict(`DvP trade ${trade.id}: this leg is already being moved; nothing was sent`, {
       reason: DVP_LEG_REFUSAL.legFundingInProgress,
@@ -262,10 +221,155 @@ export async function reclaimDvpTradeLeg(
     throw error;
   }
 
-  // On the wire. Releasing now is what lets the leg be funded again, and it is
-  // safe even if this transaction drops: funding reads the escrow live and only
-  // ever sends the shortfall, so a lost reclaim cannot become an over-funded leg.
-  await claims.release(trade.id, side, heldSignature);
+  await releaseOnceConfirmed(
+    claims,
+    rpc,
+    { tradeId: trade.id, side },
+    heldSignature,
+    reclaimSignature
+  );
 
-  return { signature: reclaimSignature, leg: side, amount: leg.amount.toString() };
+  return { signature: reclaimSignature, leg: side, amount: held.toString() };
+}
+
+type FundingClaims = ReturnType<typeof createPostgresDvpLegFundingClaimRepository>;
+type Rpc = ReturnType<typeof solanaRpc.createRpc>;
+
+/**
+ * Reads the leg's escrow live and refuses anything reclaim cannot act on: a
+ * trade no longer on chain, a missing or tampered escrow, or an empty one.
+ *
+ * @returns The escrow balance, in base units.
+ */
+async function readReclaimableEscrow(rpc: Rpc, trade: DvpTradeRow, side: DvpTradeSide) {
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
+    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+  });
+  try {
+    await verifySwapDvpAccount(snapshot.trade);
+  } catch (error) {
+    if (error instanceof SwapDvpVerificationError) {
+      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`, {
+        reason: DVP_LEG_REFUSAL.tradeNotOnChain,
+      });
+    }
+    throw error;
+  }
+
+  const leg = side === "a" ? snapshot.legA : snapshot.legB;
+  if (!leg.exists) {
+    if (leg.tampered) {
+      throw conflict(
+        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
+        { reason: DVP_LEG_REFUSAL.escrowMismatch }
+      );
+    }
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`, {
+      reason: DVP_LEG_REFUSAL.escrowMissing,
+    });
+  }
+  // The program no-ops an empty escrow, so sending one would spend a sponsored
+  // fee to move nothing.
+  if (leg.amount === 0n) {
+    throw conflict(`DvP trade ${trade.id}: this leg's escrow holds nothing to reclaim`, {
+      reason: DVP_LEG_REFUSAL.nothingToReclaim,
+    });
+  }
+  return leg.amount;
+}
+
+/**
+ * `validate_mint_extensions` allows TransferHook, and the program forwards hook
+ * accounts as trailing extras. SDP does not resolve those, so the Token-2022 CPI
+ * would refuse the refund; say so instead of paying to find out.
+ */
+async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) {
+  const mintAccount = await fetchMaybeMint(rpc, mint);
+  if (!mintAccount.exists) {
+    throw badRequest(`DvP trade ${tradeId}: mint ${mint} could not be read`, {
+      reason: DVP_LEG_REFUSAL.mintUnreadable,
+    });
+  }
+  const extensions = mintAccount.data.extensions;
+  if (
+    extensions.__option === "Some" &&
+    extensions.value.some((extension) => extension.__kind === "TransferHook")
+  ) {
+    throw conflict(
+      `DvP trade ${tradeId}: mint ${mint} carries a transfer hook, which reclaim does not support yet; nothing was sent`,
+      { reason: DVP_LEG_REFUSAL.transferHookUnsupported }
+    );
+  }
+}
+
+/**
+ * The funding receipt a reclaim may take over, or null when the leg has no row.
+ *
+ * A funding row is either a lock (still being sent) or a receipt (`funding_tx`
+ * set straight after broadcast, before anything confirms). Only a receipt whose
+ * transfer the chain confirmed, or one that provably moved nothing, may be taken
+ * over: reclaiming ahead of a funding that has not landed drains today's balance
+ * and leaves that funding to land afterwards, re-funding the leg the caller was
+ * just told was reclaimed.
+ *
+ * @throws 409 `legFundingInProgress` while a funding on the leg can still land.
+ */
+async function takeoverableReceipt(
+  claims: FundingClaims,
+  rpc: Rpc,
+  tradeId: string,
+  side: DvpTradeSide
+): Promise<string | null> {
+  const existing = (await claims.listForTrade(tradeId)).find((row) => row.side === side);
+  if (existing === undefined) {
+    return null;
+  }
+  const state =
+    existing.fundingTx === null
+      ? "pending"
+      : await readDvpFundingReceipt(rpc, {
+          fundingTx: existing.fundingTx,
+          expiryHeight: existing.expiryHeight,
+        });
+  if (state === "pending") {
+    throw conflict(`DvP trade ${tradeId}: this leg is already being moved; nothing was sent`, {
+      reason: DVP_LEG_REFUSAL.legFundingInProgress,
+    });
+  }
+  return existing.fundingTx;
+}
+
+/**
+ * Releases the reclaim's lock once its transaction is confirmed.
+ *
+ * On the wire is not landed. Until it confirms the balance anyone reads is
+ * stale, and a second reclaim or a funding let in now would read the escrow
+ * still full and send on top of it. A confirmed failure is final too, so it
+ * releases. An unconfirmed send keeps the lock until its blockhash expires and
+ * `releaseExpired` frees it.
+ */
+async function releaseOnceConfirmed(
+  claims: FundingClaims,
+  rpc: Rpc,
+  leg: { tradeId: string; side: DvpTradeSide },
+  heldSignature: Signature,
+  reclaimSignature: Signature
+) {
+  try {
+    const confirmation = await solanaRpc.confirmTransaction(rpc, reclaimSignature, {
+      timeoutMs: RECLAIM_CONFIRM_TIMEOUT_MS,
+    });
+    if (
+      confirmation.confirmationStatus === "confirmed" ||
+      confirmation.confirmationStatus === "finalized"
+    ) {
+      await claims.release(leg.tradeId, leg.side, heldSignature);
+    }
+  } catch (error) {
+    getLogger().warn(
+      { error, ...leg, signature: reclaimSignature },
+      "dvp reclaim: not confirmed in time; the leg stays locked until its blockhash expires"
+    );
+  }
 }

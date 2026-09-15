@@ -12,9 +12,14 @@
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
-import { type Address, address, fetchEncodedAccounts, fetchJsonParsedAccount } from "@solana/kit";
+import {
+  type Address,
+  assertAccountExists,
+  decodeAccount,
+  fetchEncodedAccounts,
+} from "@solana/kit";
+import { getSysvarClockDecoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
-import { z } from "zod";
 import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { DvpLegObservation, DvpTradeObservation } from "./observe";
@@ -32,38 +37,6 @@ export interface DvpLegAddress {
   escrow: Address;
   tokenProgram: Address;
   mint: Address;
-}
-
-const SYSVAR_CLOCK_ADDRESS = address("SysvarC1ock11111111111111111111111111111111");
-
-/** The Clock sysvar as the RPC's `jsonParsed` encoding describes it. */
-const parsedClockSchema = z.object({
-  parsedAccountMeta: z.object({ program: z.literal("sysvar"), type: z.literal("clock") }),
-  unixTimestamp: z.bigint(),
-});
-
-/**
- * The cluster's current `Clock.unix_timestamp`, the time `settle_dvp.rs` reads.
- *
- * Asked of the RPC in `jsonParsed` form rather than decoded here: `@solana/kit`
- * does not re-export `@solana/sysvars`, and declaring that package in this app
- * re-resolves the Mosaic SDK's sysvars peer. The RPC names the account's program
- * and type, which is checked before the value is believed.
- *
- * @param rpc - The cluster to ask.
- * @returns Unix seconds, as the cluster's clock has them.
- */
-export async function readClusterUnixTimestamp(rpc: SolanaRpc): Promise<bigint> {
-  const account = await fetchJsonParsedAccount<{ unixTimestamp: bigint }>(
-    rpc,
-    SYSVAR_CLOCK_ADDRESS
-  );
-  if (!account.exists) {
-    throw new Error("The cluster returned no Clock sysvar account");
-  }
-  // An RPC that could not jsonParse the account hands back raw bytes, which the
-  // schema refuses along with any account that is not the clock.
-  return parsedClockSchema.parse(account.data).unixTimestamp;
 }
 
 const MISSING: DvpLegObservation = { exists: false, tampered: false };
@@ -150,8 +123,13 @@ export async function readEscrowState(
 }
 
 /**
- * Fetches a trade and both escrows at one slot for callers that must verify
- * terms before acting.
+ * Fetches a trade, both escrows and the cluster clock at one slot, for callers
+ * that must verify terms or time before acting.
+ *
+ * The clock rides in the same request so its `unixTimestamp` is the one the
+ * program would read against exactly these balances: `settle_dvp.rs` judges
+ * the window by `Clock`, and a separate read could straddle an expiry second.
+ * Decoded with `@solana/sysvars`, the same decoder `fetchSysvarClock` uses.
  */
 export async function readDvpAccounts(
   rpc: SolanaRpc,
@@ -161,12 +139,24 @@ export async function readDvpAccounts(
   trade: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number];
   legA: DvpLegObservation;
   legB: DvpLegObservation;
+  /** The cluster's `Clock.unix_timestamp` at the slot these accounts were read. */
+  clusterUnixTimestamp: bigint;
 }> {
-  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
+  const accounts = await fetchEncodedAccounts(rpc, [
+    swapDvp,
+    legs.a.escrow,
+    legs.b.escrow,
+    SYSVAR_CLOCK_ADDRESS,
+  ]);
+  const clock = accounts[3];
+  // The Clock sysvar always exists; an RPC answering otherwise is not one to
+  // judge a settlement window by, so this throws like any failed read.
+  assertAccountExists(clock);
   return {
     trade: accounts[0],
     legA: readLeg(accounts[1], legs.a, swapDvp),
     legB: readLeg(accounts[2], legs.b, swapDvp),
+    clusterUnixTimestamp: decodeAccount(clock, getSysvarClockDecoder()).data.unixTimestamp,
   };
 }
 
@@ -233,6 +223,7 @@ export async function readDvpTradeObservation(
     legA: accounts.legA,
     legB: accounts.legB,
     blockHeight,
+    clusterUnixTimestamp: accounts.clusterUnixTimestamp,
     closeResolution: null,
   };
 }

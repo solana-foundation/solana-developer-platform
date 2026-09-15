@@ -117,21 +117,38 @@ describe("DvpTradeDetailWorkspace", () => {
       frozen: false,
     });
 
+    // Each row is a state the API can produce: the status, and each leg's
+    // funding and outcome as the server derives them for that status.
     it.each([
-      ["a funded leg the caller holds", "funded", ownParty(), held("1000"), true],
-      ["a partly funded leg the caller holds", "partially_funded", ownParty(), held("400"), true],
+      ["a funded leg the caller holds", "funded", ownParty(), held("1000"), "funded", true],
+      [
+        "a partly funded leg the caller holds",
+        "partially_funded",
+        ownParty(),
+        held("400"),
+        "partial",
+        true,
+      ],
       // No expiry gate on chain, and an expired trade is where it matters most.
-      ["an expired trade's leg the caller holds", "expired", ownParty(), held("1000"), true],
-      ["the counterparty's leg", "funded", testParty(), held("1000"), false],
-      ["an empty escrow", "created", ownParty(), held("0"), false],
-      ["a settled trade", "settled", ownParty(), held("1000"), false],
-    ] as const)("on %s: offered=%s", (_label, status, party, funding, offered) => {
+      [
+        "an expired trade's leg the caller holds",
+        "expired",
+        ownParty(),
+        held("1000"),
+        "expired",
+        true,
+      ],
+      ["the counterparty's leg", "funded", testParty(), held("1000"), "funded", false],
+      ["an empty escrow", "created", ownParty(), held("0"), "awaiting", false],
+      // The escrows are closed: no observed balance, and the leg was delivered.
+      ["a settled trade", "settled", ownParty(), null, "delivered", false],
+    ] as const)("on %s: offered=%s", (_label, status, party, funding, outcome, offered) => {
       const html = renderDetail(
         trade({
           status,
           legs: {
-            a: testLeg({ party, funding, outcome: "funded" }),
-            b: testLeg({ funding: FUNDED, outcome: "funded" }),
+            a: testLeg({ party, funding, outcome }),
+            b: testLeg({ funding, outcome }),
           },
         })
       );
@@ -143,8 +160,6 @@ describe("DvpTradeDetailWorkspace", () => {
   // A reclaim racing a settle can only make one of them fail, so the quiet
   // footer action waits while anything is in flight.
   it("holds Reclaim while a settle is still confirming", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(1_800_000_000_000);
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(() => new Promise<Response>(() => {}));
     try {
@@ -154,6 +169,7 @@ describe("DvpTradeDetailWorkspace", () => {
             cluster="devnet"
             trade={trade({
               status: "funded",
+              settlementAvailability: "available",
               legs: {
                 a: testLeg({ party: ownParty(), funding: FUNDED, outcome: "funded" }),
                 b: testLeg({ funding: FUNDED, outcome: "funded" }),
@@ -170,7 +186,6 @@ describe("DvpTradeDetailWorkspace", () => {
       expect(await view.findByRole("button", { name: "Reclaim" })).toHaveProperty("disabled", true);
     } finally {
       globalThis.fetch = originalFetch;
-      vi.useRealTimers();
     }
   });
 

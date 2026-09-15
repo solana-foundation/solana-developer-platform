@@ -62,6 +62,24 @@ export const DVP_LEG_OUTCOMES = [
 export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];
 
 /**
+ * Whether a DvP trade can settle, derived by the API from the cluster clock read
+ * with the trade's last observation. The program judges `earliest <= now <=
+ * expiry` by its own `Clock`, so this is the one answer the status badge, the
+ * list filter and the Settle action all read, never a host or browser clock.
+ */
+export const DVP_SETTLEMENT_AVAILABILITY = [
+  /** Both legs funded and inside the window: Settle will be accepted. */
+  "available",
+  /** At least one leg still short of its target. */
+  "unfunded",
+  /** Both legs funded, but the earliest settlement time is still ahead. */
+  "too_early",
+  /** Past expiry: only Cancel (or a reclaim) can move the money. */
+  "expired",
+] as const;
+export type DvpSettlementAvailability = (typeof DVP_SETTLEMENT_AVAILABILITY)[number];
+
+/**
  * Why a request to act on one DvP leg (fund it, or reclaim it) was refused, sent
  * as `error.details.reason`.
  *
@@ -90,6 +108,11 @@ export const DVP_LEG_REFUSAL = {
   tradeNotReclaimable: "dvp_trade_not_reclaimable",
   /** The leg's escrow holds nothing. */
   nothingToReclaim: "dvp_leg_nothing_to_reclaim",
+  /**
+   * The custody wallet resolved for the side no longer signs as that side's
+   * party address, and the program accepts no other signer.
+   */
+  signerNotParty: "dvp_signer_not_party",
   /**
    * The leg's mint carries a transfer hook, whose extra accounts SDP does not
    * resolve, so the refund transfer would be refused by the token program.

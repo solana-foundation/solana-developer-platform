@@ -15,19 +15,11 @@ import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { explorerTxUrl } from "@/lib/explorer";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
 import type { DvpPartyWire } from "./use-dvp-parties";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
-
-/**
- * A fresh idempotency key, from `getRandomValues` rather than `randomUUID`:
- * the latter needs a secure context, and a dashboard reached over plain http
- * on a LAN address has none.
- */
-function freshIdempotencyKey(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return `dvp-create-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
 
 export interface DvpCreateRequest {
   parties: { a: DvpPartyWire; b: DvpPartyWire };
@@ -55,10 +47,13 @@ export interface DvpCreateSubmit {
   submitting: boolean;
 }
 
+/** A refusal's envelope. Only the message is read. */
+const errorEnvelopeSchema = z.object({ error: z.object({ message: z.string() }) });
+
 /** The created trade, as far as the confirmation needs it. */
 const createdEnvelopeSchema = z.object({
   data: z.object({
-    trade: z.object({ id: z.string(), createSignature: z.string().nullable() }),
+    trade: z.object({ id: z.string().min(1), createSignature: z.string().nullable() }),
   }),
 });
 
@@ -73,7 +68,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   // left the first attempt broadcasting, and the retry has to replay it rather
   // than draw a second trade at a second address; a rejection stored nothing,
   // so the key is still free.
-  const idempotencyKey = useRef(freshIdempotencyKey());
+  const idempotencyKey = useRef(freshDvpIdempotencyKey("dvp-create"));
 
   async function submit(request: DvpCreateRequest) {
     setSubmitting(true);
@@ -83,7 +78,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": idempotencyKey.current,
+          [IDEMPOTENCY_KEY_HEADER]: idempotencyKey.current,
         },
         body: JSON.stringify({
           partyA: request.parties.a.ref,
@@ -117,18 +112,25 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // Status before body. A non-2xx response carries an error envelope, not
       // a trade, and reading it as one would navigate to `undefined`.
       if (!response.ok) {
-        const failure = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        setError(failure.error?.message ?? `Create failed (${response.status}).`);
+        const failure = errorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+        setError(
+          failure.success
+            ? failure.data.error.message
+            : t("DashboardMarkets.dvp.actionFailed", { status: String(response.status) })
+        );
         return;
       }
 
-      // Null when a 2xx body is not JSON; the schema then fails and the page
-      // falls back to the trades list rather than navigating to `undefined`.
+      // A success answer that cannot be read says nothing about which trade
+      // exists. The key is kept, so pressing Create again replays the trade the
+      // first request made instead of drawing a second one.
       const created = createdEnvelopeSchema.safeParse(await response.json().catch(() => null));
-      idempotencyKey.current = freshIdempotencyKey();
-      const createSignature = created.success ? created.data.data.trade.createSignature : null;
+      if (!created.success) {
+        setError(t("DashboardMarkets.dvp.createUnconfirmed"));
+        return;
+      }
+      idempotencyKey.current = freshDvpIdempotencyKey("dvp-create");
+      const { id: createdId, createSignature } = created.data.data.trade;
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement
@@ -148,11 +150,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
                   ),
               },
       });
-      router.push(
-        created.success
-          ? `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${created.data.data.trade.id}`
-          : DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
-      );
+      router.push(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${createdId}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Create failed.");
     } finally {

@@ -14,20 +14,23 @@
 import { SwapDvpVerificationError } from "@sdp/dvp";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
-  address,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
   none,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
   some,
 } from "@solana/kit";
-import { generateKeyPairSigner, partiallySignTransactionWithSigners } from "@solana/signers";
+import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
-import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
+import {
+  acceptTransaction,
+  buildDvpTradeRow,
+  createTestSponsor,
+  DVP_TEST_T22,
+} from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -46,18 +49,7 @@ const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
-let sponsorSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
-
-/** Co-signs a partially signed transaction as the sponsor, the way Kora would. */
-async function sponsorSign(transaction: Uint8Array, lifecycle: OwnedSubmissionLifecycle) {
-  const decoded = getTransactionDecoder().decode(transaction);
-  const signed = await partiallySignTransactionWithSigners([sponsorSigner], decoded);
-  const signature = getSignatureFromTransaction(signed);
-  const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
-  await lifecycle.persistSigned({ signature, signedTransaction });
-  await lifecycle.markStarted();
-  return { signature, signedTransaction, releaseDefinitelyUnbroadcast: vi.fn() };
-}
+let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
@@ -96,59 +88,10 @@ vi.mock("@sdp/rpc/solana", () => ({
 
 const { fundDvpTradeLeg } = await import("./fund");
 
-const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const _T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
-  return {
-    id: "dvp_fund_test",
-    organizationId: "org_a",
-    projectId: "prj_a",
-    swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
-    settlementAuthority: address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY"),
-    userA: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
-    userB: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
-    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
-    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
-    nonce: "42",
-    tokenProgramA: address(T22),
-    tokenProgramB: address(T22),
-    decimalsA: 6,
-    decimalsB: 6,
-    symbolA: "ATD",
-    symbolB: "USDC",
-    nameA: "Acme Treasury Debt",
-    nameB: "USD Coin",
-    amountA: "1000",
-    amountB: "2000",
-    expiryTimestamp: "1900000000",
-    earliestSettlementTimestamp: null,
-    userASettlementDestination: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
-    userBSettlementDestination: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
-    refString: null,
-    escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
-    escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    counterpartyAccountIdA: null,
-    counterpartyAccountIdB: null,
-    status: "created",
-    observedAt: null,
-    idempotencyKey: null,
-    idempotencyFingerprint: null,
-    createSignature: null,
-    createLastValidBlockHeight: null,
-    closeSignature: null,
-    closeResolutionAttempts: 0,
-    closeResolutionAfter: null,
-    closedAt: null,
-    escrowAAmount: null,
-    escrowBAmount: null,
-    escrowAPeakAmount: null,
-    escrowBPeakAmount: null,
-    escrowAFrozen: null,
-    escrowBFrozen: null,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
-    ...overrides,
-  };
+  return buildDvpTradeRow({ id: "dvp_fund_test", ...overrides });
 }
 
 /** The funder: whoever's custody wallet holds the side's party address. */
@@ -164,7 +107,7 @@ const context = { env } as never;
 describe("fundDvpTradeLeg", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    sponsorSigner = await generateKeyPairSigner();
+    sponsor = await createTestSponsor();
     createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
     readDvpAccounts.mockImplementation(async () => {
@@ -194,14 +137,12 @@ describe("fundDvpTradeLeg", () => {
     }));
     readMintDecimals.mockResolvedValue(6);
     fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
-    prepareOwnedSubmission.mockImplementation(sponsorSign);
+    prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
     createProjectSponsorshipFeePayment.mockResolvedValue({
-      getFeePayer: async () => sponsorSigner.address,
+      getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });
-    sendTransaction.mockImplementation(async (_rpc, bytes) =>
-      getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
-    );
+    sendTransaction.mockImplementation(acceptTransaction);
     claimFunding.mockResolvedValue(true);
     releaseFunding.mockResolvedValue(undefined);
     rebindSignature.mockResolvedValue(true);
@@ -417,7 +358,7 @@ describe("fundDvpTradeLeg", () => {
     });
     prepareOwnedSubmission.mockImplementation(async (transaction, lifecycle) => {
       order.push("sponsor");
-      return sponsorSign(transaction, lifecycle);
+      return sponsor.prepareOwnedSubmission(transaction, lifecycle);
     });
     sendTransaction.mockImplementation(async () => {
       order.push("send");
@@ -519,7 +460,7 @@ describe("fundDvpTradeLeg", () => {
         logs: [
           "Program log: Instruction: TransferChecked",
           "Program log: Error: IncorrectProgramId",
-          `Program ${T22} failed: incorrect program id for instruction`,
+          `Program ${DVP_TEST_T22} failed: incorrect program id for instruction`,
         ],
         postBalances: null,
         postTokenBalances: null,

@@ -241,16 +241,33 @@ describe("DvpLegFundingClaimRepository", () => {
   // A reclaim takes the leg the way funding does, so the two can never be in
   // flight together; releasing it is what lets a reclaimed leg be funded again.
   describe("reclaiming a leg", () => {
-    it("turns a landed receipt into the reclaim's lock, blocking funding until released", async () => {
+    it("turns the receipt it checked into the reclaim's lock, blocking funding until released", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
         await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
 
-        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"))).toBe(true);
+        expect(
+          await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_sent")
+        ).toBe(true);
         expect(await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_fund_during"))).toBe(false);
 
         await repo.release(TRADE_ID, "a", "sig_reclaim");
         expect(await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_fund_after"))).toBe(true);
+      });
+    });
+
+    // The chain was asked about one funding transaction. A row that now carries
+    // a different one was not checked, and must not be taken over.
+    it("refuses to take over a receipt other than the one it checked", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_newer"));
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_newer");
+
+        expect(
+          await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_checked")
+        ).toBe(false);
+        const [row] = await repo.listForTrade(TRADE_ID);
+        expect(row.fundingTx).toBe("sig_newer");
       });
     });
 
@@ -259,14 +276,21 @@ describe("DvpLegFundingClaimRepository", () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_inflight"));
 
-        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"))).toBe(false);
+        expect(
+          await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_inflight")
+        ).toBe(false);
+        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), null)).toBe(
+          false
+        );
         expect(await repo.hasClaim(TRADE_ID, "a", "sig_inflight")).toBe(true);
       });
     });
 
     it("takes a leg nobody has claimed like any claim", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
-        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "b", "sig_reclaim"))).toBe(true);
+        expect(await repo.claimForReclaim(claimInput(PARTY_A_ORG, "b", "sig_reclaim"), null)).toBe(
+          true
+        );
         expect(await repo.hasClaim(TRADE_ID, "b", "sig_reclaim")).toBe(true);
       });
     });
@@ -344,6 +368,32 @@ describe("DvpLegFundingClaimRepository", () => {
       const listed = await repo.listExpiredBroadcast(900n);
 
       expect(listed.map((claim) => claim.signature)).toEqual(["sig_brd_dead"]);
+    });
+
+    // An expired trade's escrows still exist, so a receipt that never landed
+    // on one has to be cleared too, or its link to a dropped transaction stays.
+    it("lists receipts on expired trades, and not on closed ones", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({
+          ...claimInput(PARTY_A_ORG, "a", "sig_on_expired"),
+          expiryHeight: "500",
+        });
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_on_expired");
+      });
+
+      await getDb(env)
+        .prepare("UPDATE dvp_trades SET status = 'expired' WHERE id = ?")
+        .bind(TRADE_ID)
+        .run();
+      expect((await repo.listExpiredBroadcast(900n)).map((claim) => claim.signature)).toEqual([
+        "sig_on_expired",
+      ]);
+
+      await getDb(env)
+        .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
+        .bind(TRADE_ID)
+        .run();
+      expect(await repo.listExpiredBroadcast(900n)).toEqual([]);
     });
 
     it("deletes the matching broadcast claim and never an unbroadcast lock", async () => {
