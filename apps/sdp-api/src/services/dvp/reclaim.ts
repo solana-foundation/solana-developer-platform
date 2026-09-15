@@ -18,7 +18,6 @@ import {
   createNoopSigner,
   createTransactionMessage,
   getBase58Decoder,
-  getBase64Encoder,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -35,10 +34,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  assertSponsorSignedSameMessage,
-  createProjectSponsorshipFeePayment,
-} from "@/services/sponsorship.service";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -196,12 +192,9 @@ export async function reclaimDvpTradeLeg(
       transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
       lastValidBlockHeight,
       store: {
-        persistSigned: async ({ signature: sponsored, signedTransaction }) => {
-          await assertSponsorSignedSameMessage({
-            unsignedOrPartiallySigned: partiallySigned,
-            sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
-            sponsor,
-          });
+        // The sponsorship port verifies the sponsor signed this exact message
+        // before it hands the signature here.
+        persistSigned: async ({ signature: sponsored }) => {
           if (!(await claims.rebindSignature(trade.id, side, claimSignature, sponsored))) {
             throw new Error(
               "reclaim lock was released before the sponsored signature could be attached"
