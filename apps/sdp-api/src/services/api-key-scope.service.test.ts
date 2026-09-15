@@ -513,9 +513,16 @@ describe("api key scope service", () => {
 
 describe("assertGrantableApiKeyPermissions", () => {
   it("lets wildcard and org admins grant the api_admin role", () => {
-    expect(() => assertGrantableApiKeyPermissions(["*"], "api_admin", undefined, null)).not.toThrow();
     expect(() =>
-      assertGrantableApiKeyPermissions(["org:admin", "api-keys:write"], "api_admin", undefined, null)
+      assertGrantableApiKeyPermissions(["*"], "api_admin", undefined, null)
+    ).not.toThrow();
+    expect(() =>
+      assertGrantableApiKeyPermissions(
+        ["org:admin", "api-keys:write"],
+        "api_admin",
+        undefined,
+        null
+      )
     ).not.toThrow();
   });
 

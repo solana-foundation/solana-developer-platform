@@ -219,7 +219,7 @@ describe("ApiKeyService.updateApiKey", () => {
     await service.updateApiKey({
       ...base,
       actorPermissions: ["org:admin"],
-        actorApiKeyRole: null,
+      actorApiKeyRole: null,
       name: "renamed",
     });
 
@@ -235,7 +235,7 @@ describe("ApiKeyService.updateApiKey", () => {
     await service.updateApiKey({
       ...base,
       actorPermissions: ["payments:read", "payments:write", "api-keys:write"],
-        actorApiKeyRole: null,
+      actorApiKeyRole: null,
       permissions: ["payments:read"],
     });
 

@@ -95,9 +95,18 @@ describe("rotateApiKey wallet-scope guard", () => {
     const service = new ApiKeyService(getDb(env), SCOPE);
 
     await expect(
-      service.rotateApiKey(TARGET_KEY_ID, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"], null, "pepper", () => {
-        throw new Error("scope refused");
-      })
+      service.rotateApiKey(
+        TARGET_KEY_ID,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        24,
+        ["*"],
+        null,
+        "pepper",
+        () => {
+          throw new Error("scope refused");
+        }
+      )
     ).rejects.toThrow("scope refused");
 
     const replacement = await getDb(env)

@@ -362,6 +362,17 @@ export function assertGrantableApiKeyPermissions(
   requestedPermissions: Permission[] | null | undefined,
   actorApiKeyRole: string | null
 ): void {
+  // The api_admin role carries capabilities beyond its permission list
+  // (wallet policy authoring), so no permission set — including a custom
+  // org:admin grant — lets a lesser API key mint or rotate an api_admin key.
+  // Dashboard actors carry no API-key role and keep the exemptions below.
+  if (resolvedRole === "api_admin" && actorApiKeyRole !== null && actorApiKeyRole !== "api_admin") {
+    throw new AppError(
+      "FORBIDDEN",
+      "Only an api_admin API key can create or rotate api_admin keys"
+    );
+  }
+
   if (hasAnyPermission(actorPermissions, ["org:admin"])) {
     return;
   }
@@ -374,12 +385,6 @@ export function assertGrantableApiKeyPermissions(
       "INSUFFICIENT_PERMISSIONS",
       "Cannot grant an API key more permissions than you hold"
     );
-  }
-
-  // The api_admin role now carries capabilities beyond its permission list
-  // (wallet policy authoring), so matching permissions alone cannot grant it.
-  if (resolvedRole === "api_admin" && actorApiKeyRole !== null && actorApiKeyRole !== "api_admin") {
-    throw new AppError("FORBIDDEN", "Only an api_admin API key can create or rotate api_admin keys");
   }
 }
 

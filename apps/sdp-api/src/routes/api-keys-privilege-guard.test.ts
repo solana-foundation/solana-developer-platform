@@ -127,7 +127,7 @@ describe("API key privilege guards", () => {
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
+    expect(body.error.code).toBe("FORBIDDEN");
     const replacementCount = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS count FROM api_keys WHERE id <> ? AND id <> ?")
       .bind(WRITER_KEY.id, ADMIN_TARGET_KEY.id)
@@ -414,6 +414,34 @@ describe("API key privilege guards", () => {
 
     const body = (await res.json()) as { error: { message: string } };
     expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body.error.message).toContain("api_admin");
+  });
+
+  it("refuses a non-admin key holding a custom org:admin permission from minting api_admin", async () => {
+    await reseedActor();
+    const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, writerHash, {
+      ...WRITER_CACHED,
+      permissions: [...WRITER_CACHED.permissions, "org:admin"],
+    });
+
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          name: "Escalated via org:admin permission",
+          role: "api_admin",
+          walletScope: "all",
+          permissions: ["api-keys:read", "api-keys:write", "payments:read"],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("api_admin");
   });
 
