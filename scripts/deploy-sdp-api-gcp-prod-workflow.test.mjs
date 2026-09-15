@@ -14,7 +14,11 @@ test("a canary failure after promotion reports canary-failed, not a deploy failu
     /- name: Record canary outcome\n\s+id: canary_outcome\n\s+if: \$\{\{ always\(\) \}\}/
   );
   assert.match(workflow, /canary: \$\{\{ steps\.canary_outcome\.outputs\.result \}\}/);
-  assert.match(workflow, /needs\.deploy\.outputs\.canary == 'failure' && 'canary-failed'/);
+  assert.match(
+    workflow,
+    /needs\.deploy\.outputs\.canary == 'failure' && needs\.deploy\.outputs\.tail_clean == 'true' && 'canary-failed'/
+  );
+  assert.match(workflow, /tail_clean: \$\{\{ steps\.tail_outcome\.outputs\.clean \}\}/);
 });
 
 test("manual production deploy requires an immutable SHA-tagged image", () => {
