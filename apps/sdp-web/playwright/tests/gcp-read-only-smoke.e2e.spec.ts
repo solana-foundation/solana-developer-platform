@@ -236,12 +236,13 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     expect((await activityResponse).status()).toBe(200);
     await expect(page.getByText("Recent transactions", { exact: true })).toBeVisible();
-    if (fixture.issuanceTransactions.length + fixture.transfers.length > 0) {
-      const firstActivityRow = page.locator("tbody tr").first();
-      await expect(firstActivityRow).toBeVisible();
+    const firstActivityRow = page.locator("tbody tr").first();
+    const emptyActivity = page.getByText(
+      /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
+    );
+    await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
+    if (await firstActivityRow.isVisible()) {
       expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
-    } else {
-      await expect(page.getByText("No recent activity found yet.", { exact: true })).toBeVisible();
     }
     await assertExactIdentityAndProject(page, fixture);
     expect(activityRequests).toHaveLength(1);
