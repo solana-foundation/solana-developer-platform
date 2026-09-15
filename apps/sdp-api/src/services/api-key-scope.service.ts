@@ -359,7 +359,8 @@ export async function resolveWalletBindingsInScope(
 export function assertGrantableApiKeyPermissions(
   actorPermissions: Permission[],
   resolvedRole: ApiKeyRole,
-  requestedPermissions: Permission[] | null | undefined
+  requestedPermissions: Permission[] | null | undefined,
+  actorApiKeyRole: string | null
 ): void {
   if (hasAnyPermission(actorPermissions, ["org:admin"])) {
     return;
@@ -373,6 +374,12 @@ export function assertGrantableApiKeyPermissions(
       "INSUFFICIENT_PERMISSIONS",
       "Cannot grant an API key more permissions than you hold"
     );
+  }
+
+  // The api_admin role now carries capabilities beyond its permission list
+  // (wallet policy authoring), so matching permissions alone cannot grant it.
+  if (resolvedRole === "api_admin" && actorApiKeyRole !== null && actorApiKeyRole !== "api_admin") {
+    throw new AppError("FORBIDDEN", "Only an api_admin API key can create or rotate api_admin keys");
   }
 }
 

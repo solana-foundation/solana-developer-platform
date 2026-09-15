@@ -75,8 +75,9 @@ describe("rotateApiKey wallet-scope guard", () => {
       TEST_PROJECT.id,
       24,
       ["*"],
+      null,
       "pepper",
-      ({ bindings }) => {
+      ({ bindings }: { bindings: Array<{ walletId: string; permissions: string[] }> }) => {
         seen.push([...bindings].sort((a, b) => a.walletId.localeCompare(b.walletId)));
       }
     );
@@ -94,7 +95,7 @@ describe("rotateApiKey wallet-scope guard", () => {
     const service = new ApiKeyService(getDb(env), SCOPE);
 
     await expect(
-      service.rotateApiKey(TARGET_KEY_ID, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"], "pepper", () => {
+      service.rotateApiKey(TARGET_KEY_ID, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"], null, "pepper", () => {
         throw new Error("scope refused");
       })
     ).rejects.toThrow("scope refused");

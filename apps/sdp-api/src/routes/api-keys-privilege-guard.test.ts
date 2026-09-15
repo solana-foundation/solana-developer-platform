@@ -395,6 +395,56 @@ describe("API key privilege guards", () => {
     expect(body.error.message).toContain("Cannot provision a wallet");
   });
 
+  it("refuses a non-admin key minting an api_admin key with matching permissions", async () => {
+    await reseedActor();
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          name: "Escalated admin",
+          role: "api_admin",
+          walletScope: "all",
+          permissions: ["api-keys:read", "api-keys:write", "payments:read"],
+        }),
+      },
+      env
+    );
+
+    const body = (await res.json()) as { error: { message: string } };
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body.error.message).toContain("api_admin");
+  });
+
+  it("refuses a non-admin key rotating an api_admin key with matching permissions", async () => {
+    await reseedActor();
+    const targetHash = await hashString("sk_test_privilege_admin_rotate", env.API_KEY_PEPPER);
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, 'Admin rotate target', 'sk_test_priv', ?, 'api_admin',
+                 '["api-keys:read", "api-keys:write", "payments:read"]', 'active')`
+      )
+      .bind("key_privilege_admin_rotate", TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, targetHash)
+      .run();
+
+    const res = await app.request(
+      "/v1/api-keys/key_privilege_admin_rotate/rotate",
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({}),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("api_admin");
+  });
+
   it("refuses a key updating its own record", async () => {
     await reseedActor();
     const res = await app.request(
