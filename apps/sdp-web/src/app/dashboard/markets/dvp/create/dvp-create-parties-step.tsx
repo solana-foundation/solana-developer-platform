@@ -10,6 +10,9 @@ import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./dvp-create-fields";
 import type { DvpCreateForm, DvpPartySlot } from "./use-dvp-create-form";
 
+/** The Token-2022 extension kind the API names when SDP cannot move a mint (`UNSUPPORTED_MINT_EXTENSIONS`). */
+const TRANSFER_HOOK_EXTENSION = "TransferHook";
+
 /**
  * One side's fields: the party picker on its own row, then the amount and mint.
  * The parties are symmetric but the legs are not — side "a" delivers the
@@ -36,6 +39,20 @@ function LegRow({
   const t = useTranslations();
   const a = side === "a";
   const leg = a ? form.asset : form.cash;
+  // Said at the field, before an amount is typed, rather than as a 400 on
+  // submit. A transfer hook is named for what it costs; the extensions the
+  // program itself refuses are named as they are.
+  let mintWarning: string | null = null;
+  if (leg.ineligible) {
+    mintWarning =
+      leg.blockedBy === null
+        ? t("DashboardMarkets.dvp.mintRefusedUnnamed")
+        : leg.blockedBy === TRANSFER_HOOK_EXTENSION
+          ? t("DashboardMarkets.dvp.mintRefusedTransferHook")
+          : t("DashboardMarkets.dvp.mintRefusedExtension", { extension: leg.blockedBy });
+  } else if (leg.token === null && leg.pasted.notFound) {
+    mintWarning = t("DashboardMarkets.dvp.mintNotFound");
+  }
   return (
     <div className="grid gap-4">
       <PartySlotPicker
@@ -73,6 +90,7 @@ function LegRow({
           onChoiceChange={leg.setChoice}
           onCustomChange={leg.setCustom}
           options={a ? context.tokens : form.cashOptions}
+          warning={mintWarning}
         />
       </div>
     </div>

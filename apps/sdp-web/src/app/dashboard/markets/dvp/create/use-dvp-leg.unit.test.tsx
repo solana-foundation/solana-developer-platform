@@ -109,3 +109,54 @@ describe("a pasted leg whose lookup has not caught up", () => {
     expect(result.current.pendingLookup).toBe(false);
   });
 });
+
+/**
+ * PRO-1951. A mint create refuses, such as one with a transfer hook, is ruled
+ * out at the field rather than by a 400 on submit. Listed tokens are read too:
+ * an issued token can carry a hook, and the list says nothing about extensions.
+ */
+describe("a leg on a mint create would refuse", () => {
+  const LISTED = {
+    mint: MINT_A,
+    label: "ATD",
+    name: null,
+    decimals: 6,
+    tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+  };
+
+  function refused(address: string, blockedBy: string | null): PastedMintState {
+    const state = resolved(address, 6);
+    return { ...state, mint: state.mint && { ...state.mint, eligible: false, blockedBy } };
+  }
+
+  it("rules out a pasted mint and names the extension", () => {
+    const result = leg(refused(MINT_B, "TransferHook"), MINT_B, "10");
+
+    expect(result.current.ineligible).toBe(true);
+    expect(result.current.blockedBy).toBe("TransferHook");
+  });
+
+  it("rules out a listed token the inspection refuses", () => {
+    pastedState.current = refused(MINT_A, "TransferHook");
+    const { result } = renderHook(() => useDvpLeg([LISTED], true));
+
+    expect(result.current.ineligible).toBe(true);
+    expect(result.current.pendingLookup).toBe(false);
+  });
+
+  it("does not rule out a mint by an answer for a different one", () => {
+    const result = leg(refused(MINT_A, "TransferHook"), MINT_B, "10");
+
+    expect(result.current.ineligible).toBe(false);
+    expect(result.current.blockedBy).toBeNull();
+  });
+
+  // Unread is not refused. The API still refuses at create, so the field makes
+  // no claim it cannot back.
+  it("claims nothing while a listed token is unread", () => {
+    pastedState.current = { address: MINT_A, loading: true, notFound: false, mint: null };
+    const { result } = renderHook(() => useDvpLeg([LISTED], true));
+
+    expect(result.current.ineligible).toBe(false);
+  });
+});

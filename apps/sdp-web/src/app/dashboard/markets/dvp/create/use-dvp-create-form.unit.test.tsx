@@ -141,6 +141,44 @@ describe("useDvpCreateForm", () => {
     expect(result.current.ready).toBe(true);
   });
 
+  // PRO-1951. Everything else is filled; the one thing wrong is a mint create
+  // would refuse, and that alone holds the form.
+  it("is not ready while a leg's mint would be refused at create", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            mint: {
+              decimals: 6,
+              name: null,
+              symbol: null,
+              tokenProgram: TOKEN_2022,
+              eligible: false,
+              blockedBy: "TransferHook",
+            },
+          },
+        }),
+      })
+    );
+    try {
+      const { result } = setup();
+
+      fillParties(result);
+      act(() => result.current.asset.setChoice(ASSET_MINT));
+      act(() => result.current.asset.setAmount("10"));
+      act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
+      act(() => result.current.cash.setAmount("25"));
+
+      await waitFor(() => expect(result.current.asset.ineligible).toBe(true));
+      expect(result.current.ready).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   /**
    * With no issued tokens the asset leg falls back to a pasted mint, and the
    * form has to stay usable rather than becoming permanently un-submittable.

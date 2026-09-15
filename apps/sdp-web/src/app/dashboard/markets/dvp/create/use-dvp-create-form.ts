@@ -129,6 +129,8 @@ function canCreateTrade(input: {
   const legsResolved = Boolean(
     !asset.pendingLookup && !cash.pendingLookup && asset.mint && cash.mint
   );
+  // A mint create would refuse is answered at the field, not by a 400 on submit.
+  const legsAccepted = !(asset.ineligible || cash.ineligible);
   // No base units means no scale, so there is no quantity to send. Never a
   // rounded fallback.
   const amountsResolved = Boolean(asset.baseUnits && cash.baseUnits);
@@ -136,7 +138,13 @@ function canCreateTrade(input: {
   // a round trip that costs a custody-provider call.
   const partiesUsable = Boolean(input.partiesReady && !input.destinationLooksWrong);
 
-  return legsResolved && amountsResolved && partiesUsable && input.expiry.trim().length > 0;
+  return (
+    legsResolved &&
+    legsAccepted &&
+    amountsResolved &&
+    partiesUsable &&
+    input.expiry.trim().length > 0
+  );
 }
 
 /**

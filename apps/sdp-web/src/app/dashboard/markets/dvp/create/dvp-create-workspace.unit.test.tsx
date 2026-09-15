@@ -10,7 +10,7 @@
  */
 
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -142,7 +142,10 @@ function advanceToReview() {
   fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("DvpCreateWorkspace", () => {
   // Continue gates each stage, so an empty form cannot even reach the review
@@ -275,5 +278,45 @@ describe("DvpCreateWorkspace", () => {
     const { container } = renderForm();
 
     expect(container.textContent).not.toContain("decimals)");
+  });
+
+  // PRO-1951. An issued token can carry a transfer hook. Picking one says so at
+  // the field, and Continue stays disabled, instead of a 400 at the very end.
+  it("refuses a transfer-hook token at the field, before any amount is typed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            mint: {
+              decimals: 6,
+              name: "Test Bond",
+              symbol: "TBOND",
+              tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+              eligible: false,
+              blockedBy: "TransferHook",
+            },
+          },
+        }),
+      })
+    );
+    renderForm();
+
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    fillAssetMint();
+    fillCashMint();
+    fillAmounts();
+
+    expect(
+      await screen.findByText(
+        "This token runs a transfer hook, which SDP can't settle, cancel or reclaim yet. Pick another token."
+      )
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i }).hasAttribute("disabled")).toBe(true)
+    );
   });
 });

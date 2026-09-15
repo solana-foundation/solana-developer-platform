@@ -53,6 +53,14 @@ export interface DvpLeg {
    * different quantity than the one typed.
    */
   pendingLookup: boolean;
+  /**
+   * The chosen mint was read and create would refuse a trade on it, such as a
+   * transfer-hook mint. False while it is unread or could not be read: the API
+   * still refuses at create, so an unknown is never claimed either way.
+   */
+  ineligible: boolean;
+  /** The extension that rules the chosen mint out, when `ineligible`. */
+  blockedBy: string | null;
 }
 
 /**
@@ -76,9 +84,10 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
 
   const token = options.find((option) => option.mint === choice) ?? null;
 
-  // Only a pasted leg needs the lookup; a listed token already carries its
-  // decimals, so this stays idle on the empty string for one.
-  const pasted = usePastedMint(token ? "" : custom);
+  // A listed token already carries its decimals, but not whether a trade on it
+  // would be accepted: an issued token can carry a transfer hook. So the chosen
+  // mint is read either way, and only a pasted one waits on it for its scale.
+  const pasted = usePastedMint(token ? token.mint : custom);
 
   // Only metadata that belongs to the address currently typed. A resolved
   // answer for a PREVIOUS address is not a slightly stale answer, it is a
@@ -102,6 +111,10 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
   // Without a scale the amount has no meaning, so this leg has no base units
   // and submit is blocked rather than a quantity guessed.
   const decimals = token?.decimals ?? pastedMint?.decimals ?? null;
+
+  // Only an answer for the mint chosen now can rule it out.
+  const inspected = pasted.address === (token?.mint ?? custom.trim()) ? pasted.mint : null;
+  const ineligible = inspected !== null && !inspected.eligible;
   const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
   const baseUnits = resolved?.ok ? resolved.baseUnits : null;
 
@@ -112,6 +125,8 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
     custom,
     decimals,
     pendingLookup,
+    ineligible,
+    blockedBy: ineligible ? inspected.blockedBy : null,
     mint: token?.mint ?? custom.trim(),
     pasted,
     setAmount,
