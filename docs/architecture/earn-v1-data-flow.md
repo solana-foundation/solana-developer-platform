@@ -16,11 +16,11 @@ custodian), see the
 flowchart LR
     subgraph Clients
         DASH["Corporate dashboard<br/>(sdp-web, float sweeping)"]
-        PARTNER["B2B2C partner<br/>(Payfi co, API keys)"]
+        PARTNER["B2B2C partner<br/>(keyless or API key)"]
     end
 
     subgraph SDP["sdp-api  /v1/earn"]
-        ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
+        ROUTES["earn routes<br/>optional auth for catalogue/builds<br/>required auth for tenant control plane"]
         SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo vault-direct; Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
         CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
@@ -33,7 +33,7 @@ flowchart LR
     end
 
     DASH -->|BFF proxy| ROUTES
-    PARTNER -->|sk_live API key| ROUTES
+    PARTNER -->|anonymous or API key| ROUTES
     ROUTES --> DB
     ROUTES --> SVC
     SVC -->|REST| VAULT
@@ -44,12 +44,12 @@ flowchart LR
     CHAIN -.-> VAULT
 ```
 
-Vault-direct execution now has two signer surfaces over one provider runtime:
-the treasury flow signs with an organization custody wallet, while Embedded
-Yield returns an unsigned transaction for an end-user wallet and optional
-partner fee payer to co-sign. Both are recorded before broadcast and converge
-through the vault-movement reconciler. The custodial portfolio flow (the
-removed Ground integration) was address-funded and provider-observed.
+Vault-direct execution has two signer surfaces over one provider runtime. The
+treasury flow signs with an organization custody wallet. Embedded Yield returns
+an unsigned transaction for an end-user wallet and, on keyed builds, an
+optional partner fee payer to co-sign. Authenticated submits are recorded before
+SDP broadcasts and converge through the vault-movement reconciler. Anonymous
+builds are never persisted; the caller broadcasts and tracks them.
 
 ## Where each surface gets its data (source of truth)
 
@@ -58,6 +58,7 @@ removed Ground integration) was address-funded and provider-observed.
 | Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) — identity, mints, liquidity terms and **admission** only |
 | APY + vault TVL/holders | `earn_strategies.current_apy` / `risk_metadata` (DB) + live `getPortfolioYield` for the program-level rate | Metrics refresh ← provider `listStrategyMetrics` (`supportsLiveMetrics`); live provider read | **Every 5 min** (`cron/earn-metrics-refresh.ts`) / real-time |
 | Whether a strategy is fundable *here* | Derived per request from `earn_strategies.host_cluster` vs the caller's environment — the `fundable` field on `GET /strategies` | `isClusterFundableInEnvironment` (`@sdp/earn`) | Real-time (never stored) |
+| Keyless catalogue and unsigned builds | `GET /strategies`, `GET /strategies/:id`, deposit and withdrawal previews, and external-wallet transaction builders | Deployment `SDP_ENVIRONMENT`; no organization, project, entitlement, or persisted build context | Per request; catalogue responses may be publicly cached |
 | Program list | `earn_provider_wallets` (**DB**, oldest first) joined per row with a **live provider snapshot** — `GET /v1/earn/programs` | Rows written by create; snapshots fetched in parallel per listed program | Real-time |
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
 | Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
@@ -71,11 +72,10 @@ removed Ground integration) was address-funded and provider-observed.
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
-> **Ledger vs live.** SDP ledgers every movement it builds or submits, while
-> balances remain live provider or on-chain reads. Custodial deposits are the
-> exception because customers transfer directly to a provider-managed address;
-> the provider observes those deposits and SDP has no build intent to record. A
-> ledger row proves SDP's movement lifecycle, never the current balance.
+> **Ledger vs live.** SDP ledgers every movement it signs or accepts through a
+> keyed external-wallet submit, while balances remain live provider or
+> on-chain reads. Anonymous builds are not SDP movements and create no ledger
+> row. A ledger row proves SDP's movement lifecycle, never the current balance.
 
 > **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
 > The catalogue row and the numbers on it now have different cadences and
@@ -112,9 +112,9 @@ removed Ground integration) was address-funded and provider-observed.
 
 **No new indexer.** The catalogue comes from provider APIs or bounded on-chain
 reads, and holdings are hydrated live. Vault-direct deposits and withdrawals
-are ledgered because SDP builds or submits them. Custodial address-funded
-deposits (the removed Ground integration) were provider-observed. Richer
-per-block history would be an indexer decision for a later product need.
+are ledgered when SDP signs them from custody or accepts them through a keyed
+external-wallet submit. Anonymous unsigned builds remain outside the ledger.
+Richer per-block history would be an indexer decision for a later product need.
 
 ## Execution era (PRO-1634 — arrived for `vault_direct`)
 
@@ -161,8 +161,8 @@ per-provider movement endpoints or status polling types from git history.
 
 | Existing component | Where | Earn uses it for | Status |
 |---|---|---|---|
-| Auth + API keys + permissions | `middleware/auth.ts`, `@sdp/types/permissions` | `earn:read`/`earn:write` gating, partner `sk_live` access | ✅ wired in scaffold |
-| Org/project tenancy | `projectContextMiddleware` | Program + withdrawal-ledger scoping (rows carry org/project; every program lookup is scoped to org **and** environment, and the ledger anchors on the program wallet) | ✅ wired |
+| Auth + API keys + permissions | `lib/auth.ts`, `middleware/auth.ts`, `@sdp/types/permissions` | Optional identity enrichment for catalogue/previews/builds; an authenticated call retains that operation's `earn:read` or `earn:write` scope, while submits and tenant reads require authentication | ✅ two-tier router |
+| Org/project tenancy | `projectContextMiddleware` | Authenticated program, build, movement, position, and withdrawal scoping. Anonymous requests receive no tenant context and write no tenant state. | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
 | Custody + signing | `services/solana`, `@sdp/custody` | Treasury vault deposits and withdrawals sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault-direct treasury paths |
 | Fee sponsorship | `@sdp/payments/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. The exit closes the share ATA and refunds its rent to whoever funded it: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Cluster-gated to devnet and off by default: deployed devnet carries the Earn ids on its Kora allowlist (sdp-infra#64, asserted by the `Kora / Live Smoke` shard on secret-bearing CI runs); mainnet additionally needs `allow_create_account` opened and `sbp_mainnet_global` enabled (PRO-1736) | ✅ code · ✅ devnet deploy · ⏸ mainnet |
@@ -175,7 +175,7 @@ per-provider movement endpoints or status polling types from git history.
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public strategy catalogue, deposit quote, and external-wallet build/submit/read surfaces | ✅ published; regenerate after contract changes |
+| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the keyless subset | 🔨 regenerate after the security-reviewed contract change |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
 (Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads;

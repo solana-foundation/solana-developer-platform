@@ -5,7 +5,7 @@ description: Authenticate API requests with project-scoped API keys, layered wit
 
 SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, policy profiles, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
 
-Every API request carries an API key in the `Authorization` header:
+Authenticated API requests carry an API key in the `Authorization` header:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
@@ -13,6 +13,8 @@ curl https://api.solana.com/v1/wallets \
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
+
+The Embedded Yield strategy catalogue, quote routes, and unsigned external-wallet transaction builders also support [keyless access](/docs/guides/embedded-yield#without-an-api-key). Those requests have no organization or project identity and cannot submit transactions or read tenant state.
 
 ## Key scope
 
@@ -42,7 +44,7 @@ Authentication and authorization failures are always machine-distinguishable:
 
 | Condition | Status | Code |
 | --- | --- | --- |
-| No API key on the request | 401 | `UNAUTHORIZED` |
+| No API key on a keyed-only request | 401 | `UNAUTHORIZED` |
 | Malformed or unknown key | 401 | `INVALID_API_KEY` |
 | Key has been revoked | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |

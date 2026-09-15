@@ -1,7 +1,7 @@
 import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
 
 /**
- * The complete B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
+ * The authenticated B2B2C loop, exactly as shipped (PRO-1722 + PRO-1772): the
  * partner's backend BUILDS an unsigned transaction for the customer's own
  * wallet, the wallet signs it in the browser, the backend SUBMITS the signed
  * bytes, and SDP verifies the signature, records the movement, then broadcasts.
@@ -21,7 +21,8 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * sponsoring fees, their server-side sponsor wallet.
  *
  * The public docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
- * documents this same flow. Update both together.
+ * documents this authenticated flow plus the separate keyless catalogue and
+ * unsigned-build tier. Keep the shared authenticated contract aligned.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope. */

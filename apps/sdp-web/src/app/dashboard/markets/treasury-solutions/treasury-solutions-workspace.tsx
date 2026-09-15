@@ -240,6 +240,40 @@ function replaceTrackedVaultMovement<
   );
 }
 
+/**
+ * Pure merge for the vault deposit/withdrawal watch lists: append the incoming
+ * movements newest-first — callers reverse before passing so the latest
+ * observed movement for a position stays last and wins the status column's map
+ * reduction — refresh rows already present, and keep the list bounded.
+ * `settledIds` is load-bearing, not defensive: the ledger list keeps
+ * re-asserting a row until the server marks it terminal, so without a
+ * tombstone a settled movement would resume polling. Shared by the deposit and
+ * withdrawal watchers, whose updaters are otherwise line-for-line identical.
+ */
+function mergeTrackedVaultMovements<Movement extends { movementId: string; observedOrder: number }>(
+  current: readonly Movement[],
+  incoming: readonly Movement[],
+  settledIds: ReadonlySet<string>
+): readonly Movement[] {
+  const next = [...current];
+  for (const movement of incoming) {
+    const existingIndex = next.findIndex(
+      (candidate) => candidate.movementId === movement.movementId
+    );
+    if (settledIds.has(movement.movementId)) continue;
+    if (existingIndex >= 0) {
+      next[existingIndex] = {
+        ...next[existingIndex],
+        ...movement,
+        observedOrder: next[existingIndex]?.observedOrder ?? movement.observedOrder,
+      };
+    } else {
+      next.push(movement);
+    }
+  }
+  return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
+}
+
 function subtractUnsignedDecimalStrings(left: string, right: string): string | undefined {
   if (
     compareUnsignedDecimals(left, "0") === undefined ||
@@ -1028,7 +1062,7 @@ function StrategyTable({
                     {position === null || position.unrecorded
                       ? "—"
                       : position.count === 0
-                        ? "\u2014"
+                        ? "—"
                         : formatProviderAmount(position.value, locale)}
                   </p>
                   {position === null ||
@@ -1978,31 +2012,9 @@ export function TreasurySolutionsWorkspace({
         ...deposit,
         observedOrder: ++vaultActivityOrder.current,
       }));
-      setVaultDepositWatches((current) => {
-        const next = [...current];
-        // The collection is newest-first. Reverse it before appending so the
-        // latest observed deposit for a position stays last and wins the
-        // status column's map reduction.
-        for (const deposit of observedIncoming) {
-          const existingIndex = next.findIndex(
-            (candidate) => candidate.movementId === deposit.movementId
-          );
-          // `settledVaultDepositIds` is load-bearing, not defensive: the ledger
-          // list keeps re-asserting a row until the server marks it terminal, so
-          // without a tombstone a settled deposit would resume polling.
-          if (settledVaultDepositIds.has(deposit.movementId)) continue;
-          if (existingIndex >= 0) {
-            next[existingIndex] = {
-              ...next[existingIndex],
-              ...deposit,
-              observedOrder: next[existingIndex]?.observedOrder ?? deposit.observedOrder,
-            };
-          } else {
-            next.push(deposit);
-          }
-        }
-        return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
-      });
+      setVaultDepositWatches((current) =>
+        mergeTrackedVaultMovements(current, observedIncoming, settledVaultDepositIds)
+      );
     },
     [settledVaultDepositIds]
   );
@@ -2014,25 +2026,9 @@ export function TreasurySolutionsWorkspace({
         ...withdrawal,
         observedOrder: ++vaultActivityOrder.current,
       }));
-      setVaultWithdrawalWatches((current) => {
-        const next = [...current];
-        for (const withdrawal of observedIncoming) {
-          const existingIndex = next.findIndex(
-            (candidate) => candidate.movementId === withdrawal.movementId
-          );
-          if (settledVaultWithdrawalIds.has(withdrawal.movementId)) continue;
-          if (existingIndex >= 0) {
-            next[existingIndex] = {
-              ...next[existingIndex],
-              ...withdrawal,
-              observedOrder: next[existingIndex]?.observedOrder ?? withdrawal.observedOrder,
-            };
-          } else {
-            next.push(withdrawal);
-          }
-        }
-        return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
-      });
+      setVaultWithdrawalWatches((current) =>
+        mergeTrackedVaultMovements(current, observedIncoming, settledVaultWithdrawalIds)
+      );
     },
     [settledVaultWithdrawalIds]
   );

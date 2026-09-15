@@ -16,7 +16,7 @@ integration touches:
 | `/v1/earn/programs` | the whole flow | **501** by capability detection |
 | Credential | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY` | none today; public API or on-chain state |
 | Clusters | catalogued per environment's own cluster | deployment registry per cluster; Kamino has devnet and mainnet, Veda is devnet-only until a production vault is approved |
-| Dashboard | treasury program flow | treasury vault flow plus the API-key integration guide for external wallets |
+| Dashboard | treasury program flow | treasury vault flow plus an authenticated integration guide; public docs also cover keyless external-wallet builds |
 
 A vault-direct provider is a complete integration without a portfolio wallet:
 `supportsPortfolioWallets` returning false is the answer, not a TODO. Its
@@ -90,44 +90,50 @@ the flow:
 | | Treasury (SDP signs) | B2B2C external wallet (the customer signs) |
 | -- | -- | -- |
 | Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
-| Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (build), then `/external-wallet/deposits` (submit) |
-| Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-transactions`, then `/external-wallet/withdrawals` |
+| Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (keyless or keyed build); a keyed caller may then submit to `/external-wallet/deposits` |
+| Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions` (keyless or keyed); a keyed caller may then submit to `/external-wallet/withdrawals` |
 | Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
 | Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…` |
 | Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
 | Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
 
-Both are the SAME execution model (`vault_direct`): one signed transaction,
-recorded durably with its signature, wire bytes and blockhash window BEFORE
-broadcast, then driven terminal by the same reconciliation sweep. Exactly one
-of the two identity columns is set per row (migration 0070), and every
-treasury read scopes by custody wallet, so external-wallet rows are
-structurally invisible to those surfaces.
+Both are the SAME execution model (`vault_direct`). Treasury and keyed
+external-wallet submits record a signed transaction durably before SDP
+broadcasts it, then drive it terminal through the same reconciliation sweep.
+A keyless external-wallet build is deliberately ephemeral: SDP returns unsigned
+bytes, writes no tenant row, and leaves signing, broadcast, and tracking to the
+caller. Exactly one of the two identity columns is set on every recorded row
+(migration 0070), and every treasury read scopes by custody wallet, so recorded
+external-wallet rows are structurally invisible to those surfaces.
 
 The external-wallet flow in one pass (PRO-1722):
 
-1. **Build.** The partner's backend calls the build route with its API key.
-   SDP runs the full money-in gates, asks the provider for the plan, simulates
-   with the owner as fee payer (which is also the funds check), compiles ONE
-   unsigned transaction, persists it (`earn_external_wallet_transactions`),
-   and returns `{transactionId, transaction}`. Nothing has moved; an unsigned
-   build expires with its blockhash (about a minute).
+1. **Build.** The partner calls the same build route with or without an API
+   key. SDP runs the environment, catalogue, and safety gates, asks the provider
+   for the plan, simulates it, and compiles ONE unsigned transaction. A keyed
+   build also applies the tenant entitlement and persists
+   `earn_external_wallet_transactions`; a keyless build uses the owner as fee
+   payer and writes nothing. Both return `{transactionId, transaction,
+   sponsored}`. Nothing has moved, and the build expires with its blockhash.
 2. **Sign.** The customer's wallet signs those exact bytes in the partner's
    UI. By default the owner is the fee payer and only required signer. To
-   sponsor fees and share-account rent, pass the partner wallet's `feePayer`
-   on the build and co-sign the same bytes with both wallets before submit.
-3. **Submit.** The backend returns `{transactionId, signedTransaction}` with a
-   required `Idempotency-Key`. SDP proves the message is byte-for-byte the one
-   it built, verifies the owner's signature, records the movement, THEN
-   broadcasts. A retry with the same key replays the original movement
-   (`replayed: true`); each built transaction is consumable exactly once.
-4. **Settle.** The shared reconciler drives the movement to `finalized` or
-   `failed`; the exit mirrors the deposit and takes only 404-scoping plus
-   capability (ADR 0002 exit safety), so it works while deposits are closed.
+   sponsor fees and share-account rent on a keyed build, pass the partner
+   wallet's `feePayer` and co-sign the same bytes with both wallets.
+3. **Broadcast.** A keyless caller broadcasts and tracks the signed transaction
+   directly. It cannot use SDP's submit or tenant read routes because no server
+   build row exists.
+4. **Submit, keyed only.** The backend returns `{transactionId,
+   signedTransaction}` with a required `Idempotency-Key`. SDP proves the message
+   is byte-for-byte the one it built, verifies every required signature,
+   records the movement, THEN broadcasts. A retry with the same key replays the
+   original movement (`replayed: true`); each durable build is consumable once.
+5. **Settle.** SDP drives a submitted movement to `finalized` or `failed`. The
+   exit mirrors the deposit and retains its money-out safety rules.
 
-The dashboard's Embedded Yield integration guide
-(`/dashboard/markets/embedded-yield/integrate`) emits this exact contract as
-its server snippets. The treasury dashboard flows use the SDP-signed routes.
+The public Embedded Yield guide documents both access tiers. The dashboard's
+configuration snippets intentionally emit the authenticated end-to-end flow
+because they include submit and tenant read routes. The treasury dashboard
+flows use the SDP-signed routes.
 Deeper docs: gates and scoping in
 `apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
 `packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
@@ -339,12 +345,15 @@ refresh is update-only.
   cron run reads error; the job's own query failing emits no tick at all.
 - **Cadence:** `EARN_SPLIT_SWAPS_CRON` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
-  rows absent from that provider's live catalogue are deleted, scoped to the
-  cluster sub-shelf the responding lane is the truth for. Operator-paused or
-  deprecated rows remain so a later sync cannot silently reactivate them. The
-  mirror lane additionally converges to EMPTY on a reliable "nothing is
-  listed" answer (an empty accepted mainnet shelf, or a steady-state
-  production skip), so orphaned mirror rows never outlive their truth source;
+  rows absent from that provider's live catalogue become deprecated metadata
+  tombstones, scoped to the cluster sub-shelf the responding lane is the truth
+  for. They disappear from browse and deposit admission while preserving the
+  stable vault and mint identity an anonymous holder needs to exit. A provider
+  relist reactivates only a sync-owned tombstone; operator-paused or deprecated
+  rows remain sticky. The mirror lane additionally converges to EMPTY on a
+  reliable "nothing is listed" answer (an empty accepted mainnet shelf, or a
+  steady-state production skip), so orphaned mirror rows never outlive their
+  truth source;
   fundable own shelves keep the absolute empty-keep-set refusal.
 
 ### Figure anomaly check (`services/earn/catalogue-anomaly.ts`)

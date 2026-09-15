@@ -10,7 +10,7 @@ import type {
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
 import type {
-  DeleteUnlistedEarnStrategiesInput,
+  DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -55,6 +55,7 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     redemption_delay_days: row.redemption_delay_days as number | null,
     risk_metadata: row.risk_metadata as EarnStrategyRiskMetadata,
     status: row.status as EarnStrategyStatus,
+    catalogue_delisted_at: row.catalogue_delisted_at as string | null,
     host_cluster:
       (row.host_cluster as SolanaCluster | null) ?? CLUSTER_BY_SDP_ENVIRONMENT[environment],
     environment,
@@ -155,18 +156,19 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              redemption_delay_days = EXCLUDED.redemption_delay_days,
              risk_metadata = EXCLUDED.risk_metadata,
              host_cluster = EXCLUDED.host_cluster,
-             -- An operator pause/deprecation outranks the provider catalogue.
-             -- The hourly sync always upserts 'active' for anything a provider
-             -- still lists, so overwriting status here would silently unpause a
-             -- strategy stopped for an exploit or depeg within the hour and let
-             -- deposits resume. Reactivation is therefore deliberate: metadata
-             -- and rates keep flowing, but leaving paused/deprecated takes an
-             -- explicit status write, never a sync.
+             -- Migration 0099 clears the tombstone marker when an operator
+             -- updates status. A sync-owned delisting may be reactivated when
+             -- the provider relists it; operator pauses/deprecations stay sticky.
              status = CASE
-               WHEN earn_strategies.status IN ('paused', 'deprecated')
+               WHEN earn_strategies.status = 'paused'
+                 OR (
+                   earn_strategies.status = 'deprecated'
+                   AND earn_strategies.catalogue_delisted_at IS NULL
+                 )
                  THEN earn_strategies.status
                ELSE EXCLUDED.status
              END,
+             catalogue_delisted_at = NULL,
              updated_at = sdp_iso_now()
            RETURNING *`
         )
@@ -245,30 +247,28 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return (result.results ?? []).map(mapStrategyRow);
     },
 
-    async deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput) {
-      // Only `active` rows are deleted. An operator `paused`/`deprecated` is a
-      // deliberate human record, and it is load-bearing: upsertStrategy refuses
-      // to overwrite it precisely so a vault stopped for an exploit or depeg
-      // cannot be silently reactivated by a sync. Deleting such a row would
-      // discard that guard — the next time the provider listed the reference, it
-      // would be inserted fresh as `active`. So an operator-stopped row is the
-      // one thing this pass leaves behind; it is invisible to every read anyway
-      // (the catalogue and program-creation paths both filter `status = 'active'`).
+    async deprecateUnlistedStrategies(input: DeprecateUnlistedEarnStrategiesInput) {
+      // Only `active` rows are transitioned. An operator `paused`/`deprecated`
+      // is a deliberate human record, and it is load-bearing: upsertStrategy
+      // refuses to overwrite it so a vault stopped for an exploit or depeg
+      // cannot be silently reactivated by a sync. A sync-owned transition sets
+      // catalogue_delisted_at, which is what lets a later relist safely reopen
+      // that row without weakening the operator stop.
       //
       // An empty keep set would match EVERY active row (`= ANY('{}')` is false,
-      // so `NOT` admits everything) and delete the provider's whole shelf.
+      // so `NOT` admits everything) and deprecate the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account or a silently-empty response, so it can never trigger a
       // catalogue-wide teardown, unless the caller explicitly authorizes it
       // (`allowEmptyKeepSet`), which the mirror lane does when its truth source
       // reliably answered "nothing is listed". Even then the delist must be
-      // cluster-scoped: an authorized empty pass tears down one sub-shelf, never
+      // cluster-scoped: an authorized empty pass deprecates one sub-shelf, never
       // an environment.
       if (input.listedProviderReferences.length === 0 && !input.allowEmptyKeepSet) {
         return [];
       }
       if (input.allowEmptyKeepSet && !input.hostCluster) {
-        throw new Error("deleteUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
+        throw new Error("deprecateUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
       }
 
       const conditions = ["provider = ?", "environment = ?", "status = 'active'"];
@@ -287,7 +287,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       const rows = await db
         .prepare(
-          `DELETE FROM earn_strategies
+          `UPDATE earn_strategies
+              SET status = 'deprecated',
+                  catalogue_delisted_at = sdp_iso_now(),
+                  updated_at = sdp_iso_now()
             WHERE ${conditions.join("\n              AND ")}
             RETURNING provider_reference`
         )

@@ -23,7 +23,7 @@ The hosted platform is available at https://platform.solana.com and the public d
 - `infra`: local and deployment infrastructure helpers
 - `docs/ops`: operator and maintainer notes
 
-The supported public API areas are health, API keys, wallets, projects, issuance, payments, and compliance. Internal routes and provider-specific operational details are not part of the public surface.
+The supported public API areas are health, API keys, wallets, projects, issuance, payments, policies, compliance, and Earn. Earn exposes a keyless strategy and unsigned-build tier alongside its API-key control plane; see the [Embedded Yield guide](apps/sdp-docs/content/docs/guides/embedded-yield.mdx). Internal routes and provider-specific operational details are not part of the public surface.
 
 ## Local Development
 

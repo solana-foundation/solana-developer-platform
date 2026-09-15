@@ -22,6 +22,9 @@ import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 
+const EARN_TAG_DESCRIPTION =
+  "Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.";
+
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
   ORGANIZATIONS: { name: "Organizations", description: "Organization provisioning and settings." },
@@ -63,8 +66,7 @@ const OPENAPI_TAG = {
   // (sdp-docs generate-api-docs.mjs), so a colon here breaks that YAML.
   PUBLIC_EARN: {
     name: "Earn",
-    description:
-      "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
+    description: EARN_TAG_DESCRIPTION,
   },
   DVP: {
     name: "DvP",
@@ -73,8 +75,7 @@ const OPENAPI_TAG = {
   },
   EARN: {
     name: "Earn",
-    description:
-      "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
+    description: EARN_TAG_DESCRIPTION,
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },

@@ -13,14 +13,14 @@
  */
 
 import Link from "next/link";
-import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
+import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { AddressWithCopy } from "./dvp-party-cell";
 import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
@@ -148,11 +148,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
               is the only address a reader acts on, and the column is the one
               place they would look for it. */}
           <span className="relative z-10 flex flex-col gap-1">
-            <span className="inline-flex items-center gap-1">
-              <span className="sr-only">{yours.escrow}</span>
-              <span aria-hidden>{shortenAddress(yours.escrow)}</span>
-              <WalletAddressCopyButton address={yours.escrow} tooltip={yours.escrow} />
-            </span>
+            <AddressWithCopy address={yours.escrow} />
             {/* Disabling the funding button is not enough on its own: the
                 address next to it stays copyable, so somebody can pay a frozen
                 escrow by hand and lose the fee to a transfer that was always
