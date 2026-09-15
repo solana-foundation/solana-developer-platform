@@ -1,6 +1,6 @@
 import {
   type HercleVerificationStatus,
-  mapHercleVerificationStatus,
+  tryMapHercleVerificationStatus,
 } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
@@ -113,10 +113,16 @@ export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
           provider: "hercle",
         });
       }
+      // A status outside the known vocabulary is foreign-but-valid, not a broken envelope:
+      // acknowledge it, or Hercle redelivers the same event until it gives up.
+      const verificationStatus = tryMapHercleVerificationStatus(status);
+      if (verificationStatus === undefined) {
+        return { kind: "ignore", reason: `unknown_verification_status:${status}` };
+      }
       return {
         kind: "verification",
         accountId,
-        status: mapHercleVerificationStatus(status),
+        status: verificationStatus,
         verificationUrl: data === undefined ? undefined : readString(data.verificationUrl),
       };
     }

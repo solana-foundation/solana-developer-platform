@@ -13,7 +13,11 @@ import {
   hercleCounterpartyRequirements,
   hercleJurisdictionForCountry,
 } from "./counterparty";
-import { hercleOnboardingRequirements, mapHercleVerificationStatus } from "./provider-data";
+import {
+  hercleOnboardingRequirements,
+  mapHercleVerificationStatus,
+  tryMapHercleVerificationStatus,
+} from "./provider-data";
 
 function businessCounterparty(): Counterparty {
   return {
@@ -172,6 +176,11 @@ describe("provider-data mapping", () => {
     assert.equal(mapHercleVerificationStatus("VERIFIED"), "ready");
     assert.equal(mapHercleVerificationStatus("approved"), "ready");
     assert.throws(() => mapHercleVerificationStatus("something-new"));
+  });
+
+  it("offers a non-throwing lookup so a webhook can skip a foreign status", () => {
+    assert.equal(tryMapHercleVerificationStatus("approved"), "ready");
+    assert.equal(tryMapHercleVerificationStatus("something-new"), undefined);
   });
 });
 

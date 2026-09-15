@@ -128,4 +128,19 @@ describe("parseHercleWebhookEvent", () => {
       })
     ).toMatchObject({ kind: "ignore" });
   });
+
+  it("skips unknown verification statuses instead of failing the delivery", () => {
+    expect(
+      parseHercleWebhookEvent({
+        event: "customer.verification.status_changed",
+        data: { accountId: "acct_1", status: "escalated" },
+      })
+    ).toEqual({ kind: "ignore", reason: "unknown_verification_status:escalated" });
+    expect(() =>
+      parseHercleWebhookEvent({
+        event: "customer.verification.status_changed",
+        data: { accountId: "acct_1" },
+      })
+    ).toThrow(AppError);
+  });
 });

@@ -35,10 +35,14 @@ export interface HercleCustomerState {
 /**
  * Maps the Hercle partner API's verification vocabulary onto the internal lifecycle.
  * Accounts read: `verificationStatus` is UNVERIFIED | VERIFIED; verification read:
- * `status` is action_required | pending | rejected | approved. Unknown values throw
- * rather than defaulting — a silently wrong lifecycle is worse than a loud one.
+ * `status` is action_required | pending | rejected | approved. An unknown value is
+ * `undefined` rather than a default — a silently wrong lifecycle is worse than no answer.
+ * The webhook parser skips such an event; the synchronous reads throw via
+ * `mapHercleVerificationStatus`, since there the caller is mid-provisioning and cannot skip.
  */
-export function mapHercleVerificationStatus(apiStatus: string): HercleVerificationStatus {
+export function tryMapHercleVerificationStatus(
+  apiStatus: string
+): HercleVerificationStatus | undefined {
   switch (apiStatus) {
     case "UNVERIFIED":
     case "action_required":
@@ -51,8 +55,16 @@ export function mapHercleVerificationStatus(apiStatus: string): HercleVerificati
     case "approved":
       return "ready";
     default:
-      throw internalError(`Hercle returned an unmapped verification status "${apiStatus}".`);
+      return undefined;
   }
+}
+
+export function mapHercleVerificationStatus(apiStatus: string): HercleVerificationStatus {
+  const status = tryMapHercleVerificationStatus(apiStatus);
+  if (status === undefined) {
+    throw internalError(`Hercle returned an unmapped verification status "${apiStatus}".`);
+  }
+  return status;
 }
 
 /**
