@@ -49,7 +49,6 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import {
-  buildLegacyPaymentTransferFingerprint,
   buildPaymentTransferFingerprint,
   resolveIdentityBoundIdempotencyReplay,
 } from "@/lib/idempotency";
@@ -140,13 +139,11 @@ async function resolveTransferIdempotencyReplay(
   projectId: string | null,
   idempotencyKey: string,
   fingerprint: string,
-  legacyFingerprint: string,
   custodyWalletId: string
 ): Promise<TransferRow | null> {
   return resolveIdentityBoundIdempotencyReplay(
     () => repository.findTransferByIdempotency({ organizationId, projectId, idempotencyKey }),
     fingerprint,
-    legacyFingerprint,
     (row) => row.custody_wallet_id === custodyWalletId
   );
 }
@@ -185,22 +182,18 @@ async function createTransferRecord(
   const idempotencyFingerprint = idempotencyKey
     ? buildPaymentTransferFingerprint(fingerprintInput)
     : null;
-  const legacyIdempotencyFingerprint = idempotencyKey
-    ? buildLegacyPaymentTransferFingerprint(fingerprintInput)
-    : null;
 
   try {
     return await runApprovedWalletOperationEffectTransaction(c, async (db) => {
       const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
 
-      if (idempotencyKey && idempotencyFingerprint && legacyIdempotencyFingerprint) {
+      if (idempotencyKey && idempotencyFingerprint) {
         const existing = await resolveTransferIdempotencyReplay(
           repository,
           input.organizationId,
           input.projectId,
           idempotencyKey,
           idempotencyFingerprint,
-          legacyIdempotencyFingerprint,
           input.custodyWalletId
         );
         if (existing) {
@@ -234,8 +227,7 @@ async function createTransferRecord(
         slot: null,
         initiatedByKeyId: input.initiatedByKeyId ?? null,
         idempotencyKey,
-        // HOO-1023: persist the K2 shape until rollback support ends.
-        idempotencyFingerprint: legacyIdempotencyFingerprint,
+        idempotencyFingerprint,
       });
 
       if (!createdRow) {
@@ -245,19 +237,13 @@ async function createTransferRecord(
       return { row: createdRow, replayed: false };
     });
   } catch (error) {
-    if (
-      idempotencyKey &&
-      idempotencyFingerprint &&
-      legacyIdempotencyFingerprint &&
-      isPostgresUniqueViolation(error)
-    ) {
+    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const existing = await resolveTransferIdempotencyReplay(
         getPaymentsRepository(c),
         input.organizationId,
         input.projectId,
         idempotencyKey,
         idempotencyFingerprint,
-        legacyIdempotencyFingerprint,
         input.custodyWalletId
       );
       if (existing) {
@@ -510,7 +496,6 @@ export async function findTransferIdempotentKeyReplay(
     scope.auth.projectId,
     idempotencyKey,
     buildPaymentTransferFingerprint(fingerprintInput),
-    buildLegacyPaymentTransferFingerprint(fingerprintInput),
     operation.sourceWallet.id
   );
   if (!replay) {

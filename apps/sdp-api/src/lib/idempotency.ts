@@ -85,18 +85,13 @@ export async function resolveIdentityBoundIdempotencyReplay<
 >(
   findExisting: () => Promise<Row | null>,
   fingerprint: string,
-  legacyFingerprint: string,
   identityMatches: (row: Row) => boolean
 ): Promise<Row | null> {
   const existing = await findExisting();
   if (!existing || existing.idempotency_fingerprint === null) {
     return null;
   }
-  if (
-    identityMatches(existing) &&
-    (existing.idempotency_fingerprint === fingerprint ||
-      existing.idempotency_fingerprint === legacyFingerprint)
-  ) {
+  if (identityMatches(existing) && existing.idempotency_fingerprint === fingerprint) {
     return existing;
   }
   throw conflict("Idempotency key already used with different request payload");
@@ -175,10 +170,6 @@ function paymentTransferFingerprint(
 export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
   paymentTransferFingerprint(input, input.custodyWalletId);
 
-export const buildLegacyPaymentTransferFingerprint = (
-  input: PaymentTransferFingerprintInput
-): string => paymentTransferFingerprint(input);
-
 function transferBatchFingerprint(
   input: TransferBatchFingerprintInput,
   sourceCustodyWalletId?: string
@@ -197,9 +188,6 @@ function transferBatchFingerprint(
 
 export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
   transferBatchFingerprint(input, input.sourceCustodyWalletId);
-
-export const buildLegacyTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
-  transferBatchFingerprint(input);
 
 export interface EarnVaultDepositFingerprintInput {
   environment: string;
