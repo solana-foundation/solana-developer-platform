@@ -637,7 +637,7 @@ export function HomeWorkspace({
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
             todaysVolume={todaysVolume}
-            todaysVolumeError={activityError}
+            todaysVolumeError={activityError ?? activitySnapshot?.todaysVolumeError ?? null}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
