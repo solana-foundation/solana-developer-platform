@@ -19,11 +19,9 @@ import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
-  fullySignTestTransaction,
   installPaymentsRouteTestHooks,
   sendTransactionMock,
   TEST_CUSTODY_WALLET_ID,
-  TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -35,6 +33,7 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — signed submission", () => {
   installPaymentsRouteTestHooks();
@@ -219,7 +218,7 @@ describe("Payments routes — signed submission", () => {
       const signAndSendMock = vi.fn();
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockRejectedValue(new Error("Kora config timed out")),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,

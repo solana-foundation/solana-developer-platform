@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -8,7 +7,6 @@ import {
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import { getBase58Codec } from "@solana/codecs";
 import {
   address,
   createNoopSigner,
@@ -16,9 +14,7 @@ import {
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
   type Signature,
-  type SignatureBytes,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -41,11 +37,12 @@ import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
-  fullySignTestTransaction,
   sendTransactionMock,
   sendTransactionPreflightError,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -95,50 +92,37 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
-const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
-const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
-  signerAddress: address(TEST_KORA_FEE_PAYER),
-  maxAllowedLamports: 0n,
-  feePayerMayTransferLamports: false,
-  feePayerPolicy: { test: "zero-outflow" },
-} satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
 const FIRST_SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
 
+const labeledSignatures = new Map<string, string>();
+
+function actualSignature(label: string): string {
+  const signature = labeledSignatures.get(label);
+  if (signature === undefined) {
+    throw new Error(`No sponsored signature was recorded for label ${label}`);
+  }
+  return signature;
+}
+
 function ownedSubmissionAdapter(
   signingOutcome = vi.fn().mockResolvedValue(FIRST_SIGNATURE)
 ): ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter> {
   return {
     providerId: "mock",
-    getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+    getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
     getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
     signAsFeePayer: vi.fn(async (transactionBytes: Uint8Array) => {
-      const requestedSignature = await signingOutcome(transactionBytes);
-      const transaction = getTransactionDecoder().decode(
-        fullySignTestTransaction(transactionBytes)
+      const label = await signingOutcome(transactionBytes);
+      const signed = await fullySignTestTransaction(transactionBytes);
+      labeledSignatures.set(
+        label,
+        getSignatureFromTransaction(getTransactionDecoder().decode(signed))
       );
-      const feePayer = Object.keys(transaction.signatures)[0];
-      let signatureBytes: Uint8Array;
-      try {
-        signatureBytes = new Uint8Array(getBase58Codec().encode(requestedSignature));
-      } catch {
-        signatureBytes = new Uint8Array();
-      }
-      if (signatureBytes.length !== 64) {
-        signatureBytes = createHash("sha512").update(requestedSignature).digest();
-      }
-      return new Uint8Array(
-        getTransactionEncoder().encode({
-          ...transaction,
-          signatures: {
-            ...transaction.signatures,
-            [feePayer]: signatureBytes as SignatureBytes,
-          },
-        })
-      );
+      return signed;
     }),
     signAndSend: signingOutcome,
   } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>;
@@ -528,6 +512,7 @@ async function seedBatchApproverSession(): Promise<Record<string, string>> {
 describe("payment transfer batches", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    labeledSignatures.clear();
 
     createRpcMock.mockReturnValue({
       getFeeForMessage: () => ({
@@ -544,14 +529,14 @@ describe("payment transfer batches", () => {
       >["blockhash"],
       lastValidBlockHeight: 1000n,
     });
-    confirmTransactionMock.mockResolvedValue({
-      signature: FIRST_SIGNATURE as Awaited<
+    confirmTransactionMock.mockImplementation(async () => ({
+      signature: (labeledSignatures.get(FIRST_SIGNATURE) ?? FIRST_SIGNATURE) as Awaited<
         ReturnType<typeof solanaRpc.confirmTransaction>
       >["signature"],
       slot: 100n,
       confirmationStatus: "confirmed",
       err: null,
-    });
+    }));
     createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter());
     sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
@@ -761,7 +746,7 @@ describe("payment transfer batches", () => {
     expect(body.data.recipients.every((recipient) => Boolean(recipient.transferId))).toBe(true);
     expect(body.data.transfers).toHaveLength(2);
     expect(body.data.transfers.map((transfer) => transfer.signature).sort()).toEqual(
-      [FIRST_SIGNATURE, SECOND_SIGNATURE].sort()
+      [actualSignature(FIRST_SIGNATURE), actualSignature(SECOND_SIGNATURE)].sort()
     );
     expect(body.data.transfers.every((transfer) => transfer.type === "transfer_batch")).toBe(true);
     expect(body.data.transfers.every((transfer) => transfer.status === "processing")).toBe(true);
@@ -1097,7 +1082,7 @@ describe("payment transfer batches", () => {
     const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend,
@@ -1170,7 +1155,7 @@ describe("payment transfer batches", () => {
     const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend,
@@ -1252,7 +1237,7 @@ describe("payment transfer batches", () => {
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
@@ -2219,7 +2204,7 @@ describe("payment transfer batches", () => {
         {
           type: "transfer_batch",
           status: "processing",
-          signature: FIRST_SIGNATURE,
+          signature: actualSignature(FIRST_SIGNATURE),
         },
       ]);
       expect(signAndSendMock).toHaveBeenCalledTimes(1);
@@ -2287,7 +2272,7 @@ describe("payment transfer batches", () => {
     expect(body.data.batch.status).toBe("processing");
     expect(body.data.recipients).toMatchObject([{ status: "processing" }]);
     expect(body.data.transfers).toMatchObject([
-      { status: "processing", signature: FIRST_SIGNATURE },
+      { status: "processing", signature: actualSignature(FIRST_SIGNATURE) },
     ]);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
@@ -2603,7 +2588,7 @@ describe("payment transfer batches", () => {
     getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
       signatures.map(
         (signature): solanaRpc.SignatureStatusInfo =>
-          String(signature) === FIRST_SIGNATURE
+          String(signature) === actualSignature(FIRST_SIGNATURE)
             ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
             : {
                 slot: 201n,
@@ -2632,11 +2617,16 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .all<{ status: string; error: string | null; signature: string }>();
-    expect(recipientRows.results).toMatchObject([
-      { status: "confirmed", error: null, signature: FIRST_SIGNATURE },
-      { status: "failed", signature: SECOND_SIGNATURE },
-    ]);
-    expect(recipientRows.results[1].error).toContain("InstructionError");
+    const bySignature = (left: { signature: string }, right: { signature: string }) =>
+      left.signature < right.signature ? -1 : left.signature > right.signature ? 1 : 0;
+    expect([...recipientRows.results].sort(bySignature)).toMatchObject(
+      [
+        { status: "confirmed", error: null, signature: actualSignature(FIRST_SIGNATURE) },
+        { status: "failed", signature: actualSignature(SECOND_SIGNATURE) },
+      ].sort(bySignature)
+    );
+    const failedRow = recipientRows.results.find((row) => row.status === "failed");
+    expect(failedRow?.error).toContain("InstructionError");
   });
 
   it("settles a chunk's recipients as failed when its execution throws mid-flight", async () => {

@@ -2,7 +2,6 @@ import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { FeePaymentError } from "@sdp/payments/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types";
-import { address } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -16,7 +15,6 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
-  fullySignTestTransaction,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   sendTransactionMock,
@@ -35,6 +33,7 @@ import {
   readTransferRow,
   seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const approvalErrorDetailsSchema = z.object({
   approvalRequestId: z.string(),
@@ -368,10 +367,10 @@ describe("Payments routes — transfer idempotency", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -419,10 +418,10 @@ describe("Payments routes — transfer idempotency", () => {
     const signAndSendMock = vi.fn();
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,
@@ -464,10 +463,10 @@ describe("Payments routes — transfer idempotency", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
@@ -557,10 +556,10 @@ describe("Payments routes — transfer idempotency", () => {
       );
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,

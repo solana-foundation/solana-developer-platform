@@ -1,6 +1,5 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { SOL_MINT } from "@sdp/types";
-import { address } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -13,7 +12,6 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  fullySignTestTransaction,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
   sendTransactionMock,
@@ -34,6 +32,7 @@ import {
   readTransferRow,
   seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
@@ -283,7 +282,7 @@ describe("Payments routes — on-chain transfers", () => {
       getFeePayer: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
@@ -318,10 +317,10 @@ describe("Payments routes — on-chain transfers", () => {
     );
     createFeePaymentAdapterMock.mockReturnValueOnce({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
