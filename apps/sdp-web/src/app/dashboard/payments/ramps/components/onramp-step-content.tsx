@@ -1,6 +1,6 @@
 "use client";
 
-import { isMuralSandboxPayinCurrency } from "@sdp/types";
+import { isMuralSandboxPayinCurrency, isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
@@ -18,7 +18,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -194,7 +194,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
     // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
-    if (isTerminalTransferStatus(transferStatus?.status)) {
+    if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
       return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
     }
 

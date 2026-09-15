@@ -1,5 +1,6 @@
 "use client";
 
+import { isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
@@ -19,7 +20,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
@@ -37,7 +38,7 @@ function OfframpManualQuoteStep({
   const { selectedRampPair, fields, transferStatus } = wizard;
 
   // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
-  if (isTerminalTransferStatus(transferStatus?.status)) {
+  if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
     return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
   }
 
