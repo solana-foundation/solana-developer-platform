@@ -246,7 +246,10 @@
         "preparing": "Preparando el estado de la transferencia",
         "preparingDescription": "Estamos esperando el registro de la transferencia asociado a esta cotización.",
         "waitingForPayment": "Esperando el pago",
-        "waitingForPaymentHostedDescription": "Completa el pago en la ventana del proveedor que aparece arriba. Este depósito se actualiza automáticamente cuando el proveedor lo confirma."
+        "waitingForPaymentHostedDescription": "Completa el pago en la ventana del proveedor que aparece arriba. Este depósito se actualiza automáticamente cuando el proveedor lo confirma.",
+        "canceled": "Transferencia cancelada",
+        "canceledFundingDescription": "Esta transferencia se canceló, por lo que las instrucciones de fondeo ya no aplican. Crea una nueva cotización para continuar.",
+        "canceledPayoutDescription": "Este pago saliente se canceló, por lo que las instrucciones de depósito ya no aplican. Crea una nueva cotización para continuar."
       },
       "untrustedProviderUrl": "El proveedor devolvió una URL no confiable, por lo que no se cargó. Crea una nueva cotización o contacta a soporte.",
       "destinationCountry": "País de destino",

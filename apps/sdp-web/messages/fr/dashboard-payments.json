@@ -246,7 +246,10 @@
         "preparing": "Préparation du statut du transfert",
         "preparingDescription": "Nous attendons l’enregistrement du transfert lié à ce devis.",
         "waitingForPayment": "En attente de paiement",
-        "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme."
+        "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme.",
+        "canceled": "Transfert annulé",
+        "canceledFundingDescription": "Ce transfert a été annulé, les instructions de financement ne s'appliquent donc plus. Créez un nouveau devis pour continuer.",
+        "canceledPayoutDescription": "Ce paiement a été annulé, les instructions de dépôt ne s'appliquent donc plus. Créez un nouveau devis pour continuer."
       },
       "untrustedProviderUrl": "Le fournisseur a renvoyé une URL non fiable, elle n'a donc pas été chargée. Créez un nouveau devis ou contactez le support.",
       "destinationCountry": "Pays de destination",

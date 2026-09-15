@@ -246,7 +246,10 @@
         "preparing": "Preparando o status da transferência",
         "preparingDescription": "Estamos aguardando o registro da transferência vinculado a esta cotação.",
         "waitingForPayment": "Aguardando pagamento",
-        "waitingForPaymentHostedDescription": "Conclua o pagamento na janela do provedor acima. Este depósito é atualizado automaticamente assim que o provedor o confirmar."
+        "waitingForPaymentHostedDescription": "Conclua o pagamento na janela do provedor acima. Este depósito é atualizado automaticamente assim que o provedor o confirmar.",
+        "canceled": "Transferência cancelada",
+        "canceledFundingDescription": "Esta transferência foi cancelada, então as instruções de depósito não são mais válidas. Crie uma nova cotação para continuar.",
+        "canceledPayoutDescription": "Este pagamento de saída foi cancelado, então as instruções de depósito não são mais válidas. Crie uma nova cotação para continuar."
       },
       "destinationCountry": "País de destino",
       "paymentRail": "Rails de pagamento",
