@@ -236,8 +236,11 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     expect((await activityResponse).status()).toBe(200);
     await expect(page.getByText("Recent transactions", { exact: true })).toBeVisible();
-    const firstActivityRow = page.locator("tbody tr").first();
-    const emptyActivity = page.getByText(
+    const activityCard = page
+      .locator('[data-slot="card"]')
+      .filter({ has: page.getByText("Recent transactions", { exact: true }) });
+    const firstActivityRow = activityCard.locator("tbody tr").first();
+    const emptyActivity = activityCard.getByText(
       /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
     );
     await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
