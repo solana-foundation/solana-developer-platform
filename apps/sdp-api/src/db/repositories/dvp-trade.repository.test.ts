@@ -1,5 +1,5 @@
 import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types";
-import { type Address, address, signature } from "@solana/kit";
+import { type Address, address, getBase58Decoder, signature } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -374,6 +374,133 @@ describe("DvpTradeRepository (postgres)", () => {
       closeResolutionAttempts: 0,
       closeResolutionAfter: null,
       closedAt: "2026-09-11T00:00:00.000Z",
+    });
+  });
+
+  /**
+   * PRO-1973. One close lock per trade, so of a settle and a cancel sent
+   * together only one goes out. Every write names the signature it holds, so a
+   * slow request can never free or move a lock taken after its own was swept.
+   */
+  describe("close lock", () => {
+    const signatureOf = (byte: number) =>
+      signature(getBase58Decoder().decode(new Uint8Array(64).fill(byte)));
+    const AUTHORITY_SIGNATURE = signatureOf(2);
+    const SPONSORED_SIGNATURE = signatureOf(3);
+    const OTHER_SIGNATURE = signatureOf(4);
+
+    async function openTrade() {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      return created;
+    }
+
+    it("admits exactly one close lock on a trade", async () => {
+      const created = await openTrade();
+
+      const [first, second] = await Promise.all([
+        repo.claimClose(created.id, {
+          action: "settle",
+          signature: AUTHORITY_SIGNATURE,
+          expiryHeight: "500",
+        }),
+        repo.claimClose(created.id, {
+          action: "cancel",
+          signature: OTHER_SIGNATURE,
+          expiryHeight: "500",
+        }),
+      ]);
+
+      expect([first, second].filter(Boolean)).toHaveLength(1);
+      const read = await repo.getById(scope, created.id);
+      expect(read?.closeClaim?.action).toBe(first ? "settle" : "cancel");
+    });
+
+    it("refuses a close lock on a trade that is already closed", async () => {
+      const created = await openTrade();
+      await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+
+      await expect(
+        repo.claimClose(created.id, {
+          action: "cancel",
+          signature: AUTHORITY_SIGNATURE,
+          expiryHeight: "500",
+        })
+      ).resolves.toBe(false);
+    });
+
+    it("moves the lock only from the signature it holds", async () => {
+      const created = await openTrade();
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      await expect(
+        repo.rebindCloseClaim(created.id, OTHER_SIGNATURE, SPONSORED_SIGNATURE)
+      ).resolves.toBe(false);
+      await expect(
+        repo.rebindCloseClaim(created.id, AUTHORITY_SIGNATURE, SPONSORED_SIGNATURE)
+      ).resolves.toBe(true);
+      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+        closeClaim: { action: "settle", signature: SPONSORED_SIGNATURE, expiryHeight: "500" },
+      });
+    });
+
+    it("frees the lock only for the signature it holds", async () => {
+      const created = await openTrade();
+      await repo.claimClose(created.id, {
+        action: "cancel",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      await repo.releaseCloseClaim(created.id, OTHER_SIGNATURE);
+      expect((await repo.getById(scope, created.id))?.closeClaim).not.toBeNull();
+
+      await repo.releaseCloseClaim(created.id, AUTHORITY_SIGNATURE);
+      expect((await repo.getById(scope, created.id))?.closeClaim).toBeNull();
+    });
+
+    // A request that died holding the lock must not hold the trade forever,
+    // and one that can still land must not be freed under it.
+    it("sweeps only locks past their last valid height", async () => {
+      const created = await openTrade();
+      const other = await repo.create(
+        tradeInsert({
+          id: "dvp_trade_test_2",
+          swapDvp: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
+        })
+      );
+      await repo.resolveCreate(other.id, "created");
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+      await repo.claimClose(other.id, {
+        action: "cancel",
+        signature: OTHER_SIGNATURE,
+        expiryHeight: "900",
+      });
+
+      await expect(repo.releaseExpiredCloseClaims(900n)).resolves.toBe(1);
+      expect((await repo.getById(scope, created.id))?.closeClaim).toBeNull();
+      expect((await repo.getById(scope, other.id))?.closeClaim?.signature).toBe(OTHER_SIGNATURE);
+    });
+
+    it("clears the lock when the close is recorded", async () => {
+      const created = await openTrade();
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: CLOSE_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      const closed = await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+
+      expect(closed).toMatchObject({ status: "settled", closeClaim: null });
     });
   });
 

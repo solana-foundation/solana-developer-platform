@@ -38,6 +38,11 @@ export interface DvpTradeRow {
   nameB: string | null;
   /** The transaction that settled or cancelled the trade. Null while open. */
   closeSignature: Signature | null;
+  /**
+   * The settle or cancel in flight, held from before it is signed until it
+   * lands, is refused, or can no longer land. Null when no close is in flight.
+   */
+  closeClaim: DvpCloseClaim | null;
   closeResolutionAttempts: number;
   closeResolutionAfter: string | null;
 
@@ -102,6 +107,14 @@ export interface DvpTradeRow {
   updatedAt: string;
 }
 
+/** A close in flight on a trade. */
+export interface DvpCloseClaim {
+  action: "settle" | "cancel";
+  signature: Signature;
+  /** Past this block height the close transaction can no longer land. */
+  expiryHeight: string;
+}
+
 /**
  * Everything needed to persist a trade before its create is broadcast.
  *
@@ -112,6 +125,7 @@ export type DvpTradeInsert = Omit<
   DvpTradeRow,
   // Written by `recordClose`, never at insert: a trade is not born closed.
   | "closeSignature"
+  | "closeClaim"
   | "closeResolutionAttempts"
   | "closeResolutionAfter"
   | "status"
@@ -290,6 +304,26 @@ export interface DvpTradeRepository {
     status: "settled" | "cancelled",
     signature: Signature
   ): Promise<DvpTradeRow | null>;
+  /**
+   * Takes the trade's close lock before a settle or cancel is sent.
+   *
+   * Compare-and-swap on an open status and no close already held, so of two
+   * closes exactly one gets the lock.
+   *
+   * @returns False when the trade is closed or another close holds it.
+   */
+  claimClose(id: string, claim: DvpCloseClaim): Promise<boolean>;
+  /** Moves the lock from the authority's signature to the sponsored transaction's. */
+  rebindCloseClaim(id: string, from: Signature, to: Signature): Promise<boolean>;
+  /** Frees a close lock, and only the one this signature holds. */
+  releaseCloseClaim(id: string, signature: Signature): Promise<void>;
+  /**
+   * Frees close locks whose transaction can no longer land.
+   *
+   * Past its last valid block height a close either landed, and the reconciler
+   * records the close from the chain, or never will.
+   */
+  releaseExpiredCloseClaims(blockHeight: bigint): Promise<number>;
   /**
    * The project's trades, newest first, narrowed by the given filters.
    *

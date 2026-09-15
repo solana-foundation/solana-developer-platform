@@ -1,4 +1,4 @@
-import { getBase58Decoder } from "@solana/kit";
+import { getBase58Decoder, signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
@@ -510,6 +510,34 @@ describe("reconcileDvpTrades", () => {
   // `claim()`'s ON CONFLICT refuses every retry, so the leg 409s forever.
   // Past last-valid height the chain's answer is final: no status found means
   // it can never land, and the row must go.
+  // PRO-1973. A settle or cancel that died holding its lock, or whose send was
+  // ambiguous and never landed, must not keep the trade from closing or its
+  // legs from moving. One that can still land keeps its lock.
+  it("releases close locks past their last valid height and keeps live ones", async () => {
+    await seedTrade("dvp_close_dead", "funded");
+    await seedTrade("dvp_close_live", "funded");
+    const trades = createPostgresDvpTradeRepository(getDb(env));
+    const signatureOf = (byte: number) =>
+      signature(getBase58Decoder().decode(new Uint8Array(64).fill(byte)));
+    await trades.claimClose("dvp_close_dead", {
+      action: "settle",
+      signature: signatureOf(7),
+      expiryHeight: "999",
+    });
+    await trades.claimClose("dvp_close_live", {
+      action: "cancel",
+      signature: signatureOf(8),
+      expiryHeight: "1000",
+    });
+
+    await reconcileDvpTrades(env);
+
+    const read = async (id: string) =>
+      (await trades.getByIdAsParty(id))?.closeClaim?.signature ?? null;
+    expect(await read("dvp_close_dead")).toBeNull();
+    expect(await read("dvp_close_live")).toBe(signatureOf(8));
+  });
+
   it("releases an expired broadcast claim whose transfer never landed", async () => {
     await seedTrade("dvp_dead_broadcast", "created");
     const db = getDb(env);

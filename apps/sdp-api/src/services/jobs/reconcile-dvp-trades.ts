@@ -80,9 +80,22 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
         "dvp reconcile: released funding claims whose transaction can no longer land"
       );
     }
+    // Same reasoning for a close lock: past its height the settle or cancel
+    // either landed, and the sweep below records the close from the chain, or
+    // never will, and the trade can be closed again.
+    const releasedCloses = await repository.releaseExpiredCloseClaims(blockHeight);
+    if (releasedCloses > 0) {
+      getLogger().info(
+        { released: releasedCloses, blockHeight: blockHeight.toString() },
+        "dvp reconcile: released close locks whose transaction can no longer land"
+      );
+    }
   } catch (error) {
     // Never fatal to the sweep. Observing trades is the job; this is repair.
-    getLogger().error({ error }, "dvp reconcile: failed to release expired funding claims");
+    getLogger().error(
+      { error },
+      "dvp reconcile: failed to release expired funding claims or close locks"
+    );
   }
 
   // One row, two meanings: `funding_tx` set turns the claim from a lock into a

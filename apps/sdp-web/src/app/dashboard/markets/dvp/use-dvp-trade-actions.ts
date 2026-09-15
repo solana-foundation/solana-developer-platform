@@ -14,7 +14,9 @@
  */
 
 import {
+  DVP_CLOSE_REFUSAL,
   DVP_LEG_REFUSAL,
+  type DvpCloseRefusalReason,
   type DvpLegRefusalReason,
   type DvpTradeSide,
   type SolanaCluster,
@@ -106,6 +108,23 @@ const LEG_REFUSAL_MESSAGE: Record<
     "DashboardMarkets.dvp.reclaimRefusedTransferHook"
   ),
   [DVP_LEG_REFUSAL.signerNotParty]: sameCopy("DashboardMarkets.dvp.reclaimRefusedSignerChanged"),
+  [DVP_LEG_REFUSAL.tradeClosing]: sameCopy("DashboardMarkets.dvp.legRefusedTradeClosing"),
+};
+
+/** The copy for each settle or cancel refusal. */
+const CLOSE_REFUSAL_MESSAGE: Record<DvpCloseRefusalReason, MessageKey> = {
+  [DVP_CLOSE_REFUSAL.closeInProgress]: "DashboardMarkets.dvp.closeRefusedInProgress",
+  [DVP_CLOSE_REFUSAL.legMoving]: "DashboardMarkets.dvp.closeRefusedLegMoving",
+  [DVP_CLOSE_REFUSAL.closeFailedOnChain]: "DashboardMarkets.dvp.closeRefusedFailedOnChain",
+};
+
+/**
+ * A settle or cancel sent but not confirmed within the request, keyed by action.
+ * The trade updates once the reconciler reads it, so the toast says sent, not done.
+ */
+const SENT_MESSAGE: Record<"settle" | "cancel", MessageKey> = {
+  settle: "DashboardMarkets.dvp.toastSettleSent",
+  cancel: "DashboardMarkets.dvp.toastCancelSent",
 };
 
 function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: MessageKey } {
@@ -113,6 +132,7 @@ function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: Mes
 }
 
 const legRefusalReasonSchema = z.enum(DVP_LEG_REFUSAL);
+const closeRefusalReasonSchema = z.enum(DVP_CLOSE_REFUSAL);
 
 /** A failed call's envelope. Only what the toast reads is required. */
 const errorEnvelopeSchema = z.object({
@@ -122,8 +142,13 @@ const errorEnvelopeSchema = z.object({
   }),
 });
 
-/** Every action answers with the transaction it broadcast. */
+/** Fund and reclaim answer with the transaction they broadcast. */
 const broadcastEnvelopeSchema = z.object({ data: z.object({ signature: z.string().min(1) }) });
+
+/** Settle and cancel also say whether the close is confirmed yet. */
+const closeEnvelopeSchema = z.object({
+  data: z.object({ signature: z.string().min(1), confirmed: z.boolean() }),
+});
 
 /**
  * One in-flight key per action, per leg for the two that move one leg, so a
@@ -151,6 +176,29 @@ function requestInit(action: DvpTradeActionName, leg: { side: DvpTradeSide } | n
   };
 }
 
+/**
+ * What a success answer says was sent and the copy that reports it, or null
+ * when it cannot be read. Only a close can be sent without being confirmed yet;
+ * a leg action is reported once it is on the wire.
+ */
+function successOf(
+  action: DvpTradeActionName,
+  body: unknown
+): { signature: string; message: MessageKey } | null {
+  if (action === "settle" || action === "cancel") {
+    const close = closeEnvelopeSchema.safeParse(body);
+    if (!close.success) {
+      return null;
+    }
+    const { signature, confirmed } = close.data.data;
+    return { signature, message: confirmed ? DONE_MESSAGE[action] : SENT_MESSAGE[action] };
+  }
+  const broadcast = broadcastEnvelopeSchema.safeParse(body);
+  return broadcast.success
+    ? { signature: broadcast.data.data.signature, message: DONE_MESSAGE[action] }
+    : null;
+}
+
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
   const router = useRouter();
   const t = useTranslations();
@@ -162,12 +210,17 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
     if (!envelope.success) {
       return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
     }
-    const reason = legRefusalReasonSchema.safeParse(envelope.data.error.details?.reason);
-    if (!reason.success) {
-      return envelope.data.error.message;
+    const reasonCode = envelope.data.error.details?.reason;
+    const legReason = legRefusalReasonSchema.safeParse(reasonCode);
+    if (legReason.success) {
+      const copy = LEG_REFUSAL_MESSAGE[legReason.data];
+      return symbol === null ? t(copy.withoutSymbol) : t(copy.withSymbol, { symbol });
     }
-    const copy = LEG_REFUSAL_MESSAGE[reason.data];
-    return symbol === null ? t(copy.withoutSymbol) : t(copy.withSymbol, { symbol });
+    const closeReason = closeRefusalReasonSchema.safeParse(reasonCode);
+    if (closeReason.success) {
+      return t(CLOSE_REFUSAL_MESSAGE[closeReason.data]);
+    }
+    return envelope.data.error.message;
   }
 
   async function act(...call: DvpTradeActionCall) {
@@ -193,27 +246,25 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // A success answer that cannot be read is not a success to report: nothing
       // on it says what was sent. Say so, and let the refresh show what the
       // chain now holds instead of guessing.
-      const broadcast = broadcastEnvelopeSchema.safeParse(await response.json().catch(() => null));
-      if (!broadcast.success) {
+      const body: unknown = await response.json().catch(() => null);
+      const success = successOf(action, body);
+      if (success === null) {
         toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), { position: "bottom-right" });
         router.refresh();
         return;
       }
       // The single biggest source of "did anything happen?": these used to
       // succeed and then say nothing, leaving the page to catch up on the
-      // reconciler's next sweep. A refresh is not an answer.
-      toast.success(t(DONE_MESSAGE[action]), {
+      // reconciler's next sweep. A refresh is not an answer. A close that went
+      // out but has not confirmed says sent, not done.
+      toast.success(t(success.message), {
         position: "bottom-right",
         // Whatever SDP just sent can be checked on chain from the toast that
         // reports it, without hunting for it on the page.
         action: {
           label: t("DashboardMarkets.dvp.viewTransaction"),
           onClick: () =>
-            window.open(
-              explorerTxUrl(broadcast.data.data.signature, cluster),
-              "_blank",
-              "noopener,noreferrer"
-            ),
+            window.open(explorerTxUrl(success.signature, cluster), "_blank", "noopener,noreferrer"),
         },
       });
       router.refresh();
