@@ -298,6 +298,7 @@ export type {
   PolicyRepository,
   PolicyRepositoryContext,
   ReplaceApiKeyWalletPolicyBindingsInput,
+  SumWalletOperationAmountsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionHistoryRow,

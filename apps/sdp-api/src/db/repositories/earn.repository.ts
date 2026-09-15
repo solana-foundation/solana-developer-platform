@@ -272,6 +272,17 @@ export interface EarnRepository {
    */
   updateStrategyMetrics(input: UpdateEarnStrategyMetricsInput): Promise<boolean>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
+  /**
+   * The catalogue row for one vault, by the identity a movement row carries
+   * (provider + on-chain reference + environment; unique per 0048). For callers
+   * that hold a ledger row rather than a strategy id, such as the vault
+   * exposure cap's re-check inside the ledger write.
+   */
+  getStrategyByReference(input: {
+    provider: string;
+    providerReference: string;
+    environment: SdpEnvironment;
+  }): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
   /**
    * Every stored strategy's volatile figures for one (provider, environment),

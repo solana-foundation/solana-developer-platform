@@ -26,6 +26,17 @@ const SHARED_TABLES: Record<string, string> = {
   helius_rings_asset_allowlist: "platform reference data seeded by 0057_helius_rings",
 };
 
+/**
+ * Functions that widen their own read to a privileged isolation identity via a
+ * function-level SET. Each is a cross-tenant fact by definition and collapses
+ * to a figure no tenant row can leak through; a new one needs a reason here.
+ */
+const IDENTITY_SETTING_FUNCTIONS: Record<string, string> = {
+  earn_vault_deposit_exposure:
+    "ADR 0004 vault exposure cap: SDP-wide deposits into one vault, summed across " +
+    "organizations inside the ledger write's own transaction (0101)",
+};
+
 interface TableSecurityRow {
   table_name: string;
   row_security: boolean;
@@ -75,6 +86,28 @@ describe("tenant isolation coverage", () => {
       .map((view) => view.view_name);
 
     expect(ownerRights).toEqual([]);
+  });
+
+  it("lets only registered functions set the isolation identity for themselves", async () => {
+    // A function-level `SET app.tenant_isolation_identity` runs its body as a
+    // privileged identity regardless of the caller's. That is the one way a
+    // tenant-stamped transaction can read across organizations, so every
+    // function that does it is registered above with a reason, and the
+    // registry cannot go stale either.
+    const rows = await env.db.queryMany<{ function_name: string; config: string[] | null }>(
+      `SELECT p.proname AS function_name, p.proconfig AS config
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proconfig IS NOT NULL
+       ORDER BY p.proname`
+    );
+    const identitySetting = rows
+      .filter((row) =>
+        (row.config ?? []).some((entry) => entry.startsWith("app.tenant_isolation_identity="))
+      )
+      .map((row) => row.function_name);
+
+    expect(identitySetting).toEqual(Object.keys(IDENTITY_SETTING_FUNCTIONS).sort());
   });
 
   it("keeps the shared-table registry free of stale entries", async () => {

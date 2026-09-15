@@ -441,11 +441,67 @@ describe("wallet policy rule schema", () => {
     }
   });
 
+  it("accepts a velocity rule with a supported window and rejects the rest", () => {
+    const valid = updateWalletPolicySchema.safeParse({
+      defaultAction: "allow",
+      rules: [
+        {
+          id: "daily-volume",
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "100000",
+          asset: USDC_MINT,
+          operationTypes: ["earn_vault_deposit"],
+          action: "approval_required",
+        },
+      ],
+    });
+    expect(valid.success).toBe(true);
+
+    const invalid = updateWalletPolicySchema.safeParse({
+      defaultAction: "allow",
+      rules: [
+        { id: "bad-window", kind: "velocity", window: "P1W", max: "1", asset: USDC_MINT },
+        { id: "bad-max", kind: "velocity", window: "PT1H", max: "1,5", asset: USDC_MINT },
+        { id: "no-window", kind: "velocity", max: "1", asset: USDC_MINT },
+      ],
+    });
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      expect(invalid.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: ["rules", 0, "window"] }),
+          expect.objectContaining({ path: ["rules", 1, "max"], message: "Invalid amount format" }),
+          expect.objectContaining({ path: ["rules", 2, "window"] }),
+        ])
+      );
+    }
+
+    // The cross-rule refinement only runs on a shape-valid payload.
+    const assetless = updateWalletPolicySchema.safeParse({
+      defaultAction: "allow",
+      rules: [{ id: "no-asset", kind: "velocity", window: "PT1H", max: "1" }],
+    });
+    expect(assetless.success).toBe(false);
+    if (!assetless.success) {
+      expect(assetless.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["rules", 0],
+            message: "Velocity rules must name the asset mint(s) they bound",
+          }),
+        ])
+      );
+    }
+  });
+
   it("keeps all existing public rule kinds backward-compatible", () => {
     const rules = [
       { kind: "operation_family", family: "payment", action: "allow" },
       { kind: "destination", destination: VALID_DESTINATION, action: "deny" },
       { kind: "amount", max: "100", asset: "USDC", action: "approval_required" },
+      { kind: "velocity", window: "PT1H", max: "100", asset: "USDC" },
       { kind: "approval", families: ["payment"], approvalGroupId: "group-1" },
       { kind: "always", action: "review" },
     ] satisfies PolicyRule[];

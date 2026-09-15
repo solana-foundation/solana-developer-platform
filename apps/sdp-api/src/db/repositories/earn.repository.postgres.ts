@@ -231,6 +231,17 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return row ? mapStrategyRow(row) : null;
     },
 
+    async getStrategyByReference(input) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_strategies
+            WHERE provider = ? AND provider_reference = ? AND environment = ?`
+        )
+        .bind(input.provider, input.providerReference, input.environment)
+        .first<Record<string, unknown>>();
+      return row ? mapStrategyRow(row) : null;
+    },
+
     async listShareMintedStrategies(params) {
       const result = await db
         .prepare(
