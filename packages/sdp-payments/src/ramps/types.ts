@@ -248,10 +248,7 @@ export interface RampOnrampQuoteInput {
   /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
   purposeOfPayment?: LightsparkPurposeOfPayment;
   bvnkCompliance?: BvnkComplianceInput;
-  /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
-  email?: string;
-  phone?: string;
-  /** Browser origin host the Coinbase Apple Pay link renders on (required for iframe embedding). */
+  /** Browser origin host the Coinbase payment link renders on; must be a CDP-registered domain. */
   domain?: string;
   /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
   customerIpAddress?: string;
