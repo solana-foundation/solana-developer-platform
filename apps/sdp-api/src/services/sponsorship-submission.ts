@@ -108,9 +108,9 @@ export async function submitSponsoredTransaction(input: {
       }
       const transient = isTransientRpcError(error);
       if (sawTransientFailure && !transient) {
-        throw solanaRpcError(
-          "Solana RPC submission outcome is ambiguous after a transient failure"
-        );
+        throw new Error("Solana RPC submission outcome is ambiguous after a transient failure", {
+          cause: error,
+        });
       }
       sawTransientFailure ||= transient;
       throw error;
