@@ -66,17 +66,10 @@ export interface DvpLegActionRequestRepository {
   /** Records what the action returned, so a retry is answered from it. */
   markSent(id: string, result: { signature: Signature; amount: string }): Promise<void>;
   /**
-   * Frees a pending key whose request ended without sending anything, so the
-   * same key can be tried again. Never touches a `sent` row.
+   * Frees a pending key whose request was refused before sending anything, so
+   * the same key can be tried again. Never touches a `sent` row.
    */
   release(id: string): Promise<void>;
-  /**
-   * Hands a pending row abandoned before `staleBefore` to a new request.
-   *
-   * @returns Whether this call now holds it. False when it was sent, released or
-   *   retaken in the meantime.
-   */
-  retakeAbandoned(id: string, staleBefore: string): Promise<boolean>;
 }
 
 function toDvpLegActionRequest(row: Record<string, unknown>): DvpLegActionRequest {
@@ -164,19 +157,6 @@ export function createPostgresDvpLegActionRequestRepository(
         .prepare(`DELETE FROM dvp_leg_action_requests WHERE id = ? AND status = 'pending'`)
         .bind(id)
         .run();
-    },
-
-    async retakeAbandoned(id, staleBefore) {
-      const row = await db
-        .prepare(
-          `UPDATE dvp_leg_action_requests
-              SET updated_at = sdp_iso_now()
-            WHERE id = ? AND status = 'pending' AND updated_at < ?
-            RETURNING id`
-        )
-        .bind(id, staleBefore)
-        .first<{ id: string }>();
-      return row !== null;
     },
   };
 }

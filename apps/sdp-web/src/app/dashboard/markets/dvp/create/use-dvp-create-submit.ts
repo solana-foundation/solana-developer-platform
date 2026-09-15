@@ -68,7 +68,18 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   // left the first attempt broadcasting, and the retry has to replay it rather
   // than draw a second trade at a second address; a rejection stored nothing,
   // so the key is still free.
-  const idempotencyKey = useRef(freshDvpIdempotencyKey("dvp-create"));
+  const idempotencyKey = useRef<string | null>(null);
+  // Minted on first use rather than as the ref's initial value, which would draw
+  // (and throw away) fresh random bytes on every render.
+  function currentIdempotencyKey(): string {
+    const existing = idempotencyKey.current;
+    if (existing !== null) {
+      return existing;
+    }
+    const minted = freshDvpIdempotencyKey("dvp-create");
+    idempotencyKey.current = minted;
+    return minted;
+  }
 
   async function submit(request: DvpCreateRequest) {
     setSubmitting(true);
@@ -78,7 +89,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          [IDEMPOTENCY_KEY_HEADER]: idempotencyKey.current,
+          [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(),
         },
         body: JSON.stringify({
           partyA: request.parties.a.ref,
@@ -129,7 +140,8 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         setError(t("DashboardMarkets.dvp.createUnconfirmed"));
         return;
       }
-      idempotencyKey.current = freshDvpIdempotencyKey("dvp-create");
+      // The next submit mints a new key: a second trade on the same terms is a new request.
+      idempotencyKey.current = null;
       const { id: createdId, createSignature } = created.data.data.trade;
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow

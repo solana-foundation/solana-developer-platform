@@ -15,13 +15,14 @@ import {
   createPostgresDvpLegActionRequestRepository,
   type DvpLegActionRequest,
 } from "@/db/repositories/dvp-leg-action-request.repository";
-import { conflict } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 /**
- * A pending key older than this belongs to a request that died before it could
- * record an answer. Far above the longest live request (a send plus two
- * 15-second confirmation waits), so a request in flight is never retaken.
+ * A pending key older than this belongs to a request that ended without
+ * recording its outcome. Far above the longest live request (a send plus two
+ * 15-second confirmation waits), so a request in flight is never mistaken for one.
  */
 const ABANDONED_AFTER_MS = 5 * 60 * 1_000;
 
@@ -52,14 +53,21 @@ function fingerprintOf(scope: DvpLegActionRequestScope): string {
 }
 
 /**
- * The answer an earlier request with this key already gave, if any.
+ * The answer an earlier request with this key already gave.
  *
- * @throws 409 when the key belongs to a different request, or to one still running.
+ * A pending key is never handed to a new request. Its first request may have
+ * moved the leg and then failed to record that (a crash, a failed write), and
+ * running again under the same key could move it a second time, after a reclaim
+ * confirmed and somebody deposited again. Refusing is the only safe reading: the
+ * caller checks the trade and, if it still wants the action, sends a new key.
+ *
+ * @throws 409 when the key belongs to a different request, is still running, or
+ *   never recorded what it did.
  */
 function answerFromExisting(
   existing: DvpLegActionRequest | null,
   fingerprint: string
-): { kind: "replay"; result: DvpLegActionResult } | { kind: "retake"; id: string } {
+): DvpLegActionResult {
   if (existing === null) {
     throw conflict("A request with this Idempotency-Key is still being processed; retry shortly");
   }
@@ -67,26 +75,36 @@ function answerFromExisting(
     throw conflict("Idempotency key already used with different request payload");
   }
   if (existing.status === "sent") {
-    return {
-      kind: "replay",
-      result: { signature: existing.signature, leg: existing.side, amount: existing.amount },
-    };
+    return { signature: existing.signature, leg: existing.side, amount: existing.amount };
   }
   if (Date.now() - Date.parse(existing.updatedAt) < ABANDONED_AFTER_MS) {
     throw conflict("A request with this Idempotency-Key is still being processed; retry shortly");
   }
-  return { kind: "retake", id: existing.id };
+  throw conflict(
+    "A request with this Idempotency-Key did not record its outcome. Check the trade, then send a new key if the action is still needed."
+  );
+}
+
+/**
+ * Whether a failed request provably sent nothing, so its key can be reused.
+ *
+ * Every refusal fund and reclaim make is an AppError with a 4xx status raised
+ * before broadcast, and a preflight rejection is mapped to one too. Anything else
+ * (a transient RPC failure, an ambiguous send, a failed write after the send) may
+ * have moved the leg, so the key stays taken.
+ */
+function sentNothing(error: unknown): boolean {
+  return error instanceof AppError && error.statusCode >= 400 && error.statusCode < 500;
 }
 
 /**
  * Runs a leg action at most once per Idempotency-Key.
  *
  * Without a key the action simply runs. With one: a sent key replays the stored
- * answer without touching the chain; a key held by a live request, or used for a
- * different request, is refused; otherwise the key is taken, the action runs,
- * and its answer is recorded. A request that throws releases the key so the
- * same key can try again, which is safe because a retry still has to get past
- * the leg lock and the live chain reads that stopped the first one.
+ * answer without touching the chain; any other taken key is refused; otherwise
+ * the key is taken, the action runs, and its answer is recorded. A refusal that
+ * sent nothing frees the key for another try. Any other failure keeps it taken,
+ * because the leg may have moved.
  *
  * @param env - API environment.
  * @param idempotencyKey - The caller's header, or null.
@@ -106,7 +124,7 @@ export async function runDvpLegActionOnce(
 
   const requests = createPostgresDvpLegActionRequestRepository(getDb(env));
   const fingerprint = fingerprintOf(scope);
-  let id = `dvpla_${crypto.randomUUID().replace(/-/g, "")}`;
+  const id = `dvpla_${crypto.randomUUID().replace(/-/g, "")}`;
   const reservation = await requests.reserve({
     id,
     organizationId: scope.organizationId,
@@ -118,24 +136,28 @@ export async function runDvpLegActionOnce(
     side: scope.side,
   });
   if (!reservation.reserved) {
-    const answer = answerFromExisting(reservation.existing, fingerprint);
-    if (answer.kind === "replay") {
-      return { result: answer.result, replayed: true };
-    }
-    const staleBefore = new Date(Date.now() - ABANDONED_AFTER_MS).toISOString();
-    if (!(await requests.retakeAbandoned(answer.id, staleBefore))) {
-      throw conflict("A request with this Idempotency-Key is still being processed; retry shortly");
-    }
-    id = answer.id;
+    return { result: answerFromExisting(reservation.existing, fingerprint), replayed: true };
   }
 
   let result: DvpLegActionResult;
   try {
     result = await run();
   } catch (error) {
-    await requests.release(id);
+    if (sentNothing(error)) {
+      await requests.release(id);
+    }
     throw error;
   }
-  await requests.markSent(id, { signature: result.signature, amount: result.amount });
+  try {
+    await requests.markSent(id, { signature: result.signature, amount: result.amount });
+  } catch (error) {
+    // The leg moved; failing the request now would report a failure that did
+    // not happen. The key stays pending, which a retry reads as an unrecorded
+    // outcome and refuses, so it cannot move the leg again.
+    getLogger().error(
+      { error, idempotencyRequestId: id, signature: result.signature },
+      "dvp leg action: sent, but the idempotency record could not be marked sent"
+    );
+  }
   return { result, replayed: false };
 }

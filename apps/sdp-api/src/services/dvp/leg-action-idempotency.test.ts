@@ -11,6 +11,7 @@ import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { conflict } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -149,34 +150,46 @@ describe("runDvpLegActionOnce", () => {
     expect(slow).toHaveBeenCalledTimes(1);
   });
 
-  // A refusal sent nothing, so the same key may try again; the leg lock and the
-  // live chain reads still stand between the retry and a second send.
-  it("frees the key when the request throws", async () => {
+  // A refusal sent nothing, so the same key may try again.
+  it("frees the key when the request is refused before sending", async () => {
     const refused = vi.fn(async () => {
-      throw new Error("leg is already being moved");
+      throw conflict("this leg is already being moved; nothing was sent");
     });
-    await expect(once("key-4", refused)).rejects.toThrow("leg is already being moved");
+    await expect(once("key-4", refused)).rejects.toThrow("already being moved");
 
     const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
     await expect(once("key-4", run)).resolves.toMatchObject({ replayed: false });
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  // A request that died before recording its answer must not hold the key forever.
-  it("hands a key abandoned mid-request to the next request", async () => {
+  // An ambiguous send may have moved the leg. Freeing the key would let a
+  // retry, after that reclaim confirmed and a new deposit landed, drain it too.
+  it("keeps the key when the request fails in a way that may have sent", async () => {
+    const ambiguous = vi.fn(async () => {
+      throw new Error("socket hang up");
+    });
+    await expect(once("key-5", ambiguous)).rejects.toThrow("socket hang up");
+
+    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+    await expect(once("key-5", run)).rejects.toThrow(/still being processed/);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  // Its first request may have moved the leg and failed to record it. Running
+  // again under the same key is how one intent moves money twice.
+  it("never hands a key whose outcome went unrecorded to a new request", async () => {
     const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
     await getDb(env)
       .prepare(
         `INSERT INTO dvp_leg_action_requests
            (id, organization_id, project_id, idempotency_key, fingerprint, action, trade_id, side, status, updated_at)
-         SELECT 'dvpla_abandoned', ?, ?, 'key-5', fingerprint, 'reclaim', ?, 'a', 'pending', '2026-01-01T00:00:00.000Z'
+         SELECT 'dvpla_abandoned', ?, ?, 'key-6', fingerprint, 'reclaim', ?, 'a', 'pending', '2026-01-01T00:00:00.000Z'
            FROM (SELECT encode(sha256(?::bytea), 'hex') AS fingerprint) AS f`
       )
       .bind(ORG, PROJECT, TRADE_ID, JSON.stringify(["reclaim", TRADE_ID, "a", "cwlt_leg_action"]))
       .run();
 
-    await expect(once("key-5", run)).resolves.toMatchObject({ replayed: false });
-    expect(run).toHaveBeenCalledTimes(1);
-    await expect(once("key-5", run)).resolves.toMatchObject({ replayed: true });
+    await expect(once("key-6", run)).rejects.toThrow(/did not record its outcome/);
+    expect(run).not.toHaveBeenCalled();
   });
 });
