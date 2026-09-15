@@ -216,12 +216,14 @@ export interface CreatePrivateChannelRequest {
  *   failed     pre-broadcast or on-chain terminal failure. Never entered after
  *              `confirmed` for withdrawals — the balance is already gone.
  */
-export type PrivateChannelTransferStatus =
-  | "pending"
-  | "submitted"
-  | "confirmed"
-  | "settled"
-  | "failed";
+export const PRIVATE_CHANNEL_TRANSACTION_STATUSES = [
+  "pending",
+  "submitted",
+  "confirmed",
+  "settled",
+  "failed",
+] as const;
+export type PrivateChannelTransferStatus = (typeof PRIVATE_CHANNEL_TRANSACTION_STATUSES)[number];
 
 /**
  * Read-only audit snapshot of the SPC instance parameters at intent time.

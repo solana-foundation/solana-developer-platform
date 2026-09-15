@@ -113,6 +113,22 @@ export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
       const sql = fs.readFileSync(path.join(migrationsDir, migrationFile), "utf8");
       await applyPostgresMigration({ client, migrationFile, sql });
     }
+
+    const repeatableDir = path.join(migrationsDir, "repeatable");
+    const repeatableFiles = fs
+      .readdirSync(repeatableDir)
+      .filter((file) => file.endsWith(".sql"))
+      .sort((left, right) => left.localeCompare(right));
+    for (const repeatableFile of repeatableFiles) {
+      await client.query("BEGIN");
+      try {
+        await client.query(fs.readFileSync(path.join(repeatableDir, repeatableFile), "utf8"));
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+    }
   } finally {
     await client.end().catch(() => {});
   }

@@ -1,56 +1,46 @@
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { UnifiedTransactionsListResponse } from "@sdp/types";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import type { TransactionFilters } from "./transactions-query";
 import { toTransactionsApiQuery } from "./transactions-query";
 
-export interface TransactionsPageResult {
-  transfers: PaymentTransferSummary[];
-  total: number;
-  page: number;
-  pageSize: number;
-  hasMore: boolean;
-  error: string | null;
+export type TransactionsPageResult = UnifiedTransactionsListResponse;
+
+const TRANSACTIONS_PAGE_SIZE = 25;
+
+/**
+ * The `/v1/transactions` query string for a filter set; the SWR key for the
+ * client fetch, so identical filter sets share one cache entry.
+ *
+ * @param filters - The active filter set.
+ * @returns The serialized API query.
+ */
+export function transactionsApiQuery(filters: TransactionFilters): string {
+  return toTransactionsApiQuery(filters, TRANSACTIONS_PAGE_SIZE).toString();
 }
 
 export async function fetchTransactionsPage(
-  request: SdpApiClient["request"],
+  apiClient: SdpApiClient,
   filters: TransactionFilters
 ): Promise<TransactionsPageResult> {
-  try {
-    const response = await request(`/v1/payments/transfers?${toTransactionsApiQuery(filters)}`);
-    const body = (await response.json().catch(() => ({}))) as {
-      data?: PaymentTransferSummary[];
-      meta?: { total?: number; page?: number; pageSize?: number; hasMore?: boolean };
-      error?: { message?: string };
-    };
+  return apiClient.fetch<UnifiedTransactionsListResponse>(
+    `/v1/transactions?${transactionsApiQuery(filters)}`
+  );
+}
 
-    if (!response.ok) {
-      return {
-        transfers: [],
-        total: 0,
-        page: filters.page,
-        pageSize: filters.pageSize,
-        hasMore: false,
-        error: body.error?.message ?? `Transaction list request failed (${response.status}).`,
-      };
-    }
-
-    return {
-      transfers: body.data ?? [],
-      total: body.meta?.total ?? 0,
-      page: body.meta?.page ?? filters.page,
-      pageSize: body.meta?.pageSize ?? filters.pageSize,
-      hasMore: body.meta?.hasMore ?? false,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      transfers: [],
-      total: 0,
-      page: filters.page,
-      pageSize: filters.pageSize,
-      hasMore: false,
-      error: error instanceof Error ? error.message : "Transaction list request failed.",
-    };
-  }
+/**
+ * Browser-side page fetch through the dashboard proxy route. Throws on a failed
+ * response so SWR surfaces it as `error`.
+ *
+ * @param apiQuery - The serialized API query from `transactionsApiQuery`.
+ * @returns The transactions page.
+ */
+export async function fetchTransactionsPageFromDashboard(
+  apiQuery: string
+): Promise<TransactionsPageResult> {
+  const result = await dashboardFetch<{ data: UnifiedTransactionsListResponse }>(
+    `/api/dashboard/payments/transactions?${apiQuery}`
+  );
+  if (!result.ok) throw new Error(result.error);
+  return result.data.data;
 }

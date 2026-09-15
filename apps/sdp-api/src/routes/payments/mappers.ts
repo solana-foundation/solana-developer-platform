@@ -19,6 +19,7 @@ export function mapTransferRow(row: TransferRow) {
     providerWalletId: row.wallet_id,
     ...(row.project_id ? { projectId: row.project_id } : {}),
     type: row.type,
+    kind: row.kind,
     direction: row.direction,
     status: row.status,
     signature: row.signature,
