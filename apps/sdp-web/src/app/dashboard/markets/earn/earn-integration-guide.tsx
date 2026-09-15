@@ -24,18 +24,18 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { EarnIntegrationGuideSkeleton } from "../markets-route-skeletons";
-import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnDepositAvailabilityLabel,
+  earnProviderLabel,
+  earnStrategyLiquidityLabel,
+} from "./earn-format";
 import {
   buildEarnIntegrationSections,
   buildEarnServerIntegration,
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
-import {
-  EarnDepositAvailabilityBadge,
-  type EarnDepositAvailabilityLabels,
-  earnDepositAvailabilityLabel,
-  formatProviderApy,
-} from "./earn-market-presentation";
+import { EarnDepositAvailabilityBadge, formatProviderApy } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
 import {
   type EarnProviderAccess,

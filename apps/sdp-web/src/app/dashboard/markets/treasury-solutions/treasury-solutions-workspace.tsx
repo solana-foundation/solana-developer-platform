@@ -51,10 +51,13 @@ import {
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
-import { earnProviderLabel, formatUsd } from "../earn/earn-format";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnProviderLabel,
+  formatUsd,
+} from "../earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
-  type EarnDepositAvailabilityLabels,
   earnMintAsset,
   earnStrategyAsset,
   earnStrategyReferenceKey,
