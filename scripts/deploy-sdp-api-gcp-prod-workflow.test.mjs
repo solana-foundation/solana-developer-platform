@@ -88,7 +88,7 @@ test("candidate is revision-specific and Cloud Run-ready before promotion", () =
 });
 
 test("candidate traffic tag is always removed", () => {
-  assert.match(workflow, /- name: Remove candidate traffic tag\n\s+if: \$\{\{ always\(\) \}\}/);
+  assert.match(workflow, /- name: Remove candidate traffic tag\n\s+id: remove_tag\n\s+if: \$\{\{ always\(\) \}\}/);
   assert.match(workflow, /--remove-tags "\$\{CANDIDATE_TAG\}"/);
 
   const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
@@ -122,7 +122,7 @@ test("cancellation-safe rollback restores resolved traffic and cron together", (
   assert.match(workflow, /ROLLOUT_COMPLETE=true/);
   assert.match(
     workflow,
-    /- name: Roll back incomplete rollout\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
+    /- name: Roll back incomplete rollout\n\s+id: rollback_guard\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
   );
   assert.match(workflow, /--to-revisions "\$\{CANDIDATE_REVISION\}=100"/);
   assert.match(workflow, /--to-revisions "\$\{PREVIOUS_TRAFFIC\}"/);
