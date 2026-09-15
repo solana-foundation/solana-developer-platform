@@ -234,6 +234,7 @@
       "sourceWalletNoUsdc": "Source wallet has no USDC balance to send.",
       "coinbaseEventFailed": "Failed to record Coinbase event.",
       "coinbaseOnramp": "Coinbase onramp",
+      "coinbaseSessionError": "Coinbase could not continue this payment: {message} Create a new quote to try again.",
       "status": {
         "waitingForFunding": "Waiting for funding",
         "waitingToSend": "Waiting to send",
