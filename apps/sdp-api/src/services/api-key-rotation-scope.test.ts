@@ -123,6 +123,7 @@ describe("rotateApiKey wallet-scope guard", () => {
       TEST_PROJECT.id,
       24,
       ["*"],
+      null,
       "pepper"
     );
 
