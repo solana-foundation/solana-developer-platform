@@ -133,7 +133,14 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Block recipient" }).disabled
     ).toBe(true);
+    // The list authority shows as an identity row with its wallet link, not a dead select.
     expect(screen.getByText(/List authority/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /List authority/ }).getAttribute("href")).toBe(
+      "/dashboard/wallets/wal_authority"
+    );
+    expect(screen.queryAllByRole("combobox").map((el) => el.textContent)).not.toContainEqual(
+      expect.stringContaining("List authority")
+    );
     expect(screen.getByText(reason).className).toContain("text-warning");
   });
 

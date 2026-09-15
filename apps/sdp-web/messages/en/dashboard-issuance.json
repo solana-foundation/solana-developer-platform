@@ -290,8 +290,8 @@
       "tokenManagementAction": "Token management action"
     },
     "signer": {
-      "label": "Signer",
-      "select": "Select a signer wallet",
+      "label": "Signing wallet",
+      "select": "Select a signing wallet",
       "requiredAuthorityHint": "SDP will sign this action with the required authority wallet.",
       "selectedWalletHint": "SDP will sign this transaction with the selected wallet.",
       "defaultSignerHint": "No signer wallets available — SDP will use the project's default signer.",

@@ -81,6 +81,22 @@ describe("TokenSignerSelect", () => {
     expect(markup).toContain("DashboardIssuance.signer.defaultSignerHint");
   });
 
+  it("keeps the identity row for a single signer whose runtime signing is restricted", () => {
+    const wallet = { ...makeWallet(1), isRuntimeExecutionAllowed: false };
+    const markup = renderToStaticMarkup(
+      <TokenSignerSelect
+        signerWallets={[wallet]}
+        signerWalletId={wallet.id}
+        signerUnavailableReason="DashboardIssuance.management.signingUnavailable"
+        onSignerWalletIdChange={() => {}}
+      />
+    );
+    expect(markup).toContain('href="/dashboard/wallets/wal_1"');
+    expect(markup).not.toContain("DashboardIssuance.signer.select");
+    expect(markup).toContain("DashboardIssuance.management.signingUnavailable");
+    expect(markup).toContain("text-warning");
+  });
+
   it("surfaces the unavailable reason over the wallet list", () => {
     const markup = render([makeWallet(1)], "custody offline");
     expect(markup).not.toContain('data-testid="wallet-identity-card"');

@@ -44,17 +44,20 @@ export function TokenSignerSelect({
   const selectionUnavailableReason = optional
     ? null
     : getSignerWalletUnavailableReason(signerWallets, signerWalletId || selectedWallet?.id, t);
+  // ponytail: runtime disablement is recognised by its copy, not a kind flag —
+  // every reason producer renders it through this same key.
+  const runtimeReason = t("DashboardIssuance.management.signingUnavailable");
+  // A restricted wallet is still the signer, so it keeps its identity row; only a
+  // structural reason (no authority, not controlled, load failure) hides it.
+  const structuralReason = hasReason && signerUnavailableReason !== runtimeReason;
   // A disappeared explicit choice must stay editable, not display a replacement.
-  const isLocked = !isUnavailable && signerWallets.length === 1 && selectedWallet !== null;
+  const isLocked = !structuralReason && signerWallets.length === 1 && selectedWallet !== null;
   const hasDuplicateAddress =
     new Set(signerWallets.map((wallet) => wallet.publicKey)).size < signerWallets.length;
   // Red only signals a genuine problem: an explicit unavailable reason, or no
   // wallets in a context that requires a signer. An empty list where the signer
   // is optional (draft creation) is expected, so it stays neutral.
   const isError = hasReason || Boolean(selectionUnavailableReason) || (hasNoWallets && !optional);
-  // ponytail: runtime disablement is recognised by its copy, not a kind flag —
-  // every reason producer renders it through this same key.
-  const runtimeReason = t("DashboardIssuance.management.signingUnavailable");
   const defaultMessage = isLocked
     ? t("DashboardIssuance.signer.requiredAuthorityHint")
     : t("DashboardIssuance.signer.selectedWalletHint");
