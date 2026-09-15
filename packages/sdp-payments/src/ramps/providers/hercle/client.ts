@@ -141,10 +141,10 @@ const hercleEstimateResponseSchema = z.object({
 });
 
 /**
- * The account attributes the wire to the business and the reference attributes it to this order, so an
- * order without either cannot be funded or reconciled: refuse it as malformed rather than hand the
- * business instructions with a blank IBAN. The bank identity fields and the payer name are descriptive
- * and may be absent — Hercle sends an empty payer when the sub-account carries no company name.
+ * The account attributes the wire to the business, the reference attributes it to this order, and the
+ * payer name is the first-party rule the bank enforces, so an order missing any of the three cannot be
+ * funded, reconciled, or wired from the right account: refuse it as malformed rather than hand the
+ * business instructions it cannot act on. The bank identity fields are descriptive and may be absent.
  */
 const hercleOnrampOrderResponseSchema = z.object({
   orderId: z.string().min(1),
@@ -156,7 +156,7 @@ const hercleOnrampOrderResponseSchema = z.object({
     bankName: z.string().optional(),
     accountHolder: z.string().optional(),
     paymentReference: z.string().min(1),
-    payerAccountHolder: z.string().optional(),
+    payerAccountHolder: z.string().min(1),
   }),
   expiresAt: z.string().optional(),
 });
@@ -410,10 +410,7 @@ export class HercleRampClient implements RampProvider {
       kind: "fiat_funding",
       fiatCurrency: order.fiatCurrency,
       bankAccount: order.bankAccount,
-      instructionsNotes:
-        order.bankAccount.payerAccountHolder === undefined
-          ? `Wire ${order.fiatAmount} ${order.fiatCurrency} from your registered business account; include the payment reference so Hercle can match the transfer.`
-          : `Wire ${order.fiatAmount} ${order.fiatCurrency} from a bank account held in the name of ${order.bankAccount.payerAccountHolder}; a transfer from any other account is returned by the bank. Include the payment reference so Hercle can match the transfer.`,
+      instructionsNotes: `Wire ${order.fiatAmount} ${order.fiatCurrency} from a bank account held in the name of ${order.bankAccount.payerAccountHolder}; a transfer from any other account is returned by the bank. Include the payment reference so Hercle can match the transfer.`,
     };
 
     return {

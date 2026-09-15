@@ -1144,6 +1144,7 @@ describe("Payments routes — ramps", () => {
             bankName: "Hercle (simulated)",
             accountHolder: "Hercle Financial AG",
             paymentReference: "HRC-0E936582C524",
+            payerAccountHolder: "Acme Ltd",
           },
           expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
         }),
@@ -1185,11 +1186,12 @@ describe("Payments routes — ramps", () => {
 
     expect(body.data.quote.provider).toBe("hercle");
     expect(body.data.quote.deliveryMode).toBe("manual_instructions");
-    // Without the reference on the wire Hercle cannot attribute the incoming transfer,
-    // so settlement stalls until someone reconciles by hand.
+    // Without the reference on the wire Hercle cannot attribute the incoming transfer, so settlement
+    // stalls until someone reconciles by hand; without the payer name the business cannot follow the
+    // first-party rule the bank enforces.
     expect(body.data.quote.paymentInstructions[0]).toMatchObject({
       kind: "fiat_funding",
-      bankAccount: { paymentReference: "HRC-0E936582C524" },
+      bankAccount: { paymentReference: "HRC-0E936582C524", payerAccountHolder: "Acme Ltd" },
     });
 
     // The order is opened on behalf of the sub-account — without it Hercle refuses with

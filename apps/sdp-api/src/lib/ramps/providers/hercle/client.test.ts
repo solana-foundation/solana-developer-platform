@@ -144,7 +144,11 @@ describe("HercleRampClient on-ramp quote", () => {
         orderId: "ord_124",
         fiatCurrency: "EUR",
         fiatAmount: "250",
-        bankAccount: { iban: "CH9300762011623852957", paymentReference: "HRC-PAY-124" },
+        bankAccount: {
+          iban: "CH9300762011623852957",
+          paymentReference: "HRC-PAY-124",
+          payerAccountHolder: "Acme Ltd",
+        },
       })
     );
 
@@ -162,11 +166,17 @@ describe("HercleRampClient on-ramp quote", () => {
     expect(headers.get("Idempotency-Key")).toBeTruthy();
   });
 
-  it("refuses an order that names no account or reference to wire to", async () => {
+  it("refuses an order missing the account, the reference or the payer to wire from", async () => {
     // Without the IBAN the business cannot fund the order; without the reference Hercle cannot
-    // attribute the transfer. Either gap is a malformed order, not a quote to show.
+    // attribute the transfer; without the payer name the first-party rule cannot be followed.
+    // Any gap is a malformed order, not a quote to show.
     const client = new HercleRampClient();
-    for (const bankAccount of [{}, { iban: "CH9300762011623852957" }, { paymentReference: "X" }]) {
+    for (const bankAccount of [
+      {},
+      { iban: "CH9300762011623852957" },
+      { paymentReference: "X" },
+      { iban: "CH9300762011623852957", paymentReference: "X" },
+    ]) {
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         jsonResponse({ orderId: "ord_126", fiatCurrency: "EUR", fiatAmount: "250", bankAccount })
       );
@@ -195,6 +205,7 @@ describe("HercleRampClient on-ramp quote", () => {
           bic: "HERCCHZZ",
           bankName: "Hercle SA",
           paymentReference: "HRC-PAY-1",
+          payerAccountHolder: "Acme Ltd",
         },
       })
     );
