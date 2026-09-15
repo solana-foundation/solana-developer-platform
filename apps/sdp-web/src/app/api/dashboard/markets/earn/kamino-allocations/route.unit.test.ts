@@ -38,11 +38,6 @@ const VAULTS = {
   badJson: "So11111111111111111111111111111111111111112",
   passthrough: "Passthrough11111111111111111111111111111111",
   unknown: "UpstreamMiss11111111111111111111111111111111",
-  clusterMissing: `C1usterMissing${"1".repeat(23)}`,
-  clusterDevnet: `C1usterDevnet${"1".repeat(21)}`,
-  clusterTestnet: `C1usterTestnet${"1".repeat(20)}`,
-  clusterMainnet: `C1usterMainnet${"1".repeat(20)}`,
-  clusterSneaky: `C1usterSneakyMainnetBeta${"1".repeat(11)}`,
   absent: `Absent${"1".repeat(27)}`,
   catalogueDown: `FrontDeskDown${"1".repeat(19)}`,
   coalesced: `Merged${"1".repeat(27)}`,
@@ -220,29 +215,23 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     );
   });
 
-  it("answers 502 for a missing vault parameter without an upstream read", async () => {
-    const response = await GET(new Request("https://dashboard.example.test/api/kamino"));
+  it("answers 400 for a missing vault parameter without an upstream read", async () => {
+    const response = await GET(request("", "missing"));
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(400);
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["missing", "clusterMissing"],
-    ["devnet", "clusterDevnet"],
-    ["testnet", "clusterTestnet"],
-    ["mainnet", "clusterMainnet"],
-    ["sneaky-mainnet-beta", "clusterSneaky"],
-  ] as const)(
-    "passes a %s cluster parameter through for a listed vault: the cluster is the caller's concern",
-    async (cluster, vaultKey) => {
-      const response = await GET(request(VAULTS[vaultKey], cluster));
+  it.each(["missing", "devnet", "testnet", "mainnet", "sneaky-mainnet-beta"])(
+    "refuses a %s cluster parameter: the allocations source is mainnet-only",
+    async (cluster) => {
+      const response = await GET(request(VAULTS.happy, cluster));
 
-      expect(response.status).toBe(200);
-      expect(mocks.fetch).toHaveBeenCalledWith(
-        `https://api.kamino.finance/kvaults/vaults/${VAULTS[vaultKey]}/allocations`,
-        expect.objectContaining({ cache: "no-store" })
-      );
+      expect(response.status).toBe(400);
+      // Refused before anything downstream: neither the catalogue allowlist
+      // nor Kamino is asked about a vault on a cluster that cannot resolve.
+      expect(mocks.catalogue).not.toHaveBeenCalled();
+      expect(mocks.fetch).not.toHaveBeenCalled();
     }
   );
 

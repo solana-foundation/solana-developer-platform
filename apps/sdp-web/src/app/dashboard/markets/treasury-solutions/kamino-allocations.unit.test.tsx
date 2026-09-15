@@ -49,7 +49,7 @@ describe("useKaminoVaultAllocations", () => {
     await waitFor(() => expect(result.current.allocations).toBeDefined());
     expect(result.current.error).toBeUndefined();
     expect(mocks.fetch).toHaveBeenCalledWith(
-      "/api/dashboard/markets/earn/kamino-allocations?vault=Kvault1111"
+      "/api/dashboard/markets/earn/kamino-allocations?vault=Kvault1111&cluster=mainnet-beta"
     );
     expect(result.current.allocations?.allocations[0]?.marketName).toBe("SOL/BTC Market");
   });
@@ -78,7 +78,7 @@ describe("useKaminoVaultAllocations", () => {
     expect(mocks.fetch).toHaveBeenCalledWith(
       `/api/dashboard/markets/earn/kamino-allocations?vault=${encodeURIComponent(
         "5YxwKgsv+TdT/not=A RealKey"
-      )}`
+      )}&cluster=mainnet-beta`
     );
   });
 

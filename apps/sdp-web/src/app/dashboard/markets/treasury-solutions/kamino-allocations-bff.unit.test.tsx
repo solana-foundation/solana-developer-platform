@@ -145,8 +145,9 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
       unallocated: { pct: "0.0154" },
     });
     // One browser→BFF hop and one BFF→Kamino hop, nothing else on the wire.
+    // The hook states its cluster explicitly for the BFF's mainnet-only gate.
     expect(seenUrls).toEqual([
-      `${BFF_PATH}?vault=${VAULTS.happy}`,
+      `${BFF_PATH}?vault=${VAULTS.happy}&cluster=mainnet-beta`,
       `${UPSTREAM_BASE}/${VAULTS.happy}/allocations`,
     ]);
   });
