@@ -571,7 +571,7 @@ jobs:
       - name: Record tail cleanup outcome
         id: tail_outcome
         if: ${{ always() }}
-        run: echo "clean=${{ steps.rollback_guard.outcome != 'failure' && steps.remove_tag.outcome != 'failure' }}" >> "$GITHUB_OUTPUT"
+        run: echo "clean=${{ (steps.rollback_guard.outcome == 'success' || steps.rollback_guard.outcome == 'skipped') && (steps.remove_tag.outcome == 'success' || steps.remove_tag.outcome == 'skipped') }}" >> "$GITHUB_OUTPUT"
 
 
   notify-result:
@@ -606,8 +606,8 @@ jobs:
           ENV: production
           STATUS: >-
             ${{ needs.deploy.result == 'success' && 'success' ||
-                needs.deploy.outputs.canary == 'failure' && needs.deploy.outputs.tail_clean == 'true' && 'canary-failed' ||
                 (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+                needs.deploy.outputs.canary == 'failure' && needs.deploy.outputs.tail_clean == 'true' && 'canary-failed' ||
                 'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
           DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
