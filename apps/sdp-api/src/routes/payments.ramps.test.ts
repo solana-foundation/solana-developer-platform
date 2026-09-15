@@ -1360,6 +1360,40 @@ describe("Payments routes — ramps", () => {
     fetchSpy.mockRestore();
   });
 
+  it("refuses Hercle off-ramp requirements before provisioning anything", async () => {
+    // Hercle offers no off-ramp. Letting the request through would open a real sub-account and start
+    // its KYB for a direction that can never be quoted, then report it ready.
+    const counterpartyId = await seedCounterparty({
+      externalId: "hercle_customer_offramp",
+      entityType: "business",
+      displayName: "Acme Ltd",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "hercle",
+          direction: "offramp",
+          collectedData: hercleCollectedData,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/direction/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    fetchSpy.mockRestore();
+  });
+
   it("answers the Hercle requirements GET from the rows and mints the verification link per read", async () => {
     const accountId = "6f1b2c3d-0000-4000-8000-000000000003";
     const counterpartyId = await seedHercleCounterparty({

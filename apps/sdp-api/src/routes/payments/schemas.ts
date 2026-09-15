@@ -719,9 +719,11 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     }),
   ]),
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
+  // On-ramp only: the requirements stage provisions a real Hercle sub-account and starts its KYB, so an
+  // off-ramp request must be refused here, before anything is created for a direction Hercle does not serve.
   z.object({
     provider: z.literal("hercle"),
-    direction: rampDirectionSchema,
+    direction: z.literal("onramp"),
     collectedData: collectedDataSchema,
   }),
 ]);
