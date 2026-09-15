@@ -774,8 +774,18 @@ async function extractFreezeStatePolicyCandidate(options: {
     tokenService,
   });
 
+  // Policy must judge the token account the operation will actually modify,
+  // not the submitted address: a wallet address resolves to its token account.
+  const { tokenAccount } = await resolveFreezeTarget(
+    c.env,
+    assertValidAddress(body.accountAddress, "accountAddress"),
+    assertValidAddress(token.mintAddress, "mintAddress"),
+    getTokenAccessControlMode(token)
+  );
+
   return {
     ...emptyExtraction,
+    rawPayload: { ...emptyExtraction.rawPayload, tokenAccountAddress: tokenAccount },
     resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
     candidate: buildIssuancePolicyCandidate({
       auth,
@@ -784,7 +794,7 @@ async function extractFreezeStatePolicyCandidate(options: {
       walletId: wallet.providerWalletId,
       operationType,
       amount: null,
-      destination: body.accountAddress,
+      destination: tokenAccount,
     }),
   };
 }

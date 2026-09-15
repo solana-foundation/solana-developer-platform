@@ -774,6 +774,13 @@ describe("Issuance Routes", () => {
         exists: true,
         data: { freezeAuthority: policyMintAuthority },
       } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
       const policyResponse = await app.request(
         `/v1/payments/wallets/${wallet.walletId}/policies`,
         {
@@ -821,6 +828,7 @@ describe("Issuance Routes", () => {
         expect(operationCount).toEqual({ count: 1 });
       } finally {
         aclSpy.mockRestore();
+        targetSpy.mockRestore();
       }
     });
 
@@ -839,6 +847,13 @@ describe("Issuance Routes", () => {
         exists: true,
         data: { freezeAuthority: policyMintAuthority },
       } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: true,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
       const policyResponse = await app.request(
         `/v1/payments/wallets/${wallet.walletId}/policies`,
         {
@@ -882,6 +897,7 @@ describe("Issuance Routes", () => {
         expect(operationCount).toEqual({ count: 1 });
       } finally {
         aclSpy.mockRestore();
+        targetSpy.mockRestore();
       }
     });
 
@@ -1933,6 +1949,78 @@ describe("Issuance Routes", () => {
             frozenAccount: {
               accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
               signature: "sig_direct_freeze_replay",
+            },
+          },
+        });
+        expect(authoritySpy).not.toHaveBeenCalled();
+        expect(targetSpy).not.toHaveBeenCalled();
+        expect(admitSpy).not.toHaveBeenCalled();
+      } finally {
+        targetSpy.mockRestore();
+        admitSpy.mockRestore();
+      }
+    });
+
+    it("replays unfreeze from its persisted account without live target or authority lookup", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_direct_unfreeze_replay",
+        status: "revoked",
+        isFreezable: false,
+      });
+      const idempotencyKey = "direct-unfreeze-replay";
+      const body = { accountAddress: TEST_SOLANA_ADDRESSES.wallet1 };
+      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+        tokenId: token.id,
+        operation: "unfreeze",
+        mode: "execute",
+        params: {
+          ...body,
+          signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        },
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by
+           ) VALUES ('frz_direct_unfreeze_replay', ?, ?, NULL, sdp_iso_now(), ?)`
+        )
+        .bind(token.id, TEST_SOLANA_ADDRESSES.wallet2, TEST_PROJECT_API_KEY.id)
+        .run();
+      await seedIssuanceTransaction({
+        id: "ttx_direct_unfreeze_replay",
+        tokenId: token.id,
+        type: "unfreeze",
+        status: "confirmed",
+        custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        idempotencyKey,
+        idempotencyFingerprint: idempotency.idempotencyFingerprint,
+        signature: "sig_direct_unfreeze_replay",
+        slot: 12,
+        params: {
+          accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+      });
+      const authoritySpy = vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole);
+      authoritySpy.mockClear();
+      const targetSpy = vi
+        .spyOn(MosaicSdk, "resolveTokenAccount")
+        .mockRejectedValue(new Error("target unavailable"));
+      const admitSpy = vi
+        .spyOn(SigningService.prototype, "admitRuntimeExecution")
+        .mockRejectedValue(new Error("runtime unavailable"));
+
+      try {
+        const replay = await app.request(
+          `/v1/issuance/tokens/${token.id}/unfreeze`,
+          { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
+          env
+        );
+        expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
+        expect(await replay.json()).toMatchObject({
+          data: {
+            frozenAccount: {
+              accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
+              signature: "sig_direct_unfreeze_replay",
             },
           },
         });

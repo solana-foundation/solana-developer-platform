@@ -126,7 +126,8 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "replays freeze from its persisted account without live target or authority lookup",
+        evidence:
+          "replays freeze from its persisted account without live target or authority lookup",
       },
     ],
   },
@@ -146,7 +147,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "stops a denied unfreeze before signer and issuance side effects",
+        evidence: "replays unfreeze from its persisted account",
       },
     ],
   },
@@ -166,7 +167,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "stops a denied pause before signer and issuance side effects",
+        evidence: "replays %s only for the original exact wallet",
       },
     ],
   },
@@ -186,7 +187,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/issuance.test.ts",
-        evidence: "stops a denied unpause before signer and issuance side effects",
+        evidence: "replays %s only for the original exact wallet",
       },
     ],
   },
