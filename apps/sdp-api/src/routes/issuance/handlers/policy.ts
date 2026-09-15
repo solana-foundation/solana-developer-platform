@@ -26,8 +26,12 @@ type IssuancePolicyOperationType = Extract<
   WalletOperationType,
   | "issuance_burn_execute"
   | "issuance_force_burn_execute"
+  | "issuance_freeze_execute"
   | "issuance_mint_execute"
+  | "issuance_pause_execute"
   | "issuance_seize_execute"
+  | "issuance_unfreeze_execute"
+  | "issuance_unpause_execute"
   | "issuance_update_authority_execute"
 >;
 

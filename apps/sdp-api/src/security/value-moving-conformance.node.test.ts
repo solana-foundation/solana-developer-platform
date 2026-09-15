@@ -113,6 +113,86 @@ const contracts: ValueMovingContract[] = [
   {
     family: "issuance",
     trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/freeze.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/freeze",',
+      before: "policyGate({ extract: extractFreezePolicyCandidate })",
+      after: "freezeAccount",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays freeze from its persisted account without live target or authority lookup",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/freeze.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/unfreeze",',
+      before: "policyGate({ extract: extractUnfreezePolicyCandidate })",
+      after: "unfreezeAccount",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied unfreeze before signer and issuance side effects",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/pause.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/pause",',
+      before: "policyGate({ extract: extractPausePolicyCandidate })",
+      after: "  pauseToken",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied pause before signer and issuance side effects",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/pause.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/unpause",',
+      before: "policyGate({ extract: extractUnpausePolicyCandidate })",
+      after: "unpauseToken",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied unpause before signer and issuance side effects",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
       file: "apps/sdp-api/src/routes/issuance/handlers/seize.ts",
       evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
     },
@@ -438,13 +518,18 @@ describe("value-moving authorization and replay conformance", () => {
     // withdrawals) are separately gated routes, and each carries its own
     // authorization boundary and replay evidence. `issuance` appears four
     // times for the same reason: authority updates, seize, force-burn, and
-    // burn are separately gated execute routes.
+    // burn are separately gated execute routes, and freeze, unfreeze, pause,
+    // and unpause each carry the same per-route gate.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
       "dvp",
       "earn",
       "earn",
+      "issuance",
+      "issuance",
+      "issuance",
+      "issuance",
       "issuance",
       "issuance",
       "issuance",

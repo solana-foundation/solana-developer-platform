@@ -4,6 +4,7 @@ import { inspectToken, MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
@@ -20,6 +21,7 @@ import {
   resolveDirectIssuanceReplay,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
@@ -390,3 +392,114 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     throw error;
   }
 };
+
+async function extractPauseStatePolicyCandidate(options: {
+  c: ValidatedBodyContext<typeof pauseTokenSchema>;
+  operation: "pause" | "unpause";
+  operationType: "issuance_pause_execute" | "issuance_unpause_execute";
+}): Promise<PolicyGateExtraction> {
+  const { c, operation, operationType } = options;
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: operation,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: operation,
+        idempotencyKey,
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:admin"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(idempotencyKey, {
+            tokenId,
+            operation,
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  if (!token.mintAddress) {
+    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
+  }
+
+  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const pauseAuthorityRaw = await resolvePauseAuthority(c.env, mintAddress);
+  if (!pauseAuthorityRaw) {
+    throw badRequest("Pause authority is not configured for this token");
+  }
+
+  const wallet = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    currentAuthority: pauseAuthorityRaw,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType,
+      amount: null,
+      destination: null,
+    }),
+  };
+}
+
+export async function extractPausePolicyCandidate(
+  c: ValidatedBodyContext<typeof pauseTokenSchema>
+): Promise<PolicyGateExtraction> {
+  return extractPauseStatePolicyCandidate({
+    c,
+    operation: "pause",
+    operationType: "issuance_pause_execute",
+  });
+}
+
+export async function extractUnpausePolicyCandidate(
+  c: ValidatedBodyContext<typeof pauseTokenSchema>
+): Promise<PolicyGateExtraction> {
+  return extractPauseStatePolicyCandidate({
+    c,
+    operation: "unpause",
+    operationType: "issuance_unpause_execute",
+  });
+}

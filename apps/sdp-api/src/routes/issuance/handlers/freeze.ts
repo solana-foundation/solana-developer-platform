@@ -6,6 +6,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
@@ -25,6 +26,7 @@ import {
   resolveFreezeOperationAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -687,3 +689,117 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     throw error;
   }
 };
+
+async function extractFreezeStatePolicyCandidate(options: {
+  c: ValidatedBodyContext<typeof freezeSchema> | ValidatedBodyContext<typeof unfreezeSchema>;
+  operation: "freeze" | "unfreeze";
+  operationType: "issuance_freeze_execute" | "issuance_unfreeze_execute";
+}): Promise<PolicyGateExtraction> {
+  const { c, operation, operationType } = options;
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: operation,
+      accountAddress: body.accountAddress,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay = idempotencyKey
+    ? await resolveDirectIssuanceReplay({
+        env: c.env,
+        auth,
+        tokenService,
+        tokenId,
+        type: operation,
+        idempotencyKey,
+        requestedCustodyWalletId: body.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:admin"],
+        fingerprintForCustodyWalletId: (custodyWalletId) =>
+          buildIdempotencyMetadata(idempotencyKey, {
+            tokenId,
+            operation,
+            mode: "execute",
+            params: { ...body, signingCustodyWalletId: custodyWalletId },
+          }).idempotencyFingerprint,
+      })
+    : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  if (operation === "freeze" && !token.isFreezable) {
+    throw badRequest("Token does not support freeze operations");
+  }
+  if (!token.mintAddress) {
+    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
+  }
+
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
+  if (!currentAuthorityRaw) {
+    throw badRequest("Current freeze authority is not available for this token");
+  }
+
+  const wallet = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    currentAuthority: currentAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType,
+      amount: null,
+      destination: body.accountAddress,
+    }),
+  };
+}
+
+export async function extractFreezePolicyCandidate(
+  c: ValidatedBodyContext<typeof freezeSchema>
+): Promise<PolicyGateExtraction> {
+  return extractFreezeStatePolicyCandidate({
+    c,
+    operation: "freeze",
+    operationType: "issuance_freeze_execute",
+  });
+}
+
+export async function extractUnfreezePolicyCandidate(
+  c: ValidatedBodyContext<typeof unfreezeSchema>
+): Promise<PolicyGateExtraction> {
+  return extractFreezeStatePolicyCandidate({
+    c,
+    operation: "unfreeze",
+    operationType: "issuance_unfreeze_execute",
+  });
+}

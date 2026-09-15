@@ -11,6 +11,7 @@ import type { Address } from "@sdp/solana/address";
 import type { CachedApiKey } from "@sdp/types";
 import { address, createNoopSigner, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
+import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,6 +52,9 @@ import { seedCachedApiKey } from "@/test/mocks/kv";
 // Copy the immutable ESM namespace so tests can spy on SDK reads while preserving real exports.
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
+}));
+vi.mock("@solana/token-acl-sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana/token-acl-sdk")>()),
 }));
 
 // Check if running in mock mode (no RPC access)
@@ -753,6 +757,251 @@ describe("Issuance Routes", () => {
         .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
         .first<{ count: number }>();
       expect(operationCount).toEqual({ count: 1 });
+    });
+
+    it("stops a denied freeze before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_freeze_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_freeze_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-freeze", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_freeze_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        aclSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied unfreeze before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_unfreeze_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_unfreeze_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-unfreeze", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/unfreeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_unfreeze_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        aclSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied pause before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_pause_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_pause_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const inspectSpy = vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-pause", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/pause`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_pause_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        inspectSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied unpause before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_unpause_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_unpause_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        status: "paused",
+      });
+      const inspectSpy = vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-unpause", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/unpause`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_unpause_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        inspectSpy.mockRestore();
+      }
     });
 
     it("stops a denied seize before signer and issuance side effects", async () => {
