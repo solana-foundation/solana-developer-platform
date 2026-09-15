@@ -1081,6 +1081,30 @@ describe("HeliusRingsService", () => {
       expect(operation.failure?.message).toContain("Helius Rings setup is required");
     });
 
+    // A wallet provisioned before its custody provider left the raw-message
+    // allowlist fails here, at material derivation — which is a gateway
+    // failure, so this boundary is the only place the row can learn that
+    // custody is the reason. Folded into `invalid_input` it would read as a
+    // malformed request and send an operator to rewrite the amount.
+    it("records an unsupported custody provider as itself, not as bad input", async () => {
+      const gateway = new InMemoryRingsGateway();
+      const reason =
+        "custody provider para cannot back a Rings private wallet: providers that do: local, privy, turnkey.";
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("provider_unsupported", reason));
+
+      const operation = await service({ gateway }).prepareOperation(
+        operationInput({ clientNonce: "nonce-provider-unsupported" }),
+        actorContext
+      );
+
+      expect(operation.failure).toMatchObject({
+        code: "provider_unsupported",
+        retryable: false,
+      });
+      expect(operation.failure?.message).toBe(reason);
+    });
+
     it("resends the persisted bytes when resumed in submitted", async () => {
       const sent: string[] = [];
       const svc = () =>

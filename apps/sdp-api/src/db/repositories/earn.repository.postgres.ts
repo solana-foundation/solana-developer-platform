@@ -30,13 +30,13 @@ import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
  * expand half of an expand/contract rollout), so the read has to answer for a
  * row an older writer left unset. It answers with the environment's own
  * cluster — the same rule the migration's backfill applies, and true of every
- * writer that predates the column: Ground's catalogue gate only ever admits a
- * source hosted on the environment's own chain.
+ * writer that predates the column: a provider's catalogue gate only ever
+ * admits a source hosted on the environment's own chain.
  *
  * Failing closed here instead would be worse than useless: a NULL row would
  * come back un-fundable, so a mid-deploy or rolled-back write would quietly
- * drop live Ground strategies out of the wizard. Reading the fact that IS
- * known keeps such a row correct until the next sync states it explicitly.
+ * drop live strategies out of the wizard. Reading the fact that IS known keeps
+ * such a row correct until the next sync states it explicitly.
  */
 function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   const environment = row.environment as SdpEnvironment;

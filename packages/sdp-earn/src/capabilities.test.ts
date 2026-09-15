@@ -2,13 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { supportsPortfolioWallets, supportsWithdrawalApprovals } from "./capabilities";
 import { EARN_PROVIDER_CLIENTS } from "./index";
-import { GroundEarnClient } from "./providers/ground/client";
 
 describe("supportsPortfolioWallets", () => {
-  it("narrows the Ground client to the portfolio-wallet capability", () => {
-    assert.equal(supportsPortfolioWallets(new GroundEarnClient()), true);
-  });
-
   it("rejects stub clients that do not implement the capability", () => {
     assert.equal(supportsPortfolioWallets(EARN_PROVIDER_CLIENTS.veda), false);
     assert.equal(supportsPortfolioWallets(EARN_PROVIDER_CLIENTS.upshift), false);
@@ -32,10 +27,6 @@ describe("supportsPortfolioWallets", () => {
 });
 
 describe("supportsWithdrawalApprovals", () => {
-  it("narrows the Ground client to the withdrawal-approval capability", () => {
-    assert.equal(supportsWithdrawalApprovals(new GroundEarnClient()), true);
-  });
-
   it("rejects stub clients that do not implement the capability", () => {
     assert.equal(supportsWithdrawalApprovals(EARN_PROVIDER_CLIENTS.veda), false);
     assert.equal(supportsWithdrawalApprovals(EARN_PROVIDER_CLIENTS.upshift), false);

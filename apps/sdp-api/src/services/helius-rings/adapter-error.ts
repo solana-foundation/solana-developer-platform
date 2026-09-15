@@ -65,7 +65,13 @@ export function redactAdapterMessage(
 /** Codes the signer/RPC adapters can raise; widened for preflight escalation. */
 export type RingsAdapterFailureCode = Extract<
   FailureCode,
-  "signer_failed" | "submit_failed" | "manual_reconciliation_required"
+  | "signer_failed"
+  // Carries an operator-facing message by construction: it names the provider
+  // and what Rings needs from it, and is built here rather than quoted from an
+  // upstream, so it is the one adapter message safe to surface verbatim.
+  | "provider_unsupported"
+  | "submit_failed"
+  | "manual_reconciliation_required"
 >;
 
 export class RingsAdapterError extends Error {

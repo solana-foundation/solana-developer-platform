@@ -222,7 +222,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+      "Executes a public on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. The deprecated `privateTransfer` field is retired: SDP no longer integrates a private-transfer provider, so a request carrying it is refused with 503 and no transfer is created. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -236,7 +236,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -329,7 +329,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch created",
         content: jsonContent(transferBatchResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -470,7 +470,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment activated",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -492,7 +492,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment canceled",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -514,7 +514,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment collection result",
         content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -536,7 +536,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment resumed",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 

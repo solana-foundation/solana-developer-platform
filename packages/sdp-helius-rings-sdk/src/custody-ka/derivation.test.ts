@@ -1,6 +1,6 @@
 import { ed25519DerivationPayload } from "@heliuslabs/zolana/keypair";
 import { getBase64Codec, signBytes } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { canonicalShieldedIdentity } from "../material.js";
 import {
   TEST_FOREIGN_REQUEST,
@@ -10,11 +10,9 @@ import {
   testSignMessage,
 } from "../test/shielded-identity-fixtures.js";
 import { createCustodyMaterialSource } from "./derivation.js";
-import { clearSeedCache, invalidateCachedSeed } from "./seed-cache.js";
 
-/** No cache unless a case is about caching, so one call means one signature. */
-function source(signMessage = testSignMessage, ttlMs = 0) {
-  return createCustodyMaterialSource({ signMessage, cache: { ttlMs } });
+function source(signMessage = testSignMessage) {
+  return createCustodyMaterialSource({ signMessage });
 }
 
 function identityFor(request = TEST_REQUEST, signMessage = testSignMessage): Promise<string> {
@@ -24,10 +22,6 @@ function identityFor(request = TEST_REQUEST, signMessage = testSignMessage): Pro
 }
 
 describe("createCustodyMaterialSource", () => {
-  beforeEach(() => {
-    clearSeedCache();
-  });
-
   it("derives the same identity every time for one owner", async () => {
     expect(await identityFor()).toBe(await identityFor());
   });
@@ -95,75 +89,44 @@ describe("createCustodyMaterialSource", () => {
     expect(signMessage).toHaveBeenCalledExactlyOnceWith(expect.any(String), TEST_OWNER);
   });
 
-  describe("seed cache", () => {
-    it("signs once for repeated operations on one owner", async () => {
+  /**
+   * The contract that replaced the seed cache, asserted on ONE source: every
+   * use fetches its own seed. Holding a seed between uses is what let a
+   * non-reproducible signer look healthy until the entry expired, so a cache
+   * reintroduced here has to fail a test rather than quietly restore that.
+   */
+  describe("no seed is held between uses", () => {
+    it("signs again for a second use of one source", async () => {
       const signMessage = vi.fn(testSignMessage);
-      const cached = source(signMessage, 60_000);
+      const uncached = source(signMessage);
 
-      await cached.withMaterial(TEST_REQUEST, async () => undefined);
-      await cached.withMaterial(TEST_REQUEST, async () => undefined);
+      await uncached.withMaterial(TEST_REQUEST, async () => undefined);
+      await uncached.withMaterial(TEST_REQUEST, async () => undefined);
 
-      expect(signMessage).toHaveBeenCalledTimes(1);
+      expect(signMessage).toHaveBeenCalledTimes(2);
     });
 
-    it("signs once for concurrent operations on one owner", async () => {
+    it("signs per concurrent use rather than joining one fetch", async () => {
       const signMessage = vi.fn(testSignMessage);
-      const cached = source(signMessage, 60_000);
+      const uncached = source(signMessage);
 
       await Promise.all(
-        Array.from({ length: 4 }, () => cached.withMaterial(TEST_REQUEST, async () => undefined))
+        Array.from({ length: 4 }, () => uncached.withMaterial(TEST_REQUEST, async () => undefined))
       );
 
-      // Without in-flight de-duplication a dashboard load would fan out one
-      // custody call per wallet tile.
-      expect(signMessage).toHaveBeenCalledTimes(1);
+      // In-flight de-duplication went with the cache: four uses, four calls.
+      expect(signMessage).toHaveBeenCalledTimes(4);
     });
 
-    it("signs per owner rather than sharing one seed", async () => {
-      const signMessage = vi.fn(testSignMessage);
-      const cached = source(signMessage, 60_000);
-
-      await cached.withMaterial(TEST_REQUEST, async () => undefined);
-      await cached.withMaterial(TEST_FOREIGN_REQUEST, async () => undefined);
-
-      expect(signMessage).toHaveBeenCalledTimes(2);
-    });
-
-    it.each([
-      ["invalidateCachedSeed", () => invalidateCachedSeed(TEST_OWNER)],
-      ["clearSeedCache", () => clearSeedCache()],
-    ])("a fetch pending when %s runs does not repopulate the cache", async (_name, invalidate) => {
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const signMessage = vi.fn(async (messageBase64: string, owner: string) => {
-        await gate;
-        return testSignMessage(messageBase64, owner);
-      });
-      const cached = source(signMessage, 60_000);
-
-      const pending = cached.withMaterial(TEST_REQUEST, async () => undefined);
-      invalidate();
-      release();
-      await pending;
-
-      await cached.withMaterial(TEST_REQUEST, async () => undefined);
-
-      // The second operation must sign again: a seed discarded mid-flight has
-      // to stay discarded, or a re-key can be undone by a slow custody call.
-      expect(signMessage).toHaveBeenCalledTimes(2);
-    });
-
-    it("still derives the same identity from a cached seed", async () => {
-      const cached = source(testSignMessage, 60_000);
+    it("derives one identity across uses despite re-signing each time", async () => {
+      const uncached = source();
       const read = () =>
-        cached.withMaterial(TEST_REQUEST, async (material) =>
+        uncached.withMaterial(TEST_REQUEST, async (material) =>
           canonicalShieldedIdentity(material.shieldedAddress)
         );
 
-      // A caller that cleared the seed in place would leave later hits deriving
-      // from zeroes: well-formed, and the wrong identity.
+      // The seed is zeroed after each use; a copy cleared in place would leave
+      // the next use deriving from zeroes — well-formed, and a wrong identity.
       expect(await read()).toBe(await read());
     });
   });

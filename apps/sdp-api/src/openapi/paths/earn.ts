@@ -374,7 +374,7 @@ function registerEarnExternalWalletPaths(
         description: "Recorded deposit movement",
         content: jsonContent(earnExternalWalletDepositResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },
   });
 
@@ -458,7 +458,7 @@ function registerEarnExternalWalletPaths(
         description: "Recorded withdrawal movement",
         content: jsonContent(earnExternalWalletWithdrawalResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },
   });
 }

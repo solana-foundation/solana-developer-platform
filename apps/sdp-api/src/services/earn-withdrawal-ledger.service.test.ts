@@ -7,8 +7,7 @@ import { describe, expect, it } from "vitest";
  * canonical provider contract, so its module must never name a concrete
  * provider — a new provider inherits the entire ledger with zero code here.
  * (The behavioral half of this proof is the ledger repo/service suite in
- * db/repositories/earn.repository.test.ts, which runs against a non-Ground
- * stub id.)
+ * db/repositories/earn.repository.test.ts, which runs against a stub id.)
  */
 describe("earn withdrawal ledger — provider neutrality", () => {
   it("never names a concrete provider in the ledger service module", () => {
@@ -16,7 +15,7 @@ describe("earn withdrawal ledger — provider neutrality", () => {
       fileURLToPath(new URL("./earn-withdrawal-ledger.service.ts", import.meta.url)),
       "utf8"
     );
-    for (const providerId of ["ground", "veda", "upshift", "perena"]) {
+    for (const providerId of ["ground", "veda", "upshift", "perena", "kamino", "jupiter_lend"]) {
       expect(source.toLowerCase()).not.toContain(providerId);
     }
   });

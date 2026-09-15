@@ -395,7 +395,7 @@ function defaultProgramLabel(
 /**
  * Live reads per list page are capped: each program costs two provider calls
  * (wallet + yield), so an uncapped page of 100 would fire 200 concurrent
- * requests at Ground per read — a self-inflicted burst against a shared
+ * requests at the provider per read — a self-inflicted burst against a shared
  * account. Eight programs in flight keeps a default page fast (one or two
  * waves) without the burst.
  */
@@ -676,7 +676,7 @@ export const previewEarnProgramWithdrawal = async (
     providerWalletRef: row.provider_wallet_ref,
     // Absent = the liquidity read (PRO-1675). Spread rather than passed as
     // `undefined` so the provider contract sees a field that is genuinely not
-    // there — the Ground client keys the two request forms off presence.
+    // there — the client keys the two request forms off presence.
     ...(body.amountUsd !== undefined && { amountUsd: body.amountUsd }),
     token: body.token,
   });
@@ -1100,7 +1100,7 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
   // BOLA guard, defense in depth: every SDP organization shares one provider
   // account, so a withdrawal ref this program does not own must 404 HERE —
   // before any provider call — regardless of how the provider scopes its own
-  // lookup (Ground's read is wallet-scoped, but that is the provider's promise,
+  // lookup (a wallet-scoped read is the provider's promise,
   // not ours). The ledger knows which program owns every ref it has seen; a ref
   // it has never seen (pre-ledger withdrawals) falls through to the provider's
   // wallet-scoped read, which cannot name another wallet's withdrawal.

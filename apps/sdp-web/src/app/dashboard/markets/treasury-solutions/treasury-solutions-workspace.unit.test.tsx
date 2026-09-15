@@ -7,8 +7,8 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
 
-// jsdom implements no matchMedia, and the design-system SegmentedControl (the
-// PRO-1742 cluster toggle) reads it through motion's useReducedMotion.
+// jsdom implements no matchMedia, while the workspace's motion components read
+// it through useReducedMotion.
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
     matches: false,
@@ -25,7 +25,7 @@ if (!window.matchMedia) {
 const mocks = vi.hoisted(() => ({
   canManageCustody: true,
   environment: "sandbox" as "sandbox" | "production",
-  programProvider: "ground",
+  programProvider: "upshift",
   // Every cluster value useEarnStrategies was asked for, across renders.
   strategiesClusterRequests: [] as Array<"devnet" | "mainnet-beta" | undefined>,
   refreshStrategies: vi.fn(),
@@ -141,8 +141,11 @@ const mocks = vi.hoisted(() => ({
   livePositionTokenValue: "125.25" as string | undefined,
   positionsError: false,
   positionsEmpty: false,
+  strategiesLoading: false,
   strategiesUnavailable: false,
   strategiesStaleError: false,
+  mainnetStrategiesLoading: false,
+  mainnetStrategiesUnavailable: false,
   strategyMissingShareMint: false,
   walletsError: false,
   walletsEmpty: false,
@@ -150,12 +153,39 @@ const mocks = vi.hoisted(() => ({
   secondWalletBalances: undefined as
     | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
     | undefined,
+  // Vault address -> "loading" | "error" | a Kamino allocations payload.
+  allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
+  allocationsRequests: [] as Array<string | undefined>,
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "Share1111111111111111111111111111111111111";
 // A share mint known only through the strategy catalogue — no position row.
 const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
+
+vi.mock("./kamino-allocations", () => ({
+  useKaminoVaultAllocations: (vaultAddress?: string, cluster?: "devnet" | "mainnet-beta") => {
+    // Mirrors the hook's contract: a non-mainnet cluster is an unsupported
+    // read — the SWR key stays null, so nothing is requested and no cell ever
+    // sees data for it.
+    if (cluster !== "mainnet-beta") {
+      return { allocations: undefined, error: undefined, isLoading: false };
+    }
+    mocks.allocationsRequests.push(vaultAddress);
+    const state = vaultAddress === undefined ? undefined : mocks.allocationsByVault[vaultAddress];
+    if (state === "loading") {
+      return { allocations: undefined, error: undefined, isLoading: true };
+    }
+    if (state === "error") {
+      return {
+        allocations: undefined,
+        error: new Error("vault allocations unavailable"),
+        isLoading: false,
+      };
+    }
+    return { allocations: state, error: undefined, isLoading: false };
+  },
+}));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
@@ -211,50 +241,97 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
 vi.mock("../earn/earn-program-data", () => ({
   useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
     mocks.strategiesClusterRequests.push(options?.cluster);
-    // The mirrored mainnet shelf (PRO-1742), served only on the explicit
-    // opt-in — rows arrive `fundable: false`, exactly as the API derives them.
+    // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
+    // list. Rows arrive `fundable: false`, exactly as the API derives them.
     if (options?.cluster === "mainnet-beta") {
+      const mainnetUnavailable =
+        mocks.mainnetStrategiesUnavailable || mocks.mainnetStrategiesLoading;
       return {
-        error: undefined,
-        isLoading: false,
+        error: mocks.mainnetStrategiesUnavailable
+          ? new Error("mainnet catalogue unavailable")
+          : undefined,
+        isLoading: mocks.mainnetStrategiesLoading,
         refresh: mocks.refreshStrategies,
-        strategies: [
-          {
-            id: "earn_strategy_mainnet_mirror",
-            provider: "kamino",
-            providerReference: "KvaultMainnet111111111111111111111111111111",
-            name: "Kamino JLP Vault",
-            sourceKind: "defi",
-            depositMints: [USDC_MINT],
-            shareMint: "ShareMainnet111111111111111111111111111111",
-            apyType: "variable",
-            currentApy: "0.081",
-            riskMetadata: { tvlUsd: 32_000_000 },
-            liquidityTerm: "instant",
-            status: "active",
-            hostCluster: "mainnet-beta",
-            fundable: false,
-            createdAt: "2026-08-18T00:00:00.000Z",
-            updatedAt: "2026-08-18T00:00:00.000Z",
-          },
-        ],
+        strategies: mainnetUnavailable
+          ? undefined
+          : [
+              {
+                id: "earn_strategy_mainnet_mirror",
+                provider: "kamino",
+                providerReference: "KvaultMainnet111111111111111111111111111111",
+                name: "Kamino JLP Vault",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnet111111111111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.081",
+                riskMetadata: { tvlUsd: 32_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
+              // The mainnet counterparts the intersection filter demands: the
+              // devnet rows may only advertise names this shelf actually
+              // offers, from the same provider. RockawayX is deliberately
+              // absent — the devnet vault mapping to it must stay hidden.
+              {
+                id: "earn_strategy_mainnet_steakhouse",
+                provider: "kamino",
+                providerReference: "KvaultMainnetSteakhouse1111111111111111111",
+                name: "Steakhouse USDC",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnetSteakhouse111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.058",
+                riskMetadata: { tvlUsd: 40_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
+              {
+                id: "earn_strategy_mainnet_allez",
+                provider: "kamino",
+                providerReference: "KvaultMainnetAllez1111111111111111111111",
+                name: "Allez USDC",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnetAllez111111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.045",
+                riskMetadata: { tvlUsd: 18_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
+            ],
       };
     }
+    const strategiesUnavailable = mocks.strategiesUnavailable || mocks.strategiesLoading;
     return {
       error:
         mocks.strategiesUnavailable || mocks.strategiesStaleError
           ? new Error("catalogue unavailable")
           : undefined,
-      isLoading: false,
+      isLoading: mocks.strategiesLoading,
       refresh: mocks.refreshStrategies,
-      strategies: mocks.strategiesUnavailable
+      strategies: strategiesUnavailable
         ? undefined
         : [
             {
               id: "earn_strategy_live",
               provider: "kamino",
               providerReference: "Kvault11111111111111111111111111111111111",
-              name: "Kamino USDC Vault",
+              name: "Steakhouse USDC",
               sourceKind: "defi",
               depositMints: [USDC_MINT],
               shareMint: SHARE_MINT,
@@ -272,7 +349,7 @@ vi.mock("../earn/earn-program-data", () => ({
               id: "earn_strategy_catalogue_only",
               provider: "kamino",
               providerReference: "KvaultCatalogue1111111111111111111111111111",
-              name: "Kamino PYUSD Vault",
+              name: "Allez USDC",
               sourceKind: "defi",
               depositMints: [USDC_MINT],
               ...(mocks.strategyMissingShareMint
@@ -280,6 +357,49 @@ vi.mock("../earn/earn-program-data", () => ({
                 : { shareMint: mocks.corruptStableShareMint ? USDC_MINT : CATALOGUE_SHARE_MINT }),
               apyType: "variable",
               currentApy: "0.041",
+              riskMetadata: { tvlUsd: 25_000_000 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+            // A devnet vault with NO mainnet counterpart: the Sandbox shelf
+            // hides it (the rough-name intersection), so nothing below may
+            // treat it as rendered.
+            {
+              id: "earn_strategy_devnet_only",
+              provider: "kamino",
+              providerReference: "KvaultDevnetOnly11111111111111111111111111",
+              name: "Kamino Vault USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareDevnetOnly111111111111111111111111111",
+              apyType: "variable",
+              currentApy: "0.055",
+              riskMetadata: { tvlUsd: 5_000_000 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+            // A mapped name whose mainnet counterpart the loaded mainnet shelf
+            // never lists: the catalogue check must veto the mapping, so this
+            // row stays off the Sandbox shelf too (the RockawayX case).
+            {
+              id: "earn_strategy_rockaway_devnet",
+              provider: "kamino",
+              providerReference: "KvaultRockaway11111111111111111111111111",
+              name: "RockawayX RWA USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareRockaway111111111111111111111111111111",
+              apyType: "variable",
+              currentApy: "0.048",
+              riskMetadata: { tvlUsd: 8_000_000 },
               liquidityTerm: "instant",
               status: "active",
               hostCluster: "devnet",
@@ -323,7 +443,7 @@ vi.mock("../earn/earn-program-data", () => ({
             id: "earn_vault_position_live",
             provider: "kamino",
             providerReference: "Kvault11111111111111111111111111111111111",
-            label: "Kamino USDC Vault",
+            label: "Steakhouse USDC",
             custodyWalletId: "cwlt_live",
             tokenMint: USDC_MINT,
             shareMint: SHARE_MINT,
@@ -554,10 +674,19 @@ function renderWorkspace() {
   );
 }
 
+// The devnet strategy rows carry the cluster badge, and a name can exist on
+// both shelves once the intersection filter is satisfied — the badge is what
+// distinguishes the depositable devnet row from its mainnet mirror.
+const devnetStrategyRow = (name: string) =>
+  screen
+    .queryAllByText(name)
+    .map((element) => element.closest("tr"))
+    .find((row) => row?.textContent?.includes("Devnet"));
+
 beforeEach(() => {
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
-  mocks.programProvider = "ground";
+  mocks.programProvider = "upshift";
   mocks.strategiesClusterRequests = [];
   mocks.withdrawalsByProgram = {};
   mocks.vaultDeposits = [];
@@ -576,13 +705,18 @@ beforeEach(() => {
   mocks.livePositionTokenValue = "125.25";
   mocks.positionsError = false;
   mocks.positionsEmpty = false;
+  mocks.strategiesLoading = false;
   mocks.strategiesUnavailable = false;
   mocks.strategiesStaleError = false;
+  mocks.mainnetStrategiesLoading = false;
+  mocks.mainnetStrategiesUnavailable = false;
   mocks.secondWalletBalances = undefined;
   mocks.strategyMissingShareMint = false;
   mocks.walletsError = false;
   mocks.walletsEmpty = false;
   mocks.corruptStableShareMint = false;
+  mocks.allocationsByVault = {};
+  mocks.allocationsRequests = [];
   vi.clearAllMocks();
 });
 
@@ -622,7 +756,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByRole("heading", { name: "Available strategies" })).toBeTruthy();
 
     const vaultRows = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .filter((row): row is HTMLTableRowElement => row !== null);
     const vaultPositionRow = vaultRows.find((row) =>
@@ -670,10 +804,10 @@ describe("TreasurySolutionsWorkspace", () => {
     expect((vaultWithdraw as HTMLButtonElement).disabled).toBe(false);
 
     await user.click(within(vaultStrategyRow).getByRole("button", { name: "Deposit" }));
-    expect(screen.getByRole("dialog").textContent).toBe("Deposit into Kamino USDC Vault");
+    expect(screen.getByRole("dialog").textContent).toBe("Deposit into Steakhouse USDC");
 
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
-    if (!legacyRow) throw new Error("Expected existing Ground program row");
+    if (!legacyRow) throw new Error("Expected existing legacy program row");
     expect(legacyRow.textContent).toContain("900.50 USD");
   });
 
@@ -694,7 +828,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const status = await screen.findByRole("button", {
       name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
     });
-    expect(status.closest("tr")?.textContent).toContain("Kamino USDC Vault");
+    expect(status.closest("tr")?.textContent).toContain("Steakhouse USDC");
 
     await user.hover(status);
     expect(
@@ -721,7 +855,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const status = await screen.findByRole("button", {
       name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
     });
-    expect(status.closest("tr")?.textContent).toContain("Kamino USDC Vault");
+    expect(status.closest("tr")?.textContent).toContain("Steakhouse USDC");
 
     await user.hover(status);
     expect(
@@ -746,10 +880,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
 
     const view = renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Kamino USDC Vault")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected the deposit strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -825,7 +956,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     const depositedPositionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!depositedPositionRow) throw new Error("Expected updated position row");
@@ -851,10 +982,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
     renderWorkspace();
 
-    const strategyRow = screen
-      .getAllByText("Kamino USDC Vault")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -869,7 +997,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     const positionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!positionRow) throw new Error("Expected position row");
@@ -882,10 +1010,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const user = userEvent.setup();
     const movementId = "earn_vault_movement_balance_projection";
     const view = renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Kamino USDC Vault")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -941,10 +1066,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const movementId = "earn_vault_movement_first_position";
     mocks.positionsEmpty = true;
     const view = renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Kamino USDC Vault")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -965,7 +1087,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     const pendingRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!pendingRow) throw new Error("Expected provisional position row");
@@ -1008,7 +1130,7 @@ describe("TreasurySolutionsWorkspace", () => {
       expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
     );
     const reconciledRows = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .filter((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     expect(reconciledRows).toHaveLength(1);
@@ -1018,10 +1140,7 @@ describe("TreasurySolutionsWorkspace", () => {
   it("combines concurrent confirmed movements without dropping either projection", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    const strategyRow = screen
-      .getAllByText("Kamino USDC Vault")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Deposit" }));
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
     if (!strategyRow) throw new Error("Expected strategy row");
     await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
 
@@ -1084,7 +1203,7 @@ describe("TreasurySolutionsWorkspace", () => {
         ?.querySelector("[data-earn-vault-balance-value]")?.textContent
     ).toBe("140.25");
     const positionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!positionRow) throw new Error("Expected position row");
@@ -1146,7 +1265,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     const withdrawnPositionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!withdrawnPositionRow) throw new Error("Expected updated position row");
@@ -1173,7 +1292,7 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const positionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!positionRow) throw new Error("Expected position row");
@@ -1199,7 +1318,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const movementId = "earn_vault_withdrawal_balance_projection";
     renderWorkspace();
     const positionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!positionRow) throw new Error("Expected position row");
@@ -1238,13 +1357,13 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const instantRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
     expect(within(instantRow).getByText("Kamino")).toBeTruthy();
     expect(within(instantRow).queryByText("Instant")).toBeNull();
-    expect(within(instantRow).getAllByRole("cell")).toHaveLength(6);
+    expect(within(instantRow).getAllByRole("cell")).toHaveLength(7);
 
     const strategyTable = instantRow.closest("table");
     if (!strategyTable) throw new Error("Expected the available strategies table");
@@ -1252,7 +1371,7 @@ describe("TreasurySolutionsWorkspace", () => {
       within(strategyTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Actions"]);
+    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Information", "Actions"]);
     expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
@@ -1264,7 +1383,193 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(delayedRow.textContent).not.toMatch(/\d%/);
   });
 
-  it("sorts active balances and strategy APYs while keeping unavailable values last", async () => {
+  it("discloses a Kamino vault's allocations in the Information column", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      asOf: "2026-09-14T17:53:52.895Z",
+      allocations: [
+        { reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "23.94" },
+        {
+          reserve: "reserve-2",
+          marketName: "A deliberately long lending market name that must truncate",
+          actualPct: "76.00",
+        },
+        // A configured reserve holding nothing says nothing about where the
+        // capital is; it never becomes a row.
+        { reserve: "reserve-3", marketName: "Empty Market", actualPct: "0" },
+      ],
+      unallocated: { pct: "0.06" },
+    };
+    renderWorkspace();
+
+    // Only mainnet Kamino vaults are readable (the allocations source is
+    // mainnet-only): the devnet Kamino rows and the Veda fund never ask.
+    expect(mocks.allocationsRequests).toContain("KvaultMainnet111111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("KvaultCatalogue1111111111111111111111111111");
+    expect(mocks.allocationsRequests).not.toContain("VedaFund1111111111111111111111111111111111");
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // Deployed weight is the complement of the unallocated share.
+    expect(within(mainnetRow).getByText("99.9% deployed")).toBeTruthy();
+
+    const disclosure = within(mainnetRow).getByRole("button", { name: "99.9% deployed" });
+    await user.hover(disclosure);
+    // The table is named for assistive technology only; its column headings
+    // are exposed as columnheaders, not hidden behind a decorative grid.
+    expect(await screen.findByText("Vault allocations")).toBeTruthy();
+    const disclosureTable = screen
+      .getByRole("columnheader", { name: "Allocation" })
+      .closest("table");
+    if (!disclosureTable) throw new Error("Expected the allocations disclosure table");
+    expect(within(disclosureTable).getByRole("columnheader", { name: "Market" })).toBeTruthy();
+    // Two columns, heaviest market first, the idle share last: one weight per
+    // row and nothing else (no token, supplied or APY figures).
+    const bodyRows = within(disclosureTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole("cell")
+          .map((cell) => cell.textContent)
+      );
+    expect(bodyRows).toEqual([
+      ["A deliberately long lending market name that must truncate", "76.0%"],
+      ["SOL/BTC Market", "23.9%"],
+      ["Unallocated", "0.1%"],
+    ]);
+    expect(within(disclosureTable).queryByText("Empty Market")).toBeNull();
+    // A long market name truncates inside its cell and keeps the full string
+    // reachable, so nothing can run past the tooltip's edge.
+    const longName = within(disclosureTable).getByText(
+      "A deliberately long lending market name that must truncate"
+    );
+    expect(longName.className).toContain("truncate");
+    expect(longName.getAttribute("title")).toBe(
+      "A deliberately long lending market name that must truncate"
+    );
+    // The provider timestamp is a quiet footer, rendered in the viewer's
+    // locale and zone (so the exact time is not pinned here).
+    expect(screen.getByText(/^As of .+2026/)).toBeTruthy();
+  });
+
+  it("omits the idle row when nothing is unallocated", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [
+        { reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "60" },
+        // Kamino names an unnamed market by its address; the row shortens it
+        // the way SDP shows any address and keeps the full string in `title`.
+        {
+          reserve: "reserve-2",
+          marketName: "Dwg1aeZFYtsyMEkoyJn2ak8oPqaXMWd1uui6FBkM1872",
+          actualPct: "40",
+        },
+      ],
+      unallocated: { pct: "0" },
+    };
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    const disclosure = within(mainnetRow).getByRole("button", { name: "100.0% deployed" });
+    await user.hover(disclosure);
+    const disclosureTable = (
+      await screen.findByRole("columnheader", { name: "Allocation" })
+    ).closest("table");
+    if (!disclosureTable) throw new Error("Expected the allocations disclosure table");
+    const bodyRows = within(disclosureTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole("cell")
+          .map((cell) => cell.textContent)
+      );
+    expect(bodyRows).toEqual([
+      ["SOL/BTC Market", "60.0%"],
+      ["Dwg1ae…1872", "40.0%"],
+    ]);
+    expect(within(disclosureTable).queryByText("Unallocated")).toBeNull();
+    expect(within(disclosureTable).getByText("Dwg1ae…1872").getAttribute("title")).toBe(
+      "Dwg1aeZFYtsyMEkoyJn2ak8oPqaXMWd1uui6FBkM1872"
+    );
+  });
+
+  it("keeps the disclosure when the deployed weight cannot be certified", async () => {
+    const user = userEvent.setup();
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [{ reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "23.94" }],
+    };
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // No unallocated share means no certifiable summary weight, but the
+    // per-reserve rows are still a real read: disclose them under a neutral
+    // summary instead of hiding everything behind the placeholder.
+    const disclosure = within(mainnetRow).getByRole("button", { name: "Allocation details" });
+    await user.hover(disclosure);
+    expect(await screen.findByText("SOL/BTC Market")).toBeTruthy();
+    expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+  });
+
+  it("degrades the Information cell to the placeholder when the allocations read fails", () => {
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = "error";
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // Same placeholder as a non-Kamino row — never a partial or stale figure.
+    expect(within(mainnetRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+  });
+
+  it("renders the Information placeholder for devnet Kamino rows without requesting", () => {
+    renderWorkspace();
+
+    // The devnet shelf's instant row shares the mainnet mirror's name: pick
+    // the devnet row by its own observed APY.
+    const instantRow = screen
+      .getAllByText("Steakhouse USDC")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("6.2%"));
+    if (!instantRow) throw new Error("Expected the instant strategy row");
+    // Kamino's allocations source is mainnet-only: the devnet vault is an
+    // unsupported read, so it takes the placeholder without a request.
+    expect(within(instantRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    const informationCell = within(instantRow).getAllByRole("cell")[5];
+    if (!informationCell) throw new Error("Expected the Information cell");
+    expect(within(informationCell).queryByRole("button")).toBeNull();
+    expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
+    // The devnet-only vault has no mainnet counterpart: the rough-name
+    // intersection hides the whole row, so no cell of it can render at all.
+    expect(screen.queryByText("Kamino Vault USDC")).toBeNull();
+  });
+
+  it("renders the Information placeholder for a non-Kamino strategy", () => {
+    renderWorkspace();
+
+    const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
+    if (!delayedRow) throw new Error("Expected the delayed strategy row");
+    expect(within(delayedRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(delayedRow).queryByRole("button", { name: /deployed/ })).toBeNull();
+  });
+
+  it("sorts active balances, strategy APYs, and TVLs while keeping unavailable values last", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
@@ -1287,7 +1592,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const balanceHeader = within(activeTable).getByRole("columnheader", { name: "Balance" });
     expect(balanceHeader.getAttribute("aria-sort")).toBe("descending");
     expect(firstColumn(activeTable)).toEqual([
-      "Kamino USDC VaultKamino",
+      "Steakhouse USDCKamino",
       "Retired provider vaultKamino",
     ]);
 
@@ -1295,23 +1600,54 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(balanceHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(activeTable)).toEqual([
       "Retired provider vaultKamino",
-      "Kamino USDC VaultKamino",
+      "Steakhouse USDCKamino",
     ]);
 
     const apyHeader = within(strategiesTable).getByRole("columnheader", { name: "APY" });
+    const tvlHeader = within(strategiesTable).getByRole("columnheader", { name: "TVL" });
     expect(apyHeader.getAttribute("aria-sort")).toBe("descending");
+    expect(tvlHeader.getAttribute("aria-sort")).toBe("none");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino USDC VaultKamino",
-      "Kamino PYUSD VaultKamino",
-      "Veda Treasury FundVeda",
+      "Kamino JLP VaultKamino",
+      "Steakhouse USDCKamino",
+      "Allez USDCKamino",
+      "Steakhouse USDCDevnetKamino",
+      "Allez USDCDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "APY" }));
     expect(apyHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(strategiesTable)).toEqual([
-      "Kamino PYUSD VaultKamino",
-      "Kamino USDC VaultKamino",
-      "Veda Treasury FundVeda",
+      "Allez USDCKamino",
+      "Steakhouse USDCKamino",
+      "Kamino JLP VaultKamino",
+      "Allez USDCDevnetKamino",
+      "Steakhouse USDCDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
+    ]);
+
+    await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
+    expect(apyHeader.getAttribute("aria-sort")).toBe("none");
+    expect(tvlHeader.getAttribute("aria-sort")).toBe("descending");
+    expect(firstColumn(strategiesTable)).toEqual([
+      "Steakhouse USDCKamino",
+      "Kamino JLP VaultKamino",
+      "Allez USDCKamino",
+      "Allez USDCDevnetKamino",
+      "Steakhouse USDCDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
+    ]);
+
+    await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
+    expect(tvlHeader.getAttribute("aria-sort")).toBe("ascending");
+    expect(firstColumn(strategiesTable)).toEqual([
+      "Allez USDCKamino",
+      "Kamino JLP VaultKamino",
+      "Steakhouse USDCKamino",
+      "Steakhouse USDCDevnetKamino",
+      "Allez USDCDevnetKamino",
+      "Veda Treasury FundDevnetVeda",
     ]);
   });
 
@@ -1392,7 +1728,7 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const usdcRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!usdcRow) throw new Error("Expected the USDC strategy row");
@@ -1459,7 +1795,8 @@ describe("TreasurySolutionsWorkspace", () => {
   it("treats a stale catalogue behind a failed revalidation as incomplete", () => {
     // SWR keeps the stale rows and sets the error. Stale means possibly
     // MISSING a newly added strategy's share mint, so no deployed figure can
-    // be certified, and the strategy table already shows its error state here.
+    // be certified. The strategy card keeps its mainnet shelf and surfaces the
+    // failed Devnet refresh without leaving stale Devnet deposit actions open.
     mocks.strategiesStaleError = true;
     renderWorkspace();
 
@@ -1521,10 +1858,10 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByText("100.0%")).toBeNull();
 
     // The strategy row must not contradict them with "No active position".
-    const pyusdRow = screen.getByText("Kamino PYUSD Vault").closest("tr");
-    if (!pyusdRow) throw new Error("Expected the catalogue-only strategy row");
-    expect(pyusdRow.textContent).toContain("Live value unavailable");
-    expect(pyusdRow.textContent).not.toContain("No active position");
+    const catalogueOnlyRow = devnetStrategyRow("Allez USDC");
+    if (!catalogueOnlyRow) throw new Error("Expected the catalogue-only strategy row");
+    expect(catalogueOnlyRow.textContent).toContain("Live value unavailable");
+    expect(catalogueOnlyRow.textContent).not.toContain("No active position");
     expect(
       screen.getByLabelText("A wallet holds vault shares with no matching position")
     ).toBeTruthy();
@@ -1575,13 +1912,13 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const vaultPositionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!vaultPositionRow) throw new Error("Expected vault position row");
 
     await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
-    expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Kamino USDC Vault");
+    expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {
@@ -1591,7 +1928,7 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const vaultPositionRow = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     if (!vaultPositionRow) throw new Error("Expected vault position row");
@@ -1606,7 +1943,7 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     const row = screen
-      .getAllByText("Kamino USDC Vault")
+      .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
       .find((candidate) => candidate?.textContent?.includes("6.2%"));
     if (!row) throw new Error("Expected vault strategy row");
@@ -1762,71 +2099,167 @@ describe("TreasurySolutionsWorkspace", () => {
   });
 });
 
-describe("TreasurySolutionsWorkspace — catalogue cluster toggle (PRO-1742)", () => {
-  it("browses the mirrored mainnet shelf behind the toggle, naming the cluster on the row", async () => {
+describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)", () => {
+  it("shows both networks in sandbox while keeping mainnet deposits disabled", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
-    // Default view: the environment's own shelf, no opt-in sent to the seam.
-    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
-    expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
-
-    const toggle = screen.getByLabelText("Catalogue cluster");
-    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
-
-    // The card re-reads with the explicit opt-in…
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const catalogue = within(section as HTMLElement);
     expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
+    expect(catalogue.queryByRole("switch")).toBeNull();
 
-    // …and the mirrored row renders provider TVL while Deposit remains disabled.
-    const row = screen.getByText("Kamino JLP Vault").closest("tr");
-    expect(row).not.toBeNull();
-    const cells = within(row as HTMLTableRowElement);
-    expect(cells.getByText("$32,000,000.00")).toBeTruthy();
-    const deposit = cells.getByRole("button", { name: "Deposit" });
-    expect(deposit.hasAttribute("disabled")).toBe(true);
-    expect(cells.getByText("Mainnet only")).toBeTruthy();
+    const mainnetRow = catalogue.getByText("Kamino JLP Vault").closest("tr");
+    const devnetRow = devnetStrategyRow("Steakhouse USDC");
+    expect(mainnetRow).not.toBeNull();
+    expect(devnetRow).toBeDefined();
+    const mainnetCells = within(mainnetRow as HTMLTableRowElement);
+    expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
+    expect(mainnetCells.queryByText("Devnet")).toBeNull();
+    expect(within(devnetRow as HTMLTableRowElement).getByText("Devnet")).toBeTruthy();
+    expect(mainnetCells.getByRole("button", { name: "Deposit" }).hasAttribute("disabled")).toBe(
+      true
+    );
+    expect(
+      within(devnetRow as HTMLTableRowElement)
+        .getByRole("button", { name: "Deposit" })
+        .hasAttribute("disabled")
+    ).toBe(false);
+
+    const reason = "Mainnet vaults are view-only in Sandbox.";
+    const disabledTrigger = mainnetCells.getByRole("note", { name: reason });
+    await user.hover(disabledTrigger);
+    expect(await screen.findByText(reason)).toBeTruthy();
   });
 
-  it("renders no cluster toggle in production — there is no other shelf to offer", () => {
+  it("keeps production on its environment shelf with no network toggle", () => {
     mocks.environment = "production";
     renderWorkspace();
 
-    expect(screen.queryByLabelText("Catalogue cluster")).toBeNull();
-    expect(screen.queryByText("Devnet")).toBeNull();
-    // Production reads its default shelf; the opt-in never reaches the seam.
+    expect(screen.queryByRole("switch")).toBeNull();
+    // Production's default shelf is already mainnet, so no explicit cluster is needed.
     expect(mocks.strategiesClusterRequests).not.toContain("mainnet-beta");
   });
 
-  it("normalizes toggling back to the environment's own cluster into the shared default key", async () => {
-    // Selecting Devnet after Mainnet must re-join the environment-default SWR
-    // key (cluster: undefined) rather than pinning a second, permanently
-    // distinct cache entry of the identical shelf under the literal "devnet".
-    const user = userEvent.setup();
+  it("shows the Sandbox devnet shelf as the rough-name intersection with mainnet, Veda excepted", () => {
     renderWorkspace();
 
-    const toggle = screen.getByLabelText("Catalogue cluster");
-    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
-    expect(mocks.strategiesClusterRequests).toContain("mainnet-beta");
-
-    await user.click(within(toggle).getByRole("button", { name: "Devnet" }));
-    expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
-    expect(mocks.strategiesClusterRequests).not.toContain("devnet");
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    // Matched to a mainnet counterpart the loaded mainnet shelf actually
+    // offers, from the same provider.
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeDefined();
+    expect(devnetStrategyRow("Allez USDC")).toBeDefined();
+    // Veda is devnet-only, so its strategies skip the intersection entirely.
+    expect(catalogue.getByText("Veda Treasury Fund")).toBeTruthy();
+    // A devnet vault with no mainnet counterpart stays off the shelf.
+    expect(catalogue.queryByText("Kamino Vault USDC")).toBeNull();
+    // And so does a mapped name the mainnet shelf never lists: the recorded
+    // RockawayX pair is vetoed by the catalogue check, so the Sandbox shelf
+    // cannot advertise what Production does not offer.
+    expect(devnetStrategyRow("RockawayX RWA USDC")).toBeUndefined();
   });
 
-  it("refreshes the shared default shelf ONCE per click, and the mirror separately once toggled", async () => {
+  it("keeps mainnet strategies visible while the Devnet catalogue loads", () => {
+    mocks.strategiesLoading = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
+    expect(
+      catalogue.getByText("Loading Devnet strategies. Mainnet strategies remain available.")
+    ).toBeTruthy();
+  });
+
+  it("keeps mainnet strategies visible when the Devnet catalogue fails", () => {
+    mocks.strategiesUnavailable = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
+    expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
+    expect(
+      catalogue.getByText(
+        "Devnet strategies could not be loaded. Mainnet strategies remain available."
+      )
+    ).toBeTruthy();
+    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+  });
+
+  it("keeps devnet strategies depositable when the mainnet catalogue fails (PRO-1961)", () => {
+    mocks.mainnetStrategiesUnavailable = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    const devnetRow = catalogue.getByText("Steakhouse USDC").closest("tr");
+    if (!devnetRow) throw new Error("Expected the devnet strategy row");
+    expect(
+      within(devnetRow).getByRole("button", { name: "Deposit" }).hasAttribute("disabled")
+    ).toBe(false);
+    expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
+    expect(
+      catalogue.getByText(
+        "Mainnet strategies could not be loaded. Devnet strategies remain available."
+      )
+    ).toBeTruthy();
+    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+  });
+
+  it("keeps devnet strategies visible while the mainnet catalogue loads (PRO-1961)", () => {
+    mocks.mainnetStrategiesLoading = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Steakhouse USDC")).toBeTruthy();
+    expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
+    expect(
+      catalogue.getByText("Loading Mainnet strategies. Devnet strategies remain available.")
+    ).toBeTruthy();
+  });
+
+  it("reserves the full catalogue error for both shelves failing (PRO-1961)", () => {
+    mocks.mainnetStrategiesUnavailable = true;
+    mocks.strategiesUnavailable = true;
+    renderWorkspace();
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategy catalogue");
+    const catalogue = within(section);
+    expect(catalogue.getByText("Markets data unavailable")).toBeTruthy();
+    expect(catalogue.queryByText("Steakhouse USDC")).toBeNull();
+    expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
+    expect(catalogue.queryByText(/strategies remain available\./)).toBeNull();
+  });
+
+  it("refreshes the environment and mainnet shelves once each", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
-    // On the default shelf both strategy hooks share one SWR key: one click,
-    // one revalidation of it (the paged fetch must not run twice).
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(mocks.refreshStrategies).toHaveBeenCalledTimes(1);
-
-    // Once the toggle leaves the default, the mirror shelf is a second key and
-    // earns its own refresh.
-    const toggle = screen.getByLabelText("Catalogue cluster");
-    await user.click(within(toggle).getByRole("button", { name: "Mainnet" }));
-    mocks.refreshStrategies.mockClear();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
   });

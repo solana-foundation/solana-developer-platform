@@ -120,7 +120,7 @@ async function seedProviderPosition(): Promise<void> {
       id, organization_id, project_id, environment, provider, kind,
       provider_wallet_id, label, created_by, created_at, updated_at, activated_at
     ) VALUES (
-      'position_provider', 'org_contract', 'project_contract', 'production', 'ground',
+      'position_provider', 'org_contract', 'project_contract', 'production', 'upshift',
       'custodial', 'provider_wallet_contract', 'Treasury', 'user_contract',
       '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z',
       '2026-01-01T00:00:00.000Z'
@@ -142,7 +142,7 @@ async function seedCustodialMovement(): Promise<void> {
       request_id, idempotency_fingerprint, provider_data, created_by, initiated_by_key_id,
       created_at, updated_at
     ) VALUES (
-      'movement_custodial', 'org_contract', 'project_contract', 'production', 'ground',
+      'movement_custodial', 'org_contract', 'project_contract', 'production', 'upshift',
       'custodial', 'withdrawal', 'position_provider', 'completed',
       '2026-01-02T00:00:00.000Z', 'usd', '100', '99', '1', 'usdc',
       'destination_contract', 'provider_reference_contract', 'request_contract',

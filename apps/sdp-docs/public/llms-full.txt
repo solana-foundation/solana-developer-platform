@@ -937,6 +937,8 @@ Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-nu
 
 Jupiter Lend currently contributes one strategy: its mainnet USDT Earn market. Because Jupiter Lend is mainnet-only, the strategy can appear in a sandbox catalogue as a browse-only row with `fundable: false`; do not offer a deposit action for that row. Deposits mint jlUSDT receipt tokens to the signing wallet, and withdrawals redeem those receipt tokens back to USDT when protocol liquidity is available.
 
+Ondo contributes one strategy: holding USDY, its yield-bearing US Treasury token, on mainnet. There is no vault program. A deposit is a USDC to USDY swap routed through Jupiter and signed by the wallet, the position is the wallet's USDY balance, and a withdrawal is the reverse swap, so both directions carry a 50 bps default slippage policy and both require a live quote first. Like Jupiter Lend it is mainnet-only and appears in sandbox as a browse-only row. The row carries no `currentApy` yet, and its `riskMetadata` states the eligibility constraints: USDY is a Reg S instrument for non-US persons, which SDP does not enforce on-chain, and the issuer holds the mint's freeze authority.
+
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
@@ -1148,7 +1150,7 @@ Recovery across that split is yours: persist the swap signature and the `followU
 | Builds | No key. A build moves no money and expires with its blockhash. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
 
-A `400` means the request or current vault state must change before retrying. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
+A `400` means the request or current vault state must change before retrying. A `422 SIGNING_REJECTED` means the fee sponsor refused the transaction by policy; the same transaction will be refused again, so do not retry it unchanged. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
 
 ## Before production
 
@@ -5253,13 +5255,6 @@ These must be set or the stack will refuse to start:
 The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
 and can auto-generate `POSTGRES_PASSWORD`.
 
-## Transactional Email
-
-SDP-owned Transactional Email uses Resend. Set `EMAIL_FROM` to the sender address
-and `RESEND_API_KEY` to the Resend API key before enabling product flows that send
-email. Organization member invitation emails are handled by Clerk and do not use
-these settings.
-
 ## Database
 
 In the configurator, `DATABASE_MODE` chooses between the bundled Postgres and an
@@ -5928,15 +5923,6 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows` | List workflow rules |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows` | Create a workflow rule |
-| `DELETE` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Delete a workflow rule |
-| `PATCH` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Update a workflow rule |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/catalog` | List the workflow catalog for an asset |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/executions` | List workflow executions |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve` | Approve a held execution |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject` | Reject a held execution |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry` | Retry a failed execution |
 | `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 

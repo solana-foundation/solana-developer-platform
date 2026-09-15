@@ -15,7 +15,6 @@ const FIRST_PAGE = { page: "1", pageSize: "20" };
 const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   { domain: "projects", path: "/v1/projects", scope: "org" },
   { domain: "members", path: "/v1/members", scope: "project" },
-  { domain: "notifications", path: "/v1/notifications/unread-count", scope: "org" },
   { domain: "api-keys", path: "/v1/api-keys", scope: "project" },
   { domain: "onboarding", path: "/v1/onboarding/status", scope: "org" },
   { domain: "counterparties", path: "/v1/counterparties", scope: "project", query: FIRST_PAGE },

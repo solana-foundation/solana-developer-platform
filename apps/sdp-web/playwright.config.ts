@@ -86,6 +86,7 @@ export default defineConfig({
     {
       name: "auth-setup",
       testMatch: /auth\.global\.setup\.ts/,
+      retries: useExternalApi ? 2 : 0,
       use: {
         ...devices["Desktop Chrome"],
       },
@@ -125,6 +126,7 @@ export default defineConfig({
       name: "gcp-read-only",
       testMatch: /.*gcp-read-only.*\.e2e\.spec\.ts/,
       dependencies: ["auth-setup"],
+      retries: useExternalApi ? 2 : 0,
       use: {
         ...devices["Desktop Chrome"],
         storageState: authStatePath,

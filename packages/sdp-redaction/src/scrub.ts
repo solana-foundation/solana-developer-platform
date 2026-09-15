@@ -33,7 +33,7 @@ const EMAIL_PATTERN =
 // surname by shape — but both are self-labelling when written as an assignment.
 const PII_FIELD_NAMES =
   // biome-ignore lint/security/noSecrets: an alternation of PII field names, not a credential.
-  "e[-_ ]?mail(?:[-_ ]?address)?|phone(?:[-_ ]?number)?|first[-_ ]?name|last[-_ ]?name|full[-_ ]?name|date[-_ ]?of[-_ ]?birth|dob|tax[-_ ]?id|ssn|account[-_ ]?number|routing[-_ ]?number|iban|postal[-_ ]?code|zip[-_ ]?code";
+  "e[-_ ]?mail(?:[-_ ]?address)?|phone(?:[-_ ]?number)?|first[-_ ]?name|last[-_ ]?name|full[-_ ]?name|date[-_ ]?of[-_ ]?birth|dob|tax[-_ ]?id|ssn|account[-_ ]?number|routing[-_ ]?number|iban|postal[-_ ]?code|zip[-_ ]?code|owner[-_ ]?address";
 // The prefix group mirrors `isPiiKey`'s suffix matching for the serialized form,
 // the same way the credential pattern does: `"counterparty-email"` has to be
 // caught, not just `"email"`, since the backreference anchors the alternation to

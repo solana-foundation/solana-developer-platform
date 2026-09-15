@@ -8,7 +8,7 @@ describe("CenteredDashboardTopBar", () => {
       <CenteredDashboardTopBar
         title="Asset management"
         leadingContent={<span>Back</span>}
-        trailingContent={<span>Notifications</span>}
+        trailingContent={<span>Trailing</span>}
         hideTitleOnMobile
       />
     );

@@ -1,7 +1,7 @@
 # /v1/earn routes — agent notes
 
 HTTP surface for SDP Earn. Provider-neutral: handlers resolve clients through
-the fail-closed registry and check capabilities — no `if (provider === "ground")`
+the fail-closed registry and check capabilities — no provider-id branches
 anywhere. See `packages/sdp-earn/README.md` for architecture; ADR 0002 for
 invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
 
@@ -128,10 +128,11 @@ balance with a live one.
     `handlers/curation.ts` so route tests can mock today's picks away — the
     same rule the surfacing mock in `earn-program.test.ts` follows).
     `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
-    not currently OFFER — Ground today, while Kamino and Jupiter Lend are
-    surfaced; `HIDDEN_STRATEGY_TERMS` hides individual Aave/Morpho-related rows.
-    Jupiter Lend is admitted through its dedicated provider, which validates the
-    canonical USDT asset and jlUSDT receipt mints. The list
+    not currently OFFER — Upshift and Perena today, while Kamino, Veda, Jupiter
+    Lend and Ondo are surfaced; `HIDDEN_STRATEGY_TERMS` hides individual
+    Aave/Morpho-related rows. Jupiter Lend is admitted through its dedicated
+    provider, which validates the canonical USDT asset and jlUSDT receipt mints;
+    Ondo's one USDY row passes uncurated (no `CURATED_VAULTS` pin). The list
     pushes both into SQL (`providers: SURFACED_EARN_PROVIDERS` +
     `excludeRelatedTerms`) so `total` and the page window describe the rows the
     caller can see; `isHiddenStrategy` applies the same two rules to the detail
@@ -254,19 +255,16 @@ other's balance.
   - **`assertKnownYieldSources` validates against the STORED active catalogue.**
     It matches every requested `yieldSourceId` against `status = 'active'` for
     the environment, so whatever a provider client admits is allocatable and
-    whatever it refuses 400s with "Unknown or inactive yield sources". Note this
-    is a moving line: #1299 removed Ground's `not_solana_hosted` gate, so
-    Ground's off-Solana sources are indexed and allocatable again (Ground
-    bridges internally, and the deposit stays Solana-side). It does NOT re-check
-    existing programs either — a wallet's current allocation stands until
-    someone re-targets it in Ground.
+    whatever it refuses 400s with "Unknown or inactive yield sources". It does
+    NOT re-check existing programs either — a wallet's current allocation stands
+    until someone re-targets the program.
   - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
     that half is separately load-bearing: a genuinely single-cluster provider's
     vaults could be catalogued in sandbox, so provider scoping alone would let
     devnet money be allocated to an instrument that does not exist on this
     cluster. This is the
     last gate before a provider mutation on both create and re-target. The route
-    tests pin it with a GROUND row whose cluster is flipped — a Kamino reference
+    tests pin it with a seeded row whose cluster is flipped — a Kamino reference
     would pass on provider scoping alone and prove nothing.
   - **Browse policy is deliberately NOT one of its gates — neither half.**
     `/strategies` list/detail hide Aave/Morpho-related rows
@@ -342,7 +340,7 @@ other's balance.
     the new optionality onto the PAYOUT path — a withdrawal with no amount.
     Each declares its own `amountUsd`; a test pins the create at 400 when it is
     missing. Do not re-couple them for the two fields they share.
-  - A provider's refusal may be more informative than its success: Ground
+  - A provider's refusal may be more informative than its success: a provider
     answers `409 insufficient_funds` with the lane's balance breakdown, which
     the provider client normalizes onto `SdpEarnError.details.balance` and
     `app.ts` already serializes into `error.details`. Consumers should read it
@@ -394,7 +392,7 @@ other's balance.
   sources a caller's retry keeps stable, and following the wrong one pays out
   twice. `deriveProviderRequestId` hashes the key into a stable id scoped by
   the program wallet (two tenants sharing the provider account cannot collide;
-  Ground validates the shape strictly — v4 only, verified 2026-08-05).
+  providers validate the shape strictly — v4 only, verified 2026-08-05).
   Since PRO-1628 the defence is TWO-layer: the derived id anchors an SDP
   intent row in `earn_movements` — unique per (position, request_id), the
   custodial holding being 1:1 with the program wallet, so this is 0055's wallet
@@ -1238,8 +1236,8 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   instead. The two capabilities are asserted mutually exclusive.
 - Withdrawal approval is a SECOND optional capability
   (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
-  a vote needs the account-level Turnkey signer (platform ops — one shared
-  Ground account per environment), so exposing list/request/vote under
+  a vote needs an account-level signer (platform ops — one shared
+  provider account per environment), so exposing list/request/vote under
   `/v1/earn` would hand org API keys an approval surface they must never
   hold. Orgs see a parked withdrawal as `status: pending_approval` on
   `GET /programs/:programId/withdrawals/:withdrawalRef` (derived by the provider client from payout
@@ -1260,20 +1258,20 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   Events only: the check never blocks a write, and a failed figures read costs
   the pass its diff, not its write. Do not "fix" an anomaly by clamping the
   write; the alert exists so a human looks at the provider.
-- Whole-stack local setup (ports, flags, Ground key, entitlement, troubleshooting):
-  `packages/sdp-earn/CLAUDE.md` → "Local development".
-- **Tests must not depend on which providers are surfaced today.** Ground is the
-  only portfolio-capable provider and it is currently un-surfaced, so
-  `POST /programs` 403s for it in the shipped config — but idempotency, replay,
-  gate order and environment isolation still have to work for whichever provider
-  is offered next. `earn-program.test.ts` therefore partial-mocks
-  `isEarnProviderSurfaced` (a `vi.hoisted` flag, forced on in `beforeEach`), and
-  the gate gets its own describe that flips the flag off and runs against the
-  real map. `earn.test.ts` seeds a SURFACED provider by default for the same
-  reason. When a surfacing change breaks a suite, copy that pattern — do not
-  edit `EARN_PROVIDER_SURFACING` to make a test pass.
-- Tests: vitest; stub `EARN_PROVIDER_CLIENTS.<id>` methods with `vi.spyOn`;
+- Whole-stack local setup (ports, flags, provider credentials, entitlement,
+  troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
+- **Tests must not depend on which providers are surfaced today.** No registered
+  provider is portfolio-capable today, so `POST /programs` 403s in the shipped
+  config — but idempotency, replay, gate order and environment isolation still
+  have to work for whichever provider is offered next. `earn-program.test.ts`
+  therefore installs a portfolio-capable test double under a stub id and
+  partial-mocks `isEarnProviderSurfaced` (a `vi.hoisted` flag, forced on in
+  `beforeEach`), and the gate gets its own describe that flips the flag off and
+  runs against the real map. `earn.test.ts` seeds a SURFACED provider by
+  default for the same reason. When a surfacing change breaks a suite, copy
+  that pattern — do not edit `EARN_PROVIDER_SURFACING` to make a test pass.
+- Tests: vitest; stub provider-client methods with `vi.spyOn`;
   repository tests use testcontainers. The ledger repository/service suites in
-  `../../db/repositories/earn.repository.test.ts` run against a NON-Ground
-  stub id on purpose — the ledger consumes only the canonical contract, and
-  that suite is the pluggability proof.
+  `../../db/repositories/earn.repository.test.ts` run against a stub id on
+  purpose — the ledger consumes only the canonical contract, and that suite is
+  the pluggability proof.
