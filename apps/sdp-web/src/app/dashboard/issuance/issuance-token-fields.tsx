@@ -40,7 +40,7 @@ import { type DetailFieldKey, detailFieldOptionLabel } from "./create/asset-deta
 import { getCategoryPresentation, getSubTypePresentation } from "./create/asset-taxonomy";
 import type { DraftState } from "./create/issuance-draft-wizard.types";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
-import type { WalletIdentity } from "./wallet-identity";
+import { toWalletIdentity, type WalletIdentity } from "./wallet-identity";
 
 // Shared model + derivations for the issuance asset list/grid. The list view
 // (`IssuanceTokenView`) is a lightweight projection of the full `Token`; adapters
@@ -367,13 +367,10 @@ export function buildWalletIdentityForAuthority(
   if (control === "sdp") {
     const wallet = findWalletByPublicKey(authorityWallets, address);
     if (wallet) {
-      return {
-        state: "managed",
-        name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
-        provider: wallet.provider ?? null,
-        publicKey: wallet.publicKey,
-        walletId: wallet.walletId,
-      };
+      return toWalletIdentity(wallet, null, {
+        unresolvedAs: "external",
+        unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+      });
     }
   }
   return { state: control === "external" ? "external" : "unknown", publicKey: address };
@@ -504,13 +501,12 @@ export function buildWalletIdentityForSigner(
   if (!wallet) {
     return { state: "unresolved", walletId: signingCustodyWalletId };
   }
-  return {
-    state: "managed",
-    name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
-    provider: wallet.provider ?? null,
-    publicKey: wallet.publicKey,
-    walletId: wallet.walletId,
-  };
+  // A signer is never `external` (see wallet-identity.tsx); the framing is moot
+  // here because the wallet resolved, but it is spelled the way signer sites do.
+  return toWalletIdentity(wallet, null, {
+    unresolvedAs: "custom",
+    unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+  });
 }
 
 export interface ListCardHeroData {

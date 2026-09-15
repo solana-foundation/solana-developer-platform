@@ -45,8 +45,9 @@ describe("TokenSignerSelect", () => {
       />
     );
     expect(markup).toContain("Wallet 1");
-    expect(markup).toContain("DashboardIssuance.management.signingUnavailable");
-    // A runtime restriction is a warning; only structural problems read as errors.
+    // The locked row carries the restriction itself; no sentence repeats it below.
+    expect(markup).toContain("DashboardCustody.signingDisabledTitle");
+    expect(markup).not.toContain("DashboardIssuance.management.signingUnavailable");
     expect(markup).toContain("text-warning");
     expect(markup).not.toContain("text-destructive-strong");
     const draftMarkup = render([wallet], null, wallet.id);
@@ -93,8 +94,39 @@ describe("TokenSignerSelect", () => {
     );
     expect(markup).toContain('href="/dashboard/wallets/wal_1"');
     expect(markup).not.toContain("DashboardIssuance.signer.select");
-    expect(markup).toContain("DashboardIssuance.management.signingUnavailable");
-    expect(markup).toContain("text-warning");
+    // Status once, inside the row; the runtime sentence is not repeated under it.
+    expect(markup.split("DashboardCustody.signingDisabledTitle")).toHaveLength(2);
+    expect(markup).not.toContain("DashboardIssuance.management.signingUnavailable");
+  });
+
+  it("lets the selection summary carry a restricted pick among several wallets", () => {
+    const restricted = { ...makeWallet(2), isRuntimeExecutionAllowed: false };
+    const markup = renderToStaticMarkup(
+      <TokenSignerSelect
+        signerWallets={[makeWallet(1), restricted]}
+        signerWalletId={restricted.id}
+        signerUnavailableReason={null}
+        onSignerWalletIdChange={() => {}}
+        showSelectionSummary
+      />
+    );
+    // Still the select branch, not a locked row.
+    expect(markup).toContain('role="combobox"');
+    expect(markup.split("DashboardCustody.signingDisabledTitle")).toHaveLength(2);
+    expect(markup).not.toContain("DashboardIssuance.management.signingUnavailable");
+  });
+
+  it("still shows an explicit helper under a locked row", () => {
+    const markup = renderToStaticMarkup(
+      <TokenSignerSelect
+        signerWallets={[makeWallet(1)]}
+        signerWalletId="cw_1"
+        signerUnavailableReason={null}
+        helperText="custom helper"
+        onSignerWalletIdChange={() => {}}
+      />
+    );
+    expect(markup).toContain("custom helper");
   });
 
   it("surfaces the unavailable reason over the wallet list", () => {

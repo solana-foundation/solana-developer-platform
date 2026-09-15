@@ -222,7 +222,9 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
     expect(screen.queryAllByRole("combobox").map((el) => el.textContent)).not.toContainEqual(
       expect.stringContaining("List authority")
     );
-    expect(screen.getByText(reason).className).toContain("text-warning");
+    // The row carries the status itself; the sentence is not repeated under it.
+    expect(screen.getByText("Signing is disabled").className).toContain("text-warning");
+    expect(screen.queryByText(reason)).toBeNull();
   });
 
   it("keeps mutation actions usable when no signer restriction applies", async () => {
