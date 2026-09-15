@@ -355,16 +355,18 @@ export interface EarnExternalWalletStrategyTotal {
   providerReference: string;
   label: string;
   /**
-   * Exact project-scoped owners contributing to this strategy total. Present by
-   * default; ABSENT when the caller passed `includeOwnerAddresses=false`
-   * (PRO-1873). This is the end-user address book of the whole project, so an
-   * analytics consumer that only needs totals should opt out and never hold it.
+   * Exact project-scoped owners contributing to this strategy total. ABSENT by
+   * default; present only when the caller passed `includeOwnerAddresses=true`
+   * (PRO-1873 added the flag, PRO-1908 made omission the default). This is the
+   * end-user address book of the whole project, so only a surface that renders
+   * per-customer detail should opt in.
    */
   ownerAddresses?: string[];
   /**
    * Complete live positions contributing to this strategy total. Present only
-   * when the caller passes `includePositions=true`; absent from totals-only
-   * responses so analytics consumers do not receive per-customer details.
+   * when the caller passes `includePositions=true` alongside
+   * `includeOwnerAddresses=true`; absent from totals-only responses so
+   * analytics consumers do not receive per-customer details.
    */
   positions?: EarnExternalWalletPosition[];
   walletCount: number;

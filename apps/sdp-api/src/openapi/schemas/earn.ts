@@ -690,9 +690,10 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     .optional()
     .openapi({
       description:
-        "The exact project-scoped owners contributing to this strategy total. Present by default; " +
-        "absent when the request passed `includeOwnerAddresses=false`. This list is the project's " +
-        "end-user address book, so keys that only need totals should opt out.",
+        "The exact project-scoped owners contributing to this strategy total. Absent by default; " +
+        "present only when the request passes `includeOwnerAddresses=true`. This list is the " +
+        "project's end-user address book, so only a surface that has to render per-customer " +
+        "detail should opt in.",
     }),
   positions: z
     .array(earnExternalWalletPositionSchema)
@@ -700,8 +701,8 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     .openapi({
       description:
         "Complete live positions contributing to this strategy total. Present only when the " +
-        "request passes `includePositions=true`; use this single drill-down instead of one " +
-        "live request per owner.",
+        "request passes `includePositions=true` together with `includeOwnerAddresses=true`; use " +
+        "this single drill-down instead of one live request per owner.",
     }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
