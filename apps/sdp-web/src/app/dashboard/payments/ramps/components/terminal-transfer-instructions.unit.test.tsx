@@ -62,7 +62,7 @@ function renderManualStep(
             type: direction,
             provider: "bvnk",
           },
-    selectedRampPair: { assetRail: "usdc-solana", fiatCurrency: "EUR" },
+    selectedRampPair: { assetRail: "usdc.solana", fiatCurrency: "EUR" },
   };
 
   return renderToStaticMarkup(
