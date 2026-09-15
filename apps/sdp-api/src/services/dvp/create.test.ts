@@ -17,23 +17,15 @@ import { FeePaymentError } from "@sdp/payments/fee-payment";
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
-  appendTransactionMessageInstructions,
   type Blockhash,
-  compileTransaction,
-  createTransactionMessage,
   getBase58Codec,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
-  pipe,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signature,
-  signatureBytes,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +33,7 @@ import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -93,9 +86,6 @@ const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 // expiry, so two tradeInput() calls straddling a second boundary would be
 // different requests and 409 a replay the test meant to be identical.
 const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
-const TEST_SIGNATURE = signature(
-  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-);
 
 /**
  * Configures RPC acceptance with the signature encoded in the submitted bytes.
@@ -836,83 +826,15 @@ describe("createDvpTrade", () => {
     });
   });
 
-  it("refuses sponsor bytes over a different message", async () => {
-    prepareOwnedSubmission.mockImplementation(async (_bytes: Uint8Array, lifecycle) => {
-      const foreign = pipe(
-        createTransactionMessage({ version: 0 }),
-        (message) => setTransactionMessageFeePayer(sponsor.address, message),
-        (message) =>
-          setTransactionMessageLifetimeUsingBlockhash(
-            {
-              blockhash: getBase58Codec().decode(new Uint8Array(32).fill(9)) as Blockhash,
-              lastValidBlockHeight: 100n,
-            },
-            message
-          ),
-        (message) =>
-          appendTransactionMessageInstructions(
-            [{ programAddress: address("11111111111111111111111111111111") }],
-            message
-          ),
-        compileTransaction
-      );
-      const signed = await partiallySignTransaction([sponsor.keyPair], foreign);
-      const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
-      const submission = {
-        signedTransaction,
-        signature: getSignatureFromTransaction(signed),
-        releaseDefinitelyUnbroadcast,
-      };
-      await lifecycle.persistSigned(submission);
-      return submission;
-    });
+  it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {
+    const refusal = new SponsorMessageMismatchError();
+    prepareOwnedSubmission.mockRejectedValueOnce(refusal);
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/different message/);
-    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
-    expect(sendTransaction).not.toHaveBeenCalled();
-  });
-
-  it("refuses bytes without the sponsor signature", async () => {
-    prepareOwnedSubmission.mockImplementation(async (bytes: Uint8Array, lifecycle) => {
-      const submission = {
-        signedTransaction: bytes,
-        signature: TEST_SIGNATURE,
-        releaseDefinitelyUnbroadcast,
-      };
-      await lifecycle.persistSigned(submission);
-      return submission;
-    });
-
-    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/missing the sponsor/);
-    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
-    expect(sendTransaction).not.toHaveBeenCalled();
-  });
-
-  // A filled slot is not a signature. Kora is trusted to sign, not to be
-  // infallible: bytes that fail Ed25519 against the sponsor's key must fail the
-  // claim here, not be persisted in flight for the RPC to reject later.
-  it("refuses a sponsor signature that does not verify", async () => {
-    prepareOwnedSubmission.mockImplementation(async (bytes: Uint8Array, lifecycle) => {
-      const transaction = getTransactionDecoder().decode(bytes);
-      const forged = {
-        ...transaction,
-        signatures: {
-          ...transaction.signatures,
-          [sponsor.address]: signatureBytes(new Uint8Array(64).fill(9)),
-        },
-      };
-      const submission = {
-        signedTransaction: new Uint8Array(getTransactionEncoder().encode(forged)),
-        signature: TEST_SIGNATURE,
-        releaseDefinitelyUnbroadcast,
-      };
-      await lifecycle.persistSigned(submission);
-      return submission;
-    });
-
-    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/invalid sponsor/);
-    await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
-    expect(sendTransaction).not.toHaveBeenCalled();
+    const input = { ...tradeInput(), idempotencyKey: "key-port-integrity" };
+    await expect(createDvpTrade(env, input)).rejects.toBe(refusal);
+    await expect(rowsInDb()).resolves.toMatchObject([
+      { status: "create_failed", create_signature: null },
+    ]);
   });
 
   it("fails the claim when Kora denies and frees the key on replay", async () => {

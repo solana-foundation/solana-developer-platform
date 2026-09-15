@@ -52,7 +52,8 @@ export function OfframpRail({
     onExit,
   });
 
-  const transferState = getRampTransferState(wizard.transferStatus?.status);
+  const transferState =
+    wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const showInlineStatus =
     wizard.onTransactionStage && (hostedStage || Boolean(wizard.depositTarget));
@@ -74,9 +75,7 @@ export function OfframpRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
+      counterpartyDialog={null}
       summary={
         wizard.fields.provider === null ? undefined : (
           <WizardSummaryList
@@ -102,15 +101,19 @@ export function OfframpRail({
         ) : undefined
       }
       secondaryLabel={
-        wizard.onTransactionStage && transferState.cancelable
+        wizard.onTransactionStage && transferState !== null && transferState.cancelable
           ? t("DashboardPayments.counterparty.cancel")
           : undefined
       }
-      confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
+      confirmSecondary={
+        wizard.onTransactionStage && transferState !== null && transferState.cancelable
+      }
       secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
-      hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
+      hideSecondary={
+        wizard.onTransactionStage && transferState !== null && !transferState.cancelable
+      }
       footerActions={
-        transferState.terminal ? (
+        transferState !== null && transferState.terminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               {t("DashboardPayments.goToTransaction")}

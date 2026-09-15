@@ -9,6 +9,7 @@ import {
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   PAYMENT_TRANSFER_STATUSES,
+  PAYMENT_TRANSFER_TYPES,
   type PolicyRule,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
@@ -487,27 +488,12 @@ export const createTransferSchema = z.strictObject({
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
-  /**
-   * Retired, but still ACCEPTED by validation. SDP no longer has a
-   * private-transfer provider, and the request cannot be honoured — but v1
-   * published this field, so rejecting the shape here would break the contract
-   * in place. Validation therefore keeps accepting it and the route answers
-   * PROVIDER_UNAVAILABLE (503), which is what this field's callers already had
-   * to handle: every failure of the old provider path — timeout, malformed
-   * response, upstream 5xx — surfaced as exactly that.
-   *
-   * It must not be dropped either. This object is not `.strict()`, so a
-   * stripped key would let an old caller's private-transfer request fall
-   * through and execute as an ordinary PUBLIC transfer, moving funds visibly
-   * that the caller asked to move privately. Accepted here, refused at the
-   * route: see the guard in `extractTransferPolicyCandidate`.
-   */
-  privateTransfer: z.unknown().optional(),
 });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 
 export const transferStatusSchema = z.enum(PAYMENT_TRANSFER_STATUSES);
+export const transferTypeSchema = z.enum(PAYMENT_TRANSFER_TYPES);
 
 const transferFilterTimestampSchema = z
   .string()
@@ -535,11 +521,7 @@ export const listTransfersQuerySchema = z.strictObject({
   type: z
     .string()
     .transform((value) => value.split(","))
-    .pipe(
-      z
-        .array(z.enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"]))
-        .min(1)
-    )
+    .pipe(z.array(transferTypeSchema).min(1))
     .optional(),
   counterpartyId: z.string().min(1).optional(),
   provider: rampProviderSchema.optional(),

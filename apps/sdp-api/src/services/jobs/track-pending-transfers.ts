@@ -19,7 +19,8 @@
 import { withTransientRpcRetry } from "@sdp/rpc";
 import type { SignatureStatusInfo } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { assertIsSignature, type Signature } from "@solana/kit";
+import type { TransferChainVerdictStatus } from "@sdp/types";
+import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
 import {
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
@@ -100,7 +101,10 @@ async function updateTerminalTransfer(
   repo: PaymentsRepository,
   transfer: PaymentTransferRow,
   input: UpdatePaymentTransferInput &
-    ({ status: "confirmed" | "finalized" } | { status: "failed"; error: string })
+    (
+      | { status: Exclude<TransferChainVerdictStatus, "failed"> }
+      | { status: "failed"; error: string }
+    )
 ): Promise<void> {
   if (transfer.type === "transfer_batch") {
     if (transfer.project_id === null) {
@@ -155,7 +159,10 @@ async function applyOnChainVerdict(
       return true;
     }
 
-    if (status.confirmationStatus === "finalized") {
+    if (
+      status.confirmationStatus !== null &&
+      commitmentComparator(status.confirmationStatus, "finalized") >= 0
+    ) {
       await updateTerminalTransfer(env, repo, transfer, {
         transferId: transfer.id,
         status: "finalized",
@@ -163,7 +170,10 @@ async function applyOnChainVerdict(
         updatedAt: nowIso,
       });
       return true;
-    } else if (status.confirmationStatus === "confirmed") {
+    } else if (
+      status.confirmationStatus !== null &&
+      commitmentComparator(status.confirmationStatus, "confirmed") >= 0
+    ) {
       await updateTerminalTransfer(env, repo, transfer, {
         transferId: transfer.id,
         status: "confirmed",
@@ -307,7 +317,10 @@ async function finalizeConfirmedTransfers(
         organizationId: transfer.organization_id,
         signature: transfer.signature,
       };
-      return status && !status.err && status.confirmationStatus === "finalized"
+      return status &&
+        !status.err &&
+        status.confirmationStatus !== null &&
+        commitmentComparator(status.confirmationStatus, "finalized") >= 0
         ? { ...base, finalized: true, slot: Number(status.slot) }
         : { ...base, finalized: false, slot: null };
     }
@@ -546,7 +559,9 @@ async function reconcileSignedSubmissionCacheMisses(
 function unresolvedReasonForStatus(
   status: SignatureStatusInfo
 ): "processed_only" | "verdict_write_failed" {
-  return !status.err && status.confirmationStatus === "processed"
+  return !status.err &&
+    status.confirmationStatus !== null &&
+    commitmentComparator(status.confirmationStatus, "confirmed") < 0
     ? "processed_only"
     : "verdict_write_failed";
 }

@@ -15,7 +15,6 @@ import {
   appendTransactionMessageInstructions,
   createTransactionMessage,
   getBase58Decoder,
-  getBase64Encoder,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -36,10 +35,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  assertSponsorSignedSameMessage,
-  createProjectSponsorshipFeePayment,
-} from "@/services/sponsorship.service";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -415,12 +411,7 @@ export async function executeDvpFunding(
       transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
       lastValidBlockHeight,
       store: {
-        persistSigned: async ({ signature, signedTransaction }) => {
-          await assertSponsorSignedSameMessage({
-            unsignedOrPartiallySigned: partiallySigned,
-            sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
-            sponsor,
-          });
+        persistSigned: async ({ signature }) => {
           await plan.rebindClaim(claimSignature, signature);
           heldSignature = signature;
           await recordAttempt({

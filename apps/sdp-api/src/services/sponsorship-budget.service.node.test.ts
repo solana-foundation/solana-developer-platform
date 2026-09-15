@@ -1,6 +1,5 @@
 import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";
 import {
-  type Address,
   type Blockhash,
   compileTransaction,
   createTransactionMessage,
@@ -13,6 +12,11 @@ import {
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
+import {
+  garbageSignTestTransaction,
+  sponsorSignTestTransaction,
+  TEST_MOCK_FEE_PAYER,
+} from "@/test/helpers/sponsor-signing";
 import type { Env } from "@/types/env";
 import type { SponsorshipScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
@@ -24,7 +28,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   logEvent,
 }));
 
-const FEE_PAYER = "11111111111111111111111111111111" as Address;
+const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 const SCOPE: SponsorshipScope = {
   environment: "sandbox",
@@ -104,11 +108,7 @@ function harness() {
       feePayerMayTransferLamports: false,
       feePayerPolicy: { system: { allow_transfer: false } },
     }),
-    signAsFeePayer: vi.fn().mockImplementation(async (transaction) => {
-      const signed = transaction.slice();
-      signed.fill(1, 1, 65);
-      return signed;
-    }),
+    signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
   const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, SCOPE, provider, {
@@ -395,8 +395,8 @@ describe("BudgetedFeePayment", () => {
     expect(budgetRedis.reserve).toHaveBeenCalledOnce();
   });
 
-  it("releases an owned submission when sign-only custody fails", async () => {
-    const { feePayment, provider, repository, budgetRedis } = harness();
+  it("retains an owned submission as ambiguous when sign-only custody fails", async () => {
+    const { feePayment, provider, repository } = harness();
     vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
       new FeePaymentError("KMS response timed out after signing", "SIGNING_FAILED")
     );
@@ -410,11 +410,8 @@ describe("BudgetedFeePayment", () => {
       "timed out"
     );
 
-    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
-    expect(repository.markReleased).toHaveBeenCalledOnce();
-    expect(budgetRedis.settle).toHaveBeenCalledWith(
-      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
-    );
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
     expect(lifecycle.persistSigned).not.toHaveBeenCalled();
     expect(lifecycle.markStarted).not.toHaveBeenCalled();
   });
@@ -600,14 +597,132 @@ describe("BudgetedFeePayment", () => {
     };
 
     await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
-      "fully signed"
+      "missing the sponsor fee-payer signature"
     );
 
     expect(lifecycle.persistSigned).not.toHaveBeenCalled();
+    expect(repository.markSigned).not.toHaveBeenCalled();
     expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
     expect(budgetRedis.settle).toHaveBeenCalledWith(
       expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
     );
+  });
+
+  it("treats a substituted message without the sponsor signature as ambiguous", async () => {
+    const { feePayment, provider, repository } = harness();
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(buildTransaction("legacy"));
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "came back over a different message"
+    );
+
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  it("trips the accounting breaker when the sponsor response cannot be decoded", async () => {
+    const { feePayment, provider, repository } = harness();
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "Signed sponsorship result could not be reconstructed"
+    );
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledOnce();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+  });
+
+  it("retains a signing reservation as ambiguous when the sponsor signature does not verify", async () => {
+    const { feePayment, provider, repository } = harness();
+    const requested = buildTransaction();
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(garbageSignTestTransaction(requested));
+
+    await expect(feePayment.signAsFeePayer(requested)).rejects.toThrow(
+      "invalid sponsor fee-payer signature"
+    );
+
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  it("replays stored bytes untouched when they carry the requested message", async () => {
+    const { feePayment, provider, repository } = harness();
+    const requested = buildTransaction();
+    const stored = await sponsorSignTestTransaction(requested);
+    repository.createReservation.mockResolvedValueOnce(false);
+    repository.getReservation.mockResolvedValueOnce({
+      status: "signed",
+      attempt: 1,
+      signedTransaction: Buffer.from(stored).toString("base64"),
+    });
+
+    await expect(feePayment.signAsFeePayer(requested)).resolves.toEqual(stored);
+
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(provider.getFeePayer).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stored replay whose bytes do not carry the requested message", async () => {
+    const { feePayment, provider, repository } = harness();
+    const requested = buildTransaction();
+    const foreign = await sponsorSignTestTransaction(buildTransaction("legacy"));
+    repository.createReservation.mockResolvedValueOnce(false);
+    repository.getReservation.mockResolvedValueOnce({
+      status: "signed",
+      attempt: 1,
+      signedTransaction: Buffer.from(foreign).toString("base64"),
+    });
+
+    await expect(feePayment.signAsFeePayer(requested)).rejects.toThrow(
+      "Stored sponsored transaction does not match the requested message"
+    );
+
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_replay_integrity_failure",
+        failure_class: "mismatch",
+      })
+    );
+  });
+
+  it("retains a signing reservation as ambiguous when the sponsor signs a different message", async () => {
+    const { feePayment, provider, repository } = harness();
+    const requested = buildTransaction();
+    const substituted = await sponsorSignTestTransaction(buildTransaction("legacy"));
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(substituted);
+
+    await expect(feePayment.signAsFeePayer(requested)).rejects.toThrow(
+      "came back over a different message"
+    );
+
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  it("retains an owned submission as ambiguous when the sponsor signs a different message", async () => {
+    const { feePayment, provider, repository } = harness();
+    const substituted = await sponsorSignTestTransaction(buildTransaction("legacy"));
+    vi.mocked(provider.signAsFeePayer).mockResolvedValueOnce(substituted);
+    const lifecycle = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "came back over a different message"
+    );
+
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
+    expect(repository.markSigned).not.toHaveBeenCalled();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
   });
 
   it("never lets a duplicate in-progress caller execute Kora", async () => {

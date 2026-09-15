@@ -74,13 +74,11 @@ export async function resolveTransferBatchIdempotencyReplay(
   projectId: string,
   idempotencyKey: string,
   fingerprint: string,
-  legacyFingerprint: string,
   sourceCustodyWalletId: string
 ): Promise<PaymentTransferBatchRow | null> {
   return resolveIdentityBoundIdempotencyReplay(
     () => repository.findTransferBatchByIdempotency({ organizationId, projectId, idempotencyKey }),
     fingerprint,
-    legacyFingerprint,
     (row) => row.source_custody_wallet_id === sourceCustodyWalletId
   );
 }

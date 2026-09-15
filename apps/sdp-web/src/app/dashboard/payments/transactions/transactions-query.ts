@@ -1,10 +1,5 @@
-export const TRANSACTION_TYPES = [
-  "transfer",
-  "transfer_confidential",
-  "transfer_batch",
-  "onramp",
-  "offramp",
-] as const;
+import { PAYMENT_TRANSFER_TYPES } from "@sdp/types";
+export const TRANSACTION_TYPES = PAYMENT_TRANSFER_TYPES;
 
 export const TRANSACTION_STATUSES = [
   "pending",

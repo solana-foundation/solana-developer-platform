@@ -177,3 +177,31 @@ export function encodeBasicAuth(value: string): string {
 
   throw new SigningError("Unable to encode Basic auth header", "PROVIDER_NOT_CONFIGURED");
 }
+
+export function assertHttpsBaseUrl(value: string, providerLabel: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new SigningError(
+      `${providerLabel} API base URL is not a valid URL`,
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new SigningError(
+      `${providerLabel} API base URL must use https`,
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new SigningError(
+      `${providerLabel} API base URL must not embed credentials`,
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return value;
+}
