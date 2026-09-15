@@ -7,9 +7,10 @@ import {
  * Upstream reader behind the Treasury Solutions "Information" column BFF:
  * per-vault allocations from Kamino's public REST API, TTL-cached in memory.
  *
- * Kamino's kvaults REST source is mainnet-only; the BFF route refuses reads
- * for any other cluster before reaching this module, so a sandbox strategy's
- * devnet vault address is never sent upstream at all.
+ * Kamino's kvaults REST source is mainnet-only; the SWR hook keeps a
+ * non-mainnet row from issuing a read at all, and this module forwards
+ * whatever vault it is handed — an address that cannot resolve there fails
+ * upstream like any other miss.
  *
  * All cache mutation lives here, deliberately outside the route handler: the
  * module-level map is a private memoization of an otherwise stateless public

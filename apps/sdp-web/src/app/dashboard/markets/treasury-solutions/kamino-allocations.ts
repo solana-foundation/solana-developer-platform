@@ -18,8 +18,9 @@ import {
  * Kamino's allocations source is mainnet-only, so a vault on any other
  * cluster is an UNSUPPORTED read, not a failing one: the SWR key stays null,
  * the same way a non-Kamino row's does, and the cell shows the placeholder.
- * The cluster still travels on the wire so the BFF can enforce the same
- * refusal server-side.
+ * The BFF route is a pure passthrough and enforces nothing server-side — this
+ * client-side gate is the only refusal, so an unsupported row costs no
+ * network at all.
  *
  * `undefined` vault (a non-Kamino row) issues no request at all: the SWR key
  * is null, so the strategies table costs nothing for providers this column
@@ -39,7 +40,7 @@ export function useKaminoVaultAllocations(
       const result = await dashboardFetch<KaminoVaultAllocations>(
         `/api/dashboard/markets/earn/kamino-allocations?vault=${encodeURIComponent(
           vaultAddress ?? ""
-        )}&cluster=mainnet-beta`
+        )}`
       );
       if (!result.ok) throw new Error(result.error);
       // Re-parsed with the same schema the route parsed upstream: the client

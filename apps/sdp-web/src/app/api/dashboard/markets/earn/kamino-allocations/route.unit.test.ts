@@ -134,27 +134,44 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "missing",
-    "5YxwKgsvyTdT8q2CBgwA4L9BKbnKNrB66K9wUzij5wH!",
-    "short",
-    `${"a".repeat(70)}`,
-  ])("rejects a malformed vault parameter", async (vault) => {
-    const response = await GET(
-      new Request(`https://dashboard.example.test/api/kamino?vault=${encodeURIComponent(vault)}`)
-    );
+  it("forwards the vault parameter exactly as sent: the route validates nothing", async () => {
+    const response = await GET(request("not-a-real-vault"));
 
-    expect(response.status).toBe(400);
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      "https://api.kamino.finance/kvaults/vaults/not-a-real-vault/allocations",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("answers 502 when the upstream cannot resolve the vault it was handed", async () => {
+    mocks.fetch.mockResolvedValue(new Response("not found", { status: 404 }));
+
+    const response = await GET(request("VaultTheUpstreamDoesNotKnow"));
+
+    expect(response.status).toBe(502);
+  });
+
+  it("forwards a missing vault parameter as the empty read it is", async () => {
+    const response = await GET(new Request("https://dashboard.example.test/api/kamino"));
+
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      "https://api.kamino.finance/kvaults/vaults//allocations",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(response.status).toBe(200);
   });
 
   it.each(["missing", "devnet", "testnet", "mainnet", "sneaky-mainnet-beta"])(
-    "refuses a %s cluster parameter: the allocations source is mainnet-only",
+    "passes a %s cluster parameter through: the cluster is the caller's concern",
     async (cluster) => {
-      const response = await GET(request(VAULTS.happy, cluster));
+      const response = await GET(request(`cluster-${cluster}`));
 
-      expect(response.status).toBe(400);
-      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(mocks.fetch).toHaveBeenCalledWith(
+        `https://api.kamino.finance/kvaults/vaults/cluster-${cluster}/allocations`,
+        expect.objectContaining({ cache: "no-store" })
+      );
     }
   );
 

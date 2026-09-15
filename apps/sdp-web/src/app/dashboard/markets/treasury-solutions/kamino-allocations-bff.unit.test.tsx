@@ -123,7 +123,7 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
     });
     // One browser→BFF hop and one BFF→Kamino hop, nothing else on the wire.
     expect(seenUrls).toEqual([
-      `${BFF_PATH}?vault=${VAULTS.happy}&cluster=mainnet-beta`,
+      `${BFF_PATH}?vault=${VAULTS.happy}`,
       `${UPSTREAM_BASE}/${VAULTS.happy}/allocations`,
     ]);
   });

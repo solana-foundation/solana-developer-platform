@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/markets/base58-address";
 import { readVaultAllocations } from "./kamino-allocations-store";
 
 /**
@@ -14,12 +13,12 @@ import { readVaultAllocations } from "./kamino-allocations-store";
  * refuses cross-site writes; the auth check below only turns an expired
  * session into a JSON 401 instead of an HTML redirect for fetch().
  *
- * The handler itself only validates and forwards: the TTL cache, the in-flight
- * read dedup, and every other piece of module state live in the store module,
- * a private memoization of this public read rather than a client-visible side
- * effect. Kamino's allocations source is mainnet-only, so a request naming any
- * other cluster is refused outright instead of being sent upstream and
- * answering 502 for vaults that could never resolve there.
+ * The handler is a pure passthrough and validates nothing: the vault travels
+ * to the upstream read exactly as the client sent it, and a malformed or
+ * unknown address simply fails upstream and answers 502 like any other miss.
+ * The TTL cache, the in-flight read dedup, and every other piece of module
+ * state live in the store module, a private memoization of this public read
+ * rather than a client-visible side effect.
  */
 
 function jsonError(status: number, message: string): NextResponse {
@@ -36,15 +35,7 @@ export async function GET(request: Request) {
     return jsonError(401, "Authentication required");
   }
 
-  const params = new URL(request.url).searchParams;
-  const vault = params.get("vault") ?? "";
-  if (!BASE58_ADDRESS_PATTERN.test(vault)) {
-    return jsonError(400, "vault must be a Solana public key");
-  }
-  const cluster = params.get("cluster") ?? "";
-  if (cluster !== "mainnet-beta") {
-    return jsonError(400, "Vault allocations are available for mainnet-beta vaults only");
-  }
+  const vault = new URL(request.url).searchParams.get("vault") ?? "";
 
   try {
     // The body IS the contract, with no envelope around it: `dashboardFetch`
