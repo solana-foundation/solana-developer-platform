@@ -12,7 +12,6 @@ import type {
   PolicyRule,
   WalletOperationStatus,
 } from "./policy";
-import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
@@ -320,19 +319,6 @@ export interface PreparedPaymentSubscriptionTransaction extends PreparedPaymentT
   requiredSigners: string[];
 }
 
-export interface MagicBlockPreparedPrivateTransfer {
-  provider: "magicblock";
-  magicBlock: {
-    kind: string;
-    version: string;
-    instructionCount: number;
-    requiredSigners: string[];
-    validator?: string;
-  };
-}
-
-export type PreparedPrivateTransfer = MagicBlockPreparedPrivateTransfer;
-
 export interface PaymentTransferRequest {
   projectId?: string;
   sourceCustodyWalletId: string;
@@ -340,18 +326,11 @@ export interface PaymentTransferRequest {
   token: string;
   amount: string;
   memo?: string;
-
-  /**
-   * Optional private-transfer routing. When omitted, the transfer should use
-   * the normal public on-chain transfer path.
-   */
-  privateTransfer?: PrivateTransferRequest;
 }
 
 export interface PaymentTransferEnvelope {
   data?: {
     transfer?: PaymentTransferSummary;
-    privateTransfer?: PreparedPrivateTransfer;
   };
   error?: {
     message?: string;

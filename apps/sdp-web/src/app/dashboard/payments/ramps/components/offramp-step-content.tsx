@@ -1,5 +1,6 @@
 "use client";
 
+import { isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
@@ -34,7 +35,12 @@ function OfframpManualQuoteStep({
   quote: Extract<NonNullable<OfframpWizard["quote"]>, { deliveryMode: "manual_instructions" }>;
   t: Translate;
 }) {
-  const { selectedRampPair, fields } = wizard;
+  const { selectedRampPair, fields, transferStatus } = wizard;
+
+  // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
+  if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
+    return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
+  }
 
   if (!quote.paymentInstructions) {
     return (
