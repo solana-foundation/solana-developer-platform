@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 export function auditFlowMatrix({ dashboardDir, specsDir, matrixPath }) {
   const sections = readdirSync(dashboardDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    // A route group like "(home)" adds no URL segment, so it is not a section of its own.
+    .filter((entry) => entry.isDirectory() && !/^\(.+\)$/.test(entry.name))
     .map((entry) => entry.name);
 
   const specs = new Set(readdirSync(specsDir).filter((name) => name.endsWith(".e2e.spec.ts")));

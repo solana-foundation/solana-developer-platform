@@ -53,6 +53,7 @@ export interface DvpTradeLeg {
   decimals: number | null;
   /** The mint's symbol, or null when it carries no metadata. */
   symbol: string | null;
+  name: string | null;
   /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
   imageUrl: string | null;
   party: DvpPartyRef;
@@ -81,18 +82,6 @@ export interface DvpTrade {
   refString: string | null;
   createSignature: string | null;
   closeSignature: string | null;
-  /**
-   * Whether the settlement authority can pay for a close, read live.
-   *
-   * Null when it could not be determined, which is not the same as "not ready"
-   * — an unreadable balance must not accuse a funded authority of being empty.
-   */
-  settlementReadiness: {
-    address: string;
-    balance: string;
-    required: string;
-    funded: boolean;
-  } | null;
   observedAt: string | null;
   createdAt: string;
   updatedAt: string;

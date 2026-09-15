@@ -2,7 +2,7 @@
  * Checking that a settlement destination can actually receive a leg.
  *
  * A destination is not where tokens land. It is the OWNER whose associated
- * token account they land in: `settle-preflight.ts` derives an ATA from this
+ * token account they land in: `settle-atas.ts` derives an ATA from this
  * address and `SettleDvp` pays into that, creating it first when it does not
  * exist. So the address given here is fed straight into an ATA derivation, and
  * an address that cannot own a token account breaks settlement rather than

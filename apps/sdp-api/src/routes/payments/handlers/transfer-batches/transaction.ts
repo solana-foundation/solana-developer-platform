@@ -1,7 +1,7 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
-  address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   compileTransaction,
@@ -24,9 +24,6 @@ import { badRequest } from "@/lib/errors";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
-
-// biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
-const MEMO_PROGRAM_ADDRESS = address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 export interface RecipientInstructionGroup extends ResolvedRecipient {
   instructions: Instruction[];

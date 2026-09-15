@@ -440,7 +440,9 @@
       "importFailed": "Import thất bại.",
       "cancel": "Hủy",
       "importing": "Đang import…",
-      "import": "Import"
+      "import": "Import",
+      "resultApprovalPending": "Batch đang chờ phê duyệt",
+      "approvalPendingDescription": "Batch này cần phê duyệt theo chính sách trước khi gửi. Chưa có gì được chuyển."
     },
     "manualInstructions": {
       "copied": "Đã sao chép {label}.",

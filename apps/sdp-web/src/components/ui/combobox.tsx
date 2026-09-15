@@ -51,6 +51,8 @@ interface ComboboxProps {
   onChange: (value: string) => void;
   options: readonly ComboboxOption[];
   label: string;
+  /** Visually hides the label while preserving it for the trigger's accessible name. */
+  hideLabel?: boolean;
   required?: boolean;
   className?: string;
   placeholder?: string;
@@ -82,6 +84,7 @@ export function Combobox({
   onChange,
   options,
   label,
+  hideLabel,
   required,
   className,
   placeholder,
@@ -323,7 +326,7 @@ export function Combobox({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label id={labelId}>
+      <Label className={hideLabel ? "sr-only" : undefined} id={labelId}>
         {label}
         {required ? (
           <>

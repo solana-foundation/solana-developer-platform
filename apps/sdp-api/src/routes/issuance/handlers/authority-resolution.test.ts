@@ -5,6 +5,7 @@ import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaServices from "@/services/solana";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   createLegacyResolvedAuthoritySigner,
@@ -66,15 +67,13 @@ async function seedScope(): Promise<void> {
       `INSERT INTO users (id, email, email_verified, status)
          VALUES ('user_test', 'authority-resolution@example.com', 1, 'active')`
     ),
-    getDb(testEnv).prepare(
-      `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (
-           'proj_test', 'org_test', 'Authority resolution',
-           'authority-resolution', 'sandbox', 'active', 'user_test'
-         )`
-    ),
   ]);
+  await seedDefaultProjects(getDb(testEnv), {
+    organizationId: "org_test",
+    createdBy: "user_test",
+    members: [],
+    ids: { sandbox: "proj_test", production: "proj_test_production" },
+  });
 }
 
 async function resetScope(): Promise<void> {
@@ -625,15 +624,13 @@ describe("authority-resolution", () => {
         `INSERT INTO users (id, email, email_verified, status)
          VALUES ('user_other', 'authority-resolution-other@example.com', 1, 'active')`
       ),
-      getDb(testEnv).prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (
-           'proj_other', 'org_other', 'Other', 'authority-resolution-other',
-           'sandbox', 'active', 'user_other'
-         )`
-      ),
     ]);
+    await seedDefaultProjects(getDb(testEnv), {
+      organizationId: "org_other",
+      createdBy: "user_other",
+      members: [],
+      ids: { sandbox: "proj_other", production: "proj_other_production" },
+    });
     await seedConfigWallet({
       id: "cwlt_other_tenant",
       walletId: "wal_other_tenant",

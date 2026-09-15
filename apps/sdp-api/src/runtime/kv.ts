@@ -25,6 +25,8 @@ export interface SlidingWindowOptions {
   maxRequests: number;
   previousWeight: number;
   expirationTtl: number;
+  /** Units this admission charges against the window; defaults to 1. */
+  cost?: number;
 }
 
 export interface SlidingWindowAdmission {

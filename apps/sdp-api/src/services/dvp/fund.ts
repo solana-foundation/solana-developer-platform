@@ -1,30 +1,51 @@
-/** Moving one side of a trade into escrow, from the custody wallet that owns that side's party address. */
+/** Moving one side of a trade into escrow, with Kora sponsoring the custody wallet's transfer. */
+
+import {
+  assertSwapDvpTerms,
+  decodeSwapDvpChecked,
+  SwapDvpTermsMismatchError,
+  SwapDvpVerificationError,
+  verifySwapDvpAccount,
+} from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   type Address,
   appendTransactionMessageInstructions,
   createTransactionMessage,
-  getSignatureFromTransaction,
+  getBase58Decoder,
+  getBase64Encoder,
   getTransactionEncoder,
-  isSolanaError,
   pipe,
   type Signature,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-  setTransactionMessageFeePayerSigner,
+  setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
-import { signTransactionMessageWithSigners } from "@solana/signers";
-import { findAssociatedTokenPda, getTransferCheckedInstruction } from "@solana-program/token-2022";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import {
+  fetchMaybeToken,
+  findAssociatedTokenPda,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { badRequest, conflict } from "@/lib/errors";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import {
+  assertSponsorSignedSameMessage,
+  createProjectSponsorshipFeePayment,
+} from "@/services/sponsorship.service";
+import {
+  isDefiniteSubmissionError,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { readMintDecimals } from "./mints";
-import { readEscrowState } from "./read-chain";
+import { readDvpAccounts, readEscrowState } from "./read-chain";
 
 /** Statuses from which a leg can still be funded. */
 const FUNDABLE: ReadonlySet<DvpTradeStatus> = new Set(["created", "partially_funded"]);
@@ -49,7 +70,7 @@ interface DvpSdpLeg {
 /**
  * One leg of a trade by side; the custody lookup decides who may fund it.
  */
-export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
+function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
   const isA = side === "a";
   return {
     side,
@@ -61,31 +82,20 @@ export function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
 }
 
 /**
- * The outstanding base-unit shortfall of one leg, per the chain now. Exported
- * for the policy extractor — the approver is shown what will actually move.
- */
-export async function readDvpLegShortfall(
-  env: Env,
-  trade: DvpTradeRow,
-  side: DvpTradeSide
-): Promise<bigint> {
-  const leg = legOfSide(trade, side);
-  const state = await readEscrowState(solanaRpc.createRpc(env), leg.escrow, leg.tokenProgram);
-  const held = state?.amount ?? 0n;
-  return held >= leg.amount ? 0n : leg.amount - held;
-}
-
-/**
  * Who signs a funding transfer, and where its lock lives. One plan shape for
  * every funder — creator and counterparty run the same safety properties, so
  * they cannot drift apart.
  */
 export interface DvpFundingPlan {
   leg: DvpSdpLeg;
-  /** Whose wallet signs and pays. Not necessarily the trade's author. */
+  /** Whose wallet authorizes the transfer. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
   /** Takes the lock on this leg. False when somebody else already holds it. */
   claim(signature: Signature, expiryHeight: string): Promise<boolean>;
+  /** Replaces the wallet-signature lock key with the sponsored transaction signature. */
+  rebindClaim(from: Signature, to: Signature): Promise<void>;
+  /** Checks whether this plan still owns the named claim. */
+  hasClaim(signature: Signature): Promise<boolean>;
   /** Gives it back, when and only when nothing was broadcast. */
   release(signature: Signature): Promise<void>;
   /** Records the transfer once it is on the wire. */
@@ -118,14 +128,21 @@ export function fundingPlan(
         expiryHeight,
       }),
     release: (signature) => claims.release(trade.id, side, signature),
+    rebindClaim: async (from, to) => {
+      const rebound = await claims.rebindSignature(trade.id, side, from, to);
+      if (!rebound) {
+        throw new Error(
+          "funding claim was released before the sponsored signature could be attached"
+        );
+      }
+    },
+    hasClaim: (signature) => claims.hasClaim(trade.id, side, signature),
     recordFundingTx: (signature) => claims.recordFundingTx(trade.id, side, signature),
   };
 }
 
 /**
- * Funds one side from the caller's already-resolved custody wallet. Mechanical
- * by design: the custody lookup and re-read belong to the caller, so they run
- * at the right point relative to the policy gate.
+ * Funds one side from the caller's already-resolved custody wallet.
  */
 export async function fundDvpTradeLeg(
   c: Context<{ Bindings: Env }>,
@@ -151,7 +168,7 @@ export async function fundDvpTradeLeg(
 /**
  * Reads the escrow, sends the shortfall, and records what happened.
  *
- * Shared by every funder; nothing below asks who is paying.
+ * Shared by every funder; Kora pays while the custody wallet authorizes the transfer.
  */
 export async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,
@@ -171,9 +188,79 @@ export async function executeDvpFunding(
   // Read the escrow NOW rather than trusting the reconciler's last sweep. The
   // sweep runs once a minute, so acting on it would let two funding requests a
   // few seconds apart both believe the escrow was empty.
-  const escrowState = await readEscrowState(rpc, escrow, tokenProgram);
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
+    a: {
+      escrow: trade.escrowA,
+      tokenProgram: trade.tokenProgramA,
+      mint: trade.mintA,
+    },
+    b: {
+      escrow: trade.escrowB,
+      tokenProgram: trade.tokenProgramB,
+      mint: trade.mintB,
+    },
+  });
 
-  if (escrowState?.frozen) {
+  try {
+    await verifySwapDvpAccount(snapshot.trade);
+  } catch (error) {
+    if (error instanceof SwapDvpVerificationError) {
+      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`);
+    }
+    throw error;
+  }
+
+  // Every agreed term, not only the seeds: the PDA omits amounts, time bounds
+  // and destinations, so a trade re-created at this address can differ in any
+  // of them and still verify. `assertSwapDvpTerms` is the one list of terms.
+  try {
+    assertSwapDvpTerms(decodeSwapDvpChecked(snapshot.trade).data, {
+      settlementAuthority: trade.settlementAuthority,
+      userA: trade.userA,
+      userB: trade.userB,
+      mintA: trade.mintA,
+      mintB: trade.mintB,
+      nonce: BigInt(trade.nonce),
+      amountA: BigInt(trade.amountA),
+      amountB: BigInt(trade.amountB),
+      expiryTimestamp: BigInt(trade.expiryTimestamp),
+      earliestSettlementTimestamp:
+        trade.earliestSettlementTimestamp === null
+          ? null
+          : BigInt(trade.earliestSettlementTimestamp),
+      userASettlementDestination: trade.userASettlementDestination,
+      userBSettlementDestination: trade.userBSettlementDestination,
+    });
+  } catch (error) {
+    if (error instanceof SwapDvpTermsMismatchError) {
+      getLogger().warn(
+        {
+          tradeId: trade.id,
+          swapDvp: trade.swapDvp,
+          mismatched: error.fields,
+          detail: error.message,
+        },
+        "dvp funding: on-chain trade does not match recorded terms"
+      );
+      throw conflict(
+        `DvP trade ${trade.id}: the on-chain trade does not match the recorded terms; nothing was sent`
+      );
+    }
+    throw error;
+  }
+
+  const legObservation = side === "a" ? snapshot.legA : snapshot.legB;
+  if (!legObservation.exists) {
+    if (legObservation.tampered) {
+      throw conflict(
+        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+      );
+    }
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+  }
+  const escrowState = { amount: legObservation.amount, frozen: legObservation.frozen };
+
+  if (escrowState.frozen) {
     // The transfer would bounce. Saying so costs nothing; learning it from a
     // failed broadcast costs a signature and leaves an unexplained failure.
     throw badRequest(
@@ -181,7 +268,7 @@ export async function executeDvpFunding(
     );
   }
 
-  const held = escrowState?.amount ?? 0n;
+  const held = escrowState.amount;
   if (held >= amount) {
     throw conflict(
       `DvP trade ${trade.id}: this leg already holds ${held} of ${amount}, so there is nothing left to fund.`
@@ -194,7 +281,6 @@ export async function executeDvpFunding(
   // revert the whole settlement. Funding a partly funded leg has to top it up
   // exactly.
   const outstanding = amount - held;
-
   const signer = await createOrgSignerForCustodyWallet(
     env,
     plan.signer.organizationId,
@@ -217,20 +303,19 @@ export async function executeDvpFunding(
     throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`);
   }
 
-  const instruction = getTransferCheckedInstruction(
-    { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
-    { programAddress: tokenProgram }
-  );
-
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(signer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m)
-  );
-  const signed = await signTransactionMessageWithSigners(message);
-  const signature = getSignatureFromTransaction(signed);
+  const sourceAccount = await fetchMaybeToken(rpc, source);
+  if (!sourceAccount.exists) {
+    throw badRequest(
+      `DvP trade ${trade.id}: wallet ${signer.address} holds no ${mint} token account, so it cannot fund this leg; nothing was sent`
+    );
+  }
+  if (sourceAccount.data.amount < outstanding) {
+    const sourceAmount = formatDecimalAmount(sourceAccount.data.amount, decimals);
+    const outstandingAmount = formatDecimalAmount(outstanding, decimals);
+    throw badRequest(
+      `DvP trade ${trade.id}: wallet ${signer.address} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`
+    );
+  }
 
   // Last look before anything is committed to. Everything between the first
   // balance read and here — resolving a signer at the custody provider above
@@ -241,8 +326,7 @@ export async function executeDvpFunding(
   // a transfer-hook mint can revert the whole Settle. The claim below cannot
   // help with this one: it serialises OUR requests, not a stranger's transfer.
   //
-  // Placed BEFORE the claim and the approval fence deliberately, so aborting
-  // costs neither a claim to release nor a consumed approval lease.
+  // Placed before the claim so aborting costs no claim to release.
   //
   // This NARROWS the window to one read; it does not close it, and it cannot be
   // closed from here. Funding is a bare `TransferChecked` with the program
@@ -252,12 +336,39 @@ export async function executeDvpFunding(
   // deposit capped at the target, which is a program change, not an API one.
   // Aborting is the safe half of the trade-off: a refused top-up is retryable,
   // an over-funded escrow depends on the surplus-refund path working.
-  const recheck = await readEscrowState(rpc, escrow, tokenProgram);
-  if ((recheck?.amount ?? 0n) !== held) {
+  const recheck = await readEscrowState(rpc, plan.leg, trade.swapDvp, trade.id);
+  if (recheck === null) {
+    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`);
+  }
+  if (recheck.amount !== held) {
     throw conflict(
       `DvP trade ${trade.id}: the escrow balance changed while this funding was being prepared, so ${outstanding} is no longer the amount owed. Nothing was sent — retry to fund the current shortfall.`
     );
   }
+
+  const feePayment = await createProjectSponsorshipFeePayment(env, {
+    organizationId: plan.signer.organizationId,
+    projectId: plan.signer.projectId,
+    actor: { type: "wallet", id: plan.signer.custodyWalletId },
+  });
+  const sponsor = await feePayment.getFeePayer();
+  const instruction = getTransferCheckedInstruction(
+    { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
+    { programAddress: tokenProgram }
+  );
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(sponsor, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions([instruction], m)
+  );
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const walletSignatureBytes = partiallySigned.signatures[signer.address];
+  if (walletSignatureBytes === null || walletSignatureBytes === undefined) {
+    throw new Error("DvP funding transaction is missing the custody wallet signature");
+  }
+  const claimSignature = signature(getBase58Decoder().decode(walletSignatureBytes));
 
   // The balance read above and this transfer are not atomic, so two overlapping
   // requests would both see the same shortfall and both send. The claim is what
@@ -266,36 +377,39 @@ export async function executeDvpFunding(
   // never be accepted, which is what lets the sweep release a claim left behind
   // by a failure this code could not classify — the alternative was a leg that
   // stayed unfundable until somebody edited the database.
-  const claimed = await plan.claim(signature, lastValidBlockHeight.toString());
+  const claimed = await plan.claim(claimSignature, lastValidBlockHeight.toString());
   if (!claimed) {
     throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`);
   }
 
-  // Past this the tokens may have moved, so an approved operation that dies
-  // here needs reconciling by hand rather than replaying: a blind retry would
-  // over-fund.
-  //
-  // The fence itself is the exception. It runs before anything is broadcast, so
-  // a failure here changed nothing on chain, and keeping the claim would leave
-  // the leg permanently unfundable over an error that cost nothing.
+  let heldSignature: Signature = claimSignature;
   try {
-    await beginApprovedWalletOperationEffect(c);
-  } catch (error) {
-    await plan.release(signature);
-    throw error;
-  }
-
-  try {
-    await solanaRpc.sendTransaction(rpc, new Uint8Array(getTransactionEncoder().encode(signed)));
+    await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
+      lastValidBlockHeight,
+      store: {
+        persistSigned: async ({ signature, signedTransaction }) => {
+          await assertSponsorSignedSameMessage({
+            unsignedOrPartiallySigned: partiallySigned,
+            sponsorSigned: new Uint8Array(getBase64Encoder().encode(signedTransaction)),
+            sponsor,
+          });
+          await plan.rebindClaim(claimSignature, signature);
+          heldSignature = signature;
+        },
+        markStarted: async () => {},
+        hasStarted: async () => plan.hasClaim(heldSignature),
+      },
+    });
   } catch (error) {
     // A preflight rejection never reached the network, so the claim can be
     // released and the leg funded again. Any other failure is ambiguous and
     // KEEPS the claim: releasing it would invite a second transfer on top of
     // one that may yet land.
-    if (
-      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
-    ) {
-      await plan.release(signature);
+    if (heldSignature === claimSignature || isDefiniteSubmissionError(error)) {
+      await plan.release(heldSignature);
     }
     throw error;
   }
@@ -304,7 +418,7 @@ export async function executeDvpFunding(
   // The claim is released on a rejected broadcast and swept once its blockhash
   // expires; a leg that funded correctly ends up with no claim at all, which is
   // why this cannot be the same column.
-  await plan.recordFundingTx(signature);
+  await plan.recordFundingTx(heldSignature);
 
-  return { signature, leg: side, amount: outstanding.toString() };
+  return { signature: heldSignature, leg: side, amount: outstanding.toString() };
 }

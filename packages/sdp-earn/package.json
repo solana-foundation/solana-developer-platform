@@ -54,11 +54,6 @@
       "import": "./src/providers/perena/client.ts",
       "default": "./src/providers/perena/client.ts"
     },
-    "./providers/ground/client": {
-      "types": "./src/providers/ground/client.ts",
-      "import": "./src/providers/ground/client.ts",
-      "default": "./src/providers/ground/client.ts"
-    },
     "./providers/kamino/client": {
       "types": "./src/providers/kamino/client.ts",
       "import": "./src/providers/kamino/client.ts",
@@ -68,6 +63,11 @@
       "types": "./src/providers/jupiter-lend/client.ts",
       "import": "./src/providers/jupiter-lend/client.ts",
       "default": "./src/providers/jupiter-lend/client.ts"
+    },
+    "./providers/ondo/client": {
+      "types": "./src/providers/ondo/client.ts",
+      "import": "./src/providers/ondo/client.ts",
+      "default": "./src/providers/ondo/client.ts"
     }
   },
   "scripts": {

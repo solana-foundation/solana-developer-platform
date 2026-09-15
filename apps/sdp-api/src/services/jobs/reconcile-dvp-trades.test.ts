@@ -5,6 +5,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getBlockHeight = vi.hoisted(() => vi.fn());
@@ -67,6 +68,8 @@ async function seedTrade(
     createLastValidBlockHeight?: string | null;
     createSignature?: string | null;
     createdAt?: string;
+    closeResolutionAttempts?: number;
+    closeResolutionAfter?: string | null;
   } = {}
 ) {
   await getDb(env)
@@ -116,12 +119,27 @@ async function seedTrade(
       .bind(overrides.createdAt, id)
       .run();
   }
+  if (
+    overrides.closeResolutionAttempts !== undefined ||
+    overrides.closeResolutionAfter !== undefined
+  ) {
+    await getDb(env)
+      .prepare(
+        "UPDATE dvp_trades SET close_resolution_attempts = ?, close_resolution_after = ? WHERE id = ?"
+      )
+      .bind(
+        overrides.closeResolutionAttempts === undefined ? 0 : overrides.closeResolutionAttempts,
+        overrides.closeResolutionAfter === undefined ? null : overrides.closeResolutionAfter,
+        id
+      )
+      .run();
+  }
 }
 
 async function statusOf(id: string): Promise<Record<string, unknown> | null> {
   return getDb(env)
     .prepare(
-      "SELECT status, escrow_a_amount, escrow_b_amount, escrow_a_frozen, observed_at, close_signature FROM dvp_trades WHERE id = ?"
+      "SELECT status, escrow_a_amount, escrow_b_amount, escrow_a_frozen, observed_at, close_signature, close_resolution_attempts, close_resolution_after FROM dvp_trades WHERE id = ?"
     )
     .bind(id)
     .first<Record<string, unknown>>();
@@ -131,12 +149,11 @@ describe("reconcileDvpTrades", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     env.MARKETS_ENABLED = "true";
-    env.DVP_ENABLED = "true";
     getBlockHeight.mockResolvedValue(1_000n);
     // Default: broadcast claims check out on chain as landed, so existing
     // receipt rows survive. Tests that exercise a dead broadcast override.
     getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
-    resolveDvpClose.mockResolvedValue(null);
+    resolveDvpClose.mockResolvedValue({ kind: "absent" });
     readDvpTradeObservation.mockResolvedValue(observation());
 
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -157,13 +174,12 @@ describe("reconcileDvpTrades", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, TEST_ORG.id, PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
@@ -180,15 +196,14 @@ describe("reconcileDvpTrades", () => {
       .run();
   });
 
-  it("does nothing when the DvP flag is off", async () => {
-    env.DVP_ENABLED = undefined;
-    await seedTrade("dvp_flagged_off", "created");
+  it("does nothing when Markets is off", async () => {
+    env.MARKETS_ENABLED = undefined;
+    await seedTrade("markets_off", "created");
 
     await reconcileDvpTrades(env);
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
-    await expect(statusOf("dvp_flagged_off")).resolves.toMatchObject({ observed_at: null });
-    env.DVP_ENABLED = "true";
+    await expect(statusOf("markets_off")).resolves.toMatchObject({ observed_at: null });
   });
 
   it("records the observed balances and advances the status", async () => {
@@ -293,7 +308,7 @@ describe("reconcileDvpTrades", () => {
   it("records a decoded close and its signature", async () => {
     await seedTrade("dvp_external_settle", "funded");
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
-    resolveDvpClose.mockResolvedValue({ status: "settled", signature: SIG });
+    resolveDvpClose.mockResolvedValue({ kind: "resolved", status: "settled", signature: SIG });
 
     await reconcileDvpTrades(env);
 
@@ -301,6 +316,44 @@ describe("reconcileDvpTrades", () => {
       status: "settled",
       close_signature: SIG,
     });
+  });
+
+  it("defers another close lookup after the page cap", async () => {
+    await seedTrade("dvp_capped", "closed_unknown", {
+      closeResolutionAttempts: 2,
+      closeResolutionAfter: null,
+    });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET closed_at = sdp_iso_now() WHERE id = ?")
+      .bind("dvp_capped")
+      .run();
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+    resolveDvpClose.mockResolvedValue({ kind: "capped" });
+    const before = Date.now();
+
+    await reconcileDvpTrades(env);
+
+    const row = await statusOf("dvp_capped");
+    expect(row?.close_resolution_attempts).toBe(3);
+    expect(Date.parse(String(row?.close_resolution_after))).toBeGreaterThanOrEqual(
+      before + 4 * 60_000
+    );
+  });
+
+  it("does not resolve a close before its deferred instant", async () => {
+    await seedTrade("dvp_deferred", "closed_unknown", {
+      closeResolutionAttempts: 1,
+      closeResolutionAfter: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET closed_at = sdp_iso_now() WHERE id = ?")
+      .bind("dvp_deferred")
+      .run();
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+
+    await reconcileDvpTrades(env);
+
+    expect(resolveDvpClose).not.toHaveBeenCalled();
   });
 
   // The most destructive failure this job could cause. `create_failed` and

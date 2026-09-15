@@ -21,13 +21,13 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>auth · project scope · earn:read/write"]
-        SVC["provider clients<br/>(Ground portfolio · Kamino/Veda vault-direct)"]
+        SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo vault-direct; Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
         CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Ground · Kamino · Veda (+ future providers)"]
+        VAULT["Vault-infra APIs<br/>Kamino · Jupiter Lend · Jupiter swap (Ondo)<br/>+ on-chain reads (Veda, Ondo)"]
         CHAIN["Solana<br/>(provider-managed wallet or direct vault transaction)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
@@ -48,8 +48,8 @@ Vault-direct execution now has two signer surfaces over one provider runtime:
 the treasury flow signs with an organization custody wallet, while Embedded
 Yield returns an unsigned transaction for an end-user wallet and optional
 partner fee payer to co-sign. Both are recorded before broadcast and converge
-through the vault-movement reconciler. Ground's custodial portfolio flow remains
-address-funded and provider-observed.
+through the vault-movement reconciler. The custodial portfolio flow (the
+removed Ground integration) was address-funded and provider-observed.
 
 ## Where each surface gets its data (source of truth)
 
@@ -72,9 +72,9 @@ address-funded and provider-observed.
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
 > **Ledger vs live.** SDP ledgers every movement it builds or submits, while
-> balances remain live provider or on-chain reads. Ground deposits are the
+> balances remain live provider or on-chain reads. Custodial deposits are the
 > exception because customers transfer directly to a provider-managed address;
-> Ground observes those deposits and SDP has no build intent to record. A
+> the provider observes those deposits and SDP has no build intent to record. A
 > ledger row proves SDP's movement lifecycle, never the current balance.
 
 > **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
@@ -112,15 +112,16 @@ address-funded and provider-observed.
 
 **No new indexer.** The catalogue comes from provider APIs or bounded on-chain
 reads, and holdings are hydrated live. Vault-direct deposits and withdrawals
-are ledgered because SDP builds or submits them. Ground's address-funded
-deposits stay provider-observed. Richer per-block history would be an indexer
-decision for a later product need.
+are ledgered because SDP builds or submits them. Custodial address-funded
+deposits (the removed Ground integration) were provider-observed. Richer
+per-block history would be an indexer decision for a later product need.
 
 ## Execution era (PRO-1634 — arrived for `vault_direct`)
 
 **This is now half true.** For the CUSTODIAL shape it still holds exactly: a
-Ground program is funded by sending stablecoins to its deposit address, with no
-SDP-built transaction and no custody signing.
+program is funded by sending stablecoins to its deposit address, with no
+SDP-built transaction and no custody signing. (The Ground integration that used
+this shape was removed; the routes and contracts stay provider-neutral.)
 
 For the NON-CUSTODIAL (`vault_direct`) shape it no longer does. A K-Vault has no
 address to send to, so the only way money moves is SDP building an instruction,
@@ -145,9 +146,11 @@ The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
 records one share-mint-denominated signed movement before broadcasting it, and
 the treasury dashboard's exit action drives it. The shared vault reconciliation
 sweep finishes an ambiguous or interrupted submission. Production vault
-deposits remain closed until PRO-1703 surfaces vault positions on the Active
-tab (`VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`); the exit route itself takes no
-environment gate — money out beats money off.
+deposits open PER PROVIDER (`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`
+in `@sdp/types`): the two mainnet-only providers, Jupiter Lend and Ondo, accept
+production deposits, while Kamino and Veda stay sandbox-only until PRO-1635's
+launch checklist opens them; the exit route itself takes no environment gate —
+money out beats money off.
 
 The removed pre-PRO-1634 execution sketch is not a contract. New providers must
 implement today's `EarnVaultDirectProvider` plan and quote capabilities, then
@@ -174,10 +177,12 @@ per-provider movement endpoints or status polling types from git history.
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
 | OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public strategy catalogue, deposit quote, and external-wallet build/submit/read surfaces | ✅ published; regenerate after contract changes |
 
-**Net-new (Earn-only) components:** the catalogue clients in `@sdp/earn`
-(Ground, Kamino, and Veda are implemented; Upshift and Perena remain
-`StubEarnClient` subclasses), the vault-direct execution packages
-`@sdp/kamino` and `@sdp/veda`, the
+**Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
+(Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads;
+Upshift/Perena remain `StubEarnClient` subclasses
+carrying `provider` + `declaredSupport`, filled in method-by-method), the
+vault-direct execution packages `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`
+and `@sdp/ondo`, the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
@@ -188,102 +193,16 @@ moved uniqueness onto the provider wallet itself — one link row per
 `services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
 (`cron/earn-catalogue-sync.ts`).
 
-## Ground portfolio-wallet flow
+## The custodial portfolio-wallet flow (retired)
 
-The dashboard's mock seam (`earn-mock-data.ts`) is replaced by a live path
-built on `GroundEarnClient` (`@sdp/earn/providers/ground/client`), which
-implements `EarnPortfolioWalletProvider`. Auth is a Bearer key from env
-(`GROUND_SANDBOX_API_KEY` / `GROUND_API_KEY`); a missing key fails closed
-with `PROVIDER_NOT_CONFIGURED` before any request leaves the process.
-
-```mermaid
-flowchart LR
-    GY["Ground GET /v2/wallets/yield-sources"] -->|hourly cron| SYNC["earn-catalogue-sync"]
-    SYNC -->|declared-support validated| ES[("earn_strategies")]
-    ES --> CAT["GET /v1/earn/strategies"]
-
-    PROG["/v1/earn/programs<br/>list · create · get · re-target"] --> EPW[("earn_provider_wallets")]
-    PROG -->|create wallet / update strategy / snapshot| GW["Ground /v2/wallets"]
-
-    FUND["Solana deposit address<br/>(from wallet snapshot)"] -.->|user sends USDC| GW
-    GW -->|GET deposits (poll)| DEP["deposit tracking"]
-
-    WD["portfolio withdrawal<br/>(amountUsd + token + solana dest)"] --> GW
-```
-
-- **Catalogue.** Cron calls Ground's cursor-paginated
-  `GET /v2/wallets/yield-sources`; each source maps to a strategy snapshot
-  (apyBps→decimal, redeem policy→instant/delayed, curator derived from known
-  ids → `morpho-<curator>-<token>` convention → protocol fallback,
-  dominant-allocation rwa/defi classification, tvl/utilization into
-  `riskMetadata`). Four gates drop a source before it can be catalogued, in
-  that order (`distillGroundYieldSource`): `mode !== "active"` — `buy_only`
-  would take deposits into an exit-frozen source and `sell_only`/
-  `emergency_freeze` cannot take deposits at all; a deposit token Ground does
-  not route on Solana (`GROUND_SOLANA_ROUTED_TOKENS` is USDC only), which is
-  un-fundable and un-exitable through SDP's Solana-only surface on *every*
-  cluster; an unrecognized token symbol; and no well-known mint on this
-  environment's cluster. Routability is the gate that actually bites: all 3 of
-  sandbox's 18 sources that never reach the catalogue are dropped
-  `not_solana_routable` — USDT twins of vaults already catalogued in USDC
-  (`docs/earn/ground-catalogue-inventory.md`). Rows land in `earn_strategies`
-  via the standard sync.
-- **Programs.** One Ground wallet = one SDP program, recorded in
-  `earn_provider_wallets`; an org may hold several per environment (PRO-1670),
-  and the only uniqueness left is global on `(provider, provider_wallet_ref)`.
-  `POST /v1/earn/programs` creates one (`POST /v2/wallets`, polled from
-  `creating` to `ready`); `PUT /v1/earn/programs/:programId` replaces that
-  program's strategy in place (`PATCH /v2/wallets/{id}/strategy`). Create
-  **requires** a caller idempotency key — exactly one of body `requestId` or the
-  `Idempotency-Key` header — because with N programs legal nothing downstream
-  can tell a retry from a genuine second program; SDP derives it against
-  (org, environment, provider) before it reaches Ground, and answers a provider
-  replay (which returns the original wallet ref, so the insert hits the global
-  unique) with the existing program at **200** instead of **201**.
-  A selection is exactly ONE strategy at
-  `pct: 100` of that strategy's stablecoin lane (`singleStrategyAllocation`) —
-  a shape the API enforces, not just a wizard convention: PRO-1667 caps each
-  token group at one allocation entry per program, leaving the weighted wire
-  shape dormant — the API side of post-V1 re-enablement is just relaxing that
-  cap, while the dashboard would separately need weight authoring and share
-  display back (concurrent strategies arrive as separate single-vault
-  programs, PRO-1670).
-  The curator-first step and the weight editor were removed on purpose —
-  curator is metadata rendered beside a strategy, never a gate — and an
-  omitted lane keeps its current allocation server-side. Positions and
-  balances are read live from the wallet snapshot and rendered as a flat
-  value-ordered holdings list, not grouped by curator — no SDP-side position
-  ledger for the portfolio surface.
-- **Funding.** The wallet snapshot exposes its Solana deposit address
-  (`solana_devnet` sandbox / `solana` production); users fund by sending
-  USDC there — Ground's Solana rails carry USDC only
-  (`GROUND_SOLANA_ROUTED_TOKENS`), with USDT riding Ethereum (mainnet in
-  production, Sepolia in sandbox), so the funding lane and the payout lane
-  (`assertSolanaRoutable`) agree on one stablecoin. Deposits are tracked via
-  Ground's cursor-paginated deposits API. No custody signing in V1.
-- **Withdrawals.** Portfolio-level: preview
-  (`POST .../withdrawal-preview`) — whose `amountUsd` is **optional**, so the
-  same call serves two jobs: omitted it is the LIQUIDITY read (what the lane can
-  pay right now, PRO-1675), present it also validates that amount and quotes its
-  fee — then create
-  (`POST .../withdrawals`, caller-owned requestId — a 409
-  `request_id_conflict` surfaces as `CONFLICT`), pinned to the environment's
-  Solana rail, then status-polled over `EARN_PORTFOLIO_WITHDRAWAL_STATUSES`
-  (`@sdp/types/earn`): `processing`, `pending_approval`, `completed`,
-  `partially_completed`, `failed`, `cancelled`. `pending_approval` is
-  SDP-derived, not a Ground status — Ground leaves the withdrawal at
-  `processing` while a payout leg (or a step inside it) sits in
-  `pending_customer_approval` awaiting the customer's Turnkey stamp, so
-  `mapWithdrawal` folds that up into the distinct wire status rather than
-  leaving a blocked exit indistinguishable from one in flight. It never
-  overrides a terminal status: once a withdrawal settles, leg states are
-  history. Destination whitelisting is available as an explicit address-book
-  call, not folded into the withdrawal flow. Every create also writes the
-  SDP-side intent row and every observation advances it (PRO-1628) — see the
-  source-of-truth table above.
-- **Settlement signal: polling, for now.** Ground offers Stripe-style
-  HMAC-signed webhooks; wiring them into the existing webhook dispatch is
-  future work — V1 polls deposit and withdrawal status.
+The Ground integration was the one live implementation of the custodial shape:
+an address-funded omnibus portfolio wallet the provider observes and rebalances,
+with SDP holding no signing role. It has been REMOVED — client, credentials and
+catalogue rows — and no registered provider implements
+`EarnPortfolioWalletProvider` today. The program routes, the portfolio ledger
+and the capability contract stay provider-neutral so a future custodial
+provider can light them up; the full flow as it shipped is in git history and
+ADR 0002's 2026-08-03 addendum.
 
 ## Open infra decisions (mirror of the V1 decision list)
 
@@ -292,8 +211,9 @@ flowchart LR
    remaining question is purely a decision — provider API vs on-chain read vs
    both — to be made when a real NAV-history consumer exists.
 2. **Settlement signal** — webhook-primary with poll backstop (ramps pattern,
-   assumed above) vs poll-only for providers without webhooks. *Resolved for
-   Ground V1: poll-only; its HMAC webhooks are future work (see above).*
+   assumed above) vs poll-only for providers without webhooks. *Resolved for the
+   V1 custodial flow (Ground): poll-only; its HMAC webhooks were future work.*
+   Revisit with the next custodial integration.
 3. **Compliance hook** — do RWA deposits require a compliance-provider check
    (Genius-compliant tokens need app whitelisting — JOLT/B-reserves)?
 4. **Policy engine scope** — which of whitelist/buffer/limits/timelocks land in

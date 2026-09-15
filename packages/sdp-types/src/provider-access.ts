@@ -26,12 +26,8 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 /**
  * Vault-infra partners fronting Earn yield strategies.
  *
- * Two shapes live here and the difference is load-bearing:
- *
- * - **Custodial portfolio providers** (Ground) front an omnibus wallet SDP
- *   provisions and moves money through. They implement the optional
- *   `EarnPortfolioWalletProvider` capability.
- * - **Vault-direct providers** (Kamino, Veda) front on-chain vaults that an
+ * All current providers are **vault-direct providers** (Kamino, Veda): they
+ * front on-chain vaults that an
  *   organization custody wallet or an end user's external wallet deposits
  *   into. Their catalogue client implements the base `EarnVaultProvider`
  *   contract; a separate execution package implements `EarnVaultDirectProvider`.
@@ -44,9 +40,9 @@ export const EARN_PROVIDERS = [
   "veda",
   "upshift",
   "perena",
-  "ground",
   "kamino",
   "jupiter_lend",
+  "ondo",
 ] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
@@ -62,9 +58,9 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   veda: [],
   upshift: [],
   perena: [],
-  ground: ["usdc"],
   kamino: [],
   jupiter_lend: [],
+  ondo: [],
 } as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
 
 /** Fail closed for provider ids from open database read models. */
@@ -123,16 +119,18 @@ export const EARN_PROVIDER_SURFACING = {
   // nothing, so there is nothing to offer.
   upshift: false,
   perena: false,
-  // Un-surfaced 2026-08-14: SDP is leading with the Kamino catalogue. Ground's
-  // client, sandbox/production credentials, catalogue sync and every program
-  // route stay live — an organization already holding a Ground program keeps
-  // read, re-target, withdrawal and ledger access untouched.
-  ground: false,
   kamino: true,
   // Jupiter Earn is a mainnet-only, public on-chain market. Its USDT row is
   // visible in both product catalogues; the sandbox copy is browse-only while
   // production projects may execute against the mainnet program.
   jupiter_lend: true,
+  // Surfaced 2026-09-14 (PRO-1832), registered dormant 2026-09-02 (PRO-1803).
+  // Mainnet-only like Jupiter Lend: the production catalogue carries the USDY
+  // row and production projects may execute against it (the deposit is a
+  // Jupiter-routed USDC→USDY swap, `@sdp/ondo`); the sandbox copy arrives
+  // through the PRO-1742 mirror, browse-only. No `currentApy` until a rate
+  // source lands (PRO-1833) — the row renders "—" rather than a derived figure.
+  ondo: true,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -141,7 +139,7 @@ export const EARN_PROVIDER_SURFACING = {
  *
  * - `custodial` — SDP provisions a provider-managed portfolio wallet and the
  *   customer funds THAT address. SDP never signs; it watches the address and the
- *   provider deploys on its own rebalance. Ground.
+ *   provider deploys on its own rebalance. (No current provider uses this.)
  * - `vault_direct`: the vault is non-custodial and takes an on-chain program
  *   instruction signed by the organization's selected custody wallet or an end
  *   user's external wallet. There is no provider deposit address to fund; SDP
@@ -190,9 +188,13 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   // drift test fails until they agree.
   upshift: "vault_direct",
   perena: "vault_direct",
-  ground: "custodial",
   kamino: "vault_direct",
   jupiter_lend: "vault_direct",
+  // Non-custodial like Kamino/Veda, though the "vault" is the open market:
+  // the deposit is a custody-signed USDC→USDY swap and the position is the
+  // USDY balance in the organization's own wallet. There is no address to
+  // fund, so `vault_direct` is the truthful shape here too.
+  ondo: "vault_direct",
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
 
 /**
@@ -229,9 +231,14 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   veda: { defaultToleranceBps: 10 },
   upshift: null,
   perena: null,
-  ground: null,
   kamino: null,
   jupiter_lend: { defaultToleranceBps: 10 },
+  // The deposit is a market swap, so its builder REQUIRES an explicit floor
+  // and quotes live (`supportsVaultDepositQuote`). 50 bps default: USDC↔USDY
+  // is a stable-ish pair but a real market — wider than Veda's oracle-rate 10
+  // so an ordinary spread move between quote and landing does not fail the
+  // deposit, still tight enough to bound what a route can take.
+  ondo: { defaultToleranceBps: 50 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -255,9 +262,10 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   veda: { defaultToleranceBps: 10 },
   upshift: null,
   perena: null,
-  ground: null,
   kamino: null,
   jupiter_lend: { defaultToleranceBps: 10 },
+  // The exit is the reverse market swap; same floor contract as the deposit.
+  ondo: { defaultToleranceBps: 50 },
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -292,9 +300,11 @@ export const EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS = {
   veda: ["sandbox"],
   upshift: ["sandbox"],
   perena: ["sandbox"],
-  ground: [],
   kamino: ["sandbox"],
   jupiter_lend: ["production"],
+  // USDY exists on mainnet only (`ONDO_DEPLOYMENTS` devnet is null), so the
+  // sandbox mirror is browse-only and only a production project may deposit.
+  ondo: ["production"],
 } as const satisfies Record<EarnProviderId, readonly SdpEnvironment[]>;
 
 /**

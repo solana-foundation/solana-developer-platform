@@ -23,7 +23,7 @@ function MarketsPathCard({
   icon: Icon,
   title,
 }: {
-  audience: string;
+  audience?: string;
   description: string;
   href: string;
   icon: LucideIcon;
@@ -39,9 +39,11 @@ function MarketsPathCard({
           <Icon aria-hidden="true" className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1 space-y-2">
-          <span className="block text-xs font-medium uppercase tracking-wide text-tertiary">
-            {audience}
-          </span>
+          {audience ? (
+            <span className="block text-xs font-medium uppercase tracking-wide text-tertiary">
+              {audience}
+            </span>
+          ) : null}
           <span
             className={cn(
               providerSelectionCardTitleClassName,
@@ -75,38 +77,44 @@ export async function MarketsLanding() {
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto w-full max-w-4xl space-y-5">
-        <div className="max-w-3xl">
-          <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
-            {t("DashboardMarkets.landing.eyebrow")}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-secondary">
-            {t("DashboardMarkets.landing.description")}
-          </p>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <MarketsPathCard
-            audience={t("DashboardMarkets.landing.treasuryAudience")}
-            description={t("DashboardMarkets.landing.treasuryDescription")}
-            href={DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions}
-            icon={LandmarkIcon}
-            title={t("Shared.dashboardShell.treasurySolutions")}
-          />
-          <MarketsPathCard
-            audience={t("DashboardMarkets.landing.programAudience")}
-            description={t("DashboardMarkets.landing.programDescription")}
-            href={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
-            icon={UsersRoundIcon}
-            title={t("Shared.dashboardShell.earnProgram")}
-          />
-          <MarketsPathCard
-            audience={t("DashboardMarkets.dvp.landingAudience")}
-            description={t("DashboardMarkets.dvp.landingDescription")}
-            href={DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}
-            icon={ArrowLeftRightIcon}
-            title={t("DashboardMarkets.dvp.navLabel")}
-          />
-        </div>
+      <div className="mx-auto w-full max-w-4xl space-y-10">
+        <section aria-labelledby="markets-earn-heading" className="space-y-4">
+          <h2 className="text-lg font-medium leading-6 text-primary" id="markets-earn-heading">
+            {t("DashboardMarkets.landing.earnHeading")}
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <MarketsPathCard
+              audience={t("DashboardMarkets.landing.treasuryAudience")}
+              description={t("DashboardMarkets.landing.treasuryDescription")}
+              href={DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions}
+              icon={LandmarkIcon}
+              title={t("Shared.dashboardShell.treasurySolutions")}
+            />
+            <MarketsPathCard
+              audience={t("DashboardMarkets.landing.programAudience")}
+              description={t("DashboardMarkets.landing.programDescription")}
+              href={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
+              icon={UsersRoundIcon}
+              title={t("Shared.dashboardShell.earnProgram")}
+            />
+          </div>
+        </section>
+        <section aria-labelledby="markets-settlement-heading" className="space-y-4">
+          <h2
+            className="text-lg font-medium leading-6 text-primary"
+            id="markets-settlement-heading"
+          >
+            {t("DashboardMarkets.landing.settlementHeading")}
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <MarketsPathCard
+              description={t("DashboardMarkets.dvp.landingDescription")}
+              href={DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}
+              icon={ArrowLeftRightIcon}
+              title={t("DashboardMarkets.dvp.navLabel")}
+            />
+          </div>
+        </section>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

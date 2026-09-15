@@ -1,5 +1,7 @@
+import { isIP } from "node:net";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { rpcProviderNeedsEndpoint } from "@sdp/types";
+import { isBlockedAddress } from "./blocked-address";
 import {
   applyApiKeyTemplate,
   withAlchemyApiKey,
@@ -128,48 +130,23 @@ export function resolveTenantEndpoint(
 }
 
 /**
- * Hosts a tenant endpoint may never point at.
+ * Names a tenant endpoint may never point at.
  *
  * Activation and the relay both fetch whatever URL the tenant stored, so
  * without this a connection could aim SDP's server at loopback, a private
  * range, or a cloud metadata service and read back coarse reachability from the
  * status and timing. Blocking at submission keeps such a row from existing.
  *
- * Literal-address matching only: a hostname that resolves to a private address
- * still passes here, which is the deeper hardening HOO-1009 covers.
+ * Name matching only: the URL parser canonicalises every literal-address
+ * spelling, and those go through `isBlockedAddress`, the same classification
+ * the egress guard applies at connect time. A hostname that resolves to a
+ * private address passes here and is caught by that guard instead.
  */
 const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /^localhost$/i,
   /\.localhost$/i,
-  /^127\./,
-  /^0\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  // 169.254.0.0/16 covers the 169.254.169.254 metadata address.
-  /^169\.254\./,
   /\.internal$/i,
   /\.local$/i,
-];
-
-/**
- * IPv6 literals, tested against the bracket-stripped host.
- *
- * `URL.hostname` returns an IPv6 literal still wrapped in brackets
- * (`https://[fd00::1]/` -> `"[fd00::1]"`), so a pattern anchored with `^fd`
- * silently matches nothing. Stripping first is what makes these anchors mean
- * what they read as.
- */
-const BLOCKED_IPV6_PATTERNS: RegExp[] = [
-  // Loopback, in the compressed form the URL parser always normalises to.
-  /^::1$/,
-  // Unspecified address: on many stacks a connect() to it reaches loopback.
-  /^::$/,
-  // fc00::/7 unique local. Exactly four hex digits: a shorter group such as
-  // `fd0:` is 0x0fd0, a different address that must not be caught here.
-  /^f[cd][0-9a-f]{2}:/i,
-  // fe80::/10 link local, which is where the IPv6 metadata endpoint lives.
-  /^fe[89ab][0-9a-f]:/i,
 ];
 
 /**
@@ -206,12 +183,19 @@ export function assertReachableTenantEndpoint(endpointUrl: string): void {
     throw new SdpRpcError("BAD_REQUEST", "An RPC endpoint must use https");
   }
 
+  if (parsed.username || parsed.password) {
+    throw new SdpRpcError("BAD_REQUEST", "An RPC endpoint URL must not embed credentials");
+  }
+
   const { host, mappedIpv4 } = normalizeHost(parsed.hostname);
   const candidates = mappedIpv4 ? [host, mappedIpv4] : [host];
 
   if (
-    BLOCKED_IPV6_PATTERNS.some((pattern) => pattern.test(host)) ||
-    candidates.some((candidate) => BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(candidate)))
+    candidates.some(
+      (candidate) =>
+        BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(candidate)) ||
+        (isIP(candidate) !== 0 && isBlockedAddress(candidate))
+    )
   ) {
     throw new SdpRpcError("BAD_REQUEST", "That RPC endpoint host is not reachable from SDP");
   }

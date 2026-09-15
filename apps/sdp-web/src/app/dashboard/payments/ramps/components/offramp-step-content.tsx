@@ -1,5 +1,6 @@
 "use client";
 
+import { isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
@@ -19,7 +20,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { isTerminalTransferStatus, RampStatusPanel } from "./ramp-status-panel";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
@@ -36,6 +37,11 @@ function OfframpManualQuoteStep({
 }) {
   const { selectedRampPair, fields, transferStatus } = wizard;
 
+  // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
+  if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
+    return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
+  }
+
   if (!quote.paymentInstructions) {
     return (
       <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
@@ -45,12 +51,6 @@ function OfframpManualQuoteStep({
   }
 
   const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
-
-  // A cancelled, failed or expired payout can never settle, so the instructions are withdrawn
-  // rather than left on screen — the status panel alone explains where the transfer stands.
-  if (isTerminalTransferStatus(transferStatus?.status)) {
-    return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
-  }
 
   return (
     <ManualInstructionsQuote

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { LightsparkWebhookProcessor } from "./lightspark";
 import type { AppContext } from "./processor";
@@ -68,20 +69,14 @@ async function seedTransfer() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "lightspark-webhook@example.com", 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        "Lightspark Webhook Project",
-        "lightspark-webhook-project",
-        "sandbox",
-        "active",
-        USER_ID
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (

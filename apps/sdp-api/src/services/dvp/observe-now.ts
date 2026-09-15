@@ -19,7 +19,7 @@ import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from 
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { resolveDvpClose } from "./closing-transaction";
-import { deriveDvpTradeState } from "./observe";
+import { closeIsKnown, deriveDvpTradeState } from "./observe";
 import { readDvpTradeObservation } from "./read-chain";
 
 /**
@@ -58,15 +58,20 @@ export async function observeDvpTradeNow(
       rpc,
       trade.swapDvp,
       {
-        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA },
-        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB },
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
       },
       blockHeight
     );
-    observation.closeResolution =
-      observation.tradeAccountExists || trade.closeSignature !== null
-        ? null
-        : await resolveDvpClose(rpc, trade.swapDvp);
+    if (!observation.tradeAccountExists && !closeIsKnown(trade)) {
+      const lookup = await resolveDvpClose(
+        rpc,
+        trade.swapDvp,
+        trade.createSignature,
+        trade.createdAt
+      );
+      observation.closeResolution = lookup.kind === "resolved" ? lookup : null;
+    }
 
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
@@ -130,15 +135,20 @@ export async function observeDvpTradeWithoutRecording(
       rpc,
       trade.swapDvp,
       {
-        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA },
-        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB },
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
       },
       blockHeight
     );
-    observation.closeResolution =
-      observation.tradeAccountExists || trade.closeSignature !== null
-        ? null
-        : await resolveDvpClose(rpc, trade.swapDvp);
+    if (!observation.tradeAccountExists && !closeIsKnown(trade)) {
+      const lookup = await resolveDvpClose(
+        rpc,
+        trade.swapDvp,
+        trade.createSignature,
+        trade.createdAt
+      );
+      observation.closeResolution = lookup.kind === "resolved" ? lookup : null;
+    }
     const derived = deriveDvpTradeState(observation, trade, Date.now());
 
     return {

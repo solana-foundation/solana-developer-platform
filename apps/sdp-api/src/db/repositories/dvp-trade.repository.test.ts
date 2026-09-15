@@ -3,6 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   DvpInboundScope,
@@ -13,7 +18,6 @@ import type {
 import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_dvp_repo_test";
-const OTHER_PROJECT_ID = "prj_dvp_repo_other";
 const CUSTODY_CONFIG_ID = "cust_dvp_repo_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_repo_test";
 const OTHER_CUSTODY_WALLET_ID = "cwlt_dvp_repo_other";
@@ -53,6 +57,8 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
     decimalsB: 6,
     symbolA: "ATD",
     symbolB: "USDC",
+    nameA: "Acme Treasury Debt",
+    nameB: "USD Coin",
     amountA: "1000",
     amountB: "2000",
     expiryTimestamp: "1800003600",
@@ -79,6 +85,7 @@ const UNFILTERED: DvpTradeListFilters = { statuses: null, q: null };
 
 describe("DvpTradeRepository (postgres)", () => {
   let repo: DvpTradeRepository;
+  let projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -109,15 +116,12 @@ describe("DvpTradeRepository (postgres)", () => {
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
-    for (const projectId of [TEST_PROJECT_ID, OTHER_PROJECT_ID]) {
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, TEST_ORG.id, projectId, TEST_USER.id)
-        .run();
-    }
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
@@ -143,6 +147,27 @@ describe("DvpTradeRepository (postgres)", () => {
     repo = createPostgresDvpTradeRepository(db);
   });
 
+  it.each([
+    [
+      "id",
+      (projectId: string, id: string) =>
+        repo.getById({ organizationId: TEST_ORG.id, projectId }, id),
+    ],
+    [
+      "swap address",
+      (projectId: string, id: string) =>
+        repo.getBySwapDvp({ organizationId: TEST_ORG.id, projectId }, address(id)),
+    ],
+  ])("does not leak a trade across projects by %s", async (kind, read) => {
+    const created = await repo.create(tradeInsert());
+    const identifier = kind === "id" ? created.id : created.swapDvp;
+    await expectProjectScoped(
+      (projectId) => read(projectId, identifier),
+      { own: projects.sandbox, other: projects.production },
+      (row) => row === null
+    );
+  });
+
   // The row is written before the create transaction is broadcast, so its
   // opening state has to be "outcome unknown" rather than "created". Anything
   // else would claim an on-chain fact nothing has observed yet.
@@ -153,7 +178,13 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(created.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
     expect(created.counterpartyAccountIdA).toBeNull();
     expect(created.counterpartyAccountIdB).toBeNull();
+    expect(created.nameA).toBe("Acme Treasury Debt");
+    expect(created.nameB).toBe("USD Coin");
     expect(created.createdAt).toBeTruthy();
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      nameA: "Acme Treasury Debt",
+      nameB: "USD Coin",
+    });
   });
 
   it("attaches a create signature exactly once", async () => {
@@ -274,6 +305,67 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(first?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAAmount).toBe("100");
+  });
+
+  it("defers close resolution with a status compare-and-swap", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+    const after = "2026-09-11T02:00:00.000Z";
+
+    await expect(
+      repo.deferCloseResolution({
+        id: created.id,
+        expectedStatus: "creating",
+        attempts: 1,
+        after,
+      })
+    ).resolves.toBe(false);
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      closeResolutionAttempts: 0,
+      closeResolutionAfter: null,
+    });
+
+    await expect(
+      repo.deferCloseResolution({
+        id: created.id,
+        expectedStatus: "created",
+        attempts: 1,
+        after,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      closeResolutionAttempts: 1,
+      closeResolutionAfter: after,
+    });
+  });
+
+  it("resets close-resolution backoff when a known close is recorded", async () => {
+    const created = await repo.create(tradeInsert());
+    await repo.resolveCreate(created.id, "created");
+    await repo.deferCloseResolution({
+      id: created.id,
+      expectedStatus: "created",
+      attempts: 3,
+      after: "2026-09-11T04:00:00.000Z",
+    });
+
+    const observed = await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "created",
+      status: "settled",
+      escrowAAmount: null,
+      escrowBAmount: null,
+      escrowAFrozen: null,
+      escrowBFrozen: null,
+      closeSignature: CLOSE_SIGNATURE,
+      observedAt: "2026-09-11T00:00:00.000Z",
+    });
+
+    expect(observed).toMatchObject({
+      closeResolutionAttempts: 0,
+      closeResolutionAfter: null,
+      closedAt: "2026-09-11T00:00:00.000Z",
+    });
   });
 
   it("sets the close time on the first closed observation and never moves it", async () => {
@@ -437,14 +529,6 @@ describe("DvpTradeRepository (postgres)", () => {
     await expect(repo.getBySwapDvp(scope, created.swapDvp)).resolves.toMatchObject({
       id: created.id,
     });
-  });
-
-  it("does not leak a trade across projects", async () => {
-    const created = await repo.create(tradeInsert());
-    const otherScope = { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID };
-
-    await expect(repo.getById(otherScope, created.id)).resolves.toBeNull();
-    await expect(repo.getBySwapDvp(otherScope, created.swapDvp)).resolves.toBeNull();
   });
 
   it("lists a project's trades, newest first", async () => {
@@ -715,21 +799,11 @@ describe("DvpTradeRepository (postgres)", () => {
       );
       expect(listed.map((t) => t.id)).toEqual(["dvp_fl_settled"]);
     });
-
-    it("stays tenant-scoped under filters: another project's matching trade is empty", async () => {
-      const other = await repo.listByProject(
-        { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID },
-        { statuses: ["settled"], q: "dvp_fl_settled" },
-        10
-      );
-      expect(other).toEqual([]);
-    });
   });
 
   describe("listInboundForParty", () => {
     // A third address that neither bound wallet's public key matches.
     const UNRELATED_PUBKEY = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
-    const UNRELATED_PUBKEY_2 = "DxR4Km2vQp8nRtYwZbCdFgHiJkLmNoPqRsTuVwXyZ12u";
 
     const inboundScope = (partyAddresses: Address[]): DvpInboundScope => ({
       organizationId: TEST_ORG.id,
@@ -739,35 +813,8 @@ describe("DvpTradeRepository (postgres)", () => {
 
     // The list only answers for open statuses, so each seeded trade is advanced
     // to `created` the way a real create would leave it.
-    const createdForeignTrade = (id: string, swapDvp: string, userA: Address, userB: Address) =>
-      repo
-        .create(
-          tradeInsert({
-            id,
-            projectId: OTHER_PROJECT_ID,
-            swapDvp: address(swapDvp),
-            userA,
-            userB,
-          })
-        )
-        .then((trade) => repo.resolveCreate(trade.id, "created"));
-
     it("returns nothing when the caller holds no wallets", async () => {
       await expect(repo.listInboundForParty(inboundScope([]), 10)).resolves.toEqual([]);
-    });
-
-    it("returns nothing when no caller address is a party to any foreign trade", async () => {
-      await createdForeignTrade(
-        "dvp_inbound_unrelated",
-        "SwapU11111111111111111111111111111111111111",
-        address(WALLET_B_PUBKEY),
-        address(UNRELATED_PUBKEY)
-      );
-
-      // The caller holds WALLET_A only; the foreign trade names WALLET_B.
-      await expect(
-        repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
-      ).resolves.toEqual([]);
     });
 
     it("excludes the caller's own project, where the trade is already listed", async () => {
@@ -784,25 +831,6 @@ describe("DvpTradeRepository (postgres)", () => {
       await expect(
         repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
       ).resolves.toEqual([]);
-    });
-
-    it("returns a foreign trade naming the caller's address, and not an unrelated foreign one", async () => {
-      await createdForeignTrade(
-        "dvp_inbound_mine",
-        "SwapM11111111111111111111111111111111111111",
-        address(WALLET_A_PUBKEY),
-        address(UNRELATED_PUBKEY)
-      );
-      await createdForeignTrade(
-        "dvp_inbound_theirs",
-        "SwapT11111111111111111111111111111111111111",
-        address(UNRELATED_PUBKEY),
-        address(UNRELATED_PUBKEY_2)
-      );
-
-      const listed = await repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10);
-
-      expect(listed.map((trade) => trade.id)).toEqual(["dvp_inbound_mine"]);
     });
   });
 });

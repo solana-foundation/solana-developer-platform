@@ -6,8 +6,9 @@ import { createPostgresCounterpartiesRepository } from "@/db/repositories/counte
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
 
 const TEST_ORG = { id: "org_dvp_test", name: "DvP Test Org", slug: "dvp-test-org" };
@@ -59,7 +60,6 @@ const PARTY_CACHED_API_KEY: CachedApiKey = {
 };
 
 let originalMarkets: string | undefined;
-let originalDvp: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -71,20 +71,14 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -124,20 +118,14 @@ async function seedPartyOrg(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
       .bind(PARTY_ORG.id, PARTY_ORG.name, PARTY_ORG.slug, "enterprise", "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PARTY_PROJECT.id,
-        PARTY_ORG.id,
-        "Party Project",
-        PARTY_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: PARTY_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: PARTY_PROJECT.id, production: `${PARTY_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -475,28 +463,17 @@ describe("deriveDvpTradeKind", () => {
 describe("DvP routes", () => {
   beforeEach(async () => {
     originalMarkets = env.MARKETS_ENABLED;
-    originalDvp = env.DVP_ENABLED;
     env.MARKETS_ENABLED = "true";
-    env.DVP_ENABLED = "true";
     await seedTestDatabase(env);
     await seedAuth();
   });
 
   afterEach(async () => {
     env.MARKETS_ENABLED = originalMarkets;
-    env.DVP_ENABLED = originalDvp;
     await clearKVStores(env);
   });
 
-  it("returns 403 when the DvP flag is off", async () => {
-    env.DVP_ENABLED = undefined;
-    const res = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
-    expect(res.status).toBe(403);
-  });
-
-  // DvP is a Markets sub-module, so clearing the parent has to dark-launch it
-  // even with its own flag on. Same hierarchy Earn uses.
-  it("returns 403 when Markets is off even though DvP is on", async () => {
+  it("returns 403 when Markets is off", async () => {
     env.MARKETS_ENABLED = undefined;
     const res = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
     expect(res.status).toBe(403);
@@ -505,6 +482,23 @@ describe("DvP routes", () => {
   it("requires authentication", async () => {
     const res = await app.request("/v1/dvp/trades", {}, env);
     expect(res.status).toBe(401);
+  });
+
+  it("429s a DvP create once the actor's metered quota is exhausted", async () => {
+    await seedRateLimit(env, `metered:dvp-create:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 2);
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(createBody()),
+      },
+      env
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
   });
 
   // Every documented family answers in the { data, meta } envelope. DvP returned
@@ -919,6 +913,7 @@ describe("DvP routes", () => {
             amount: "1000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: ISSUED_IMAGE_A,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
@@ -942,6 +937,7 @@ describe("DvP routes", () => {
             amount: "2000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
@@ -960,7 +956,6 @@ describe("DvP routes", () => {
         observedAt: null,
         createdAt,
         updatedAt,
-        settlementReadiness: null,
       });
     });
 
@@ -1011,6 +1006,7 @@ describe("DvP routes", () => {
             amount: "1000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: null,
             escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
             settlementDestination: PARTY_A_ADDRESS,
@@ -1029,6 +1025,7 @@ describe("DvP routes", () => {
             amount: "2000",
             decimals: null,
             symbol: null,
+            name: null,
             imageUrl: null,
             escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
             settlementDestination: PARTY_B_EXTERNAL,
@@ -1048,7 +1045,6 @@ describe("DvP routes", () => {
         createdAt,
         updatedAt,
         yourSide: "a",
-        settlementReadiness: null,
       });
     });
 
@@ -1109,6 +1105,7 @@ describe("DvP routes", () => {
         amount: "1000",
         decimals: null,
         symbol: null,
+        name: null,
         imageUrl: ISSUED_IMAGE_A,
         escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
         settlementDestination: PARTY_A_ADDRESS,
@@ -1284,6 +1281,7 @@ describe("DvP routes", () => {
         amount: "1000",
         decimals: null,
         symbol: null,
+        name: null,
         imageUrl: null,
         escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
         settlementDestination: PARTY_A_ADDRESS,
@@ -1302,6 +1300,7 @@ describe("DvP routes", () => {
         amount: "2000",
         decimals: null,
         symbol: null,
+        name: null,
         imageUrl: ISSUED_IMAGE_B,
         escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
         settlementDestination: PARTY_B_EXTERNAL,

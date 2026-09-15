@@ -11,6 +11,7 @@ import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -313,25 +314,17 @@ describe("Organizations routes", () => {
 
         getDb(env)
           .prepare(
-            `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            TEST_PROJECT.id,
-            TEST_ORG.id,
-            "Test Project",
-            TEST_PROJECT.slug,
-            "sandbox",
-            "active",
-            TEST_USER.id
-          ),
-
-        getDb(env)
-          .prepare(
             "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
           )
           .bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "admin", "active"),
-
+      ]);
+      await seedDefaultProjects(getDb(env), {
+        organizationId: TEST_ORG.id,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+      });
+      await getDb(env).batch([
         getDb(env)
           .prepare(
             "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"

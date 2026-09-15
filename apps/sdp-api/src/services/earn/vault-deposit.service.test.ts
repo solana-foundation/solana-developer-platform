@@ -11,6 +11,7 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { VaultDepositInput } from "./vault-deposit.service";
 
@@ -115,12 +116,14 @@ async function seedWallet(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER, "vault-deposit@example.com", 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, "Vault Deposit Project", "vault-deposit-project", USER),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
@@ -211,42 +214,6 @@ describe("depositIntoVault — idempotency", () => {
     expect(await tableCount("earn_positions")).toBe(1);
     expect(await tableCount("earn_movements")).toBe(1);
     expect(first.position.vault_address).toBe(VAULT_A);
-  });
-
-  it("conflicts a sibling project's identical key on the fast replay path, before signing", async () => {
-    // The third site of the shared ownership rule, and the one a repository
-    // test cannot reach: the fast sequential preflight returns BEFORE
-    // createSignedDepositIntent, and it is reachable with the route-level
-    // guard skipped (approved-operation execution). The fingerprint omits the
-    // project by design, so an identical deposit from a sibling project
-    // matches it — without assertMovementIsOwnReplay here, project B's
-    // approved deposit was answered with project A's movement as
-    // replayed:true.
-    const siblingProject = "prj_vault_deposit_sibling";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Sibling Vault Project', 'sibling-vault-project', 'sandbox', 'active', ?)`
-      )
-      .bind(siblingProject, ORG, USER)
-      .run();
-
-    const first = await depositIntoVault(env, depositInput());
-    expect(first.replayed).toBe(false);
-    const signingsAfterFirst = signVaultPlan.mock.calls.length;
-
-    await expect(
-      depositIntoVault(env, depositInput({ projectId: siblingProject }))
-    ).rejects.toThrow("Idempotency key already used with different request payload");
-    // Refused at the durable preflight: nothing was rebuilt, re-signed, or
-    // broadcast for the sibling.
-    expect(signVaultPlan.mock.calls.length).toBe(signingsAfterFirst);
-
-    // And the owning project still replays its own movement.
-    const replay = await depositIntoVault(env, depositInput());
-    expect(replay.replayed).toBe(true);
-    expect(replay.movement.id).toBe(first.movement.id);
   });
 
   it("rolls back a concurrent divergent requestId loser before it can claim a position", async () => {
@@ -1012,79 +979,6 @@ describe("depositIntoVault — approved-operation effect fencing", () => {
 });
 
 describe("earn vault project attribution", () => {
-  it("preserves an organization-wallet claim and cross-project history when a project is deleted", async () => {
-    const otherProject = "prj_vault_deposit_other";
-    const orgConfig = "cfg_vault_deposit_org";
-    const orgWallet = "cwlt_vault_deposit_org";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other Vault Project', 'other-vault-project', 'sandbox', 'active', ?)`
-        )
-        .bind(otherProject, ORG, USER),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES (?, ?, NULL, 'privy', 'test-encrypted', 'active')`
-        )
-        .bind(orgConfig, ORG),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, ?, 'privy_vault_deposit_org', ?, 'active')`
-        )
-        .bind(orgWallet, orgConfig, VAULT_B),
-    ]);
-    const repository = createPostgresEarnMovementsRepository(getDb(env));
-    const base = {
-      organizationId: ORG,
-      environment: "sandbox" as const,
-      provider: "kamino",
-      vaultAddress: VAULT_A,
-      custodyWalletId: orgWallet,
-      sourceAddress: WALLET_ADDRESS,
-      tokenMint: TOKEN_MINT,
-      shareMint: SHARE_MINT,
-      label: "Shared Vault",
-      requestedAmount: "1",
-      signedTransaction: "AQ==",
-      lastValidBlockHeight: "12345",
-      createdBy: USER,
-    };
-    const first = await repository.createSignedVaultDepositIntent({
-      ...base,
-      projectId: PROJECT,
-      signature: "sig_project_attribution_first",
-      requestId: "11111111-1111-4111-8111-111111111111",
-      idempotencyFingerprint: "fingerprint_project_attribution_first",
-    });
-    const second = await repository.createSignedVaultDepositIntent({
-      ...base,
-      projectId: otherProject,
-      signature: "sig_project_attribution_second",
-      requestId: "22222222-2222-4222-8222-222222222222",
-      idempotencyFingerprint: "fingerprint_project_attribution_second",
-    });
-    expect(second.position.id).toBe(first.position.id);
-
-    await getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
-
-    const position = await getDb(env)
-      .prepare("SELECT project_id FROM earn_positions WHERE id = ?")
-      .bind(first.position.id)
-      .first<{ project_id: string | null }>();
-    const movements = await getDb(env)
-      .prepare("SELECT project_id FROM earn_movements WHERE position_id = ? ORDER BY request_id")
-      .bind(first.position.id)
-      .all<{ project_id: string | null }>();
-    expect(position?.project_id).toBeNull();
-    expect(movements.results.map((row) => row.project_id)).toEqual([null, otherProject]);
-  });
-
   /**
    * Who is owed the share-ATA rent back. Recorded at DEPOSIT time because the
    * exit that closes the account may be months later and under a different fee

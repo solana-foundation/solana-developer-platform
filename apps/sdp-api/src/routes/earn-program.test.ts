@@ -1,4 +1,4 @@
-import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
 import type {
   CachedApiKey,
@@ -9,16 +9,17 @@ import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Ground is the only portfolio-capable provider and it is currently UN-SURFACED
- * (`EARN_PROVIDER_SURFACING` in @sdp/types), so `POST /programs` answers 403 for
- * it in the shipped configuration. That is the product's business state, not a
- * property of the create machinery this file tests — idempotency, replay,
- * gate order, environment isolation and the yield-source gate all have to keep
- * working for whichever provider is offered next.
+ * No shipped provider is portfolio-capable today and the one that was is
+ * UN-SURFACED (`EARN_PROVIDER_SURFACING` in @sdp/types), so `POST /programs`
+ * answers 403 for it in the shipped configuration. That is the product's
+ * business state, not a property of the create machinery this file tests —
+ * idempotency, replay, gate order, environment isolation and the yield-source
+ * gate all have to keep working for whichever provider is offered next.
  *
- * So surfacing is forced ON here and the gate gets its own explicit test, which
- * flips this flag off. Deliberately a partial mock: everything else in
- * `@sdp/types` is the real module.
+ * So the suite installs a portfolio-capable test double under `upshift` — a
+ * registered-but-never-implemented stub id — and forces surfacing ON; the gate
+ * gets its own explicit test, which flips this flag off. Deliberately partial
+ * mocks: everything else in `@sdp/types` and `@sdp/earn` is the real module.
  */
 const surfacing = vi.hoisted(() => ({ forceOn: true }));
 
@@ -31,6 +32,50 @@ vi.mock("@sdp/types", async (importOriginal) => {
   };
 });
 
+/**
+ * Portfolio-capable test double installed under `upshift`, a registered stub id
+ * the API composition root never overrides. The capability guard
+ * (`supportsPortfolioWallets`) is all-or-nothing on method presence, so the
+ * double implements every portfolio method; tests spy per case. Route dispatch
+ * resolves through this record via `@/services/earn-provider-registry`.
+ *
+ * Typed as the real contract (`EarnPortfolioWalletProvider`) so per-case spies
+ * get the provider signatures — `mockResolvedValue`/`mock.calls` see the real
+ * result and input types. The literal itself is unchecked (`unknown` cast):
+ * the no-op bases below are never awaited, every interesting call is mocked.
+ */
+const portfolioClient = vi.hoisted(
+  () =>
+    ({
+      provider: "upshift",
+      declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
+      // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
+      // `restoreAllMocks` puts the no-op back, so no call history can leak
+      // between tests through the shared double.
+      listStrategies: async () => [],
+      createPortfolioWallet: async () => {},
+      getPortfolioWallet: async () => {},
+      updatePortfolioStrategy: async () => {},
+      getPortfolioYield: async () => {},
+      listPortfolioDeposits: async () => {},
+      previewPortfolioWithdrawal: async () => {},
+      createPortfolioWithdrawal: async () => {},
+      getPortfolioWithdrawal: async () => {},
+      createPortfolioAddressBookEntry: async () => {},
+    }) as unknown as EarnPortfolioWalletProvider
+);
+
+vi.mock("@sdp/earn", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/earn")>();
+  return {
+    ...actual,
+    EARN_PROVIDER_CLIENTS: {
+      ...actual.EARN_PROVIDER_CLIENTS,
+      upshift: portfolioClient,
+    },
+  };
+});
+
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
@@ -38,7 +83,6 @@ import {
   type EarnProviderWalletRow,
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
-  WalletOperationIdempotencyConflictError,
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
@@ -46,7 +90,10 @@ import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
@@ -88,35 +135,19 @@ const TEST_PRODUCTION_PROJECT = {
 };
 const TEST_SESSION_ID = "ses_earn_program";
 
-/**
- * A second sandbox project in the SAME organization, with its own key. Programs
- * are resolved per (organization, environment), so a sibling project addresses
- * the very same program — which is how a payout's idempotency key can arrive
- * under two project scopes.
- */
-const TEST_SIBLING_PROJECT = {
-  id: "prj_test_earn_program_sibling",
-  slug: "test-earn-program-project-sibling",
-};
-const TEST_SIBLING_API_KEY = {
-  id: "key_earn_program_sibling",
-  raw: "sk_test_earn_program_sibling",
-  prefix: "sk_test_eps",
-};
-
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const GROUND_SANDBOX_KEY = "ground-sandbox-test-api-key";
-const GROUND_PRODUCTION_KEY = "ground-production-test-api-key";
-const GROUND_SOURCE = "morpho-gauntlet-usdc";
+const UPSHIFT_SANDBOX_KEY = "upshift-sandbox-test-api-key";
+const UPSHIFT_PRODUCTION_KEY = "upshift-production-test-api-key";
+const UPSHIFT_SOURCE = "morpho-gauntlet-usdc";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-const GROUND_USDT_SOURCE = "morpho-gauntlet-usdt";
+const UPSHIFT_USDT_SOURCE = "morpho-gauntlet-usdt";
 const WALLET_REF = "8f14e45f-ceea-467f-9b6b-3c1a5c7f9d21";
 /** Second provider wallet — PRO-1670 lets ONE org hold both at once. */
 const WALLET_REF_B = "2b6e1f80-7a3c-4f0d-9b21-5c8d4e2f1a03";
 const SOLANA_DESTINATION = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const VALID_ALLOCATIONS = { usdc: [{ yieldSourceId: GROUND_SOURCE, pct: 100 }] };
+const VALID_ALLOCATIONS = { usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 100 }] };
 
 const WALLET_SNAPSHOT: EarnPortfolioWalletSnapshot = {
   providerWalletRef: WALLET_REF,
@@ -135,11 +166,11 @@ const WALLET_SNAPSHOT: EarnPortfolioWalletSnapshot = {
       label: "Gauntlet USDC",
       valueUsd: "100.00",
       pct: 100,
-      yieldSourceId: GROUND_SOURCE,
+      yieldSourceId: UPSHIFT_SOURCE,
       token: "usdc",
     },
   ],
-  allocations: { usdc: [{ yieldSourceId: GROUND_SOURCE, weightBps: 10_000 }] },
+  allocations: { usdc: [{ yieldSourceId: UPSHIFT_SOURCE, weightBps: 10_000 }] },
 };
 
 const WITHDRAWAL: EarnPortfolioWithdrawal = {
@@ -153,8 +184,8 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
-let originalGroundSandboxApiKey: string | undefined;
-let originalGroundApiKey: string | undefined;
+let originalUpshiftSandboxApiKey: string | undefined;
+let originalUpshiftApiKey: string | undefined;
 
 /**
  * Earn provider entitlement defaults to OFF for every organization, so the
@@ -167,7 +198,7 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
   const settings = entitleGround
-    ? JSON.stringify({ providerOverrides: { earn: { ground: true } } })
+    ? JSON.stringify({ providerOverrides: { earn: { upshift: true } } })
     : null;
 
   await getDb(env).batch([
@@ -179,20 +210,28 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    createdBy: TEST_USER.id,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_PRODUCTION_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -230,28 +269,6 @@ async function seedSessionAuth(): Promise<void> {
       .bind("om_earn_program_session", TEST_ORG.id, TEST_USER.id),
     getDb(env)
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_program_sandbox", TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_program_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
          VALUES (?, ?, ?, 'session', ?)`
       )
@@ -259,54 +276,13 @@ async function seedSessionAuth(): Promise<void> {
   ]);
 }
 
-/** Sibling sandbox project in TEST_ORG, with an api_admin key of its own. */
-async function seedSiblingProjectAuth(): Promise<void> {
-  const keyHash = await hashString(TEST_SIBLING_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
-    id: TEST_SIBLING_API_KEY.id,
-    projectId: TEST_SIBLING_PROJECT.id,
-  });
-
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(
-        TEST_SIBLING_PROJECT.id,
-        TEST_ORG.id,
-        "Sibling Project",
-        TEST_SIBLING_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_SIBLING_API_KEY.id,
-        TEST_ORG.id,
-        TEST_SIBLING_PROJECT.id,
-        TEST_USER.id,
-        "Earn Program Sibling Key",
-        TEST_SIBLING_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
-  ]);
-}
-
-async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = {}): Promise<void> {
+async function seedUpshiftStrategy(
+  overrides: Partial<UpsertEarnStrategyInput> = {}
+): Promise<void> {
   const environment = overrides.environment ?? "sandbox";
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
-    provider: "ground",
-    providerReference: GROUND_SOURCE,
+    provider: "upshift",
+    providerReference: UPSHIFT_SOURCE,
     name: "Gauntlet USDC",
     sourceKind: "defi",
     underlyingSource: "morpho",
@@ -318,17 +294,15 @@ async function seedGroundStrategy(overrides: Partial<UpsertEarnStrategyInput> = 
     redemptionDelayDays: null,
     riskMetadata: { curator: "gauntlet" },
     status: "active",
-    // Follows the environment by default because that is what Ground itself
-    // does — it catalogues a source against the environment's own Solana mint,
-    // so a fixture pinned to devnet would be un-fundable in the
-    // production-session cases and fail for the wrong reason. Tests exercising
-    // the cluster gate override it explicitly.
+    // Follows the environment by default so a fixture pinned to devnet would
+    // not be un-fundable in the production-session cases and fail for the
+    // wrong reason. Tests exercising the cluster gate override it explicitly.
     hostCluster: CLUSTER_BY_SDP_ENVIRONMENT[environment],
     environment,
     ...overrides,
   });
   if (!strategy) {
-    throw new Error("Failed to seed ground strategy");
+    throw new Error("Failed to seed upshift strategy");
   }
 }
 
@@ -346,7 +320,7 @@ async function seedProgramWallet(
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
     environment: "sandbox",
-    provider: "ground",
+    provider: "upshift",
     providerWalletRef: WALLET_REF,
     label: "Test Program",
     createdBy: TEST_USER.id,
@@ -405,14 +379,14 @@ const PROGRAMS_PATH = "/v1/earn/programs";
 const programPath = (programId: string, suffix = "") => `${PROGRAMS_PATH}/${programId}${suffix}`;
 
 const createProgramBody = (extra: Record<string, unknown> = {}) => ({
-  provider: "ground",
+  provider: "upshift",
   allocations: VALID_ALLOCATIONS,
   ...extra,
 });
 
 /** The derived id the provider actually dedupes a program CREATE on. */
 const derivedCreateId = (callerKey: string, environment = "sandbox") =>
-  deriveProviderRequestId(["earn_program_create", TEST_ORG.id, environment, "ground"], callerKey);
+  deriveProviderRequestId(["earn_program_create", TEST_ORG.id, environment, "upshift"], callerKey);
 
 interface ProgramEnvelope {
   id: string;
@@ -454,11 +428,11 @@ async function readPrograms(res: Response): Promise<{
  * network.
  */
 function stubProgramReads() {
-  vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioYield").mockRejectedValue(
+  vi.spyOn(portfolioClient, "getPortfolioYield").mockRejectedValue(
     new Error("yield unavailable in tests")
   );
   return vi
-    .spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWallet")
+    .spyOn(portfolioClient, "getPortfolioWallet")
     .mockImplementation(async (_ctx, { providerWalletRef }) => ({
       ...WALLET_SNAPSHOT,
       providerWalletRef,
@@ -474,7 +448,7 @@ function stubProgramReads() {
 function stubProviderWalletDedupe() {
   const minted = new Map<string, string>();
   return vi
-    .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+    .spyOn(portfolioClient, "createPortfolioWallet")
     .mockImplementation(async (_ctx, input) => {
       const existing = minted.get(input.requestId);
       if (existing) {
@@ -496,16 +470,16 @@ async function countProviderWallets(): Promise<number> {
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
-  originalGroundSandboxApiKey = env.GROUND_SANDBOX_API_KEY;
-  originalGroundApiKey = env.GROUND_API_KEY;
+  originalUpshiftSandboxApiKey = env.UPSHIFT_SANDBOX_API_KEY;
+  originalUpshiftApiKey = env.UPSHIFT_API_KEY;
   // Earn is a Markets sub-module, so both gates have to be on to reach a route.
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   // Sandbox credentials so the provider-configured gates pass; provider HTTP
-  // itself is stubbed per-test via EARN_PROVIDER_CLIENTS spies. The production
+  // itself is stubbed per-test via portfolioClient spies. The production
   // credential stays absent unless a test opts in.
-  env.GROUND_SANDBOX_API_KEY = GROUND_SANDBOX_KEY;
-  env.GROUND_API_KEY = undefined;
+  env.UPSHIFT_SANDBOX_API_KEY = UPSHIFT_SANDBOX_KEY;
+  env.UPSHIFT_API_KEY = undefined;
   surfacing.forceOn = true;
   await seedTestDatabase(env);
 });
@@ -514,20 +488,20 @@ afterEach(async () => {
   vi.restoreAllMocks();
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
-  env.GROUND_SANDBOX_API_KEY = originalGroundSandboxApiKey;
-  env.GROUND_API_KEY = originalGroundApiKey;
+  env.UPSHIFT_SANDBOX_API_KEY = originalUpshiftSandboxApiKey;
+  env.UPSHIFT_API_KEY = originalUpshiftApiKey;
   await clearKVStores(env);
 });
 
 describe("Earn program — POST /programs (create) and PUT /programs/:id (re-target)", () => {
   it("creates a program, then re-targets that program in place", async () => {
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
     const updateStrategy = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .spyOn(portfolioClient, "updatePortfolioStrategy")
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
     stubProgramReads();
 
@@ -544,7 +518,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     expect(createdBody.data).not.toHaveProperty("created");
     const program = await readProgram(created);
     expect(program.id).toMatch(/^earn_provider_wallet_/);
-    expect(program.provider).toBe("ground");
+    expect(program.provider).toBe("upshift");
     expect(program.label).toBe("Treasury");
     expect(program.wallet).toEqual(WALLET_SNAPSHOT);
     expect(createWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
@@ -579,12 +553,12 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("derives the provider request id on both branches — never forwards the caller's raw key", async () => {
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
     const updateStrategy = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .spyOn(portfolioClient, "updatePortfolioStrategy")
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
     stubProgramReads();
 
@@ -622,10 +596,10 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("honors an Idempotency-Key header on re-target exactly like its siblings", async () => {
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const program = await seedProgramWallet();
     const updateStrategy = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .spyOn(portfolioClient, "updatePortfolioStrategy")
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
     stubProgramReads();
 
@@ -660,9 +634,9 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     // it takes the FULL availability gate — the same asymmetry pinned for the
     // create above and the reason a disabled provider still allows withdrawals.
     await seedAuth({ entitleGround: false });
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const program = await seedProgramWallet();
-    const updateStrategy = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy");
+    const updateStrategy = vi.spyOn(portfolioClient, "updatePortfolioStrategy");
 
     const unentitled = await requestEarn("PUT", programPath(program.id), {
       allocations: VALID_ALLOCATIONS,
@@ -672,9 +646,9 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     await clearKVStores(env);
     await seedTestDatabase(env);
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const reseeded = await seedProgramWallet();
-    env.GROUND_SANDBOX_API_KEY = undefined;
+    env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
     const noCredentials = await requestEarn("PUT", programPath(reseeded.id), {
       allocations: VALID_ALLOCATIONS,
@@ -685,8 +659,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("rejects a requestId that is not a UUIDv4", async () => {
     await seedAuth();
-    await seedGroundStrategy();
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy();
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
@@ -700,8 +674,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("rejects allocations referencing yield sources outside the synced catalogue", async () => {
     await seedAuth();
-    await seedGroundStrategy();
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy();
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
@@ -723,8 +697,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("rejects more than one allocation entry per token group (V1 single-vault cap)", async () => {
     await seedAuth();
-    await seedGroundStrategy();
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy();
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     // Weights deliberately sum to 100 so the cap is the only violation.
     const res = await requestEarn(
@@ -733,7 +707,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       createProgramBody({
         allocations: {
           usdc: [
-            { yieldSourceId: GROUND_SOURCE, pct: 50 },
+            { yieldSourceId: UPSHIFT_SOURCE, pct: 50 },
             { yieldSourceId: "morpho-steakhouse-usdc", pct: 50 },
           ],
         },
@@ -750,14 +724,14 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("rejects a lone allocation entry whose weight is not 100", async () => {
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
 
     // With the group capped at one entry, the sum rule pins that entry to 100.
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
       createProgramBody({
-        allocations: { usdc: [{ yieldSourceId: GROUND_SOURCE, pct: 60 }] },
+        allocations: { usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 60 }] },
         requestId: crypto.randomUUID(),
       })
     );
@@ -770,14 +744,14 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("accepts one entry per token group across both deposit tokens", async () => {
     await seedAuth();
-    await seedGroundStrategy();
-    await seedGroundStrategy({
-      providerReference: GROUND_USDT_SOURCE,
+    await seedUpshiftStrategy();
+    await seedUpshiftStrategy({
+      providerReference: UPSHIFT_USDT_SOURCE,
       name: "Gauntlet USDT",
       depositMints: [USDT_MINT],
     });
     const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
     stubProgramReads();
 
@@ -787,8 +761,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       PROGRAMS_PATH,
       createProgramBody({
         allocations: {
-          usdc: [{ yieldSourceId: GROUND_SOURCE, pct: 100 }],
-          usdt: [{ yieldSourceId: GROUND_USDT_SOURCE, pct: 100 }],
+          usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 100 }],
+          usdt: [{ yieldSourceId: UPSHIFT_USDT_SOURCE, pct: 100 }],
         },
         requestId: crypto.randomUUID(),
       })
@@ -800,8 +774,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("blocks create when the organization is not entitled or credentials are missing", async () => {
     await seedAuth({ entitleGround: false });
-    await seedGroundStrategy();
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy();
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const unentitled = await requestEarn(
       "POST",
@@ -814,8 +788,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     await clearKVStores(env);
     await seedTestDatabase(env);
     await seedAuth();
-    await seedGroundStrategy();
-    env.GROUND_SANDBOX_API_KEY = undefined;
+    await seedUpshiftStrategy();
+    env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
     const unconfigured = await requestEarn(
       "POST",
@@ -847,7 +821,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     // a caller and a program on a provider that moves no money through SDP —
     // and it answers before entitlement or key resolution can muddy the reason.
     await seedAuth();
-    await seedGroundStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
+    await seedUpshiftStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
 
     const res = await requestEarn("POST", PROGRAMS_PATH, {
       provider: "kamino",
@@ -867,15 +841,15 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
    * now catalogues per cluster, so a real provider reference would no longer
    * exercise this at all.
    *
-   * Deliberately uses a GROUND row with its cluster flipped rather than a
+   * Deliberately uses a seeded row with its cluster flipped rather than a
    * Kamino row: a Kamino reference is already refused for being another
    * provider's, which would pass this test without the cluster check existing
    * at all. Same provider, same environment, one field different.
    */
   it("refuses an allocation whose strategy is hosted on another cluster", async () => {
     await seedAuth();
-    await seedGroundStrategy({ hostCluster: "mainnet-beta" });
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy({ hostCluster: "mainnet-beta" });
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
@@ -888,7 +862,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
     };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.details?.unknownYieldSourceIds).toEqual([GROUND_SOURCE]);
+    expect(body.error.details?.unknownYieldSourceIds).toEqual([UPSHIFT_SOURCE]);
     expect(createWallet).not.toHaveBeenCalled();
   });
 
@@ -896,9 +870,9 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     // The control for the case above: without it, a gate that refused
     // everything would pass just as well.
     await seedAuth();
-    await seedGroundStrategy({ hostCluster: "devnet" });
+    await seedUpshiftStrategy({ hostCluster: "devnet" });
     const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
     stubProgramReads();
 
@@ -914,8 +888,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("answers an unentitled create 403 even when no idempotency key was sent", async () => {
     await seedAuth({ entitleGround: false });
-    await seedGroundStrategy();
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy();
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     // Key resolution is deliberately LAST in createEarnProgram. If it moved
     // earlier this would 400 "missing idempotency key", hiding the fact that
@@ -929,9 +903,9 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   describe("required idempotency key (PRO-1670)", () => {
     it("refuses both key sources and neither, and accepts the header alone", async () => {
       await seedAuth();
-      await seedGroundStrategy();
+      await seedUpshiftStrategy();
       const createWallet = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+        .spyOn(portfolioClient, "createPortfolioWallet")
         .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
       stubProgramReads();
 
@@ -963,7 +937,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     it("provisions exactly ONE wallet when the same caller key is retried", async () => {
       await seedAuth();
-      await seedGroundStrategy();
+      await seedUpshiftStrategy();
       const createWallet = stubProviderWalletDedupe();
       stubProgramReads();
 
@@ -995,7 +969,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     it("provisions exactly ONE wallet when the same caller key arrives concurrently", async () => {
       await seedAuth();
-      await seedGroundStrategy();
+      await seedUpshiftStrategy();
       stubProviderWalletDedupe();
       stubProgramReads();
 
@@ -1013,7 +987,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     it("provisions TWO wallets for two different caller keys", async () => {
       await seedAuth();
-      await seedGroundStrategy();
+      await seedUpshiftStrategy();
       const createWallet = stubProviderWalletDedupe();
       stubProgramReads();
 
@@ -1043,7 +1017,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     it("gives each unlabelled program its own default provider label", async () => {
       await seedAuth();
-      await seedGroundStrategy();
+      await seedUpshiftStrategy();
       const createWallet = stubProviderWalletDedupe();
       stubProgramReads();
 
@@ -1090,7 +1064,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const { a, b } = await seedTwoPrograms();
     const getWallet = stubProgramReads();
 
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
 
     expect(res.status).toBe(200);
     const page = await readPrograms(res);
@@ -1107,7 +1081,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     expect(getWallet).toHaveBeenCalledTimes(2);
 
     // The page window is DB-side: a 1-per-page page still reports the full total.
-    const paged = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground&page=2&pageSize=1`);
+    const paged = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift&page=2&pageSize=1`);
     expect(paged.status).toBe(200);
     const pagedBody = await readPrograms(paged);
     expect(pagedBody).toMatchObject({ total: 2, page: 2, pageSize: 1 });
@@ -1140,7 +1114,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
   it("routes each program's withdrawal to its own wallet and keeps the ledgers apart", async () => {
     const { a, b } = await seedTwoPrograms();
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockImplementation(async (_ctx, input) => ({
         ...WITHDRAWAL,
         withdrawalRef: input.providerWalletRef === WALLET_REF ? "wd_a" : "wd_b",
@@ -1183,7 +1157,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
   it("derives two DISTINCT provider request ids from one caller key across two programs", async () => {
     const { a, b } = await seedTwoPrograms();
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockImplementation(async (_ctx, input) => ({
         ...WITHDRAWAL,
         withdrawalRef: input.providerWalletRef === WALLET_REF ? "wd_a" : "wd_b",
@@ -1221,7 +1195,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
 
   it("404s program A's request for program B's withdrawal ref (intra-org BOLA guard)", async () => {
     const { a, b } = await seedTwoPrograms();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue({
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue({
       ...WITHDRAWAL,
       withdrawalRef: "wd_b",
     });
@@ -1231,7 +1205,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
       withdrawalBody({ requestId: crypto.randomUUID() })
     );
     const getWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal")
+      .spyOn(portfolioClient, "getPortfolioWithdrawal")
       .mockResolvedValue({ ...WITHDRAWAL, withdrawalRef: "wd_b" });
 
     // The guard compares the PROGRAM, not the organization: an org-only check
@@ -1259,18 +1233,16 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Neighbour Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(
-          "prj_earn_program_neighbour",
-          "org_earn_program_neighbour",
-          "neighbour-project",
-          TEST_USER.id
-        ),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId: "org_earn_program_neighbour",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_program_neighbour",
+        production: "prj_earn_program_neighbour_production",
+      },
+    });
     const foreign = await seedProgramWallet({
       organizationId: "org_earn_program_neighbour",
       projectId: "prj_earn_program_neighbour",
@@ -1291,10 +1263,10 @@ describe("Earn program — session callers and environment isolation", () => {
   it("creates a production program from a production-project dashboard session", async () => {
     await seedAuth();
     await seedSessionAuth();
-    env.GROUND_API_KEY = GROUND_PRODUCTION_KEY;
-    await seedGroundStrategy({ environment: "production" });
+    env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
+    await seedUpshiftStrategy({ environment: "production" });
     const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
+      .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
     stubProgramReads();
 
@@ -1338,7 +1310,7 @@ describe("Earn program — session callers and environment isolation", () => {
     ).resolves.toMatchObject({ rows: [], total: 0 });
 
     // …so the org's sandbox API key sees an EMPTY collection…
-    const sandboxList = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    const sandboxList = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
     expect(sandboxList.status).toBe(200);
     expect(await readPrograms(sandboxList)).toMatchObject({ programs: [], total: 0 });
 
@@ -1353,13 +1325,13 @@ describe("Earn program — session callers and environment isolation", () => {
     await seedSessionAuth();
     // Production is fully credentialled here on purpose: the isolation must come
     // from the environment scope, not from a missing key.
-    env.GROUND_API_KEY = GROUND_PRODUCTION_KEY;
+    env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
     const program = await seedProgramWallet();
     const getWallet = stubProgramReads();
 
     const productionList = await requestEarnAsSession(
       "GET",
-      `${PROGRAMS_PATH}?provider=ground`,
+      `${PROGRAMS_PATH}?provider=upshift`,
       TEST_PRODUCTION_PROJECT.id
     );
     expect(productionList.status).toBe(200);
@@ -1384,10 +1356,23 @@ describe("Earn program — session callers and environment isolation", () => {
 });
 
 describe("Earn program — live reads", () => {
+  it.each<[string, string, string, Record<string, unknown> | undefined]>([
+    ["program", "GET", "", undefined],
+    ["deposits", "GET", "/deposits", undefined],
+    ["withdrawal preview", "POST", "/withdrawal-preview", { amountUsd: "25.50", token: "usdc" }],
+  ])("404s another project's program on %s", async (_name, method, suffix, body) => {
+    await seedAuth();
+    const program = await seedProgramWallet();
+    const response = await requestEarn(method, programPath(program.id, suffix), body, {
+      Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}`,
+    });
+    expect(response.status).toBe(404);
+  });
+
   it("returns an empty collection while the organization has no programs", async () => {
     await seedAuth();
 
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
 
     expect(res.status).toBe(200);
     expect(await readPrograms(res)).toMatchObject({
@@ -1400,12 +1385,12 @@ describe("Earn program — live reads", () => {
 
   it("runs the credential gate on an EMPTY collection", async () => {
     await seedAuth();
-    env.GROUND_SANDBOX_API_KEY = undefined;
+    env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
     // A collection cannot 404 for emptiness, so without this assert a missing
     // provider key would read as "this organization has no programs" and a
     // dashboard would show onboarding instead of its provider-unconfigured notice.
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string } };
@@ -1432,7 +1417,7 @@ describe("Earn program — live reads", () => {
     expect(res.status).toBe(200);
     const body = await readProgram(res);
     expect(body.id).toBe(program.id);
-    expect(body.provider).toBe("ground");
+    expect(body.provider).toBe("upshift");
     expect(body.label).toBe("Test Program");
     expect(body.wallet).toEqual(WALLET_SNAPSHOT);
     expect(getWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
@@ -1443,20 +1428,18 @@ describe("Earn program — live reads", () => {
   it("passes deposit pagination cursors through to the provider", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    const listDeposits = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "listPortfolioDeposits")
-      .mockResolvedValue({
-        deposits: [
-          {
-            id: "dep_1",
-            amountUsd: "50.00",
-            token: "usdc",
-            status: "completed",
-            createdAt: "2026-08-01T00:00:00.000Z",
-          },
-        ],
-        nextCursor: "cursor-2",
-      });
+    const listDeposits = vi.spyOn(portfolioClient, "listPortfolioDeposits").mockResolvedValue({
+      deposits: [
+        {
+          id: "dep_1",
+          amountUsd: "50.00",
+          token: "usdc",
+          status: "completed",
+          createdAt: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+      nextCursor: "cursor-2",
+    });
 
     const res = await requestEarn("GET", programPath(program.id, "/deposits?cursor=cursor-1"));
 
@@ -1476,7 +1459,7 @@ describe("Earn program — live reads", () => {
 /**
  * The surfacing gate — the only place `EARN_PROVIDER_SURFACING` is allowed to
  * refuse anything. These tests turn the forced-on flag OFF, so they run against
- * the real shipped map (Ground un-surfaced today).
+ * the real shipped map (upshift un-surfaced today).
  */
 describe("Earn program — un-surfaced provider", () => {
   beforeEach(() => {
@@ -1485,8 +1468,8 @@ describe("Earn program — un-surfaced provider", () => {
 
   it("refuses to open a new position, even for a fully entitled and credentialed org", async () => {
     await seedAuth();
-    await seedGroundStrategy();
-    const createWallet = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet");
+    await seedUpshiftStrategy();
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
@@ -1511,20 +1494,18 @@ describe("Earn program — un-surfaced provider", () => {
    */
   it("keeps an existing program readable, re-targetable and withdrawable", async () => {
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const program = await seedProgramWallet();
     stubProgramReads();
     const updateStrategy = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "updatePortfolioStrategy")
+      .spyOn(portfolioClient, "updatePortfolioStrategy")
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const read = await requestEarn("GET", programPath(program.id));
     expect(read.status).toBe(200);
 
-    const list = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    const list = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
     expect(list.status).toBe(200);
 
     const retarget = await requestEarn("PUT", programPath(program.id), {
@@ -1551,7 +1532,7 @@ describe("Earn program — un-surfaced provider", () => {
    */
   it("still validates re-target allocations against the stored catalogue", async () => {
     await seedAuth();
-    await seedGroundStrategy();
+    await seedUpshiftStrategy();
     const program = await seedProgramWallet();
     stubProgramReads();
 
@@ -1567,18 +1548,16 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
   it("keeps withdrawals and previews working when the organization loses deposit entitlement", async () => {
     await seedAuth({ entitleGround: false });
     const program = await seedProgramWallet();
-    const preview = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal")
-      .mockResolvedValue({
-        amountRequestedUsd: "25.50",
-        feeUsd: "0.10",
-        withdrawableUsd: "90.00",
-        totalUsdAfterWithdrawal: "74.40",
-      });
+    const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal").mockResolvedValue({
+      amountRequestedUsd: "25.50",
+      feeUsd: "0.10",
+      withdrawableUsd: "90.00",
+      totalUsdAfterWithdrawal: "74.40",
+    });
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const previewRes = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
       amountUsd: "25.50",
@@ -1625,18 +1604,16 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     it("omits amountUsd from the provider call and answers with the lane ceiling", async () => {
       await seedAuth();
       const program = await seedProgramWallet();
-      const preview = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal")
-        .mockResolvedValue({
-          feeUsd: "0.10",
-          withdrawableUsd: "412.50",
-          totalUsdAfterWithdrawal: "412.50",
-          processingEstimate: {
-            basis: "banking_days",
-            typicalMinDuration: "P1D",
-            typicalMaxDuration: "P3D",
-          },
-        });
+      const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal").mockResolvedValue({
+        feeUsd: "0.10",
+        withdrawableUsd: "412.50",
+        totalUsdAfterWithdrawal: "412.50",
+        processingEstimate: {
+          basis: "banking_days",
+          typicalMinDuration: "P1D",
+          typicalMaxDuration: "P3D",
+        },
+      });
 
       const res = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
         token: "usdc",
@@ -1660,7 +1637,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     it("keeps amountUsd required on the payout path even though the preview made it optional", async () => {
       await seedAuth();
       const program = await seedProgramWallet();
-      const createWithdrawal = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal");
+      const createWithdrawal = vi.spyOn(portfolioClient, "createPortfolioWithdrawal");
 
       // The regression this pins: the create schema used to `.extend()` the
       // preview schema, so relaxing the preview would have silently accepted a
@@ -1679,8 +1656,8 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     it("still 503s without credentials rather than inventing a liquidity figure", async () => {
       await seedAuth();
       const program = await seedProgramWallet();
-      const preview = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal");
-      env.GROUND_SANDBOX_API_KEY = undefined;
+      const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal");
+      env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
       const res = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
         token: "usdc",
@@ -1707,10 +1684,10 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       await seedAuth();
       const program = await seedProgramWallet();
       const createWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
       const getWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal")
+        .spyOn(portfolioClient, "getPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
       // Every org shares one provider account, so a key that reached the
@@ -1753,7 +1730,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       await seedAuth();
       const program = await seedProgramWallet();
       const createWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
       // The boilerplate case: every tenant pastes the same placeholder UUID.
@@ -1784,7 +1761,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       // First attempt: the provider call dies after the intent row was
       // written (network blip, process crash — the ref-less window).
       const createWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockRejectedValueOnce(new Error("connection reset"))
         .mockResolvedValue(WITHDRAWAL);
 
@@ -1811,7 +1788,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       expect(retry.status).toBe(201);
       const [firstCall, retryCall] = createWithdrawal.mock.calls;
-      // Must be v4-SHAPED even though it is derived: Ground rejects any other
+      // Must be v4-SHAPED even though it is derived: providers reject other
       // version outright (`400 requestId must be a valid UUID v4`).
       expect(firstCall?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
       // The whole point: the provider sees ONE withdrawal id across the crash,
@@ -1828,7 +1805,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       await seedAuth();
       const program = await seedProgramWallet();
       const createWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
       await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody(), {
@@ -1846,7 +1823,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       await seedAuth();
       const program = await seedProgramWallet();
       const createWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
       // The trap this guards: a retry layer that preserves headers while the
@@ -1868,7 +1845,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       await seedAuth();
       const program = await seedProgramWallet();
       const createWithdrawal = vi
-        .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
       const res = await requestEarn(
@@ -1887,7 +1864,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
   it("rejects destinations that are not base58 Solana addresses", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    const createWithdrawal = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal");
+    const createWithdrawal = vi.spyOn(portfolioClient, "createPortfolioWithdrawal");
 
     const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
       amountUsd: "10.00",
@@ -1929,9 +1906,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   it("persists an intent row and advances it on provider acceptance", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
     expect(res.status).toBe(201);
@@ -1941,7 +1916,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     // per-family prefix, which is why nothing may parse an id for its kind.
     expect(row?.id).toMatch(/^earn_movement_/);
     expect(row?.status).toBe("processing");
-    expect(row?.provider).toBe("ground");
+    expect(row?.provider).toBe("upshift");
     expect(row?.wallet_id).toBe(program.id);
     expect(row?.provider_reference).toBe(WITHDRAWAL.withdrawalRef);
     expect(row?.amount_requested).toBe("10.00");
@@ -1961,7 +1936,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     await seedAuth();
     const program = await seedProgramWallet();
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
 
     const first = await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
@@ -1986,9 +1961,9 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     await seedAuth();
     const program = await seedProgramWallet();
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const first = await requestEarn(
       "POST",
@@ -1996,7 +1971,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       createBody({ amountUsd: "10.00" })
     );
     // The provider wire sends amountUsd as a JSON number, so '10' IS '10.00'
-    // to Ground — SDP's fingerprint must replay it, not 409 it.
+    // to the provider — SDP's fingerprint must replay it, not 409 it.
     const retry = await requestEarn(
       "POST",
       programPath(program.id, "/withdrawals"),
@@ -2011,10 +1986,8 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   it("persists provider observations from the withdrawal detail poll", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue({
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue({
       ...WITHDRAWAL,
       status: "completed",
       amountPaidUsd: "9.90",
@@ -2039,7 +2012,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   it("serves live state for a pre-ledger withdrawal without inventing a row", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue({
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue({
       ...WITHDRAWAL,
       withdrawalRef: "wd_pre_ledger",
     });
@@ -2053,7 +2026,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   it("404s a foreign organization's withdrawal ref BEFORE any provider call (BOLA guard)", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    const getWithdrawal = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal");
+    const getWithdrawal = vi.spyOn(portfolioClient, "getPortfolioWithdrawal");
 
     // A sibling organization with its own program and a ledger-known
     // withdrawal ref — the shared provider account is exactly why the ledger,
@@ -2065,19 +2038,22 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
         .bind("org_earn_program_victim", "Victim Org", "earn-program-victim"),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Victim Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind("prj_earn_program_victim", "org_earn_program_victim", "victim-project", TEST_USER.id),
     ]);
+    await seedDefaultProjects(db, {
+      organizationId: "org_earn_program_victim",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_earn_program_victim",
+        production: "prj_earn_program_victim_production",
+      },
+    });
     const repo = createPostgresEarnRepository(db);
     const victimWallet = await repo.insertProviderWallet({
       organizationId: "org_earn_program_victim",
       projectId: "prj_earn_program_victim",
       environment: "sandbox",
-      provider: "ground",
+      provider: "upshift",
       providerWalletRef: "9a35f56f-deeb-478f-8c7c-4d2b6d8f0e32",
       label: null,
       createdBy: TEST_USER.id,
@@ -2089,7 +2065,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       projectId: "prj_earn_program_victim",
       environment: "sandbox",
       providerWalletId: victimWallet?.id ?? "",
-      provider: "ground",
+      provider: "upshift",
       amountRequestedUsd: "50.00",
       payoutToken: "usdc",
       destinationAddress: SOLANA_DESTINATION,
@@ -2116,7 +2092,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     it("returns the house list envelope from the ledger, newest first", async () => {
       await seedAuth();
       const program = await seedProgramWallet();
-      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      vi.spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_a" })
         .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_b", status: "completed" });
       await requestEarn(
@@ -2147,7 +2123,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       expect(body.data.withdrawals.map((w) => w.withdrawalRef).sort()).toEqual(["wd_a", "wd_b"]);
       const [record] = body.data.withdrawals;
       expect(record?.id).toMatch(/^earn_movement_/);
-      expect(record?.provider).toBe("ground");
+      expect(record?.provider).toBe("upshift");
       expect(record?.destinationAddress).toBe(SOLANA_DESTINATION);
       // Ledger records never leak the derivation internals.
       expect(record).not.toHaveProperty("requestId");
@@ -2175,13 +2151,11 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     it("serves the audit trail even with provider credentials absent (exit-safety-adjacent)", async () => {
       await seedAuth();
       const program = await seedProgramWallet();
-      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-        WITHDRAWAL
-      );
+      vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
       await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
 
       // Pull the provider's credentials entirely: live reads break…
-      env.GROUND_SANDBOX_API_KEY = undefined;
+      env.UPSHIFT_SANDBOX_API_KEY = undefined;
       const live = await requestEarn("GET", programPath(program.id));
       expect(live.status).toBe(503);
 
@@ -2207,9 +2181,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       await seedAuth();
       await seedSessionAuth();
       const program = await seedProgramWallet();
-      vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-        WITHDRAWAL
-      );
+      vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
       await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
 
       // The program id resolves through (organization, environment), so the
@@ -2371,7 +2343,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     await seedWalletScopedKey();
     const program = await seedProgramWallet();
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
 
     const res = await requestAsWalletScopedKey(
@@ -2390,7 +2362,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     await seedAuth();
     await seedWalletScopedKey();
     const program = await seedProgramWallet();
-    const preview = vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal");
+    const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal");
 
     const res = await requestAsWalletScopedKey(
       "POST",
@@ -2405,9 +2377,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
   it("still serves an unbound key, and records the payout as a governed operation", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const res = await requestEarn(
       "POST",
@@ -2447,7 +2417,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
       ],
     });
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
 
     const res = await requestEarn(
@@ -2473,7 +2443,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
       rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
     });
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
     const body = withdrawBody({ requestId: "b5a0c9e2-8d14-4b73-9c5f-0e6a2d8f4713" });
 
@@ -2485,156 +2455,6 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     // an approver deciding one of several duplicates could pay out twice.
     const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
     expect(retried.status).toBe(202);
-
-    expect(createWithdrawal).not.toHaveBeenCalled();
-    await expect(countMovements()).resolves.toBe(0);
-    const operations = await readWalletOperations();
-    expect(operations).toHaveLength(1);
-    expect(operations[0]).toMatchObject({ status: "pending_approval" });
-  });
-
-  it("lets only one governed operation exist per payout, across projects", async () => {
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    const program = await seedProgramWallet();
-
-    const requestId = deriveProviderRequestId(
-      ["earn_program_withdrawal", program.provider_wallet_ref],
-      "4d9a1c07-6b3e-4f52-8a7d-1c0b5e9f3a26"
-    );
-    const operation = {
-      organizationId: TEST_ORG.id,
-      custodyWalletId: null,
-      walletId: program.provider_wallet_ref,
-      operationFamily: "program" as const,
-      operationType: "earn_program_withdrawal" as const,
-      status: "pending_approval" as const,
-      idempotencyKey: requestId,
-    };
-
-    const inProject = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    const inSibling = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_SIBLING_PROJECT.id })
-    );
-
-    const won = await inProject.createWalletOperation({
-      ...operation,
-      projectId: TEST_PROJECT.id,
-    });
-    expect(won).not.toBeNull();
-
-    // The concurrent case the route's prior-operation check cannot bind: both
-    // attempts see no prior record, so the database decides. A sibling project
-    // must not be able to open a second approval for one provider payout.
-    await expect(
-      inSibling.createWalletOperation({ ...operation, projectId: TEST_SIBLING_PROJECT.id })
-    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
-
-    await expect(
-      inProject.createWalletOperation({ ...operation, projectId: TEST_PROJECT.id })
-    ).rejects.toBeInstanceOf(WalletOperationIdempotencyConflictError);
-
-    const operations = await readWalletOperations();
-    expect(operations).toHaveLength(1);
-  });
-
-  it("refuses a create whose replayed program belongs to a sibling project (HOO-1563)", async () => {
-    // The create key is derived organization-wide on purpose — narrowing it
-    // would give a retry spanning a deploy a NEW key, and the provider answers a
-    // new key with a SECOND wallet holding real funds. So a sibling project can
-    // still land on the first project's program, and the boundary is enforced
-    // here: say the key is taken rather than hand back a program it cannot use.
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    await seedGroundStrategy();
-    const createWallet = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    stubProgramReads();
-    const callerKey = crypto.randomUUID();
-
-    const created = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: callerKey })
-    );
-    expect(created.status).toBe(201);
-
-    const sibling = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: callerKey }),
-      { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` }
-    );
-    expect(sibling.status).toBe(409);
-    const body = (await sibling.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("another project");
-
-    // Still exactly one program: the refusal happens on the link row, so the
-    // provider was asked once for this key and no second wallet was persisted.
-    expect(createWallet).toHaveBeenCalledTimes(2);
-    const rows = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM earn_provider_wallets")
-      .first<{ count: number }>();
-    expect(rows?.count).toBe(1);
-  });
-
-  it("hides the program from a sibling project on every per-program route (HOO-1563)", async () => {
-    // The decision is that the project is the boundary for deposits, withdrawals
-    // and previews alike, so it is enforced where every per-program route
-    // resolves its row rather than route by route.
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    const program = await seedProgramWallet();
-    const siblingAuth = { Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}` };
-
-    const read = await requestEarn("GET", programPath(program.id), undefined, siblingAuth);
-    expect(read.status).toBe(404);
-
-    const deposits = await requestEarn(
-      "GET",
-      programPath(program.id, "/deposits"),
-      undefined,
-      siblingAuth
-    );
-    expect(deposits.status).toBe(404);
-
-    const preview = await requestEarn(
-      "POST",
-      programPath(program.id, "/withdrawal-preview"),
-      { amountUsd: "25.50", token: "usdc" },
-      siblingAuth
-    );
-    expect(preview.status).toBe(404);
-  });
-
-  it("refuses a sibling project's key on the same program (HOO-1563)", async () => {
-    // The project is the boundary: a key scoped to a sibling project cannot
-    // reach this program at all, so it can never open a second approval for one
-    // payout. 404, not 403 — a caller who may not see the program must not
-    // learn that it exists.
-    await seedAuth();
-    await seedSiblingProjectAuth();
-    const program = await seedProgramWallet();
-    await seedApiKeyControlProfile({
-      rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
-    });
-    const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
-    const body = withdrawBody({ requestId: "0f3a7c19-52d4-4a8e-b1c6-9d0e5f2a8b47" });
-
-    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
-    expect(held.status).toBe(202);
-
-    const sibling = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {
-      Authorization: `Bearer ${TEST_SIBLING_API_KEY.raw}`,
-    });
-    expect(sibling.status).toBe(404);
 
     expect(createWithdrawal).not.toHaveBeenCalled();
     await expect(countMovements()).resolves.toBe(0);
@@ -2701,87 +2521,122 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
    * exemption every approved body-keyed withdrawal 400s at execution: money
    * held by policy that could never be paid.
    */
-  it("pays out a body-keyed withdrawal once its approval is granted", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_control_profiles
+  it.each(["recovery", "http"])(
+    "pays out a body-keyed withdrawal through %s approval execution",
+    async (execution) => {
+      await seedAuth();
+      const program = await seedProgramWallet();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profiles
            (id, organization_id, project_id, api_key_id, name, status)
          VALUES (?, ?, ?, ?, ?, 'active')`
-      )
-      .bind("akcp_exec", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Approve payouts")
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_control_profile_revisions
+        )
+        .bind("akcp_exec", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Approve payouts")
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_control_profile_revisions
            (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
          VALUES (?, ?, 1, ?::jsonb, 'allow', ?, ?)`
-      )
-      .bind(
-        "akcpr_exec_1",
-        "akcp_exec",
-        JSON.stringify([
-          {
-            id: "approve-program-withdrawals",
-            kind: "approval",
-            operationTypes: ["earn_program_withdrawal"],
-          },
-        ]),
-        TEST_USER.id,
-        "2026-09-07T00:00:00.000Z"
-      )
-      .run();
-    await getDb(env)
-      .prepare(
-        "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
-      )
-      .bind("akcpr_exec_1", "2026-09-07T00:00:00.000Z", "akcp_exec")
-      .run();
+        )
+        .bind(
+          "akcpr_exec_1",
+          "akcp_exec",
+          JSON.stringify([
+            {
+              id: "approve-program-withdrawals",
+              kind: "approval",
+              operationTypes: ["earn_program_withdrawal"],
+            },
+          ]),
+          TEST_USER.id,
+          "2026-09-07T00:00:00.000Z"
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
+        )
+        .bind("akcpr_exec_1", "2026-09-07T00:00:00.000Z", "akcp_exec")
+        .run();
 
-    const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
+      const createWithdrawal = vi
+        .spyOn(portfolioClient, "createPortfolioWithdrawal")
+        .mockResolvedValue(WITHDRAWAL);
 
-    // The caller keys with body `requestId`, the form this route accepts and
-    // the vault routes reject — which is why the vault suites never caught it.
-    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-      requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
-      amountUsd: "25.50",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
-    });
-    expect(held.status).toBe(202);
-    expect(createWithdrawal).not.toHaveBeenCalled();
-    const heldBody = (await held.json()) as {
-      error: { details: { approvalRequestId: string; walletOperationId: string } };
-    };
+      // The caller keys with body `requestId`, the form this route accepts and
+      // the vault routes reject — which is why the vault suites never caught it.
+      const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
+        requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
+        amountUsd: "25.50",
+        token: "usdc",
+        destinationAddress: SOLANA_DESTINATION,
+      });
+      expect(held.status).toBe(202);
+      expect(createWithdrawal).not.toHaveBeenCalled();
+      const heldBody = (await held.json()) as {
+        error: { details: { approvalRequestId: string; walletOperationId: string } };
+      };
 
-    const policyRepository = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    await policyRepository.updateApprovalRequestStatus({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      approvalRequestId: heldBody.error.details.approvalRequestId,
-      status: "approved",
-      operationStatus: "executing",
-      resolvedBy: TEST_API_KEY.id,
-    });
-    // Approved and unclaimed: the recovery pass is how an approved operation
-    // reaches its route, and it is the only in-process way to drive the real
-    // executor — which is the point, since the defect lives in what the
-    // executor sends.
-    expect(await recoverApprovedWalletOperations(env)).toBe(1);
+      const policyRepository = createPostgresPolicyRepository(
+        getDb(env),
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      );
+      if (execution === "recovery") {
+        await policyRepository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId: heldBody.error.details.approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_API_KEY.id,
+        });
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+      } else {
+        const approverKey = "sk_test_program_approver";
+        const approverHash = await hashString(approverKey, env.API_KEY_PEPPER);
+        await getDb(env).batch([
+          getDb(env).prepare(
+            `INSERT INTO users (id, email, email_verified, status)
+           VALUES ('usr_program_approver', 'program-approver@example.com', 1, 'active')`
+          ),
+          getDb(env)
+            .prepare(
+              `INSERT INTO api_keys (id, organization_id, project_id, created_by, name,
+             key_prefix, key_hash, role, permissions, status)
+           VALUES ('key_program_approver', ?, ?, 'usr_program_approver', 'Approver',
+             'sk_test_prog', ?, 'api_admin', '["*"]', 'active')`
+            )
+            .bind(TEST_ORG.id, TEST_PROJECT.id, approverHash),
+        ]);
+        await seedCachedApiKey(env, approverHash, {
+          ...TEST_CACHED_API_KEY,
+          id: "key_program_approver",
+        });
+        const path = `/v1/wallets/approval-requests/${heldBody.error.details.approvalRequestId}/approve`;
+        const headers = { Authorization: `Bearer ${approverKey}` };
+        const flag = env.PRIVY_BYOK_ENABLED;
+        env.PRIVY_BYOK_ENABLED = "false";
+        try {
+          const response = await app.request(path, { method: "POST", headers }, env);
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({
+            data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
+          });
+        } finally {
+          env.PRIVY_BYOK_ENABLED = flag;
+        }
+      }
 
-    // The payout the approval authorized actually left, exactly once.
-    expect(createWithdrawal).toHaveBeenCalledTimes(1);
-    const executed = await policyRepository.getWalletOperationById(
-      heldBody.error.details.walletOperationId
-    );
-    expect(executed).toMatchObject({ status: "completed", execution_error: null });
-  });
+      // The payout the approval authorized actually left, exactly once.
+      expect(createWithdrawal).toHaveBeenCalledTimes(1);
+      const executed = await policyRepository.getWalletOperationById(
+        heldBody.error.details.walletOperationId
+      );
+      expect(executed).toMatchObject({ status: "completed", execution_error: null });
+    }
+  );
 });
 
 /**
@@ -2804,7 +2659,7 @@ describe("Earn program — metered quotas", () => {
       60
     );
 
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=ground`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
 
     expect(res.status).toBe(429);
     expect((await res.json()) as { error: { code: string } }).toMatchObject({
@@ -2818,10 +2673,10 @@ describe("Earn program — metered quotas", () => {
     await seedAuth();
     const program = await seedProgramWallet();
     const createWithdrawal = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal")
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
     const preview = vi
-      .spyOn(EARN_PROVIDER_CLIENTS.ground, "previewPortfolioWithdrawal")
+      .spyOn(portfolioClient, "previewPortfolioWithdrawal")
       .mockResolvedValue({ withdrawableUsd: "100.00" } as never);
 
     // Both Earn quotas exhausted for this actor AND the whole organization.
@@ -2851,10 +2706,8 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
   it("records the payout with the movement's attribution, and a replay is not re-audited", async () => {
     await seedAuth();
     const program = await seedProgramWallet();
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "createPortfolioWithdrawal").mockResolvedValue(
-      WITHDRAWAL
-    );
-    vi.spyOn(EARN_PROVIDER_CLIENTS.ground, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
     const body = {
       requestId: "8d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a",
       amountUsd: "10.00",

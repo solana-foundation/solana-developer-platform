@@ -5,32 +5,25 @@
 // backends keep ciphertext inline, and it dies with the row. A version written
 // there outlives its request, so "clean up on failure" cannot be a catch block
 // alone: the process can die between the write and the compensating destroy
-// (worker loss), and the destroy itself can fail (timeout, outage). The
-// workflow action-secret path (`services/workflows/action-secret.ts`) solved
-// this with a durable obligation queue plus a sweeper, and this module is the
-// same discipline for the OTHER consumers — BYOK RPC connections and Privy
-// provider credentials — over the same queue table and the same sweeper
-// (`services/jobs/retire-workflow-secrets.ts`).
+// (worker loss), and the destroy itself can fail (timeout, outage). So the
+// destroy is a durable obligation in `secret_retirements` plus a sweeper
+// (`services/jobs/retire-orphaned-secrets.ts`), shared by every consumer — BYOK
+// RPC connections and Privy provider credentials. `source_id` is a nullable
+// trace column with no foreign key, and the sweeper resolves the store per row
+// from `storage_backend`.
 //
-// The queue table is `workflow_action_secret_retirements` — a historical name;
-// it carries no workflow-specific constraint (`workflow_id` is a nullable
-// trace column, there are no foreign keys) and the sweeper resolves the store
-// per row from `storage_backend`, so rows recorded here are collected by the
-// existing cron with no changes.
-//
-// The ordering rule, copied from the workflow path because it is the only one
-// that closes worker loss: record the obligation AFTER the backend write but
+// The ordering rule is the only one that closes worker loss: record the obligation AFTER the backend write but
 // BEFORE the database row that will reference the version; the transaction
 // that commits the reference clears the obligation atomically. The two
 // possible outcomes are "the row points at the version" and "the version is
 // queued for destruction" — never neither.
 
 import type { AppDb } from "@/db";
-import { createWorkflowSecretRetirementsRepository } from "@/db/repositories";
+import { createSecretRetirementsRepository } from "@/db/repositories";
 import {
-  cancelUnclaimedWorkflowSecretRetirement,
-  insertWorkflowSecretRetirement,
-} from "@/db/repositories/workflow-secret-retirement.repository.postgres";
+  cancelUnclaimedSecretRetirement,
+  insertSecretRetirement,
+} from "@/db/repositories/secret-retirement.repository.postgres";
 import { serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import {
@@ -46,8 +39,7 @@ export interface SecretRetirementContext {
   orgId: string | null;
   /**
    * The row the version belonged to (connection or credential id). Recorded in
-   * the queue's `workflow_id` column — a historical name; the column is a
-   * nullable trace with no foreign key.
+   * the queue's `source_id` column, a nullable trace with no foreign key.
    */
   sourceId: string | null;
 }
@@ -104,7 +96,7 @@ function pause(ms: number): Promise<void> {
 }
 
 // Secret Manager's answer for destroying a version twice. The sweeper reads it
-// the same way (`services/jobs/retire-workflow-secrets.ts`): the version is
+// the same way (`services/jobs/retire-orphaned-secrets.ts`): the version is
 // gone, which is all this ever wanted.
 function isAlreadyDestroyed(error: unknown): boolean {
   return (
@@ -129,9 +121,9 @@ async function queueRetirement(
     try {
       // Idempotent on the version ref, so a retry after an ambiguous failure
       // updates the row rather than duplicating it.
-      await createWorkflowSecretRetirementsRepository(env).recordRetirement({
+      await createSecretRetirementsRepository(env).recordRetirement({
         organizationId: context.orgId ?? "unknown",
-        workflowId: context.sourceId,
+        sourceId: context.sourceId,
         storageBackend: stored.storageBackend,
         secretRef: stored.secretRef ?? null,
         secretVersionRef,
@@ -287,7 +279,7 @@ export async function clearQueuedSecretVersion(
   if (!secretVersionRef) {
     return;
   }
-  const cleared = await cancelUnclaimedWorkflowSecretRetirement(exec, secretVersionRef);
+  const cleared = await cancelUnclaimedSecretRetirement(exec, secretVersionRef);
   if (!cleared) {
     throw serviceUnavailable(
       "The credential secret was retired while this request was still running; nothing was created — retry the request"
@@ -312,9 +304,9 @@ export async function queueOrphanedSecretVersion(
   if (!secretVersionRef) {
     return;
   }
-  await insertWorkflowSecretRetirement(exec, {
+  await insertSecretRetirement(exec, {
     organizationId: context.orgId ?? "unknown",
-    workflowId: context.sourceId,
+    sourceId: context.sourceId,
     storageBackend: stored?.storageBackend as string,
     secretRef: stored?.secretRef ?? null,
     secretVersionRef,
@@ -391,7 +383,7 @@ export async function destroySecretVersion(
     // counts as not queued: the flag summons a human when nothing else acts.
     const covered =
       queued ||
-      (await createWorkflowSecretRetirementsRepository(env)
+      (await createSecretRetirementsRepository(env)
         .hasRetirement(secretVersionRef)
         .catch(() => false));
     logOrphanRisk(context, stored as StoredCredentialSecret, {
@@ -403,9 +395,7 @@ export async function destroySecretVersion(
   // Destroyed. Discharge whatever obligation is on record. Best effort: a row
   // left behind costs one sweep that finds the version already gone.
   try {
-    await createWorkflowSecretRetirementsRepository(env).deleteRetirementByVersionRef(
-      secretVersionRef
-    );
+    await createSecretRetirementsRepository(env).deleteRetirementByVersionRef(secretVersionRef);
   } catch {
     // The sweeper reconciles it.
   }

@@ -881,7 +881,6 @@ jobs:
   browser_e2e:
     name: ${{ matrix.name }}
     needs: unit_test_scope
-    if: needs.unit_test_scope.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -913,6 +912,7 @@ jobs:
             issuance_group: allowlist
             artifact_suffix: issuance-allowlist
     env:
+      E2E_AFFECTED: ${{ needs.unit_test_scope.outputs.e2e }}
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
@@ -953,26 +953,30 @@ jobs:
           --health-retries 20
     steps:
       - name: Checkout
+        if: env.E2E_AFFECTED == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup pnpm
+        if: env.E2E_AFFECTED == 'true'
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           version: 10.16.0
 
       - name: Setup Node
+        if: env.E2E_AFFECTED == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install
+        if: env.E2E_AFFECTED == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler OIDC configuration
-        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_IS_FORK_PULL_REQUEST != 'true'
         run: |
           if [ -z "${{ vars.DOPPLER_CI_IDENTITY_ID }}" ]; then
             echo "DOPPLER_CI_IDENTITY_ID must be configured as a repository variable for secret-aware CI jobs." >&2
@@ -980,11 +984,11 @@ jobs:
           fi
 
       - name: Install Doppler CLI
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Doppler OIDC login
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         run: |
           oidc_jwt=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://github.com/solana-foundation" | jq -r '.value')
@@ -993,7 +997,7 @@ jobs:
           doppler me >/dev/null
 
       - name: Validate browser e2e runtime secrets
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         run: |
           doppler run --config dev_ci -- bash <<'EOF'
           set -euo pipefail
@@ -1008,7 +1012,7 @@ jobs:
           EOF
 
       - name: Derive Clerk issuer for local API
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         run: |
           CLERK_HOST=$(doppler run --config dev_ci -- node - <<'NODE'
           const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
@@ -1029,11 +1033,11 @@ jobs:
           echo "CLERK_JWKS_URL=https://${CLERK_HOST}/.well-known/jwks.json" >> "$GITHUB_ENV"
 
       - name: Install Playwright browser
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         run: pnpm --filter sdp-web exec playwright install chromium
 
       - name: Build web app for Playwright
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
@@ -1042,7 +1046,7 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
-        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
@@ -1054,12 +1058,12 @@ jobs:
           fi
 
       - name: Skip secret-backed browser e2e for fork
-        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        if: env.E2E_AFFECTED == 'true' && env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe browser e2e skip::Forked pull requests cannot authenticate to Doppler via OIDC, so Clerk/Privy-backed browser e2e is skipped. Run this PR from an upstream branch before merge if browser e2e coverage is required."
 
       - name: Upload Playwright artifacts
-        if: always() && env.CI_HAS_DOPPLER_TOKEN == 'true'
+        if: always() && env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: playwright-artifacts-${{ matrix.artifact_suffix }}

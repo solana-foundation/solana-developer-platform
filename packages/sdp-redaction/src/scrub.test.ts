@@ -7,7 +7,12 @@ import {
   scrubTelemetry,
   scrubTelemetryString,
 } from "./scrub";
-import { assertScrubbed, COUNTERPARTY_PAYLOAD, SOLANA_ADDRESS } from "./test/fixtures";
+import {
+  assertScrubbed,
+  COUNTERPARTY_PAYLOAD,
+  OWNER_ADDRESS,
+  SOLANA_ADDRESS,
+} from "./test/fixtures";
 
 describe("scrubTelemetry", () => {
   it("removes every identifying field from the representative payload", () => {
@@ -26,6 +31,39 @@ describe("scrubTelemetry", () => {
       walletAddress: SOLANA_ADDRESS,
       counterpartyId: "cp_01HZY",
     });
+  });
+
+  it("redacts an end-user owner address by key while the treasury address survives", () => {
+    const scrubbed = scrubTelemetry({
+      event: "sdp_api_earn_split_swap_orphaned",
+      advisory_id: "adv_01HZY",
+      owner_address: OWNER_ADDRESS,
+      vault_address: SOLANA_ADDRESS,
+    });
+
+    assert.deepEqual(scrubbed, {
+      event: "sdp_api_earn_split_swap_orphaned",
+      advisory_id: "adv_01HZY",
+      owner_address: "[REDACTED]",
+      vault_address: SOLANA_ADDRESS,
+    });
+  });
+
+  it("redacts an owner address written into a query string or a serialized body", () => {
+    // The per-owner position read takes `?ownerAddress=`, so a logged URL or
+    // an echoed request body carries the end user without any object key.
+    assert.equal(
+      scrubTelemetryString(
+        `GET /v1/earn/external-wallet/positions?ownerAddress=${OWNER_ADDRESS}&strategyId=str_1`
+      ),
+      "GET /v1/earn/external-wallet/positions?ownerAddress=[REDACTED]&strategyId=str_1"
+    );
+    assert.equal(
+      scrubTelemetryString(
+        `{"ownerAddress":"${OWNER_ADDRESS}","vaultAddress":"${SOLANA_ADDRESS}"}`
+      ),
+      `{"ownerAddress":"[REDACTED]","vaultAddress":"${SOLANA_ADDRESS}"}`
+    );
   });
 
   it("finds email addresses inside free text, where no key can vouch for them", () => {

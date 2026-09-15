@@ -18,7 +18,6 @@ import { badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
-import { getPolicyGateContext } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   assertFreshApiKeyActive,
@@ -26,24 +25,22 @@ import {
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
-import { custodyWalletForParty } from "@/services/dvp/custody-party";
+import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
-import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
+import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
 import {
   observeDvpTradeIfStale,
   observeDvpTradeNow,
   observeDvpTradeWithoutRecording,
 } from "@/services/dvp/observe-now";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
-import { findSettlementFundingShortfall } from "@/services/dvp/settle-preflight";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { toDvpInboundResponse } from "./inbound-response";
-import { type DvpCloseResolved, type DvpFundResolved, walletIdIfHoldsAddress } from "./policy";
 import {
   type createDvpTradeSchema,
   type fundDvpTradeSchema,
@@ -69,6 +66,7 @@ interface LegInput {
   observedAmount: string | null;
   decimals: number | null;
   symbol: string | null;
+  name: string | null;
   imageUrl: string | null;
   frozen: boolean | null;
   outcome: ReturnType<typeof deriveDvpLegOutcome>;
@@ -198,6 +196,7 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     decimals: leg.decimals,
     /** The mint's symbol, or null when it carries no metadata. Never invented. */
     symbol: leg.symbol,
+    name: leg.name,
     /** Image of the leg's mint when it is a token this organization issued through SDP; null otherwise. */
     imageUrl: leg.imageUrl,
     /** Pay this address to fund the leg. */
@@ -231,6 +230,7 @@ interface TradeReadContext {
 function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
   const mintAImage = context.mintImages.get(row.mintA);
   const mintBImage = context.mintImages.get(row.mintB);
+  const current = observedAfterClose(row);
   return {
     id: row.id,
     status: row.status,
@@ -244,9 +244,10 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           amount: row.amountA,
           escrow: row.escrowA,
           settlementDestination: row.userASettlementDestination,
-          observedAmount: row.escrowAAmount,
+          observedAmount: current ? row.escrowAAmount : null,
           decimals: row.decimalsA,
           symbol: row.symbolA,
+          name: row.nameA,
           imageUrl: mintAImage === undefined ? null : mintAImage,
           frozen: row.escrowAFrozen,
           outcome: deriveDvpLegOutcome(row, "a"),
@@ -266,9 +267,10 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           amount: row.amountB,
           escrow: row.escrowB,
           settlementDestination: row.userBSettlementDestination,
-          observedAmount: row.escrowBAmount,
+          observedAmount: current ? row.escrowBAmount : null,
           decimals: row.decimalsB,
           symbol: row.symbolB,
+          name: row.nameB,
           imageUrl: mintBImage === undefined ? null : mintBImage,
           frozen: row.escrowBFrozen,
           outcome: deriveDvpLegOutcome(row, "b"),
@@ -457,82 +459,106 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
 };
 
 /**
- * Settles or cancels a trade. The policy gate has already run (denied = 403,
- * approval needed = 202); on an approved replay it re-runs with the same
- * resolved trade, which is why the gate resolves it rather than the handler.
+ * Settles or cancels a trade after resolving its trade and settlement wallet.
+ *
+ * @param action - Irreversible close action to execute.
+ * @returns A route handler for that close action.
  */
 const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
-  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpCloseResolved>(c);
-  if (!resolved.trade) {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const tradeId = c.req.param("tradeId");
+  if (tradeId === undefined) {
     throw notFound("DvP trade not found");
   }
+  const trade = await createDvpTradeRepository(c.env).getById(
+    {
+      organizationId: auth.organizationId,
+      projectId,
+      sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]),
+    },
+    tradeId
+  );
+  if (trade === null) {
+    throw notFound("DvP trade not found");
+  }
+  const settlement = await readDvpSettlementWallet(c.env, {
+    organizationId: trade.organizationId,
+    projectId: trade.projectId,
+  });
+  if (settlement === null) {
+    throw notFound("DvP settlement wallet not found for this trade's project");
+  }
 
-  // Re-read the binding before anything irreversible: the gate's auth context
-  // can be an hour stale, and settling with a revoked key is an irreversible
+  // Re-read the binding before anything irreversible: the auth context can be
+  // an hour stale, and settling with a revoked key is an irreversible
   // two-leg spend, not a read slip. The wallet asserted is the SETTLEMENT
   // wallet — the one that signs; the liveness assert covers keys the
   // wallet-scoped check skips.
-  await assertFreshApiKeyActive(getDb(c.env), getAuth(c));
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    getAuth(c),
-    resolved.settlement.custodyWalletId,
-    ["payments:write"]
-  );
+  await assertFreshApiKeyActive(getDb(c.env), auth);
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, settlement.custodyWalletId, [
+    "payments:write",
+  ]);
 
-  const result = await closeDvpTrade(c, resolved.trade, action);
+  const result = await closeDvpTrade(c, trade, action, settlement);
 
   // We broadcast it, so we know the outcome — not `closed_unknown` from the sweep.
-  await createDvpTradeRepository(c.env).recordClose(
-    resolved.trade.id,
+  const closed = await createDvpTradeRepository(c.env).recordClose(
+    trade.id,
     action === "settle" ? "settled" : "cancelled",
     result.signature
   );
 
-  await observeDvpTradeNow(c.env, resolved.trade, result.signature);
+  // The observation is a compare-and-swap on the row's status, so it has to
+  // see the closed row, not the one read before the close. A null means the
+  // reconciler already moved the row from a chain read, which beats this.
+  if (closed !== null) {
+    await observeDvpTradeNow(c.env, closed, result.signature);
+  }
 
   return success(c, {
-    tradeId: resolved.trade.id,
+    tradeId: trade.id,
     action,
     signature: result.signature,
-    createdAccounts: result.createdAccounts,
   });
 };
 
 /**
- * Funds one side of a trade. Same gate as settle and cancel: it spends from a
- * custody wallet, and the right to fund side X is holding an active custody
+ * Funds one side of a trade. The right to fund side X is holding an active custody
  * wallet whose public key equals `user_x`.
+ *
+ * @param c - Validated request context for the funding action.
+ * @returns The funded-leg response envelope.
  */
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
-  const { resolved } = getPolicyGateContext<Record<string, unknown>, DvpFundResolved>(c);
-  if (!resolved.trade) {
+  const tradeId = c.req.param("tradeId");
+  if (tradeId === undefined) {
     throw notFound("DvP trade not found");
   }
-  const trade = resolved.trade;
-
-  if (!resolved.funding) {
-    // Not "not found": the caller can see this trade, so pretending it does not
-    // exist would be a worse answer than the true one. It names two addresses
-    // and they hold the key to neither.
-    throw forbidden(
-      `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${body.side} party address`
-    );
+  const trade = await createDvpTradeRepository(c.env).getByIdAsParty(tradeId);
+  if (trade === null) {
+    throw notFound("DvP trade not found");
   }
-  const { side } = resolved.funding;
+  const side = body.side;
   const partyAddress = side === "a" ? trade.userA : trade.userB;
 
-  // PRE-BROADCAST RE-READ — the ticket's authorization invariant: re-derive
-  // the wallet and re-assert the key's binding from the database (the gate's
-  // resolution and auth context can both be an hour stale). Omitted
-  // `walletId`, that is the custody lookup on the party address; explicit, it
-  // is that the named wallet still holds the address (naming narrows).
+  // The auth context can be an hour stale, so the wallet is derived and the
+  // key's binding asserted from the database before anything is broadcast.
+  // Omitted `walletId`, that is the custody lookup on the party address;
+  // explicit, it is that the named wallet still holds the address (naming
+  // narrows).
   const rereadWalletId =
     body.walletId !== null && body.walletId !== undefined
-      ? await walletIdIfHoldsAddress(c, body.walletId, partyAddress)
+      ? await walletIdIfHoldsAddress(
+          getDb(c.env),
+          c.env,
+          { organizationId: auth.organizationId, projectId },
+          body.walletId,
+          partyAddress
+        )
       : await custodyWalletForParty(
           c.env,
           { organizationId: auth.organizationId, projectId },
@@ -667,38 +693,6 @@ export const listTrades = async (c: AppContext) => {
   });
 };
 
-/**
- * Whether the settlement authority can pay for the close this trade will need.
- * Read on the detail view rather than left for the attempt (the failure is
- * silent until paid for). Never fatal: an RPC that will not answer must not
- * take the trade with it.
- */
-async function readSettlementReadiness(
-  c: AppContext,
-  trade: DvpTradeRow
-): Promise<{ address: string; balance: string; required: string; funded: boolean } | null> {
-  try {
-    const settlement = await readDvpSettlementWallet(c.env, {
-      organizationId: trade.organizationId,
-      projectId: trade.projectId,
-    });
-    if (!settlement) {
-      return null;
-    }
-    const rpc = solanaRpc.createRpc(c.env);
-    // Settlement's worst case (4 accounts) is the number worth quoting: the ceiling once beats more mid-flow.
-    const funding = await findSettlementFundingShortfall(rpc, settlement.address, 4);
-    return {
-      address: settlement.address,
-      balance: funding.balance.toString(),
-      required: funding.required.toString(),
-      funded: funding.shortfall === 0n,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export const getTrade = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -726,14 +720,12 @@ export const getTrade = async (c: AppContext) => {
   // every few seconds, closed ones once a minute for late deposits.
   const observed = await observeDvpTradeIfStale(c.env, trade);
 
-  const [callerAddresses, counterpartyLabels, fundingClaims, settlementReadiness, mintImages] =
-    await Promise.all([
-      callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
-      readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
-      readFundingClaims(c.env, observed.id),
-      readSettlementReadiness(c, observed),
-      readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
-    ]);
+  const [callerAddresses, counterpartyLabels, fundingClaims, mintImages] = await Promise.all([
+    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+    readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
+    readFundingClaims(c.env, observed.id),
+    readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
+  ]);
   return success(c, {
     trade: {
       ...toTradeResponse(observed, {
@@ -742,7 +734,6 @@ export const getTrade = async (c: AppContext) => {
         fundingClaims,
         mintImages,
       }),
-      settlementReadiness,
     },
   });
 };
@@ -771,9 +762,8 @@ async function resolveYourSide(
 
 /**
  * The same page, for a party who is not the trade's author: the detail
- * shape with the creating org's facts (attribution, funding claims,
- * settlement readiness) withheld. 404 when they are not a party, matching
- * the read above.
+ * shape with the creating org's facts (attribution and funding claims)
+ * withheld. 404 when they are not a party, matching the read above.
  */
 async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   const auth = getAuth(c);
@@ -833,7 +823,6 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
       }),
       // Theirs, not ours: a party gets the trade without the creator's fields.
       refString: null,
-      settlementReadiness: null,
       /** Which leg is the reader's, so the page can say so. */
       yourSide: fundable.side,
     },

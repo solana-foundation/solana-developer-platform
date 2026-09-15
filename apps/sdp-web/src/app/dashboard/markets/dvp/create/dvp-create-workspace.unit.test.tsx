@@ -20,13 +20,14 @@ import { DvpCreateWorkspace } from "./dvp-create-workspace";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+const PARTY_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 
 const context: DvpCreateContext = {
   error: null,
   wallets: [
     {
       id: "cwlt_1",
-      address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+      address: PARTY_A,
       label: "Treasury",
       balances: [],
     },
@@ -61,29 +62,50 @@ function renderForm(
   );
 }
 
-/** Opens a party combobox by its label and types into its search box. */
-function searchParty(trigger: RegExp, query: string) {
-  fireEvent.click(screen.getByRole("button", { name: trigger }));
-  fireEvent.change(screen.getByPlaceholderText(/paste a Solana address/i), {
+const BUYER_ROW = 0;
+const SELLER_ROW = 1;
+
+/**
+ * Switches one party row's mode; the rows render buyer first.
+ *
+ * @param row - Which party row, BUYER_ROW or SELLER_ROW.
+ * @param name - The mode's label.
+ * @returns Nothing.
+ */
+function pickMode(row: number, name: RegExp): void {
+  fireEvent.click(screen.getAllByRole("radio", { name })[row]);
+}
+
+/**
+ * Switches one party slot to its address mode and types an address.
+ *
+ * @param label - The party slot's accessible label.
+ * @param row - Which party row, BUYER_ROW or SELLER_ROW.
+ * @param query - The address text to enter.
+ * @returns Nothing.
+ */
+function searchParty(label: RegExp, row: number, query: string): void {
+  pickMode(row, /paste an address/i);
+  fireEvent.change(screen.getByLabelText(label), {
     target: { value: query },
   });
 }
 
 /** Fills the seller slot by picking the registered counterparty. */
-function fillPartyA() {
+function fillPartyA(): void {
+  pickMode(SELLER_ROW, /^counterparty$/i);
   fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
   fireEvent.click(screen.getByText("Acme OTC"));
 }
 
 /**
- * Fills the cash payer slot by pasting an address and picking the option it
- * surfaces. The last match is the open popover's option — a pasted address
- * already selected in the other slot shows the same text in its trigger.
+ * Fills the cash payer slot with a pasted address.
+ *
+ * @param address - The address to enter.
+ * @returns Nothing.
  */
-function fillPartyB(address: string = PARTY_B) {
-  searchParty(/paying the cash/i, address);
-  const options = screen.getAllByText("Use this address");
-  fireEvent.click(options[options.length - 1]);
+function fillPartyB(address: string): void {
+  searchParty(/paying the cash/i, BUYER_ROW, address);
 }
 
 /** Picks the issued token in the asset slot, which starts unselected. */
@@ -111,7 +133,7 @@ function fillAmounts() {
  */
 function advanceToReview() {
   fillPartyA();
-  fillPartyB();
+  fillPartyB(PARTY_B);
   fillAssetMint();
   fillCashMint();
   fillAmounts();
@@ -129,21 +151,64 @@ describe("DvpCreateWorkspace", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
-  // One combobox per slot: registered counterparties are options — custody
-  // wallets deliberately are not, a wallet is not a counterparty — and a
-  // pasted base58 address surfaces as an option of its own.
-  it("offers counterparties and pasted addresses, never custody wallets", () => {
+  it("selects an SDP wallet by default and fills the slot", () => {
     renderForm();
 
+    expect(screen.getAllByRole("radio", { name: /^sdp wallet$/i })[SELLER_ROW]).toHaveProperty(
+      "checked",
+      true
+    );
+    fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
+    expect(screen.getByText("Treasury")).toBeTruthy();
+    fireEvent.click(screen.getByText("Treasury"));
+    expect(screen.getByRole("button", { name: /delivering the asset/i }).textContent).toContain(
+      "Treasury"
+    );
+  });
+
+  it("lists registered counterparties in counterparty mode", () => {
+    renderForm();
+
+    pickMode(BUYER_ROW, /^counterparty$/i);
     fireEvent.click(screen.getByRole("button", { name: /paying the cash/i }));
-
     expect(screen.getByText("Acme OTC")).toBeTruthy();
-    expect(screen.queryByText("Treasury")).toBeNull();
+  });
 
-    fireEvent.change(screen.getByPlaceholderText(/paste a Solana address/i), {
-      target: { value: PARTY_B },
-    });
-    expect(screen.getByText("Use this address")).toBeTruthy();
+  it("accepts valid pasted addresses and rejects malformed ones", () => {
+    renderForm();
+
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+    fillPartyB(PARTY_B);
+    expect(screen.queryByText("Not a valid Solana address")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/paying the cash/i), { target: { value: "garbage" } });
+    expect(screen.getByText("Not a valid Solana address")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
+  });
+
+  it("trims a pasted address so surrounding whitespace never blocks Continue", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(`  ${PARTY_B}  `);
+    fillAssetMint();
+    fillCashMint();
+    fillAmounts();
+
+    expect(screen.queryByText("Not a valid Solana address")).toBeNull();
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false);
+  });
+
+  it("clears a filled slot when its mode changes", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    fillAssetMint();
+    fillCashMint();
+    fillAmounts();
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false);
+
+    pickMode(SELLER_ROW, /^sdp wallet$/i);
+    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
   it("reaches review once every stage is answered, and only then offers Create", () => {
@@ -166,23 +231,12 @@ describe("DvpCreateWorkspace", () => {
     expect(input.value).toBe("1.999999");
   });
 
-  // A malformed paste never becomes an option, so the slot cannot hold an
-  // invalid address at all — refusal happens before selection, not after.
-  it("offers no address option for a paste that is not a Solana address", () => {
-    renderForm();
-
-    searchParty(/paying the cash/i, "nope");
-
-    expect(screen.queryByText("Use this address")).toBeNull();
-  });
-
   // The program refuses one address on both sides, and the parties step is the
   // cheap place to say so rather than a provider-call round trip.
   it("refuses to proceed when both slots resolve to the same address", () => {
     renderForm();
 
-    searchParty(/delivering the asset/i, PARTY_B);
-    fireEvent.click(screen.getByText("Use this address"));
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_B);
     fillPartyB(PARTY_B);
 
     expect(screen.getByText(/Both sides are the same address/i)).toBeTruthy();

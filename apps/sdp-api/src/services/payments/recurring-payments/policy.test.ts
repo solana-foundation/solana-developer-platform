@@ -7,6 +7,7 @@ import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custod
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   assertNoPendingRecurringCollectionApproval,
@@ -36,20 +37,12 @@ async function seedPolicyFixtures(): Promise<void> {
     .bind(TEST_USER.id, TEST_USER.email)
     .run();
 
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?)`
-    )
-    .bind(
-      TEST_PROJECT.id,
-      TEST_ORG.id,
-      TEST_PROJECT.name,
-      TEST_PROJECT.slug,
-      TEST_PROJECT.environment,
-      TEST_USER.id
-    )
-    .run();
+  await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
 
   // The config's default_wallet_id FK is deferred, so the config and its
   // default wallet must land in one transaction.

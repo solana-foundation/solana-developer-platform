@@ -12,7 +12,7 @@
  * (`distillKaminoVault` — shared code, not a reimplementation), and reports
  * both sides: what enters the catalogue, and what was dropped and why.
  *
- * Layout mirrors inventory-ground-catalogue.ts:
+ * Layout mirrors the shared catalogue-inventory script shape:
  *   - inventory snapshot   apps/sdp-api/.earn-catalogue/kamino.inventory.json (committed)
  *   - rendered report      docs/earn/kamino-catalogue-inventory.md (committed)
  *
@@ -292,7 +292,9 @@ async function runFetch(): Promise<void> {
       tokenMint: vault.state.tokenMint,
       tokenSymbol: WELL_KNOWN_TOKEN_BY_MINT.get(vault.state.tokenMint)?.symbol ?? null,
       tvlUsd,
-      apy: metrics?.apy ?? null,
+      // The trailing 7d rate, which is what the shelf stores as `current_apy`
+      // (PRO-1922); the census must show the number the catalogue quotes.
+      apy: metrics?.apy7d ?? null,
       holders: metrics?.numberOfHolders ?? null,
       outcome: distilled.outcome,
       dropReason: distilled.outcome === "dropped" ? distilled.reason : null,

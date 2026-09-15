@@ -6,7 +6,6 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -190,15 +189,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     });
     await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
 
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "pause",
-      signature: result.signature,
-      slot: result.slot.toString(),
-    });
-
     return success(c, { transaction: toPublicTokenTransaction(confirmedTx) });
   } catch (error) {
     if (!onChainEffectCompleted) {
@@ -377,15 +367,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
         }),
     });
     await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "unpause",
-      signature: result.signature,
-      slot: result.slot.toString(),
-    });
 
     return success(c, { transaction: toPublicTokenTransaction(confirmedTx) });
   } catch (error) {

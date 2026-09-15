@@ -17,7 +17,6 @@ import {
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceToken2022Service,
@@ -427,15 +426,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
 
     // Update token supply
     await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "burn",
-      signature: result.signature,
-      slot: result.slot.toString(),
-    });
 
     return success(c, { transaction: toPublicTokenTransaction(updatedTx) });
   } catch (error) {

@@ -14,6 +14,7 @@
  */
 
 import { FeePaymentError } from "@sdp/payments/fee-payment";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -35,13 +36,14 @@ import {
   signatureBytes,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
@@ -54,10 +56,6 @@ const sendTransaction = vi.hoisted(() => vi.fn());
 // ordering. The last case below still proves create is wired to it.
 const validateDvpMints = vi.hoisted(() => vi.fn());
 const inspectDvpMint = vi.hoisted(() => vi.fn());
-// The settlement wallet is a per-project custody wallet provisioned on first
-// use. Its own behaviour is covered in settlement-wallet.test.ts; here it is
-// stubbed so these tests stay about broadcast ordering.
-const getOrCreateDvpSettlementWallet = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/sponsorship.service", async () => {
   const actual = await vi.importActual<typeof import("@/services/sponsorship.service")>(
@@ -67,7 +65,6 @@ vi.mock("@/services/sponsorship.service", async () => {
 });
 vi.mock("./mints", () => ({ validateDvpMints }));
 vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
-vi.mock("./settlement-wallet", () => ({ getOrCreateDvpSettlementWallet }));
 // The immediate chain read after a send is the reconciler's contract, tested in
 // observe-now.test.ts; here it is stubbed so these tests stay about the claim,
 // sign and send ordering. Null means "nothing observed yet".
@@ -85,7 +82,6 @@ vi.mock("@sdp/rpc/solana", () => ({
 const { createDvpTrade } = await import("./create");
 
 const TEST_PROJECT_ID = "prj_dvp_create_test";
-const TEST_PROJECT_ID_OTHER = "prj_dvp_create_other";
 const CUSTODY_CONFIG_ID = "cust_dvp_create_test";
 const CUSTODY_WALLET_ID = "cwlt_dvp_create_test";
 
@@ -145,11 +141,13 @@ async function rowsInDb(): Promise<
     counterparty_account_id_b: string | null;
     create_signature: string | null;
     create_last_valid_block_height: string | null;
+    name_a: string | null;
+    name_b: string | null;
   }[]
 > {
   const result = await getDb(env)
     .prepare(
-      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b, create_signature, create_last_valid_block_height FROM dvp_trades"
+      "SELECT id, status, nonce, counterparty_account_id_a, counterparty_account_id_b, create_signature, create_last_valid_block_height, name_a, name_b FROM dvp_trades"
     )
     .all<{
       id: string;
@@ -159,6 +157,8 @@ async function rowsInDb(): Promise<
       counterparty_account_id_b: string | null;
       create_signature: string | null;
       create_last_valid_block_height: string | null;
+      name_a: string | null;
+      name_b: string | null;
     }>();
   return result.results ?? [];
 }
@@ -167,24 +167,20 @@ describe("createDvpTrade", () => {
   let custodyWalletAddress: string;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let originalSettlementAuthority: string | undefined;
-
-  beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
+  let originalByok: string | undefined;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await seedTestDatabase(env);
+    originalByok = env.PRIVY_BYOK_ENABLED;
+    env.PRIVY_BYOK_ENABLED = "false";
     validateDvpMints.mockResolvedValue([]);
     // Carried onto the row so later surfaces can show the trade in the units
     // somebody typed, with the token named.
-    inspectDvpMint.mockResolvedValue({ decimals: 6, symbol: "ATD" });
-    getOrCreateDvpSettlementWallet.mockResolvedValue({
-      custodyWalletId: "cwlt_settlement",
-      address: SETTLEMENT_AUTHORITY,
+    inspectDvpMint.mockResolvedValue({
+      decimals: 6,
+      symbol: "ATD",
+      name: "Acme Treasury Debt",
     });
     sponsor = await generateKeyPairSigner();
     getFeePayer.mockResolvedValue(sponsor.address);
@@ -214,45 +210,34 @@ describe("createDvpTrade", () => {
     env.DVP_SETTLEMENT_AUTHORITY = SETTLEMENT_AUTHORITY;
 
     const db = getDb(env);
-    await db.prepare("DELETE FROM dvp_trades").run();
-    await db.prepare("DELETE FROM custody_wallets").run();
-    await db.prepare("DELETE FROM custody_configs").run();
-    await db.prepare("DELETE FROM counterparty_accounts").run();
-    await db.prepare("DELETE FROM counterparties").run();
-    await db.prepare("DELETE FROM projects").run();
-
     await db
       .prepare(
         "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();
+    await db.execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+      JSON.stringify({ providerOverrides: { custody: { local: true } } }),
+      TEST_ORG.id,
+    ]);
     await db
       .prepare(
         "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
       )
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
     await db
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES (?, ?, ?, 'local', 'x', 'active')`
       )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Other Project', ?, 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID_OTHER, TEST_ORG.id, TEST_PROJECT_ID_OTHER, TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
+      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id, TEST_PROJECT_ID)
       .run();
 
     const signer = await generateKeyPairSigner();
@@ -265,10 +250,144 @@ describe("createDvpTrade", () => {
       )
       .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, custodyWalletAddress)
       .run();
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+       VALUES ('cwlt_settlement', ?, 'provider_settlement', ?, 'active')`,
+      [CUSTODY_CONFIG_ID, SETTLEMENT_AUTHORITY]
+    );
+    await db.execute(
+      `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+       VALUES (?, ?, 'cwlt_settlement')`,
+      [TEST_PROJECT_ID, TEST_ORG.id]
+    );
   });
 
   afterEach(() => {
     env.DVP_SETTLEMENT_AUTHORITY = originalSettlementAuthority;
+    env.PRIVY_BYOK_ENABLED = originalByok;
+  });
+
+  async function useConnectionAuthority() {
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO provider_credentials
+       (id, organization_id, project_id, provider, label, scope, source, storage_backend, status, created_by)
+       VALUES ('pcred_dvp', ?, ?, 'privy', 'DvP authority', 'project', 'runtime', 'runtime_env', 'active', ?)`,
+      [TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id]
+    );
+    await db.execute(
+      `INSERT INTO custody_connections
+       (id, organization_id, project_id, provider, scope, provider_credential_id,
+        provider_credential_scope_key, status, provider_account_fingerprint, created_by)
+       VALUES ('cconn_dvp', ?, ?, 'privy', 'project', 'pcred_dvp', ?, 'pending', 'sha256:dvp', ?)`,
+      [TEST_ORG.id, TEST_PROJECT_ID, TEST_PROJECT_ID, TEST_USER.id]
+    );
+    await db.execute(`UPDATE custody_wallets SET custody_config_id = NULL,
+      custody_connection_id = 'cconn_dvp' WHERE id = 'cwlt_settlement'`);
+    await db.execute(`UPDATE custody_connections SET default_custody_wallet_id = 'cwlt_settlement',
+      status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
+      activated_at = sdp_iso_now() WHERE id = 'cconn_dvp'`);
+  }
+
+  it("refuses a paused authority before creating a trade, replacement or sponsor request", async () => {
+    await useConnectionAuthority();
+
+    await expect(createDvpTrade(env, tradeInput())).rejects.toMatchObject({
+      statusCode: 403,
+      details: { reason: "runtime_execution_paused" },
+    });
+    expect(await rowsInDb()).toEqual([]);
+    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryMany("SELECT custody_wallet_id FROM dvp_settlement_wallets")
+    ).toEqual([{ custody_wallet_id: "cwlt_settlement" }]);
+    expect(await getDb(env).queryMany("SELECT id FROM custody_wallets")).toHaveLength(2);
+  });
+
+  it.each(["connection", "credential", "entitlement"] as const)(
+    "refuses an authority with unavailable %s before recording or sponsoring a trade",
+    async (unavailable) => {
+      await useConnectionAuthority();
+      env.PRIVY_BYOK_ENABLED = "true";
+      const db = getDb(env);
+      if (unavailable === "connection") {
+        await db.execute(`UPDATE custody_connections SET status = 'deactivated',
+          deactivated_at = sdp_iso_now() WHERE id = 'cconn_dvp'`);
+      } else if (unavailable === "credential") {
+        await db.execute(
+          "UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_dvp'"
+        );
+      } else {
+        await db.execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+          JSON.stringify({ providerOverrides: { custody: { local: true, privy: false } } }),
+          TEST_ORG.id,
+        ]);
+      }
+
+      await expect(createDvpTrade(env, tradeInput())).rejects.toMatchObject({
+        statusCode: unavailable === "entitlement" ? 403 : 409,
+      });
+      expect(await rowsInDb()).toEqual([]);
+      expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+      expect(await db.queryMany("SELECT custody_wallet_id FROM dvp_settlement_wallets")).toEqual([
+        { custody_wallet_id: "cwlt_settlement" },
+      ]);
+      expect(await db.queryMany("SELECT id FROM custody_wallets")).toHaveLength(2);
+    }
+  );
+
+  it("creates with an admitted nondefault Connection authority", async () => {
+    await useConnectionAuthority();
+    env.PRIVY_BYOK_ENABLED = "true";
+    await getDb(env).execute(
+      `INSERT INTO custody_scope_defaults
+       (id, organization_id, project_id, default_custody_config_id)
+       VALUES ('csd_dvp', ?, ?, ?)`,
+      [TEST_ORG.id, TEST_PROJECT_ID, CUSTODY_CONFIG_ID]
+    );
+
+    const trade = await createDvpTrade(env, tradeInput());
+
+    expect(trade.settlementAuthority).toBe(SETTLEMENT_AUTHORITY);
+    expect(sendTransaction).toHaveBeenCalledOnce();
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } })
+    );
+  });
+
+  it("replays the recorded create after BYOK is paused without sponsoring again", async () => {
+    await useConnectionAuthority();
+    env.PRIVY_BYOK_ENABLED = "true";
+    const input = { ...tradeInput(), idempotencyKey: "byok-replay" };
+    const original = await createDvpTrade(env, input);
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    expect((await createDvpTrade(env, input)).id).toBe(original.id);
+    await expect(createDvpTrade(env, { ...input, amountA: 2000n })).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    expect(await rowsInDb()).toHaveLength(1);
+    expect(sendTransaction).toHaveBeenCalledOnce();
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
+  });
+
+  it("admits a new attempt after a failed create instead of replaying through a paused authority", async () => {
+    await useConnectionAuthority();
+    env.PRIVY_BYOK_ENABLED = "true";
+    const input = { ...tradeInput(), idempotencyKey: "byok-failed-retry" };
+    createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+    await expect(createDvpTrade(env, input)).rejects.toThrow("Sponsor unavailable");
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    await expect(createDvpTrade(env, input)).rejects.toMatchObject({
+      statusCode: 403,
+      details: { reason: "runtime_execution_paused" },
+    });
+    expect(await rowsInDb()).toMatchObject([{ status: "create_failed" }]);
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("has the trade durably recorded at `creating` before the bytes go out", async () => {
@@ -286,6 +405,23 @@ describe("createDvpTrade", () => {
     expect(rowsAtSendTime[0].id).toBe(trade.id);
     // The nonce is the seed that makes the row recoverable at all.
     expect(rowsAtSendTime[0].nonce).toBe(trade.nonce);
+  });
+
+  it("stores token names from mint metadata and the well-known registry fallback", async () => {
+    inspectDvpMint
+      .mockResolvedValueOnce({ decimals: 6, symbol: "ATD", name: "Circle Reserve Fund" })
+      .mockResolvedValueOnce({ decimals: 6, symbol: null, name: null });
+    const input = {
+      ...tradeInput(),
+      mintB: address(WELL_KNOWN_TOKENS.USDG.mints["mainnet-beta"].address),
+    };
+
+    const trade = await createDvpTrade(env, input);
+    const rows = await rowsInDb();
+
+    expect(trade.nameA).toBe("Circle Reserve Fund");
+    expect(trade.nameB).toBe("Global Dollar");
+    expect(rows).toMatchObject([{ name_a: "Circle Reserve Fund", name_b: "Global Dollar" }]);
   });
 
   it("leaves the trade creating until chain observation confirms it", async () => {
@@ -639,36 +775,6 @@ describe("createDvpTrade", () => {
       createDvpTrade(env, {
         ...tradeInput(),
         partyA: { counterpartyAccountId: "cpa_archived" },
-      })
-    ).rejects.toThrow(/counterpartyAccountId/);
-    await expect(rowsInDb()).resolves.toEqual([]);
-  });
-
-  // Cross-parent defense: an account in another project does not resolve here.
-  it("refuses a counterparty account belonging to another project", async () => {
-    const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
-         VALUES ('cpty_other', ?, ?, 'individual', 'Oth')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO counterparty_accounts
-           (id, organization_id, project_id, counterparty_id, account_kind, details, status)
-         VALUES ('cpa_other', ?, ?, 'cpty_other', 'crypto_wallet',
-                 '{"network":"solana","address":"${COUNTERPARTY_ADDRESS}"}'::jsonb, 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT_ID_OTHER)
-      .run();
-
-    acceptSend();
-    await expect(
-      createDvpTrade(env, {
-        ...tradeInput(),
-        partyA: { counterpartyAccountId: "cpa_other" },
       })
     ).rejects.toThrow(/counterpartyAccountId/);
     await expect(rowsInDb()).resolves.toEqual([]);

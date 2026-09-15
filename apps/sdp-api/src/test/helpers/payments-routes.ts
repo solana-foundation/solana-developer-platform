@@ -24,6 +24,7 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -227,10 +228,6 @@ let originalBvnkWalletId: string | undefined;
 
 let originalBvnkApiBaseUrl: string | undefined;
 
-let originalMagicBlockApiBaseUrl: string | undefined;
-
-let originalMagicBlockAuthToken: string | undefined;
-
 let originalMoneygramSandboxPublicKey: string | undefined;
 
 let originalMoneygramSandboxSecretKey: string | undefined;
@@ -268,20 +265,14 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -663,8 +654,6 @@ export function installPaymentsRouteTestHooks(): void {
     originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
     originalBvnkWalletId = env.BVNK_WALLET_ID;
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
-    originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
-    originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
     originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
     originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
     originalHercleSandboxClientId = env.HERCLE_SANDBOX_CLIENT_ID;
@@ -691,8 +680,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_HAWK_SECRET_KEY = undefined;
     env.BVNK_WALLET_ID = undefined;
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
-    env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
-    env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
     env.HERCLE_SANDBOX_CLIENT_ID = TEST_HERCLE_CLIENT_ID;
@@ -724,8 +711,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
     env.BVNK_WALLET_ID = originalBvnkWalletId;
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
-    env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
-    env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
     env.HERCLE_SANDBOX_CLIENT_ID = originalHercleSandboxClientId;

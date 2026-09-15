@@ -8,7 +8,19 @@
  * ordinary tenant isolation.
  */
 
+import { z } from "zod";
 import type { RepositoryDbClient } from "./base";
+
+const dvpLegFundingClaimRowSchema = z.object({
+  trade_id: z.string(),
+  side: z.enum(["a", "b"]),
+  organization_id: z.string(),
+  project_id: z.string(),
+  custody_wallet_id: z.string(),
+  signature: z.string(),
+  expiry_height: z.string(),
+  funding_tx: z.string().nullable(),
+});
 
 export interface DvpLegFundingClaim {
   tradeId: string;
@@ -40,6 +52,10 @@ export interface DvpLegFundingClaimRepository {
    * there is no read-then-write window to lose.
    */
   claim(input: DvpLegFundingClaimInsert): Promise<boolean>;
+  /** Replaces an unbroadcast claim's signature after sponsorship. */
+  rebindSignature(tradeId: string, side: "a" | "b", from: string, to: string): Promise<boolean>;
+  /** Checks whether an exact claim is still held. */
+  hasClaim(tradeId: string, side: "a" | "b", signature: string): Promise<boolean>;
   /**
    * Releases a claim whose broadcast was definitively rejected.
    *
@@ -86,15 +102,16 @@ export interface DvpLegFundingClaimRepository {
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
+  const parsed = dvpLegFundingClaimRowSchema.parse(row);
   return {
-    tradeId: row.trade_id as string,
-    side: row.side as "a" | "b",
-    organizationId: row.organization_id as string,
-    projectId: row.project_id as string,
-    custodyWalletId: row.custody_wallet_id as string,
-    signature: row.signature as string,
-    expiryHeight: row.expiry_height as string,
-    fundingTx: (row.funding_tx as string | null) ?? null,
+    tradeId: parsed.trade_id,
+    side: parsed.side,
+    organizationId: parsed.organization_id,
+    projectId: parsed.project_id,
+    custodyWalletId: parsed.custody_wallet_id,
+    signature: parsed.signature,
+    expiryHeight: parsed.expiry_height,
+    fundingTx: parsed.funding_tx,
   };
 }
 
@@ -137,6 +154,31 @@ export function createPostgresDvpLegFundingClaimRepository(
         )
         .bind(tradeId, side, signature)
         .run();
+    },
+
+    async rebindSignature(tradeId, side, from, to) {
+      const result = await db
+        .prepare(
+          `UPDATE dvp_leg_funding_claims
+              SET signature = ?, updated_at = sdp_iso_now()
+            WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NULL
+            RETURNING trade_id`
+        )
+        .bind(to, tradeId, side, from)
+        .first<{ trade_id: string }>();
+      return result !== null;
+    },
+
+    async hasClaim(tradeId, side, signature) {
+      const result = await db
+        .prepare(
+          `SELECT 1 AS present
+             FROM dvp_leg_funding_claims
+            WHERE trade_id = ? AND side = ? AND signature = ?`
+        )
+        .bind(tradeId, side, signature)
+        .first<{ present: number }>();
+      return result !== null;
     },
 
     async recordFundingTx(tradeId, side, signature) {

@@ -140,13 +140,12 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
 /**
  * Display labels ONLY — never a matching vocabulary. Order is irrelevant and
  * adding an entry can never change how any provider derives a curator: that
- * derivation is provider-specific and keeps its own vocabulary (Ground's lives
- * in `@sdp/earn` providers/ground/client.ts). Keeping the two apart is what
- * makes "onboarding a curator is a data change" literally true.
+ * derivation is provider-specific and keeps its own vocabulary. Keeping the
+ * two apart is what makes "onboarding a curator is a data change" literally
+ * true.
  */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses. A house is chain-agnostic because Ground can route Solana
-  // USDC into sources it hosts elsewhere.
+  // Curator houses.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
@@ -158,15 +157,14 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   superstate: "Superstate",
   maple: "Maple",
   centrifuge: "Centrifuge",
-  // Ids Ground reports when a protocol or fund curates its own vaults;
-  // `g<ticker>` is Ground's own wrapper of a Superstate fund. Some stored rows
-  // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
-  // renders their metadata.
+  // Ids providers report when a protocol or fund curates its own vaults. Some
+  // stored rows (Aave/Morpho) are hidden by strategy API policy, but inventory
+  // tooling still renders their metadata.
   kamino: "Kamino",
   jupiter: "Jupiter",
+  // The USDY issuer; `providers/ondo/client.ts` reports it as the row's curator.
+  ondo: "Ondo",
   aave_v3: "Aave V3",
-  gustb: "Superstate USTB",
-  guscc: "Superstate USCC",
 };
 
 export function earnCuratorLabel(curator: string): string {
@@ -912,8 +910,8 @@ export interface EarnPortfolioDepositsPage {
 
 /**
  * `pending_approval` is synthesized by the provider client, never reported
- * top-level by the provider: Ground parks the affected payout leg in
- * `pending_customer_approval` (awaiting a customer-side Turnkey stamp) while
+ * top-level by the provider: a provider may park the affected payout leg in
+ * `pending_customer_approval` (awaiting a customer-side signature) while
  * the withdrawal itself keeps saying `processing`, so the client folds a
  * parked leg up into this distinct status — a withdrawal waiting on an
  * approval must be legible, not an indefinite `processing`.

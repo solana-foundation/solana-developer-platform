@@ -30,9 +30,9 @@ set -euo pipefail
 #
 # Prerequisites: solana CLI 4.x, curl, jq, shasum.
 
-RELEASE_TAG="v0.1.0-alpha.6"
+RELEASE_TAG="v0.1.0-alpha.2"
 RING_SO_URL="https://github.com/helius-labs/zolana/releases/download/${RELEASE_TAG}/custom-ring-program-${RELEASE_TAG}.so"
-RING_SO_SHA256="a2a9e85c9677b26f9ee8bf60151dca5ce76b3984e00ac16dc8bd159acc591fae"
+RING_SO_SHA256="041b94f53ff0ee291473b3cf407b7c8b535d87f2beb7a18c48e2034aa2235d81"
 DEPLOY_BALANCE_SOL="1.4"   # ~1.23 SOL programdata rent + fees, with headroom
 BRINGUP_FUND_SOL="0.05"    # rents config, ring-auth, reader record, lookup table
 

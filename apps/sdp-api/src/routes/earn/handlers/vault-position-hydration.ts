@@ -23,6 +23,10 @@ export interface HydratedVaultPositionValue {
   tokenValue: string | undefined;
 }
 
+export interface VaultPositionHydrationOptions {
+  ownerKind: "custody" | "external-wallet";
+}
+
 /**
  * Hydrate vault claims in bounded owner/provider batches.
  *
@@ -34,7 +38,8 @@ export interface HydratedVaultPositionValue {
 export async function hydrateVaultPositions(
   c: AppContext,
   environment: SdpEnvironment,
-  positions: readonly HydratableVaultPosition[]
+  positions: readonly HydratableVaultPosition[],
+  options: VaultPositionHydrationOptions
 ): Promise<Map<string, HydratedVaultPositionValue>> {
   const byProvider = new Map<string, HydratableVaultPosition[]>();
   for (const position of positions) {
@@ -92,9 +97,8 @@ export async function hydrateVaultPositions(
               getLogger().warn(
                 {
                   provider,
-                  owner,
+                  ...ownerTelemetryFields(options.ownerKind, owner, snapshot.owner),
                   providerReference: snapshot.providerReference,
-                  snapshotOwner: snapshot.owner,
                   snapshotCluster: snapshot.cluster,
                   snapshotTokenMint: snapshot.tokenMint,
                   snapshotShareMint: snapshot.shareMint,
@@ -123,7 +127,7 @@ export async function hydrateVaultPositions(
               getLogger().warn(
                 {
                   provider,
-                  owner,
+                  ...ownerTelemetryFields(options.ownerKind, owner),
                   providerReference: snapshot.providerReference,
                   snapshotTokenMint: snapshot.tokenMint,
                   snapshotShareMint: snapshot.shareMint,
@@ -145,7 +149,7 @@ export async function hydrateVaultPositions(
       getLogger().warn(
         {
           provider: job?.provider,
-          owner: job?.owner,
+          ...(job ? ownerTelemetryFields(options.ownerKind, job.owner) : {}),
           positionCount: job?.positionCount,
           error: result.reason instanceof Error ? result.reason.message : String(result.reason),
         },
@@ -154,6 +158,21 @@ export async function hydrateVaultPositions(
     });
   }
   return live;
+}
+
+/** End-user owner addresses are omitted before the payload reaches the logger. */
+function ownerTelemetryFields(
+  ownerKind: VaultPositionHydrationOptions["ownerKind"],
+  owner: string,
+  snapshotOwner?: string
+): { owner?: string; snapshotOwner?: string; ownerMismatch?: boolean } {
+  if (ownerKind === "external-wallet") {
+    return snapshotOwner === undefined ? {} : { ownerMismatch: snapshotOwner !== owner };
+  }
+  return {
+    owner,
+    ...(snapshotOwner === undefined ? {} : { snapshotOwner }),
+  };
 }
 
 function isBoundedSnapshotAmount(value: unknown): value is string {

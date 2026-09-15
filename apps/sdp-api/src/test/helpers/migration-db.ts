@@ -51,8 +51,11 @@ export async function seedOrgProject(
     `${tag}@example.test`,
   ]);
   await client.query(
-    "INSERT INTO projects (id, organization_id, name, slug, created_by) VALUES ($1, $2, $1, $1, $3)",
-    [projectId, organizationId, userId]
+    `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+     VALUES
+       ($1, $2, 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', $3),
+       ($4, $2, 'Default Production Project', 'default-production', 'production', 'active', $3)`,
+    [projectId, organizationId, userId, `${projectId}_production`]
   );
 
   return { organizationId, projectId, userId };

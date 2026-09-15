@@ -11,6 +11,9 @@ import {
 import { AppError, accountFrozen, transactionFailed } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 
+const PROGRAM_ERROR_LINE = /^Program log: Error: /;
+const PROGRAM_FAILED_LINE = /^Program .* failed: /;
+
 export interface SignedSubmissionStore {
   persistSigned(input: {
     signature: Signature;
@@ -48,9 +51,20 @@ export function mapPreflightError(error: unknown): AppError | null {
   }
   const cause = unwrapSimulationError(error);
   const message = cause instanceof Error ? cause.message : error.message;
-  return isSolanaError(cause, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM) && cause.context.code === 17
-    ? accountFrozen(message)
-    : transactionFailed(message);
+  if (isSolanaError(cause, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM) && cause.context.code === 17) {
+    return accountFrozen(message);
+  }
+  const logs = error.context.logs;
+  const lines = logs === null ? [] : logs;
+  const programError = lines.filter((line) => PROGRAM_ERROR_LINE.test(line)).at(-1);
+  const programFailed = lines.filter((line) => PROGRAM_FAILED_LINE.test(line)).at(-1);
+  let diagnostic = message;
+  if (programError !== undefined) {
+    diagnostic = programError;
+  } else if (programFailed !== undefined) {
+    diagnostic = programFailed;
+  }
+  return transactionFailed(diagnostic, { logs });
 }
 
 /**

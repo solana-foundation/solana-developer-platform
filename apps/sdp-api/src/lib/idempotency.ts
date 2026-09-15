@@ -19,13 +19,12 @@ import { conflict } from "@/lib/errors";
  * another.
  *
  * The result is stamped as version FOUR even though it is derived rather than
- * random, because providers validate the shape: Ground answers a version-5
- * UUID with `400 requestId must be a valid UUID v4` (verified against their
- * sandbox, 2026-08-05), which would turn every header-keyed withdrawal into a
- * rejected request. Version 5 is the semantically correct label for a
- * name-derived value, so this is a deliberate concession to the wire format,
- * not a claim of randomness. Collision resistance comes from SHA-256, not from
- * the version nibble.
+ * random, because providers validate the shape: a provider answered a version-5
+ * UUID with `400 requestId must be a valid UUID v4`, which would turn every
+ * header-keyed withdrawal into a rejected request. Version 5 is the
+ * semantically correct label for a name-derived value, so this is a deliberate
+ * concession to the wire format, not a claim of randomness. Collision
+ * resistance comes from SHA-256, not from the version nibble.
  */
 export function deriveProviderRequestId(scope: readonly string[], key: string): string {
   const material = [...scope, key].map((part) => `${part.length}:${part}`).join("|");
@@ -137,6 +136,12 @@ export interface PaymentTransferFingerprintInput {
   amount: string | null;
   memo: string | null | undefined;
   type: string;
+  /**
+   * Vestigial: no caller passes this since private transfers were removed, but
+   * the key stays in the serialized fingerprint below. Dropping it would rewrite
+   * every fingerprint, so an Idempotency-Key recorded before that deploy would
+   * no longer match its own row and the retry would transfer a second time.
+   */
   privateTransfer?: unknown;
 }
 

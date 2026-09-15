@@ -50,7 +50,6 @@ import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
-import notifications from "@/routes/notifications";
 import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
@@ -112,6 +111,7 @@ function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
     case 501:
     case 502:
     case 503:
+    case 504:
       return statusCode;
     default:
       return 500;
@@ -155,7 +155,7 @@ function getSafeSigningErrorMessage(err: SigningError): string {
 }
 
 function mapFeePaymentError(err: FeePaymentError): {
-  status: 400 | 429 | 502 | 503;
+  status: 400 | 422 | 429 | 502 | 503;
   code: string;
   message: string;
 } {
@@ -189,6 +189,19 @@ function mapFeePaymentError(err: FeePaymentError): {
         status: 429,
         code: err.code,
         message: "The signing provider is busy. Try again.",
+      };
+    case "PROVIDER_REJECTED":
+      // The provider returned a structured refusal of these exact bytes
+      // (policy, allowlist, malformed request). Nothing was signed and a
+      // retry cannot succeed, so do not tell the caller to try again.
+      // SIGNING_FAILED stays on the ambiguous 502 path below: the native
+      // adapter uses it for any signing exception, including post-sign
+      // timeouts, where a retry may be valid.
+      return {
+        status: 422,
+        code: "SIGNING_REJECTED",
+        message:
+          "The signing provider rejected this transaction. Retrying will not help; check the transaction and provider policy.",
       };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":
@@ -349,7 +362,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/api-keys", apiKeys);
   v1.route("/counterparties", counterparties);
   v1.route("/members", members);
-  v1.route("/notifications", notifications);
   v1.route("/auth", auth);
   v1.route("/projects", projects);
   v1.route("/rpc", rpc);
