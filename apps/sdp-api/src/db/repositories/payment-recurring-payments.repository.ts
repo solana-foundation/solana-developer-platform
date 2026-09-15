@@ -6,6 +6,7 @@ import type {
   PaymentRecurringPaymentStatus,
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptStage,
+  RecurringPaymentStatusWithRecoverableCollection,
 } from "@sdp/types";
 
 export type {
@@ -48,10 +49,18 @@ export interface PaymentRecurringPaymentRow {
   updated_at: string;
 }
 
-export interface CollectibleRecurringPaymentRow extends PaymentRecurringPaymentRow {
-  status: "active";
+export interface RecurringPaymentCollectionCycleRow extends PaymentRecurringPaymentRow {
   subscription_id: string;
   next_collection_due_at: string;
+}
+
+export interface CollectibleRecurringPaymentRow extends RecurringPaymentCollectionCycleRow {
+  status: "active";
+}
+
+export interface RecoverableCollectionRecurringPaymentRow
+  extends RecurringPaymentCollectionCycleRow {
+  status: RecurringPaymentStatusWithRecoverableCollection;
 }
 
 export interface PaymentRecurringPaymentActivationAttemptRow {
@@ -415,7 +424,7 @@ export interface PaymentRecurringPaymentsRepository {
   listRecoverableCollectionPayments(params: {
     staleBefore: string;
     limit: number;
-  }): Promise<PaymentRecurringPaymentRow[]>;
+  }): Promise<RecoverableCollectionRecurringPaymentRow[]>;
   listDueCollectionPayments(params: {
     dueBefore: string;
     retryBefore: string;

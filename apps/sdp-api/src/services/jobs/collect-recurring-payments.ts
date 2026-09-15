@@ -5,8 +5,10 @@ import {
 } from "@sdp/types";
 import { getDb } from "@/db";
 import {
+  type CollectibleRecurringPaymentRow,
   createPostgresPaymentRecurringPaymentsRepository,
   type PaymentRecurringPaymentRow,
+  type RecoverableCollectionRecurringPaymentRow,
 } from "@/db/repositories";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -96,7 +98,7 @@ function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error:
 
 async function collectRow(
   env: Env,
-  row: PaymentRecurringPaymentRow
+  row: CollectibleRecurringPaymentRow | RecoverableCollectionRecurringPaymentRow
 ): Promise<"ok" | "failed" | "skipped"> {
   try {
     const sourceWallet = await resolveSourceWallet(env, row);

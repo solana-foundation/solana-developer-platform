@@ -199,6 +199,8 @@ export type {
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateAttemptStage,
   PaymentRecurringPaymentUpdateEventRow,
+  RecoverableCollectionRecurringPaymentRow,
+  RecurringPaymentCollectionCycleRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
   UpdatePaymentRecurringPaymentInput,

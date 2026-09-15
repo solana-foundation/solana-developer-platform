@@ -52,6 +52,7 @@ import {
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
   type PaymentTransferRow,
+  type RecurringPaymentCollectionCycleRow,
 } from "@/db/repositories";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import {
@@ -161,12 +162,12 @@ function recoverableCollectionSignature(input: {
       });
 }
 
-function collectionSource(
+function initialCollectionSource(
   metadata: PaymentSubscriptionCollectionAttemptMetadata
 ): RecurringCollectionSource {
   return metadata.source === "manual" || metadata.source === "automated"
     ? metadata.source
-    : metadata.collectionSource;
+    : metadata.initialSource;
 }
 
 function initialCollectionMetadata(input: {
@@ -189,7 +190,7 @@ function retryCollectionMetadata(input: {
     source: "retry",
     recurringPaymentId: input.metadata.recurringPaymentId,
     initiatedByKeyId: input.metadata.initiatedByKeyId,
-    collectionSource: collectionSource(input.metadata),
+    initialSource: initialCollectionSource(input.metadata),
     transferId: input.transferId,
     error: input.error,
     retryAfterAt: input.retryAfterAt,
@@ -204,7 +205,7 @@ function linkedTransferCollectionMetadata(input: {
     source: "linked_transfer",
     recurringPaymentId: input.metadata.recurringPaymentId,
     initiatedByKeyId: input.metadata.initiatedByKeyId,
-    collectionSource: collectionSource(input.metadata),
+    initialSource: initialCollectionSource(input.metadata),
     transferId: input.transferId,
   };
 }
@@ -541,7 +542,7 @@ async function createCollectionAttemptUnderRecurringLock(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  recurringPayment: PaymentRecurringPaymentRow;
+  recurringPayment: RecurringPaymentCollectionCycleRow;
   attemptedAt: string;
   status: PaymentSubscriptionCollectionAttemptInitialStatus;
   error: string | null;
@@ -550,7 +551,6 @@ async function createCollectionAttemptUnderRecurringLock(input: {
 }): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
   const subscriptionId = input.recurringPayment.subscription_id;
   const dueAt = input.recurringPayment.next_collection_due_at;
-  if (!subscriptionId || !dueAt) return null;
 
   return getDb(input.env).transaction(async (tx) => {
     const locked = await tx
@@ -632,14 +632,10 @@ export async function journalAutomatedCollectionFailure(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  recurringPayment: PaymentRecurringPaymentRow;
+  recurringPayment: RecurringPaymentCollectionCycleRow;
   initiatedByKeyId: string | null;
   error: Error;
 }): Promise<void> {
-  const subscriptionId = input.recurringPayment.subscription_id;
-  const dueAt = input.recurringPayment.next_collection_due_at;
-  if (!subscriptionId || !dueAt) return;
-
   const attemptedAt = new Date().toISOString();
   const message = recurringPaymentErrorMessage(input.error);
   await createCollectionAttemptUnderRecurringLock({

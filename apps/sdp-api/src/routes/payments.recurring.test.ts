@@ -2058,9 +2058,9 @@ describe("Payments routes — recurring", () => {
     const manualAttempt = await getDb(env)
       .prepare("SELECT metadata FROM payment_subscription_collection_attempts WHERE id = ?")
       .bind(collectBody.data.collectionAttempt.id)
-      .first<{ metadata: { collectionSource?: string; initiatedByKeyId?: string } }>();
+      .first<{ metadata: { source?: string; initiatedByKeyId?: string } }>();
     expect(manualAttempt?.metadata).toMatchObject({
-      collectionSource: "manual",
+      source: "manual",
       initiatedByKeyId: TEST_API_KEY.id,
     });
     expect(collectBody.data.transfer).toMatchObject({
@@ -3267,7 +3267,7 @@ describe("Payments routes — recurring", () => {
       .all<{
         status: string;
         error: string | null;
-        metadata: { collectionSource?: string; retryAfterAt?: string };
+        metadata: { initialSource?: string; retryAfterAt?: string };
         transfer_id: string | null;
       }>();
     expect(attempts.results).toEqual([
@@ -3275,7 +3275,7 @@ describe("Payments routes — recurring", () => {
         status: "failed",
         transfer_id: null,
         metadata: expect.objectContaining({
-          collectionSource: "automated",
+          initialSource: "automated",
           retryAfterAt: expect.any(String),
         }),
       }),
@@ -3341,14 +3341,14 @@ describe("Payments routes — recurring", () => {
         id: string;
         status: string;
         error: string | null;
-        metadata: { collectionSource?: string; retryAfterAt?: string };
+        metadata: { initialSource?: string; retryAfterAt?: string };
         transfer_id: string | null;
       }>();
     expect(attempts.results).toHaveLength(1);
     expect(attempts.results[0]).toMatchObject({
       status: "failed",
       transfer_id: null,
-      metadata: { collectionSource: "automated" },
+      metadata: { initialSource: "automated" },
     });
     expect(attempts.results[0]?.error).toContain("Custody wallet is unavailable");
     expect(attempts.results[0]?.metadata.retryAfterAt).toBeTruthy();
@@ -3860,6 +3860,38 @@ describe("Payments routes — recurring", () => {
       expect(recurringExecutionCallCounts()).toEqual(executionCalls);
     }
   );
+
+  it("rejects collection attempt metadata without a source discriminator at the database", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    await seedRecurringCollectionJournal({
+      stage: "claimed",
+      attemptId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      collectionDueAt: dueAt,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      attemptedAt: new Date().toISOString(),
+    });
+
+    await expect(
+      getDb(env)
+        .prepare(
+          "UPDATE payment_subscription_collection_attempts SET metadata = '{}'::jsonb WHERE id = ?"
+        )
+        .bind(attemptId)
+        .run()
+    ).rejects.toThrow(/payment_subscription_collection_attempts_metadata_source_check/);
+  });
 
   it("rejects a source change to a wallet outside the API key bindings", async () => {
     await seedUnboundWallet();

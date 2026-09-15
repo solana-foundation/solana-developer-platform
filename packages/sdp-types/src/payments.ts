@@ -518,14 +518,14 @@ export const paymentSubscriptionCollectionAttemptMetadataSchema = z.discriminate
   collectionAttemptMetadataBaseSchema.extend({ source: z.literal("automated") }),
   collectionAttemptMetadataBaseSchema.extend({
     source: z.literal("retry"),
-    collectionSource: z.enum(["manual", "automated"]),
+    initialSource: z.enum(["manual", "automated"]),
     transferId: z.string().nullable(),
     error: z.string(),
     retryAfterAt: z.string(),
   }),
   collectionAttemptMetadataBaseSchema.extend({
     source: z.literal("linked_transfer"),
-    collectionSource: z.enum(["manual", "automated"]),
+    initialSource: z.enum(["manual", "automated"]),
     transferId: z.string(),
   }),
 ]);
@@ -680,6 +680,8 @@ export const RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION = [
   "canceling",
   "canceled",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export type RecurringPaymentStatusWithRecoverableCollection =
+  (typeof RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION)[number];
 export function hasRecoverableRecurringPaymentCollection(
   status: PaymentRecurringPaymentStatus
 ): boolean {

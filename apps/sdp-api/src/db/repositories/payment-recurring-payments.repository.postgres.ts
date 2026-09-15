@@ -36,6 +36,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateEventRow,
   PaymentRecurringWalletAuthorization,
+  RecoverableCollectionRecurringPaymentRow,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
@@ -193,6 +194,20 @@ const collectibleRecurringPaymentProjectionSchema = z.object({
   subscription_id: z.string(),
   next_collection_due_at: z.string(),
 });
+
+const recoverableCollectionRecurringPaymentProjectionSchema = z.object({
+  status: z.enum(RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION),
+  subscription_id: z.string(),
+  next_collection_due_at: z.string(),
+});
+
+function mapRecoverableCollectionRecurringPaymentRow(
+  row: Record<string, unknown>
+): RecoverableCollectionRecurringPaymentRow {
+  const recurringPayment = mapRecurringPaymentRow(row);
+  const projection = recoverableCollectionRecurringPaymentProjectionSchema.parse(recurringPayment);
+  return { ...recurringPayment, ...projection };
+}
 
 function mapCollectibleRecurringPaymentRow(
   row: Record<string, unknown>
@@ -366,7 +381,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           limit
         )
         .all<Record<string, unknown>>();
-      return result.rows.map(mapRecurringPaymentRow);
+      return result.rows.map(mapRecoverableCollectionRecurringPaymentRow);
     },
     async listDueCollectionPayments({ dueBefore, retryBefore, limit }) {
       const result = await db
