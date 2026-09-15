@@ -21,6 +21,7 @@ import { registerPolicyPaths } from "./paths/policies";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
+import { registerTransactionsPaths } from "./paths/transactions";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -157,6 +158,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerTransactionsPaths(registry);
   registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
@@ -176,6 +178,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerTransactionsPaths(registry);
   registerPolicyPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);

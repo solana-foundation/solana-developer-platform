@@ -488,6 +488,13 @@ export type {
 } from "./token.repository";
 export { createPostgresTokenRepository } from "./token.repository.postgres";
 export type {
+  ListUnifiedTransactionsInput,
+  ListUnifiedTransactionsResult,
+  UnifiedTransactionModuleWalletScope,
+  UnifiedTransactionsRepository,
+} from "./unified-transactions.repository";
+export { createPostgresUnifiedTransactionsRepository } from "./unified-transactions.repository.postgres";
+export type {
   EnrolledWalletRow,
   UpsertWalletAssetEnrollmentInput,
   WalletAssetEnrollmentRow,

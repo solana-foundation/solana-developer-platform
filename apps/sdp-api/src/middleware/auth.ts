@@ -372,20 +372,26 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 /**
  * Require specific permissions
  */
+export function grantedPermissions(c: Context<{ Bindings: Env }>): readonly Permission[] | "*" {
+  const permissions =
+    c.get("apiKey")?.permissions ??
+    c.get("clerk")?.permissions ??
+    c.get("session")?.permissions ??
+    null;
+
+  if (!permissions) {
+    throw new AppError("UNAUTHORIZED");
+  }
+
+  return permissions.includes("*") ? "*" : permissions;
+}
+
 export function requirePermissions(...required: Permission[]) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const apiKey = c.get("apiKey");
-    const clerk = c.get("clerk");
-    const session = c.get("session");
-
-    const permissions = apiKey?.permissions ?? clerk?.permissions ?? session?.permissions ?? null;
-
-    if (!permissions) {
-      throw new AppError("UNAUTHORIZED");
-    }
+    const permissions = grantedPermissions(c);
 
     // Check for wildcard
-    if (permissions.includes("*")) {
+    if (permissions === "*") {
       await next();
       return;
     }

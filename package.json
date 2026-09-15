@@ -74,6 +74,8 @@
     "generate:module-map": "node scripts/check-module-boundaries.mjs --write",
     "typecheck": "turbo run typecheck",
     "typecheck:all": "turbo run typecheck",
+    "unified-transactions:generate": "pnpm --filter @sdp/api unified-transactions:generate",
+    "unified-transactions:drift": "pnpm --filter @sdp/api unified-transactions:drift",
     "lint": "biome check .",
     "lint:all": "turbo run lint",
     "lint:fix": "biome check --write .",
