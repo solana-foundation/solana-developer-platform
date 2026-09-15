@@ -453,7 +453,7 @@ describe("Payments routes — subscriptions", () => {
     });
     expectPreparedSubscriptionTransaction(prepareAuthorizationBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      TEST_SOLANA_ADDRESSES.wallet2,
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const authorizedAt = new Date().toISOString();
@@ -489,7 +489,7 @@ describe("Payments routes — subscriptions", () => {
     expect(prepareCancelBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareCancelBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      TEST_SOLANA_ADDRESSES.wallet2,
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const prepareResumeRes = await app.request(
@@ -508,7 +508,7 @@ describe("Payments routes — subscriptions", () => {
     expect(prepareResumeBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareResumeBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      TEST_SOLANA_ADDRESSES.wallet2,
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const amountOverrideRes = await app.request(
