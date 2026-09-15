@@ -150,6 +150,10 @@ export type CounterpartyAccountKind = (typeof COUNTERPARTY_ACCOUNT_KINDS)[number
 
 export type CounterpartyAccountStatus = "active" | "archived";
 
+export type CryptoWalletCounterpartyAccountDetails = Record<string, unknown> & {
+  address: string;
+};
+
 export type CounterpartyAccountDetails = Record<string, unknown>;
 
 export type CounterpartyAccountProviderData = Record<string, unknown>;
@@ -161,7 +165,7 @@ export interface CounterpartyAccount {
   counterpartyId: string;
   accountKind: CounterpartyAccountKind;
   label: string | null;
-  details: CounterpartyAccountDetails;
+  details: CryptoWalletCounterpartyAccountDetails;
   providerAccountData: CounterpartyAccountProviderData;
   status: CounterpartyAccountStatus;
   createdAt: string;

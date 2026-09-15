@@ -8,6 +8,10 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
+  PAYMENT_SUBSCRIPTION_STATUSES,
   PAYMENT_TRANSFER_STATUSES,
   PAYMENT_TRANSFER_TYPES,
   type PolicyRule,
@@ -271,36 +275,15 @@ export const recurringPaymentIdParamsSchema = z.object({
   id: z.string().min(1),
 });
 
-export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
+export const paymentSubscriptionPlanStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES);
 
-export const paymentSubscriptionStatusSchema = z.enum([
-  "pending_authorization",
-  "active",
-  "paused",
-  "canceling",
-  "canceled",
-  "expired",
-]);
+export const paymentSubscriptionStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_STATUSES);
 
-export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "skipped",
-]);
+export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum(
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES
+);
 
-export const paymentRecurringPaymentStatusSchema = z.enum([
-  "pending_activation",
-  "activating",
-  "active",
-  "updating",
-  "canceling",
-  "resuming",
-  "paused",
-  "canceled",
-  "expired",
-]);
+export const paymentRecurringPaymentStatusSchema = z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES);
 
 export const createRecurringPaymentSchema = z.strictObject({
   sourceCustodyWalletId: z.string().min(1),

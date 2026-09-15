@@ -1,6 +1,7 @@
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -361,7 +362,7 @@ export function mockTokenSupplyDecimalsOnce(decimals = 6): void {
   } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
-export function mockRecurringActivationRpc(options?: {
+export function mockRecurringActivationRpc(options: {
   tokenAccounts?: Array<{
     pubkey: string;
     mint: string;
@@ -370,7 +371,7 @@ export function mockRecurringActivationRpc(options?: {
     uiAmountString: string;
   }>;
 }) {
-  const tokenAccounts = options?.tokenAccounts ?? [
+  const tokenAccounts = options.tokenAccounts ?? [
     {
       pubkey: TEST_SOLANA_ADDRESSES.wallet3,
       mint: DEVNET_USDC_MINT,
@@ -415,7 +416,10 @@ export function mockRecurringActivationRpc(options?: {
   } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
-export async function recurringCollectionTransactionForSignature(signature: Signature) {
+export async function recurringCollectionTransactionForSignature(options: {
+  signature: Signature;
+  decimals: number;
+}) {
   const row = await getDb(env)
     .prepare(
       `SELECT t.source_address,
@@ -446,7 +450,7 @@ export async function recurringCollectionTransactionForSignature(signature: Sign
                 AND a.signature = ?
            )`
     )
-    .bind(signature, signature)
+    .bind(options.signature, options.signature)
     .first<{
       source_address: string;
       token: string;
@@ -469,7 +473,7 @@ export async function recurringCollectionTransactionForSignature(signature: Sign
   });
   const destinationTokenAccount = row.destination_token_account ?? derivedDestinationTokenAccount;
 
-  const amountBaseUnits = BigInt(row.amount.replace(".", "").padEnd(8, "0"));
+  const amountBaseUnits = parseDecimalAmount(row.amount, options.decimals);
   const instructionData = subscriptionsProgram
     .getTransferSubscriptionInstructionDataEncoder()
     .encode({
@@ -540,7 +544,7 @@ export function installPaymentsRouteTestHooks(): void {
       err: null,
     });
     getTransactionMock.mockImplementation(async (_rpc, signature) =>
-      recurringCollectionTransactionForSignature(signature)
+      recurringCollectionTransactionForSignature({ signature, decimals: 6 })
     );
     sendAndConfirmTransactionMock.mockResolvedValue({
       signature:

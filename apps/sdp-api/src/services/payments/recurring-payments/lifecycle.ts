@@ -6,6 +6,10 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import {
+  IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  isPendingActivationRecurringPaymentStatus,
+} from "@sdp/types";
 import type { Address, Instruction, Signature, TransactionSigner } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getDb } from "@/db";
@@ -21,7 +25,7 @@ import {
   type PaymentRecurringPaymentsRepository,
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -33,24 +37,15 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
+  parseNullableStoredSignature,
+  recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
-
-function tenantScope(input: { organizationId: string; projectId: string }) {
-  return createTenantScope({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-  });
-}
 
 function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperation) {
   return operation === "cancel"
     ? "Recurring payment cancellation failed on-chain"
     : "Recurring payment resume failed on-chain";
-}
-
-function lifecycleErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function buildLifecycleInstruction(input: {
@@ -75,7 +70,7 @@ async function buildLifecycleInstruction(input: {
     { commitment: "confirmed" }
   );
   if (!onChainSubscription.exists) {
-    throw new AppError("CONFLICT", "Subscription was not found on-chain");
+    throw conflict("Subscription was not found on-chain");
   }
 
   return subscriptionsProgram.getResumeSubscriptionOverlayInstructionAsync({
@@ -109,10 +104,9 @@ function assertLifecyclePreconditions(input: {
     return;
   }
   if (transition === "processing") {
-    throw new AppError("CONFLICT", `Recurring payment ${input.operation} is already processing`);
+    throw conflict(`Recurring payment ${input.operation} is already processing`);
   }
-  throw new AppError(
-    "CONFLICT",
+  throw conflict(
     `Recurring payment cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
   );
 }
@@ -133,7 +127,7 @@ async function getOrCreateLifecycleAttempt(input: {
     projectId: input.projectId,
     recurringPaymentId: input.claimed.id,
     operation: input.operation,
-    statuses: ["processing"],
+    statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   });
 
   if (existing) {
@@ -177,46 +171,53 @@ async function getOrCreateLifecycleAttempt(input: {
       expectedStatus: processingStatus,
       updatedAt: new Date().toISOString(),
     });
-    throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment lifecycle");
+    throw internalError("Failed to journal recurring payment lifecycle");
   }
 
   return attempt;
 }
 
 async function recordLifecycleFailure(input: {
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  env: Env;
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
   operation: RecurringPaymentLifecycleOperation;
   organizationId: string;
   projectId: string;
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
-  error: unknown;
+  error: Error;
   failedAt: string;
   resetClaim: boolean;
 }): Promise<void> {
-  await input.recurringRepo.updateLifecycleAttempt({
-    attemptId: input.attempt.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: "failed",
-    stage: input.stage,
-    error: lifecycleErrorMessage(input.error),
-    updatedAt: input.failedAt,
-  });
-
-  if (input.resetClaim) {
-    const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
-      input.operation
-    );
-    await input.recurringRepo.updateRecurringPaymentLifecycle({
-      recurringPaymentId: input.attempt.recurring_payment_id,
+  await getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+      attemptId: input.attempt.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: claimableStatus,
-      expectedStatus: processingStatus,
+      status: "failed",
+      stage: input.stage,
+      error: recurringPaymentErrorMessage(input.error),
       updatedAt: input.failedAt,
     });
-  }
+    if (updatedAttempt === null)
+      throw conflict("Recurring payment lifecycle attempt changed concurrently");
+
+    if (input.resetClaim) {
+      const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
+        input.operation
+      );
+      const updatedRecurringPayment = await recurringRepo.updateRecurringPaymentLifecycle({
+        recurringPaymentId: input.attempt.recurring_payment_id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: claimableStatus,
+        expectedStatus: processingStatus,
+        updatedAt: input.failedAt,
+      });
+      if (updatedRecurringPayment === null)
+        throw conflict("Recurring payment lifecycle changed concurrently");
+    }
+  });
 }
 
 async function preserveRecoverableLifecycleAttempt(input: {
@@ -228,7 +229,7 @@ async function preserveRecoverableLifecycleAttempt(input: {
   recurringPaymentId: string;
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
   signature: Signature;
-  error: unknown;
+  error: Error;
   failedAt: string;
   confirmedOnChain: boolean;
 }): Promise<void> {
@@ -239,13 +240,14 @@ async function preserveRecoverableLifecycleAttempt(input: {
       projectId: input.projectId,
       stage: input.stage,
       signature: input.signature,
-      error: lifecycleErrorMessage(input.error),
+      error: recurringPaymentErrorMessage(input.error),
       updatedAt: input.failedAt,
     });
   } catch (journalError) {
+    if (!(journalError instanceof Error)) throw journalError;
     getLogger().error(
       {
-        error: lifecycleErrorMessage(journalError),
+        error: recurringPaymentErrorMessage(journalError),
         operation: input.operation,
         recurring_payment_id: input.recurringPaymentId,
       },
@@ -256,7 +258,7 @@ async function preserveRecoverableLifecycleAttempt(input: {
   getLogger().error(
     {
       confirmed_on_chain: input.confirmedOnChain,
-      error: lifecycleErrorMessage(input.error),
+      error: recurringPaymentErrorMessage(input.error),
       operation: input.operation,
       recurring_payment_id: input.recurringPaymentId,
     },
@@ -321,13 +323,14 @@ async function finalizeRecurringPaymentLifecycle(input: {
       updatedAttempt.status !== "confirmed" ||
       updatedAttempt.signature !== input.signature
     ) {
-      throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment lifecycle");
+      throw internalError("Failed to finalize recurring payment lifecycle");
     }
 
     return updatedRecurringPayment;
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Lifecycle recovery keeps each persisted stage explicit.
 async function runRecurringPaymentLifecycle(input: {
   env: Env;
   organizationId: string;
@@ -336,9 +339,15 @@ async function runRecurringPaymentLifecycle(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   operation: RecurringPaymentLifecycleOperation;
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
-  const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const paymentsRepo = createPaymentsRepository(input.env, createTenantScope(input));
   const nowIso = new Date().toISOString();
 
   assertLifecyclePreconditions({ ...input, nowIso });
@@ -381,35 +390,41 @@ async function runRecurringPaymentLifecycle(input: {
     input.sourceWallet.id
   );
 
-  const claimed = await recurringRepo.claimRecurringPaymentLifecycle({
-    recurringPaymentId: collectionState.recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    operation: input.operation,
-    updatedAt: new Date().toISOString(),
-    staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+  const claimResult = await getDb(input.env).transaction(async (tx) => {
+    const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
+      recurringPaymentId: collectionState.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      operation: input.operation,
+      updatedAt: new Date().toISOString(),
+      staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+    });
+    if (!claimed) return null;
+    const attempt = await getOrCreateLifecycleAttempt({
+      recurringRepo: transactionRepo,
+      claimed,
+      operation: input.operation,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      nowIso,
+    });
+    return { claimed, attempt };
   });
 
-  if (!claimed) {
-    throw new AppError("CONFLICT", `Recurring payment ${input.operation} is already processing`);
+  if (!claimResult) {
+    throw conflict(`Recurring payment ${input.operation} is already processing`);
   }
-
-  let attempt = await getOrCreateLifecycleAttempt({
-    recurringRepo,
-    claimed,
-    operation: input.operation,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    nowIso,
-  });
+  const { claimed } = claimResult;
+  let { attempt } = claimResult;
 
   let currentStage: PaymentRecurringPaymentLifecycleAttemptStage = attempt.stage;
-  let signature = attempt.signature as Signature | null;
+  let signature = parseNullableStoredSignature(attempt.signature);
   let confirmedOnChain = false;
 
   try {
     if (!claimed.plan_pda || !claimed.subscription_id || !claimed.subscription_pda) {
-      throw new AppError("CONFLICT", "Recurring payment is missing on-chain subscription records");
+      throw conflict("Recurring payment is missing on-chain subscription records");
     }
 
     const subscription =
@@ -421,7 +436,7 @@ async function runRecurringPaymentLifecycle(input: {
             projectId: input.projectId,
           });
     if (!subscription) {
-      throw new AppError("NOT_FOUND", "Subscription not found");
+      throw notFound("Subscription");
     }
     const plan = await subscriptionsRepo.getPlanById({
       planId: subscription.plan_id,
@@ -429,7 +444,7 @@ async function runRecurringPaymentLifecycle(input: {
       projectId: input.projectId,
     });
     if (!plan) {
-      throw new AppError("NOT_FOUND", "Subscription plan not found");
+      throw notFound("Subscription plan");
     }
     const tokenMint = assertValidAddress(
       await assertRecurringPaymentTokenMint(
@@ -447,8 +462,7 @@ async function runRecurringPaymentLifecycle(input: {
       subscription.status !== expectedSubscriptionStatus &&
       subscription.status !== finalSubscriptionStatus
     ) {
-      throw new AppError(
-        "CONFLICT",
+      throw conflict(
         `Subscription cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
       );
     }
@@ -463,7 +477,7 @@ async function runRecurringPaymentLifecycle(input: {
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
 
-    const planPda = assertValidAddress(claimed.plan_pda, "planPda") as Address;
+    const planPda = assertValidAddress(claimed.plan_pda, "planPda");
     const subscriptionPda = assertValidAddress(claimed.subscription_pda, "subscriptionPda");
 
     if (!signature) {
@@ -494,16 +508,19 @@ async function runRecurringPaymentLifecycle(input: {
         instructions: [instruction],
       });
 
-      attempt =
-        (await recurringRepo.updateLifecycleAttempt({
-          attemptId: attempt.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          stage: currentStage,
-          signature,
-          error: null,
-          updatedAt: new Date().toISOString(),
-        })) ?? attempt;
+      const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        stage: currentStage,
+        signature,
+        error: null,
+        updatedAt: new Date().toISOString(),
+      });
+      if (updatedAttempt === null) {
+        throw conflict("Recurring payment lifecycle attempt changed concurrently");
+      }
+      attempt = updatedAttempt;
     }
 
     await confirmSubscriptionSignature(
@@ -524,6 +541,17 @@ async function runRecurringPaymentLifecycle(input: {
       signature,
     });
   } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    getLogger().error(
+      {
+        err: error,
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        recurring_payment_id: claimed.id,
+        attempt_id: attempt.id,
+      },
+      "Recurring payment lifecycle operation failed"
+    );
     const failedAt = new Date().toISOString();
     const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
 
@@ -546,7 +574,7 @@ async function runRecurringPaymentLifecycle(input: {
 
     try {
       await recordLifecycleFailure({
-        recurringRepo,
+        env: input.env,
         attempt,
         operation: input.operation,
         organizationId: input.organizationId,
@@ -578,8 +606,11 @@ export async function cancelRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
 }): Promise<PaymentRecurringPaymentRow> {
-  if (input.recurringPayment.status === "pending_activation") {
-    const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
+    const recurringRepo = createPaymentRecurringPaymentsRepository(
+      input.env,
+      createTenantScope(input)
+    );
     const updated = await recurringRepo.updateRecurringPaymentLifecycle({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,

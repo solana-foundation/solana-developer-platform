@@ -2,6 +2,8 @@
 
 import {
   type CounterpartyAccount,
+  PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
+  type PaymentRecurringPaymentSchedulePreset,
   type PaymentRecurringPaymentStatus,
   type PaymentsDashboardWallet,
   WELL_KNOWN_TOKEN_BY_MINT,
@@ -9,6 +11,7 @@ import {
 import { CopyIcon, ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -81,37 +84,31 @@ export function formatPeriodHours(periodHours: number, t: Translate): string {
     : t("DashboardPayments.recurring.everyHours", { count: periodHours });
 }
 
-export type SchedulePreset = "24" | "168" | "720" | "custom";
+export type SchedulePreset = PaymentRecurringPaymentSchedulePreset;
 
 export function getSchedulePresets(t: Translate) {
-  return [
-    {
-      value: "24",
-      label: t("DashboardPayments.recurring.everyDay"),
-      description: t("DashboardPayments.recurring.collectDaily"),
-    },
-    {
-      value: "168",
-      label: t("DashboardPayments.recurring.everyWeek"),
-      description: t("DashboardPayments.recurring.collectWeekly"),
-    },
-    {
-      value: "720",
-      label: t("DashboardPayments.recurring.everyThirtyDays"),
-      description: t("DashboardPayments.recurring.collectMonthly"),
-    },
-    {
-      value: "custom",
-      label: t("DashboardPayments.recurring.custom"),
-      description: t("DashboardPayments.recurring.customScheduleDescription"),
-    },
-  ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
+  const labels = {
+    "24": t("DashboardPayments.recurring.everyDay"),
+    "168": t("DashboardPayments.recurring.everyWeek"),
+    "720": t("DashboardPayments.recurring.everyThirtyDays"),
+    custom: t("DashboardPayments.recurring.custom"),
+  } satisfies Record<SchedulePreset, string>;
+  const descriptions = {
+    "24": t("DashboardPayments.recurring.collectDaily"),
+    "168": t("DashboardPayments.recurring.collectWeekly"),
+    "720": t("DashboardPayments.recurring.collectMonthly"),
+    custom: t("DashboardPayments.recurring.customScheduleDescription"),
+  } satisfies Record<SchedulePreset, string>;
+  return PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS.map((value) => ({
+    value,
+    label: labels[value],
+    description: descriptions[value],
+  }));
 }
 
 export function schedulePresetForPeriodHours(periodHours: number): SchedulePreset {
-  return ["24", "168", "720"].some((preset) => preset === String(periodHours))
-    ? (String(periodHours) as SchedulePreset)
-    : "custom";
+  const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS).safeParse(String(periodHours));
+  return parsed.success && parsed.data !== "custom" ? parsed.data : "custom";
 }
 
 export function parsePeriodHours(
@@ -169,14 +166,19 @@ export function CopyableValue({
   const t = useTranslations();
   if (!value) {
     return (
-      <span className="text-tertiary">{empty ?? t("DashboardPayments.recurring.notSet")}</span>
+      <span className="text-tertiary">
+        {empty === undefined ? t("DashboardPayments.recurring.notSet") : empty}
+      </span>
     );
   }
 
   return (
     <span className="inline-flex max-w-full items-center justify-end gap-2">
-      <span className="min-w-0 truncate font-mono text-xs text-primary" title={label ?? value}>
-        {label ?? value}
+      <span
+        className="min-w-0 truncate font-mono text-xs text-primary"
+        title={label === undefined ? value : label}
+      >
+        {label === undefined ? value : label}
       </span>
       <Button
         type="button"
@@ -194,13 +196,7 @@ export function CopyableValue({
   );
 }
 
-export function ExplorerValue({
-  value,
-  kind = "tx",
-}: {
-  value: string | null;
-  kind?: "tx" | "address";
-}) {
+export function ExplorerValue({ value, kind }: { value: string | null; kind: "tx" | "address" }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
   if (!value) {
@@ -241,12 +237,11 @@ export function walletLabel(
   if (!wallet) {
     return fallbackWalletId;
   }
-  return wallet.label || shortenAddress(wallet.publicKey);
+  return wallet.label === null ? shortenAddress(wallet.publicKey) : wallet.label;
 }
 
 export function accountAddress(account: CounterpartyAccount | null): string {
-  const address = account?.details.address;
-  return typeof address === "string" ? address : "";
+  return account === null ? "" : account.details.address;
 }
 
 export function accountLabel(
@@ -256,7 +251,7 @@ export function accountLabel(
   if (!account) {
     return fallbackAccountId;
   }
-  return account.label || shortenAddress(accountAddress(account));
+  return account.label === null ? shortenAddress(accountAddress(account)) : account.label;
 }
 
 export function isDueNow(value: string | null): boolean {

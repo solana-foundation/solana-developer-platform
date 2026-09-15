@@ -384,7 +384,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
     {
       href: "/dashboard/payments/recurring",
       icon: CalendarClockIcon,
-      count: recurring.ok ? recurring.total : null,
+      count: recurring.ok ? recurring.data.total : null,
       label: t("DashboardPayments.commandCenter.activeSchedules"),
     },
     {

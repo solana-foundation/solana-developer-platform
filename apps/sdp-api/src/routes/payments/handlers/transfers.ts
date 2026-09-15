@@ -3,9 +3,9 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  isSuccessfulPaymentTransferStatus,
   type Permission,
   type PolicyCandidate,
-  SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
   TRANSFER_CHAIN_VERDICT_STATUSES,
 } from "@sdp/types";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
@@ -260,8 +260,7 @@ async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: Tr
   }
 
   const completed =
-    transfer.signature !== null &&
-    SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((status) => status === transfer.status);
+    transfer.signature !== null && isSuccessfulPaymentTransferStatus(transfer.status);
   if (completed) {
     await assertApprovedWalletOperationCustodyWallet(c, transfer.custody_wallet_id);
     return;
