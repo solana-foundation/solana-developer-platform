@@ -4,12 +4,17 @@ import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sd
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
+import { isDryRunRequest } from "@/middleware/dry-run";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -29,6 +34,7 @@ import {
 import { buildIdempotencyMetadata } from "./idempotency";
 import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -271,6 +277,12 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       actorId: auth.id,
       reason: body.reason,
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved freeze-state execution is incomplete and requires manual reconciliation"
+      );
+    }
     return created(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -347,6 +359,12 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       actorId: auth.id,
       reason: body.reason,
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved freeze-state execution is incomplete and requires manual reconciliation"
+      );
+    }
     return created(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -380,6 +398,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.freezeAccount({
       tokenAccount,
       feePayer: signer.address,
@@ -522,6 +541,12 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       tokenAccount: replayAccountAddress(earlyReplay),
       actorId: auth.id,
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved freeze-state execution is incomplete and requires manual reconciliation"
+      );
+    }
     return success(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -593,6 +618,12 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       tokenAccount,
       actorId: auth.id,
     });
+    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
+      await beginApprovedWalletOperationEffect(c);
+      throw conflict(
+        "Approved freeze-state execution is incomplete and requires manual reconciliation"
+      );
+    }
     return success(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -630,6 +661,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.thawAccount({
       tokenAccount,
       feePayer: signer.address,
@@ -724,25 +756,26 @@ async function extractFreezeStatePolicyCandidate(options: {
   };
 
   const idempotencyKey = c.req.header("Idempotency-Key");
-  const replay = idempotencyKey
-    ? await resolveDirectIssuanceReplay({
-        env: c.env,
-        auth,
-        tokenService,
-        tokenId,
-        type: operation,
-        idempotencyKey,
-        requestedCustodyWalletId: body.signingCustodyWalletId,
-        requiredWalletPermissions: ["tokens:admin"],
-        fingerprintForCustodyWalletId: (custodyWalletId) =>
-          buildIdempotencyMetadata(idempotencyKey, {
-            tokenId,
-            operation,
-            mode: "execute",
-            params: { ...body, signingCustodyWalletId: custodyWalletId },
-          }).idempotencyFingerprint,
-      })
-    : null;
+  const replay =
+    idempotencyKey && !isDryRunRequest(c)
+      ? await resolveDirectIssuanceReplay({
+          env: c.env,
+          auth,
+          tokenService,
+          tokenId,
+          type: operation,
+          idempotencyKey,
+          requestedCustodyWalletId: body.signingCustodyWalletId,
+          requiredWalletPermissions: ["tokens:admin"],
+          fingerprintForCustodyWalletId: (custodyWalletId) =>
+            buildIdempotencyMetadata(idempotencyKey, {
+              tokenId,
+              operation,
+              mode: "execute",
+              params: { ...body, signingCustodyWalletId: custodyWalletId },
+            }).idempotencyFingerprint,
+        })
+      : null;
   if (replay) {
     return { ...emptyExtraction, candidate: null };
   }

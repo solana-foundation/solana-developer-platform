@@ -759,6 +759,89 @@ describe("Issuance Routes", () => {
       expect(operationCount).toEqual({ count: 1 });
     });
 
+    it("dry-runs a freeze against current policy even when the key matches a settled transaction", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_freeze_dry_run_replay",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_freeze_dry_run_replay",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+      const idempotencyKey = "issuance-freeze-dry-run-replay";
+      const body = { accountAddress: TEST_SOLANA_ADDRESSES.wallet1 };
+      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+        tokenId: token.id,
+        operation: "freeze",
+        mode: "execute",
+        params: { ...body, signingCustodyWalletId: wallet.custodyWalletId },
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_freeze_dry_run_replay",
+        tokenId: token.id,
+        type: "freeze",
+        status: "confirmed",
+        custodyWalletId: wallet.custodyWalletId,
+        idempotencyKey,
+        idempotencyFingerprint: idempotency.idempotencyFingerprint,
+        signature: "sig_freeze_dry_run_replay",
+        slot: 20,
+        params: { accountAddress: TEST_SOLANA_ADDRESSES.wallet2 },
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-freeze-dry-run", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Idempotency-Key": idempotencyKey,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ data: { decision: "deny" } });
+      } finally {
+        aclSpy.mockRestore();
+        targetSpy.mockRestore();
+      }
+    });
+
     it("stops a denied freeze before signer and issuance side effects", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_freeze_denied",
