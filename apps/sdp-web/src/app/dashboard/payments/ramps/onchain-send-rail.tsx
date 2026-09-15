@@ -19,7 +19,7 @@ function sendPrimaryLabel(
   switch (true) {
     case wizard.submitting:
       return t("DashboardPayments.submitting");
-    case wizard.isLastStep && Boolean(wizard.transferResult):
+    case wizard.isLastStep && wizard.finished:
       return t("DashboardPayments.counterparty.done");
     case wizard.isLastStep:
       return t("DashboardPayments.sendTransfer");
@@ -55,6 +55,8 @@ export function OnchainSendRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
+      // A sent or held transfer has nothing to go back to.
+      hideSecondary={wizard.finished}
       counterpartyDialog={null}
       summary={
         <WizardSummaryList

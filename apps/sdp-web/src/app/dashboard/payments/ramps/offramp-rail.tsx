@@ -1,7 +1,7 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types";
-import { SendIcon } from "lucide-react";
+import { ClockIcon, SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
@@ -167,6 +167,8 @@ export function OfframpRail({
               disabled: !wizard.canSendOnchain || wizard.quoteExpired,
               onClick: () => void wizard.sendCryptoToDeposit(),
               icon: <SendIcon />,
+              // Held for approval is not sent: the clock the Pay held view uses.
+              doneIcon: wizard.onchainSendHeldForApproval ? <ClockIcon /> : undefined,
               idleLabel: wizard.quoteExpired
                 ? t("DashboardPayments.ramps.quoteExpired")
                 : t("DashboardPayments.ramps.sendCrypto", {
@@ -174,7 +176,9 @@ export function OfframpRail({
                     token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
                   }),
               busyLabel: t("DashboardPayments.ramps.sending"),
-              doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
+              doneLabel: wizard.onchainSendHeldForApproval
+                ? t("DashboardPayments.ramps.transferApprovalPending")
+                : t("DashboardPayments.ramps.transferSubmitted"),
             }}
           />
         ) : null

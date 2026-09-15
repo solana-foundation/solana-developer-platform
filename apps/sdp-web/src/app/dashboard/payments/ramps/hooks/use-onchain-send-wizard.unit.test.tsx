@@ -14,11 +14,13 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { resetTransferIdempotencyStateForTests } from "../../transfer-idempotency";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
   toastLoading: vi.fn(() => "toast-id"),
   toastSuccess: vi.fn(),
 }));
@@ -34,6 +36,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
+    info: mocks.toastInfo,
     loading: mocks.toastLoading,
     success: mocks.toastSuccess,
   },
@@ -157,7 +160,20 @@ async function prepareReview(result: ReturnType<typeof renderWizard>["result"], 
   await act(async () => result.current.handlePrimary());
 }
 
+function transferPosts() {
+  return fetchMock.mock.calls.filter(
+    ([input, init]) =>
+      String(input) === "/api/dashboard/payments/transfers" && init?.method === "POST"
+  );
+}
+
+function sentIdempotencyKeys() {
+  return transferPosts().map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+}
+
 beforeEach(() => {
+  window.sessionStorage.clear();
+  resetTransferIdempotencyStateForTests();
   accountsResponse = null;
   transferStatus = 200;
   fetchMock.mockReset().mockImplementation((input, init) => {
@@ -186,10 +202,25 @@ beforeEach(() => {
       });
     }
     if (url === "/api/dashboard/payments/transfers" && init?.method === "POST") {
+      if (transferStatus === 200) {
+        return Promise.resolve(Response.json({ data: { transfer } }));
+      }
+      if (transferStatus === 202) {
+        return Promise.resolve(
+          Response.json(
+            {
+              error: {
+                code: "SIGNING_PENDING",
+                message: "Approval required",
+                details: { approvalRequestId: "apr_test" },
+              },
+            },
+            { status: 202 }
+          )
+        );
+      }
       return Promise.resolve(
-        transferStatus === 200
-          ? Response.json({ data: { transfer } })
-          : Response.json({ error: { message: "transfer rejected" } }, { status: transferStatus })
+        Response.json({ error: { message: "transfer rejected" } }, { status: transferStatus })
       );
     }
     return Promise.resolve(Response.json({ data: {} }));
@@ -285,6 +316,59 @@ describe("useOnchainSendWizard", () => {
       amount: "0.5",
     });
     expect(mocks.toastError).toHaveBeenCalledTimes(succeeds ? 0 : 1);
+  });
+
+  it("holds a payment a policy parks for approval instead of reporting it failed", async () => {
+    transferStatus = 202;
+    const { result } = renderWizard();
+    await prepareReview(result);
+
+    await act(async () => result.current.handlePrimary());
+
+    expect(result.current.heldApprovalRequestId).toBe("apr_test");
+    expect(result.current.transferResult).toBeNull();
+    expect(result.current.finished).toBe(true);
+    expect(mocks.toastInfo).toHaveBeenCalledOnce();
+    expect(mocks.toastError).not.toHaveBeenCalled();
+
+    // Done leaves; it never sends the held payment again.
+    await act(async () => result.current.handlePrimary());
+    expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments");
+    expect(transferPosts()).toHaveLength(1);
+  });
+
+  it("sends the same payment again under the key an approval holds", async () => {
+    transferStatus = 202;
+    const first = renderWizard();
+    await prepareReview(first.result);
+    await act(async () => first.result.current.handlePrimary());
+    first.unmount();
+
+    // A fresh wizard, as after leaving the page: the same payment is a retry.
+    transferStatus = 200;
+    const second = renderWizard();
+    await prepareReview(second.result);
+    await act(async () => second.result.current.handlePrimary());
+
+    const [heldKey, retryKey] = sentIdempotencyKeys();
+    expect(heldKey).toEqual(expect.any(String));
+    expect(retryKey).toBe(heldKey);
+  });
+
+  it("keeps the key across a lost answer and retires it on a refusal", async () => {
+    transferStatus = 503;
+    const { result } = renderWizard();
+    await prepareReview(result);
+
+    await act(async () => result.current.handlePrimary());
+    transferStatus = 422;
+    await act(async () => result.current.handlePrimary());
+    await act(async () => result.current.handlePrimary());
+
+    const [lost, retried, afterRefusal] = sentIdempotencyKeys();
+    expect(retried).toBe(lost);
+    expect(afterRefusal).not.toBe(lost);
+    expect(mocks.toastError).toHaveBeenCalledTimes(3);
   });
 
   it("selects a newly added account and closes the dialog", async () => {

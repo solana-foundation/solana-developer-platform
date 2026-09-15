@@ -170,6 +170,8 @@
       "sandboxSimulationFailed": "Sandbox simulation failed.",
       "muralSandboxCurrencyUnsupported": "Mural sandbox payin does not support {currency}.",
       "transferSignatureMissing": "Transfer did not return a signature (status: {status}).",
+      "transferHeldForApproval": "This wallet's policy needs this transfer approved before it's sent, so MoneyGram can't continue. Nothing has moved yet. If it shouldn't go out later, cancel the request in Approvals.",
+      "transferApprovalPending": "Waiting for approval",
       "offrampManualDescription": "Send {amount} {token} to the deposit address below before the quote expires. The provider converts it at the locked rate and pays out to the saved bank account automatically.",
       "noPayoutProviders": "No payout providers are enabled for this organization.",
       "providerPayout": "{provider} payout",
@@ -297,7 +299,10 @@
       "transferFailed": "Transfer failed.",
       "transferSuccess": "Your transfer was sent successfully.",
       "transferStatus": "Status: {status}",
-      "viewOnExplorer": "View on explorer"
+      "viewOnExplorer": "View on explorer",
+      "approvalPendingTitle": "Waiting for approval",
+      "approvalPendingDescription": "This wallet's policy needs someone to approve the transfer before it's sent. Nothing has moved yet.",
+      "viewApprovalRequest": "View approval request"
     },
     "onchainReceive": {
       "wallet": "Wallet",

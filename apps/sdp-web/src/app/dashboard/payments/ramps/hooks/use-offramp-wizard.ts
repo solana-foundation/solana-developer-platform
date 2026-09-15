@@ -90,7 +90,9 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     reset: resetCreateTransfer,
   } = useSWRMutation(
     paymentsQueryKeys.createTransfer(),
-    (_key, { arg }: { arg: CreateTransferInput }) => createTransfer(arg, t)
+    // The quote's `transferId` names the row, so a resend is already the same
+    // transfer; no Idempotency-Key is needed to keep it from moving twice.
+    (_key, { arg }: { arg: CreateTransferInput }) => createTransfer(arg, t, null)
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
@@ -285,13 +287,22 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     });
 
     try {
-      const transfer = await triggerCreateTransfer({
+      const outcome = await triggerCreateTransfer({
         transferId,
         sourceCustodyWalletId: wizard.selectedWallet.id,
         destination: depositTarget.destinationAddress,
         token: address(sourceTokenMint),
         amount: depositTarget.amount,
       });
+      if (outcome.kind === "approval_pending") {
+        toast.info(t("DashboardPayments.onchainSend.approvalPendingTitle"), {
+          id: toastId,
+          description: t("DashboardPayments.onchainSend.approvalPendingDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
+      const transfer = outcome.transfer;
       if (transfer.id !== transferId) {
         throw new Error(t("DashboardPayments.ramps.transferFailed"));
       }
@@ -325,6 +336,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     canSendOnchain,
     onchainSendLoading,
     onchainSendResult: onchainSendResult ?? null,
+    onchainSendHeldForApproval: onchainSendResult?.kind === "approval_pending",
     sendCryptoToDeposit,
     quoteExpired,
   };
