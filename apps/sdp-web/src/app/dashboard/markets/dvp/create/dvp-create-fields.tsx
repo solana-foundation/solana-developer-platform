@@ -18,6 +18,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
+import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
 import { toBaseUnits } from "./dvp-amount";
 import type {
   DvpCreateCounterpartyAccount,
@@ -27,9 +28,6 @@ import type {
 import { CUSTOM } from "./use-dvp-create-form";
 import type { DvpPayout } from "./use-dvp-destinations";
 import type { DvpPartySlot } from "./use-dvp-parties";
-
-/** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
-const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** Mirrors MAX_REF_STRING_BYTES in `services/dvp/validate.ts`. */
 const MAX_REF_BYTES = 64;
@@ -148,7 +146,7 @@ export function MintField({
         options={comboOptions}
         placeholder={t("DashboardMarkets.dvp.mintSlotPlaceholder")}
         queryOption={(query) =>
-          BASE58_ADDRESS.test(query)
+          BASE58_ADDRESS_PATTERN.test(query)
             ? {
                 value: query,
                 label: shortenAddress(query),
@@ -269,7 +267,7 @@ export function PartySlotPicker({
 }) {
   const t = useTranslations();
   const formatError =
-    slot.mode === "address" && slot.address.length > 0 && !BASE58_ADDRESS.test(slot.address)
+    slot.mode === "address" && slot.address.length > 0 && !BASE58_ADDRESS_PATTERN.test(slot.address)
       ? t("DashboardMarkets.dvp.partyAddressInvalid")
       : null;
   const pickerError = formatError === null ? error : formatError;
@@ -417,7 +415,7 @@ export function PayoutAddressPicker({
         onChange={payout.setAddress}
         options={options}
         queryOption={(query) =>
-          BASE58_ADDRESS.test(query)
+          BASE58_ADDRESS_PATTERN.test(query)
             ? {
                 value: query,
                 label: shortenAddress(query),

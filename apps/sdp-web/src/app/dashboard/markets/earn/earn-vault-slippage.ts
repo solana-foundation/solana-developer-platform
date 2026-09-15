@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "react";
  * exports both components and helpers breaks Fast Refresh's state preservation.
  */
 
-function atomsToDecimalString(atoms: bigint, decimals: number): string {
+export function atomsToDecimalString(atoms: bigint, decimals: number): string {
   if (decimals === 0) return atoms.toString();
   const padded = atoms.toString().padStart(decimals + 1, "0");
   const whole = padded.slice(0, -decimals);

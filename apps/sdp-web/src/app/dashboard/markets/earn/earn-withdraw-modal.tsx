@@ -19,6 +19,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
+import { BASE58_ADDRESS_PATTERN } from "../base58-address";
 import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import {
@@ -52,9 +53,6 @@ export function withdrawalRequestSignature(
 ): string {
   return JSON.stringify([programId, amountUsd, token, destinationAddress]);
 }
-
-/** Base58 Solana address shape; the API re-validates with a real decoder. */
-const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
@@ -486,7 +484,7 @@ export function EarnWithdrawModal({
     amountFormatValid &&
     (laneCeiling === undefined || compareUsdDecimals(amount, laneCeiling) !== 1);
   const destination = destinationInput.trim();
-  const destinationValid = SOLANA_ADDRESS_PATTERN.test(destination);
+  const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 
   /**
    * The idempotency key identifies ONE intended withdrawal, so it is bound to

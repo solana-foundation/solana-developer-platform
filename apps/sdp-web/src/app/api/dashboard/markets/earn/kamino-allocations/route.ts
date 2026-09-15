@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { readVaultAllocations, VAULT_PUBKEY_PATTERN } from "./kamino-allocations-store";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/markets/base58-address";
+import { readVaultAllocations } from "./kamino-allocations-store";
 
 /**
  * Treasury Solutions "Information" column data seam: per-vault allocations for
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
 
   const params = new URL(request.url).searchParams;
   const vault = params.get("vault") ?? "";
-  if (!VAULT_PUBKEY_PATTERN.test(vault)) {
+  if (!BASE58_ADDRESS_PATTERN.test(vault)) {
     return jsonError(400, "vault must be a Solana public key");
   }
   const cluster = params.get("cluster") ?? "";
