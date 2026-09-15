@@ -166,6 +166,7 @@ ADR 0002's 2026-08-14 addendum.
 | No Veda rows in the PRODUCTION catalogue | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row |
 | A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b) |
 | No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below |
+| The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed |
 | No Ondo row in the sandbox MIRROR either, on a devnet deployment | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which a devnet deployment fails the genesis proof on (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
@@ -181,9 +182,13 @@ The catalogue read (`providers/ondo/client.ts`) genesis-proves the RPC and
 verifies the mint account before reporting the one-row shelf, and the row is
 its `sourceKind: "rwa"`: the classification traces to the
 issuer's own published mint address in `ONDO_DEPLOYMENTS`
-(`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. No
-`currentApy` — Ondo's rate API is credentialed and SDP holds no key yet
-(PRO-1833). The row's `riskMetadata` carries the eligibility constraints an
+(`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. Its
+`currentApy` and Solana `tvlUsd` are the issuer's published figures, one
+keyless GET to `ondo.finance/api/v1/assets` (`providers/ondo/usdy-rate.ts`,
+PRO-1833; NOT the credentialed Stocks API, which has no USDY). Written by this
+hourly pass, not the metrics refresh, because Ondo sets the rate monthly. An
+unreachable API fails the Ondo pass (rows keep their last figures).
+The row's `riskMetadata` carries the eligibility constraints an
 integrator asks about (Reg S non-US-person restriction, issuer freeze
 authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
 Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
