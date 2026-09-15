@@ -68,6 +68,7 @@ const productionOnlyStrategy: EarnStrategy = {
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
   strategyClusters: [] as Array<SolanaCluster | undefined>,
+  mainnetLoading: false,
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -77,13 +78,15 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 vi.mock("./earn-program-data", () => ({
   useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
     mocks.strategyClusters.push(options?.cluster);
+    const mainnet = options?.cluster === "mainnet-beta";
     return {
-      strategies:
-        options?.cluster === "mainnet-beta"
-          ? [mainnetStrategy]
-          : [liveStrategy, secondLiveStrategy, productionOnlyStrategy],
+      strategies: mainnet
+        ? mocks.mainnetLoading
+          ? undefined
+          : [mainnetStrategy]
+        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy],
       error: undefined,
-      isLoading: false,
+      isLoading: mainnet && mocks.mainnetLoading,
     };
   },
 }));
@@ -108,6 +111,7 @@ function renderWithEnglish(children: ReactNode) {
 afterEach(() => {
   mocks.environment = "sandbox";
   mocks.strategyClusters.length = 0;
+  mocks.mainnetLoading = false;
   vi.clearAllMocks();
   cleanup();
 });
@@ -256,6 +260,21 @@ describe("EarnIntegrationGuide", () => {
     expect(
       screen.getByRole("option", { name: /Kamino USDC Vault/ }).getAttribute("aria-disabled")
     ).not.toBe("true");
+  });
+
+  it("keeps loading until the mainnet shelf answers, so a mainnet deep link never flashes as unknown", () => {
+    mocks.mainnetLoading = true;
+    const { container } = renderWithEnglish(
+      <EarnIntegrationGuide
+        earnHref="/dashboard/markets/embedded-yield"
+        providerAccess={providerAccess}
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(container.querySelector('[data-embedded-yield-loading="integrate"]')).toBeTruthy();
+    expect(screen.queryByText("Strategy no longer available")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
   });
 
   it("does not let a mainnet deep link bypass the cluster check even with provider access", () => {

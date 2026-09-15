@@ -112,8 +112,10 @@ function unavailableDescriptionKey(
  * Sandbox lists the fundable devnet shelf first, then the mirrored mainnet
  * catalogue: those rows stay visible but disabled ("Mainnet only"), the same
  * posture as the Treasury strategy table, so nothing is hidden behind a toggle.
- * Each shelf renders as soon as it lands; a failed mainnet read only drops its
- * own rows.
+ * The guide stays in its skeleton until BOTH shelves have answered: a mainnet
+ * deep link resolved against the devnet rows alone would flash "strategy no
+ * longer available" before flipping to the network-mismatch explanation. A
+ * failed mainnet read only drops its own rows.
  */
 function useIntegrationCatalogue(sdpEnvironment: SdpEnvironment) {
   const sandbox = sdpEnvironment === "sandbox";
@@ -127,7 +129,7 @@ function useIntegrationCatalogue(sdpEnvironment: SdpEnvironment) {
   return {
     strategies: [...devnetRows, ...mainnetRows.filter((strategy) => !seen.has(strategy.id))],
     error: shelf.error,
-    isLoading: shelf.isLoading,
+    isLoading: shelf.isLoading || mainnet.isLoading,
   };
 }
 
