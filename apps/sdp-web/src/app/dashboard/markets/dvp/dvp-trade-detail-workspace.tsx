@@ -342,12 +342,19 @@ function LegCard({
             </span>
           )}
         </h3>
-        <span className="text-sm text-tertiary">
+        <span className="flex flex-col items-end text-sm text-tertiary">
           {leg.party.wallet || leg.party.counterparty ? (
             <PartyLink party={leg.party} />
           ) : (
             holderLabel(t, side)
           )}
+          {/* Next to the party, not the button: the restriction belongs to the
+              wallet, and the disabled button already says the action is off. */}
+          {action !== undefined && leg.party.actionWallet?.isRuntimeExecutionAllowed !== true ? (
+            <span className="text-warning text-xs">
+              {t("DashboardPayments.signingUnavailable")}
+            </span>
+          ) : null}
         </span>
       </div>
 
@@ -811,22 +818,17 @@ export function DvpTradeDetailWorkspace({
       /* Clicked, not held. Funding moves your leg into the trade's own
          escrow, which is a step forward rather than something to walk back;
          hold is reserved for destroying something (HOO-1230). */
-      <span className="flex flex-col items-end gap-1">
-        <Button
-          disabled={unavailable || pending.has(`fund:${side}`)}
-          onClick={() => {
-            if (wallet?.isRuntimeExecutionAllowed === true) {
-              void act("fund", { side, walletId: wallet.id });
-            }
-          }}
-          type="button"
-        >
-          {t("DashboardMarkets.dvp.actionFund")}
-        </Button>
-        {unavailable ? (
-          <span className="text-tertiary text-xs">{t("DashboardCustody.unavailable")}</span>
-        ) : null}
-      </span>
+      <Button
+        disabled={unavailable || pending.has(`fund:${side}`)}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("fund", { side, walletId: wallet.id });
+          }
+        }}
+        type="button"
+      >
+        {t("DashboardMarkets.dvp.actionFund")}
+      </Button>
     ) : undefined;
   };
 

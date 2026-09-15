@@ -437,9 +437,9 @@ export function useBatchSendWizard({
     canProceed,
     liveWallets,
     walletsLoading,
-    liveWalletsError:
-      liveWalletsError ??
-      (signingUnavailable && !batchResult ? t("DashboardPayments.signingUnavailable") : null),
+    liveWalletsError,
+    sourceWalletHint:
+      signingUnavailable && !batchResult ? t("DashboardPayments.signingUnavailable") : null,
     walletId,
     selectWallet,
     asset,

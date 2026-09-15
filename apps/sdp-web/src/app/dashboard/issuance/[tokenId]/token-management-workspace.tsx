@@ -1410,10 +1410,18 @@ export function TokenManagementWorkspace({
           // The confirmation dialog owns pause/unpause signer selection.
           onSignerWalletIdChange: (_value: string) => {},
         };
+      case "allowlist":
+        return {
+          // Database-only lists have no on-chain authority, hence no signer to show.
+          signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : [],
+          defaultSignerWalletId: allowlistSignerSelection.defaultWalletId,
+          signerUnavailableReason: allowlistDisabledReason,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
       default:
         return {
           signerWallets: [],
-          signerUnavailableReason: action === "allowlist" ? allowlistDisabledReason : null,
+          signerUnavailableReason: null,
           onSignerWalletIdChange: (_value: string) => {},
         };
     }

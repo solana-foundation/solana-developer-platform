@@ -136,11 +136,12 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
     toggleRecipient,
     setRecipientAmount,
     bulkImport,
+    sourceWalletHint,
   } = wizard;
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const walletOptions = useMemo(
-    () => walletComboboxOptions(liveWallets, t("DashboardPayments.unavailable")),
+    () => walletComboboxOptions(liveWallets, t("DashboardPayments.restricted")),
     [liveWallets, t]
   );
 
@@ -181,6 +182,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           searchable={false}
           disabled={!walletId || assetOptions.length === 0}
         />
+        <p hidden={!sourceWalletHint} className="text-sm text-warning sm:col-span-2">
+          {sourceWalletHint}
+        </p>
         <div className="flex flex-col gap-2 sm:col-span-2">
           <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
           <Input

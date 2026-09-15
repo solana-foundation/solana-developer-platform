@@ -82,6 +82,9 @@ function InboundFundAction({
           {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
         </Link>
       ) : null}
+      {unavailable ? (
+        <span className="text-warning text-xs">{t("DashboardPayments.signingUnavailable")}</span>
+      ) : null}
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
@@ -99,9 +102,6 @@ function InboundFundAction({
           ? t("DashboardMarkets.dvp.inboundFunding")
           : t("DashboardMarkets.dvp.inboundFundAction")}
       </Button>
-      {unavailable ? (
-        <span className="text-tertiary text-xs">{t("DashboardCustody.unavailable")}</span>
-      ) : null}
     </span>
   );
 }

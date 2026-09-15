@@ -122,7 +122,7 @@ describe("DvpTradeDetailWorkspace", () => {
 
       const button = within(container).getByRole("button", { name: "Fund" });
       expect(button.hasAttribute("disabled")).toBe(true);
-      expect(container.textContent).toContain("Unavailable");
+      expect(container.textContent).toContain("Signing is disabled for this wallet.");
       expect(
         within(container).getByRole("link", { name: actionWallet?.name ?? "Fixture Desk" })
       ).toBeTruthy();

@@ -19,7 +19,10 @@ export function getRecurringPaymentDetailState({
 }) {
   const sourceWalletUnresolved = sourceCustodyWalletId === null;
   const controlsDisabled = sourceWalletUnresolved || hasPendingAction || savingPayment;
+  // Unavailable covers both "not allowed" and "not known"; only the former is a
+  // signing restriction the reader can act on.
   const signingUnavailable = sourceWallet?.isRuntimeExecutionAllowed !== true;
+  const signingDisabled = sourceWallet !== undefined && !sourceWallet.isRuntimeExecutionAllowed;
   // The active editor replaces the on-chain subscription; pending edits only save data.
   const editWalletUnavailable =
     (!!selectedCustodyWalletId && !selectedWallet) ||
@@ -31,6 +34,7 @@ export function getRecurringPaymentDetailState({
     isEditable: !sourceWalletUnresolved && (status === "pending_activation" || status === "active"),
     controlsDisabled,
     signingUnavailable,
+    signingDisabled,
     editWalletUnavailable,
     saveDisabled: controlsDisabled || editWalletUnavailable,
     signingActionsDisabled: controlsDisabled || signingUnavailable,

@@ -192,7 +192,7 @@ describe("Recurring Payment exact source selection", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Funding wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
-    expect(screen.getByText("Signing is unavailable for this wallet.")).toBeTruthy();
+    expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Create recurring payment" }));

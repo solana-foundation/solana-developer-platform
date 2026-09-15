@@ -314,9 +314,8 @@ export function useOfframpWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
-    liveWalletsError:
-      wizard.liveWalletsError ??
-      (signingUnavailable && !onchainSendResult ? t("DashboardPayments.signingUnavailable") : null),
+    sourceWalletHint:
+      signingUnavailable && !onchainSendResult ? t("DashboardPayments.signingUnavailable") : null,
     summaryDetails,
     transferStatus,
     transferStatusLoading,

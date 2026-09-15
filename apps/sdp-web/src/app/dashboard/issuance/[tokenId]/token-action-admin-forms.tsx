@@ -610,7 +610,18 @@ export function TokenActionAdminForms({
               : (controlListDescription ?? t("DashboardIssuance.forms.controlListDescription"))
           }
         >
-          <TokenValidationMessage message={signerUnavailableReason} reserveSpace={false} />
+          {signerWallets.length > 0 ? (
+            // The list authority is a known wallet: show it, and let a runtime
+            // restriction read as a warning rather than a structural error.
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={defaultSignerWalletId}
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
+          ) : (
+            <TokenValidationMessage message={signerUnavailableReason} reserveSpace={false} />
+          )}
           <form
             className="space-y-4"
             onSubmit={(event) => {

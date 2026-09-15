@@ -321,11 +321,13 @@ function RecurringPaymentLifecycleBand({
   actionError,
   walletsError,
   signingUnavailable,
+  signingDisabled,
 }: {
   status: PaymentRecurringPaymentStatus;
   actionError: DetailActionError | null;
   walletsError: string | null;
   signingUnavailable: boolean;
+  signingDisabled: boolean;
 }) {
   const t = useTranslations();
   if (actionError) {
@@ -338,6 +340,13 @@ function RecurringPaymentLifecycleBand({
             label={t("DashboardPayments.recurring.copyError")}
           />
         </div>
+      </ActionBand>
+    );
+  }
+  if (signingDisabled) {
+    return (
+      <ActionBand variant="warning" title={t("DashboardPayments.recurring.signingDisabledTitle")}>
+        {t("DashboardPayments.recurring.signingDisabledBody")}
       </ActionBand>
     );
   }
@@ -426,6 +435,7 @@ export function RecurringPaymentDetailWorkspace({
     isEditable,
     controlsDisabled,
     signingUnavailable,
+    signingDisabled,
     editWalletUnavailable,
     saveDisabled,
     signingActionsDisabled,
@@ -628,6 +638,7 @@ export function RecurringPaymentDetailWorkspace({
             actionError={actionError}
             walletsError={liveWalletsError}
             signingUnavailable={signingUnavailable}
+            signingDisabled={signingDisabled}
           />
         )}
 
@@ -844,14 +855,14 @@ export function RecurringPaymentDetailWorkspace({
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
                 ...(entry.isRuntimeExecutionAllowed !== true
-                  ? { badge: t("DashboardPayments.unavailable"), badgeVariant: "warning" as const }
+                  ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }
                   : {}),
               }))}
               placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
               icon={<WalletIcon />}
               disabled={savingPayment || liveWallets.length === 0}
             />
-            <p role="status" hidden={!editWalletUnavailable} className="text-sm text-error">
+            <p role="status" hidden={!editWalletUnavailable} className="text-sm text-warning">
               {t("DashboardPayments.signingUnavailable")}
             </p>
             <Combobox

@@ -18,8 +18,23 @@ describe("getRecurringPaymentDetailState", () => {
       isEditable: true,
       saveDisabled: false,
       signingActionsDisabled: true,
+      signingDisabled: true,
       cancelDisabled: false,
     });
+  });
+
+  it("does not report a signing restriction for a wallet it cannot see", () => {
+    expect(
+      getRecurringPaymentDetailState({
+        sourceCustodyWalletId: "cwlt_source",
+        selectedCustodyWalletId: "cwlt_source",
+        status: "active",
+        hasPendingAction: false,
+        savingPayment: false,
+        sourceWallet: undefined,
+        selectedWallet: undefined,
+      })
+    ).toMatchObject({ signingUnavailable: true, signingDisabled: false });
   });
 
   it.each([

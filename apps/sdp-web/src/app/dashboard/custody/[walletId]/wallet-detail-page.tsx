@@ -29,7 +29,9 @@ import {
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import { issuance, policies } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -295,8 +297,17 @@ export default async function WalletDetailPage({
                     {purposeLabel}
                   </span>
                 ) : null}
+                {wallet.isRuntimeExecutionAllowed ? null : (
+                  <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
+                )}
               </div>
             </div>
+
+            {wallet.isRuntimeExecutionAllowed ? null : (
+              <Callout variant="warning" title={t("DashboardCustody.signingDisabledTitle")}>
+                {t("DashboardCustody.signingDisabledBody")}
+              </Callout>
+            )}
 
             <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
               <WalletInfoRow

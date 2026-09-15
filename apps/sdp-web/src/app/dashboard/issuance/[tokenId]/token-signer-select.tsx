@@ -52,6 +52,9 @@ export function TokenSignerSelect({
   // wallets in a context that requires a signer. An empty list where the signer
   // is optional (draft creation) is expected, so it stays neutral.
   const isError = hasReason || Boolean(selectionUnavailableReason) || (hasNoWallets && !optional);
+  // ponytail: runtime disablement is recognised by its copy, not a kind flag —
+  // every reason producer renders it through this same key.
+  const runtimeReason = t("DashboardIssuance.management.signingUnavailable");
   const defaultMessage = isLocked
     ? t("DashboardIssuance.signer.requiredAuthorityHint")
     : t("DashboardIssuance.signer.selectedWalletHint");
@@ -64,6 +67,11 @@ export function TokenSignerSelect({
         ? t("DashboardIssuance.signer.defaultSignerHint")
         : t("DashboardIssuance.signer.noneAvailable")
       : availableMessage);
+  const messageTone = !isError
+    ? "text-secondary"
+    : message === runtimeReason
+      ? "text-warning"
+      : "text-destructive-strong";
   return (
     <div className="space-y-2">
       <span className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary">
@@ -98,14 +106,7 @@ export function TokenSignerSelect({
         </Select>
       )}
       {message && (!isLocked || isError || helperText !== undefined) ? (
-        <p
-          className={[
-            "text-sm leading-5",
-            isError ? "text-destructive-strong" : "text-secondary",
-          ].join(" ")}
-        >
-          {message}
-        </p>
+        <p className={`text-sm leading-5 ${messageTone}`}>{message}</p>
       ) : null}
       {showSelectionSummary && !isUnavailable && selectedWallet && !isLocked ? (
         // Summary of a live selection — the surrounding form holds unsaved state,

@@ -206,11 +206,10 @@ function FieldHint({
   tone = "neutral",
 }: {
   children: ReactNode;
-  tone?: "neutral" | "error";
+  tone?: "neutral" | "error" | "warning";
 }) {
-  return (
-    <p className={tone === "error" ? "text-sm text-error" : "text-sm text-tertiary"}>{children}</p>
-  );
+  const toneClassName = { neutral: "text-tertiary", error: "text-error", warning: "text-warning" };
+  return <p className={`text-sm ${toneClassName[tone]}`}>{children}</p>;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This wizard intentionally keeps shared form state in one place while each step remains simple.
@@ -719,7 +718,7 @@ export function RecurringPaymentCreateWorkspace({
               label: wallet.label ?? wallet.walletId,
               description: shortenAddress(wallet.publicKey),
               ...(wallet.isRuntimeExecutionAllowed !== true
-                ? { badge: t("DashboardPayments.unavailable"), badgeVariant: "warning" as const }
+                ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }
                 : {}),
             }))}
             placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
@@ -728,7 +727,10 @@ export function RecurringPaymentCreateWorkspace({
             disabled={availableWallets.length === 0}
           />
           {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
-            <FieldHint>{t("DashboardPayments.signingUnavailable")}</FieldHint>
+            <FieldHint tone="warning">
+              {t("DashboardPayments.signingUnavailable")}{" "}
+              {t("DashboardPayments.recurring.signingDisabledDraft")}
+            </FieldHint>
           ) : null}
 
           <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">

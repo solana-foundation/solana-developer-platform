@@ -75,10 +75,11 @@ export function OnchainSendStepContent({
     setAddAccountOpen,
     handleAccountAdded,
     transferResult,
+    sourceWalletHint,
   } = wizard;
 
   const walletOptions = useMemo(
-    () => walletComboboxOptions(liveWallets, t("DashboardPayments.unavailable")),
+    () => walletComboboxOptions(liveWallets, t("DashboardPayments.restricted")),
     [liveWallets, t]
   );
   const assetSelectOptions = useMemo(
@@ -140,6 +141,9 @@ export function OnchainSendStepContent({
           icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
         />
+        <p hidden={!sourceWalletHint} className="text-sm text-warning">
+          {sourceWalletHint}
+        </p>
         <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
           <div className="flex flex-col gap-2">
             <Label className="text-tertiary" htmlFor="onchain-send-amount">

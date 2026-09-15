@@ -288,9 +288,9 @@ export function useOnchainSendWizard({
     canProceed,
     liveWallets,
     walletsLoading,
-    liveWalletsError:
-      liveWalletsError ??
-      (signingUnavailable && !transferResult ? t("DashboardPayments.signingUnavailable") : null),
+    liveWalletsError,
+    sourceWalletHint:
+      signingUnavailable && !transferResult ? t("DashboardPayments.signingUnavailable") : null,
     cryptoAccounts,
     accountsLoading,
     counterpartyId,

@@ -115,6 +115,8 @@ describe("wallet selection during payments", () => {
     );
     expect(result.current.wizard.quote?.id).toBe("quote_ramp");
     expect(result.current.wizard.canSendOnchain).toBe(false);
+    expect(result.current.wizard.liveWalletsError).toBeNull();
+    expect(result.current.wizard.sourceWalletHint).toBe("Signing is disabled for this wallet.");
     await act(() => result.current.wizard.sendCryptoToDeposit());
     expect(sent).toEqual([]);
   });
@@ -169,6 +171,8 @@ describe("wallet selection during payments", () => {
     );
     expect(result.current.wizard.walletId).toBe(wallet.id);
     expect(result.current.wizard.canProceed).toBe(false);
+    expect(result.current.wizard.liveWalletsError).toBeNull();
+    expect(result.current.wizard.sourceWalletHint).toBe("Signing is disabled for this wallet.");
     await act(() => result.current.wizard.handlePrimary());
     expect(sent).toEqual([]);
   });
@@ -230,6 +234,9 @@ describe("wallet selection during payments", () => {
       );
       expect(result.current.wizard.fields.walletId).toBe(wallet.id);
       expect(result.current.wizard.canProceed).toBe(false);
+      expect(result.current.wizard.liveWalletsError).toBeNull();
+      // A wallet that vanished from the list cannot sign either, so the hint stays.
+      expect(result.current.wizard.sourceWalletHint).toBe("Signing is disabled for this wallet.");
       await act(() => result.current.wizard.handlePrimary());
       expect(sent).toEqual([]);
       await act(() =>

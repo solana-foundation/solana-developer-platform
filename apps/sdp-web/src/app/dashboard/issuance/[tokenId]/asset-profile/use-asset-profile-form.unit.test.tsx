@@ -334,7 +334,7 @@ describe("useAssetProfileForm", () => {
           metadataSignerSelection: {
             wallets: [{ ...metadataSignerSelection.wallets[0], isRuntimeExecutionAllowed: false }],
             defaultWalletId: "cwlt_metadata",
-            unavailableReason: "Signing is unavailable for this wallet.",
+            unavailableReason: "Signing is disabled for this wallet.",
           },
         }),
       { wrapper }

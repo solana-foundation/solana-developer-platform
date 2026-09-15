@@ -46,6 +46,9 @@ describe("TokenSignerSelect", () => {
     );
     expect(markup).toContain("Wallet 1");
     expect(markup).toContain("DashboardIssuance.management.signingUnavailable");
+    // A runtime restriction is a warning; only structural problems read as errors.
+    expect(markup).toContain("text-warning");
+    expect(markup).not.toContain("text-destructive-strong");
     const draftMarkup = render([wallet], null, wallet.id);
     expect(draftMarkup).toContain("Wallet 1");
     expect(draftMarkup).not.toContain("DashboardIssuance.management.signingUnavailable");
@@ -82,5 +85,7 @@ describe("TokenSignerSelect", () => {
     const markup = render([makeWallet(1)], "custody offline");
     expect(markup).not.toContain('data-testid="wallet-identity-card"');
     expect(markup).toContain("custody offline");
+    expect(markup).toContain("text-destructive-strong");
+    expect(markup).not.toContain("text-warning");
   });
 });

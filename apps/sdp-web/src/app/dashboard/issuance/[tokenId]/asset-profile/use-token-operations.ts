@@ -1127,7 +1127,9 @@ export function useTokenOperations({
         };
       case "allowlist":
         return {
-          signerWallets: [] as PaymentsDashboardWallet[],
+          // Database-only lists have no on-chain authority, hence no signer to show.
+          signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : [],
+          defaultSignerWalletId: allowlistSignerSelection.defaultWalletId,
           signerUnavailableReason: allowlistDisabledReason,
           onSignerWalletIdChange: (_value: string) => {},
         };

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { TokenAllowlistEntry } from "@sdp/types";
+import type { PaymentsDashboardWallet, TokenAllowlistEntry } from "@sdp/types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -36,7 +36,8 @@ vi.mock("@/lib/dashboard-swr", () => ({
 
 function renderControlList(
   enableControlListSearch: boolean,
-  signerUnavailableReason: string | null
+  signerUnavailableReason: string | null,
+  overrides: Partial<ComponentProps<typeof TokenActionAdminForms>> = {}
 ) {
   const props: ComponentProps<typeof TokenActionAdminForms> = {
     activeAction: "allowlist",
@@ -76,6 +77,7 @@ function renderControlList(
     onFreeze: vi.fn(),
     onAddAllowlist: vi.fn(),
     onRemoveAllowlist: vi.fn(),
+    ...overrides,
   };
   const view = render(
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -113,6 +115,26 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
         false
       );
     }
+  });
+
+  it("shows the list signer and reads its runtime restriction as a warning", () => {
+    const signer: PaymentsDashboardWallet = {
+      id: "cw_authority",
+      walletId: "wal_authority",
+      publicKey: "AuthorityPubKey",
+      label: "List authority",
+      isRuntimeExecutionAllowed: false,
+    };
+    const reason = "Signing is disabled for this wallet.";
+    renderControlList(searchable, reason, {
+      signerWallets: [signer],
+      defaultSignerWalletId: signer.id,
+    });
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Block recipient" }).disabled
+    ).toBe(true);
+    expect(screen.getByText(/List authority/)).toBeTruthy();
+    expect(screen.getByText(reason).className).toContain("text-warning");
   });
 
   it("keeps mutation actions usable when no signer restriction applies", () => {

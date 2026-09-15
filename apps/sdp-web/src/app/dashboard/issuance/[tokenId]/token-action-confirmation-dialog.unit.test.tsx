@@ -57,7 +57,7 @@ describe("Unpause confirmation", () => {
       </I18nProvider>
     );
     expect(screen.getByRole("button", { name: "Unpause now" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Signing is unavailable for this wallet.")).toBeDefined();
+    expect(screen.getByText("Signing is disabled for this wallet.")).toBeDefined();
   });
 
   it("requires the selected wallet to belong to the displayed candidates", () => {
