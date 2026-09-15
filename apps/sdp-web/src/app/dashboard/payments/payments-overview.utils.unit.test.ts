@@ -1,5 +1,12 @@
-import { type CustodyWalletTokenBalance, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import {
+  type CustodyWalletTokenBalance,
+  PAYMENT_TRANSFER_STATUS_TONE,
+  PAYMENT_TRANSFER_STATUSES,
+  SOL_MINT,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import type { BadgeVariant } from "@/components/ui/badge";
 import {
   formatTokenAmount,
   isHttpUrl,
@@ -8,6 +15,7 @@ import {
   resolveTotalBalance,
   resolveTransferTokenLabel,
   statusMessageKey,
+  statusVariant,
 } from "./payments-overview.utils";
 
 const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
@@ -128,11 +136,42 @@ describe("isHttpUrl", () => {
 });
 
 describe("statusMessageKey", () => {
-  it("maps known statuses to the transactions catalog keys", () => {
-    expect(statusMessageKey("failed")).toBe("DashboardPayments.transactions.failed");
-    expect(statusMessageKey("awaiting_payment")).toBe(
-      "DashboardPayments.transactions.awaitingPayment"
-    );
+  const cases = [
+    ["pending", "DashboardPayments.transactions.pending"],
+    ["processing", "DashboardPayments.transactions.processing"],
+    ["confirmed", "DashboardPayments.transactions.confirmed"],
+    ["finalized", "DashboardPayments.transactions.finalized"],
+    ["failed", "DashboardPayments.transactions.failed"],
+    ["awaiting_payment", "DashboardPayments.transactions.awaitingPayment"],
+    ["settling", "DashboardPayments.transactions.settling"],
+    ["completed", "DashboardPayments.transactions.completed"],
+    ["canceled", "DashboardPayments.transactions.canceled"],
+    ["expired", "DashboardPayments.transactions.expired"],
+  ] satisfies ReadonlyArray<
+    readonly [
+      (typeof PAYMENT_TRANSFER_STATUSES)[number],
+      `DashboardPayments.transactions.${string}`,
+    ]
+  >;
+
+  it.each(cases)("maps %s to %s", (status, expected) => {
+    expect(statusMessageKey(status)).toBe(expected);
+  });
+});
+
+describe("statusVariant", () => {
+  const expectedVariantByTone = {
+    success: "success",
+    pending: "warning",
+    danger: "danger",
+    neutral: "default",
+  } satisfies Record<
+    (typeof PAYMENT_TRANSFER_STATUS_TONE)[keyof typeof PAYMENT_TRANSFER_STATUS_TONE],
+    BadgeVariant
+  >;
+
+  it.each(PAYMENT_TRANSFER_STATUSES)("maps %s through its status tone", (status) => {
+    expect(statusVariant(status)).toBe(expectedVariantByTone[PAYMENT_TRANSFER_STATUS_TONE[status]]);
   });
 });
 
