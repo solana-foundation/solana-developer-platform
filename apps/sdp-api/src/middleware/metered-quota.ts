@@ -10,6 +10,7 @@
 
 import type { Context, Next } from "hono";
 import { getAuth } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -27,6 +28,15 @@ export interface MeteredQuotaConfig {
    * out into that many upstream calls (a JSON-RPC batch). Defaults to 1.
    */
   units?: (c: Context<{ Bindings: Env }>) => number;
+}
+
+export interface AnonymousMeteredQuotaConfig {
+  /** Stable counter namespace. */
+  name: string;
+  /** Deployment-resolved request ceiling for one client IP. */
+  maxRequests: (env: Env) => number;
+  /** Deployment-resolved counter window in milliseconds. */
+  windowMs: (env: Env) => number;
 }
 
 /**
@@ -95,6 +105,60 @@ export async function enforceMeteredQuota(
 export function meteredQuota(config: MeteredQuotaConfig) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     await enforceMeteredQuota(c, config);
+    await next();
+  };
+}
+
+/** Preserve an existing keyed quota when its route also admits anonymous callers. */
+export function authenticatedMeteredQuota(config: MeteredQuotaConfig) {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    if (c.get("apiKey") || c.get("clerk") || c.get("session")) {
+      await enforceMeteredQuota(c, config);
+    }
+    await next();
+  };
+}
+
+/**
+ * Meter only requests that reached an optional-auth route anonymously. A
+ * verified key or dashboard session keeps the route's existing keyed quota
+ * behavior; anonymous paid-upstream traffic is isolated by client IP and
+ * fails closed when the counter store is unavailable.
+ */
+export function anonymousMeteredQuota(config: AnonymousMeteredQuotaConfig) {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    if (c.get("apiKey") || c.get("clerk") || c.get("session")) {
+      await next();
+      return;
+    }
+
+    const actor = `ip:${getClientIp(c) ?? "unknown"}`;
+    try {
+      await enforceRateLimit(
+        c,
+        `metered:${config.name}:anonymous:${actor}`,
+        config.maxRequests(c.env),
+        {
+          failClosed: true,
+          windowMs: config.windowMs(c.env),
+          metricTier: "anonymous_earn_rpc",
+        }
+      );
+    } catch (error) {
+      if (error instanceof AppError) {
+        getLogger().warn(
+          {
+            event: "sdp_api_metered_quota",
+            quota: config.name,
+            decision: error.code === "RATE_LIMITED" ? "rejected" : "store_unavailable",
+            actor,
+            auth_type: "anonymous",
+          },
+          "Metered quota refused request"
+        );
+      }
+      throw error;
+    }
     await next();
   };
 }

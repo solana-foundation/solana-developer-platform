@@ -24,12 +24,21 @@ describe("resolveClientIp", () => {
     expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBeNull();
   });
 
-  it("keeps first-hop proxy behavior outside Cloud Run", () => {
+  it("rejects caller-controlled forwarding headers outside Cloud Run by default", () => {
     const headers = new Headers({
       "x-forwarded-for": "203.0.113.10, 192.0.2.20",
     });
 
-    expect(resolveClientIp(headers, {})).toBe("203.0.113.10");
+    expect(resolveClientIp(headers, {})).toBeNull();
+  });
+
+  it("uses first-hop proxy behavior only after a self-hosted operator opts in", () => {
+    const headers = new Headers({
+      "x-forwarded-for": "203.0.113.10, 192.0.2.20",
+    });
+
+    expect(resolveClientIp(headers, { TRUST_PROXY_HEADERS: "true" })).toBe("203.0.113.10");
+    expect(resolveClientIp(headers, { TRUST_PROXY_HEADERS: "false" })).toBeNull();
   });
 
   it("returns null when no valid forwarded address is available", () => {

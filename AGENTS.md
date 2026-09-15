@@ -31,6 +31,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 - Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`, `earn`
 - Hidden/internal families stay out of public AI resources unless product policy changes: `rpc`, `admin`, `onboarding`, `auth`, `organizations`, `members`
+- Earn has two access tiers. Only strategy catalogue reads, deposit and withdrawal previews, and unsigned external-wallet transaction builds may be keyless. Submits, tenant reads, programs, custody routes, and the aggregate movement feed always require authentication. Keep this matrix aligned across the router, OpenAPI, API reference, Embedded Yield guide, and AI discovery resources.
 - Promoting a route into the public OpenAPI document is a security-relevant scope change, not a docs edit: the PR needs a named security sign-off. For `earn` the pinned list in `apps/sdp-api/src/openapi/spec.test.ts` enforces this (see `apps/sdp-api/src/routes/earn/CLAUDE.md`, "Public OpenAPI promotion").
 
 ## Preferred checks
@@ -46,6 +47,8 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Implementation guidance
 
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
+- Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
+- Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys and sessions, plus Clerk tokens without organization context, return 401.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.

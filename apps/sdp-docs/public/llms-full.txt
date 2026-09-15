@@ -14,15 +14,16 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> One API for tokenization, custody, payments, and compliance on Solana.
+> One API for tokenization, custody, payments, embedded yield, and compliance on Solana.
 
-SDP gives organizations project-scoped access to tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Integrate against the API once; swap or add providers without changing your integration code.
+SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers a keyless strategy, quote, and unsigned external-wallet build tier for self-custodial integrations.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
 | **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Embedded Yield** | Discover curated strategies and build self-custodial deposit or withdrawal transactions, [with or without an API key](/docs/guides/embedded-yield) |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -248,20 +249,20 @@ Source: https://platform.solana.com/docs/developing-with-sdp
 SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
+- **REST API:** programmatic access for backend integrations. Most routes authenticate with an API key in the `Authorization` header. Embedded Yield also has a [keyless catalogue and unsigned-build tier](/docs/guides/embedded-yield#without-an-api-key).
 
 Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
 
 ## Environments
 
-Environments are a property of the **project**, not of individual requests. Every resource — and every API key — belongs to a project, and inherits that project's environment.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. Keyless Earn requests instead use the API deployment's operator-configured environment.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose identical APIs. Develop and test against a sandbox project, then switch to production by swapping your API key.
+Both environments expose identical APIs. Develop and test against a sandbox project, then switch authenticated integrations to production by swapping your API key. Keyless integrations switch only when the API operator changes the deployment environment.
 
 ## Response conventions
 
@@ -286,7 +287,7 @@ Include the `requestId` when reporting an issue — it links your request to our
 
 ## Execution model
 
-SDP executes every operation: it builds the transaction, signs it with the custody wallet's key, and submits it to Solana.
+SDP executes custody operations by building, signing, and submitting with the configured custody wallet. For Embedded Yield, the customer's external wallet signs. A keyless integration broadcasts and tracks that signed transaction itself; an authenticated integration may submit it back to SDP for durable tracking.
 
 ---
 
@@ -343,7 +344,7 @@ Source: https://platform.solana.com/docs/developing-with-sdp/authentication
 
 SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, policy profiles, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
 
-Every API request carries an API key in the `Authorization` header:
+Authenticated API requests carry an API key in the `Authorization` header:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
@@ -351,6 +352,8 @@ curl https://api.solana.com/v1/wallets \
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
+
+The Embedded Yield strategy catalogue, quote routes, and unsigned external-wallet transaction builders also support [keyless access](/docs/guides/embedded-yield#without-an-api-key). Those requests have no organization or project identity and cannot submit transactions or read tenant state.
 
 ## Key scope
 
@@ -380,7 +383,7 @@ Authentication and authorization failures are always machine-distinguishable:
 
 | Condition | Status | Code |
 | --- | --- | --- |
-| No API key on the request | 401 | `UNAUTHORIZED` |
+| No API key on a keyed-only request | 401 | `UNAUTHORIZED` |
 | Malformed or unknown key | 401 | `INVALID_API_KEY` |
 | Key has been revoked | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
@@ -892,37 +895,81 @@ HttpRequest request = HttpRequest.newBuilder()
 ### Embedded Yield
 Source: https://platform.solana.com/docs/guides/embedded-yield
 
-> Offer yield to your users from your own app. SDP builds the transactions, your customer's wallet signs, and you can sponsor their fees.
+> Offer yield from your own app. SDP builds the transactions, your customer's wallet signs, and an authenticated integration can pay the fees with its own co-signing wallet.
 
 {/* Keep this guide and the dashboard integration snippets (apps/sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
 
-Embedded Yield lets your platform offer vault yield to your end users without SDP ever holding their funds. Your backend asks SDP to **build** an unsigned Solana transaction for the customer's own wallet, the customer signs it in your app, and your backend **submits** the signed bytes back. SDP verifies the signature, records the movement, then broadcasts it. Withdrawals work the same way in reverse.
+Embedded Yield lets your platform offer vault yield without SDP holding your users' funds. SDP can build an unsigned Solana transaction with or without an API key. The customer's wallet signs it every time.
 
 Two properties define the surface:
 
 - **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
-- **Server-side.** Your SDP API key stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones.
+- **Two access tiers.** An anonymous integration signs, broadcasts, and tracks its own transaction. An authenticated integration can submit signed bytes back to SDP and use its movement, position, and earnings APIs.
 
-All endpoints live under `/v1/earn`. Authenticate with `Authorization: Bearer <SDP_API_KEY>`; the key needs the `earn:read` and `earn:write` permissions. Start in sandbox, which uses Solana devnet. A sandbox strategy is depositable only when its `hostCluster` is `devnet`, `fundable` is `true`, and `status` is `active`.
+All endpoints live under `/v1/earn`. Keyless requests use the API deployment's configured environment. The preview deployment uses Solana devnet. A strategy is depositable only when its `hostCluster` matches the deployment, `fundable` is `true`, and `status` is `active`.
 
-## The endpoints at a glance
+## Choose an access tier
 
-| Step | Endpoint |
-| --- | --- |
-| Discover strategies | `GET /v1/earn/strategies` |
-| Preview a direct deposit | `POST /v1/earn/vault-deposit-previews` |
-| Build a deposit | `POST /v1/earn/external-wallet/deposit-transactions` |
-| Submit the signed deposit | `POST /v1/earn/external-wallet/deposits` |
-| Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
-| Balance and earnings | `GET /v1/earn/external-wallet/earnings?ownerAddress=…` |
-| Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
-| Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
-| Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
-| Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
-| Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
-| Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
+| Capability | Without an API key | With an API key |
+| --- | --- | --- |
+| List and inspect strategies | Yes | Yes |
+| Preview deposits and withdrawals | Yes | Yes |
+| Build unsigned external-wallet transactions | Yes, owner pays | Yes, owner or your `feePayer` |
+| Submit signed transactions through SDP | No | Yes, `earn:write` |
+| Track movements, positions, balances, and earnings | No | Yes, `earn:read` |
+| Create or operate custody vaults and programs | No | Yes |
 
-Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
+The keyless tier has no organization or project identity and creates no build, advisory, movement, or position record. Its response carries `sponsored: false` and no `movementId`. The caller must sign, broadcast, and track the transaction.
+
+The keyed tier preserves the API key's project and environment. Build records can be submitted through SDP. SDP verifies all required signatures, records the movement before broadcast, and reconciles it to a terminal state. Keep the key on your backend and request `earn:read` and `earn:write` only where needed.
+
+## Without an API key
+
+This devnet walkthrough lists the catalogue and builds a deposit without an onboarding step. Replace the two placeholders with a returned strategy id and the customer's funded devnet wallet.
+
+```bash
+export SDP_API_URL=https://api-preview.solana.com
+
+curl --fail-with-body --silent --show-error \
+  "$SDP_API_URL/v1/earn/strategies"
+
+curl --fail-with-body --silent --show-error \
+  --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "strategyId": "<STRATEGY_ID>",
+    "ownerAddress": "<OWNER_ADDRESS>",
+    "amount": "1"
+  }' \
+  "$SDP_API_URL/v1/earn/external-wallet/deposit-transactions"
+```
+
+If the strategy's `depositSlippage` is non-null, call `POST /v1/earn/vault-deposit-previews` first and include a quote-derived `minSharesOut`. Never derive that floor from the deposit amount.
+
+Deserialize the response's base64 `transaction.transaction`, have the owner wallet sign it, and broadcast the signed wire transaction to the same cluster. In the example below, `build` is the parsed JSON response from the build request above. Do not call SDP's submit endpoint for a keyless build: the `transactionId` is ephemeral and no server-side row exists to consume.
+
+```ts
+const transaction = VersionedTransaction.deserialize(
+  Buffer.from(build.data.transaction.transaction, "base64"),
+);
+const signed = await wallet.signTransaction(transaction);
+const signature = await connection.sendRawTransaction(signed.serialize());
+await connection.confirmTransaction({
+  signature,
+  blockhash: transaction.message.recentBlockhash,
+  lastValidBlockHeight: Number(build.data.transaction.lastValidBlockHeight),
+});
+```
+
+For a keyless withdrawal, both preview and build use `{ strategyId, ownerAddress, shares }`. Add `minAmountOut` to the build when the strategy's `withdrawalSlippage` is non-null. An anonymous caller never supplies a tenant `positionId`.
+
+If a swap-funded keyless deposit returns `{ requiresSeparateSwap: true, swap, followUp }`, persist `followUp`, sign and broadcast the swap, then request the ordinary deposit build with that body. SDP stores no split advisory for an anonymous request, so recovery and tracking remain entirely with the caller.
+
+## With an API key
+
+Authenticate with `Authorization: Bearer <SDP_API_KEY>`. The same catalogue, preview, and build endpoints retain their existing keyed behavior. A keyed build is durable, may name a partner-controlled `feePayer`, and can be submitted to SDP. Authenticated withdrawals use the `positionId` returned by the positions API.
+
+Every keyed per-owner read uses the same required `ownerAddress` query parameter.
 
 ## 1. Pick a strategy
 
@@ -930,7 +977,7 @@ Every per-owner read addresses the customer's wallet the same way: a required `o
 
 Two fields gate what you may offer:
 
-- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive. `true` is necessary but not sufficient: the strategy must also be `active`, and your organization entitled to the provider.
+- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive. `true` is necessary but not sufficient: the strategy must also be `active`. Authenticated calls additionally require the organization to be entitled to the provider.
 - **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
 
 Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-null means that direction's builder refuses to run without an explicit protection floor (`minSharesOut` on deposits, `minAmountOut` on withdrawals): quote first, then derive the floor from the live figure minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). Null means the floor is optional there.
@@ -942,7 +989,7 @@ Ondo contributes one strategy: holding USDY, its yield-bearing US Treasury token
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
-const SDP_API_URL = "https://api.solana.com";
+const SDP_API_URL = process.env.SDP_API_URL ?? "https://api.solana.com";
 // For a local SDP API, use the configured base URL, usually http://127.0.0.1:8787.
 
 function sdpHeaders(extra: Record<string, string> = {}) {
@@ -1017,7 +1064,7 @@ const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transac
     ...(minSharesOut ? { minSharesOut } : {}),
   }),
 });
-// { transactionId, transaction, lastValidBlockHeight, ... }
+// { transactionId, transaction, lastValidBlockHeight, sponsored, ... }
 ```
 
 **Sign.** Hand the base64 `transaction.transaction` to the customer's wallet, for example with wallet-adapter:
@@ -1057,6 +1104,8 @@ Statuses are `requested`, `submitted`, `confirmed`, `finalized`, `failed`. Only 
 **By default, the customer's wallet pays everything**: the network fee, plus about 0.002 SOL of rent when a first deposit creates their share token account (refunded when the position fully exits). A customer holding only stablecoins cannot complete that transaction.
 
 **To pay on your customers' behalf, name a `feePayer` on the build.** The named wallet, one you control, becomes the transaction's fee payer and funds the account rent, and the built transaction then requires its signature alongside the customer's. Co-sign server-side after the customer signs, in either order, then submit:
+
+The response's `sponsored` field means SDP supplied the fee payer. It remains `false` when you provide your own `feePayer`; your wallet, not SDP, is sponsoring that transaction.
 
 ```ts
 
@@ -1143,13 +1192,13 @@ Pass `sourceTokenMint` (USDC, USDG, PYUSD or USDT on your cluster) to accept a s
 
 If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
 
-Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP does record that it handed the swap out, and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. Demonstrating split-swap recovery in sandbox is part of the [production checklist](#before-production).
+Recovery across that authenticated split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP records a keyed advisory that it handed the swap out and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. The keyless form described above stores no advisory. Demonstrating split-swap recovery in sandbox is part of the [production checklist](#before-production).
 
 ## Idempotency, in one place
 
 | Call | Rule |
 | --- | --- |
-| Builds | No key. A build moves no money and expires with its blockhash. |
+| Builds | No `Idempotency-Key`. A build moves no money and expires with its blockhash. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
 
 A `400` means the request or current vault state must change before retrying. A `422 SIGNING_REJECTED` means the fee sponsor refused the transaction by policy; the same transaction will be refused again, so do not retry it unchanged. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
@@ -5302,6 +5351,9 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
+| `EARN_ANONYMOUS_RPC_MAX_REQUESTS` | `20` | Paid-upstream calls allowed per anonymous client IP in one Earn RPC quota window. |
+| `EARN_ANONYMOUS_RPC_WINDOW_SECONDS` | `60` | Anonymous Earn RPC quota window in seconds. |
+| `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
 for server-to-server calls. The browser-facing `NEXT_PUBLIC_*` URLs default to
@@ -6020,7 +6072,7 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 ### Earn
 Source: https://platform.solana.com/docs/reference/api/earn
 
-> The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.
+> Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |

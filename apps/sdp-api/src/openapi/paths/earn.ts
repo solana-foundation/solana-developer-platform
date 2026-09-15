@@ -132,7 +132,9 @@ function registerEarnDepositPreviewPath(
       "Quotes how many shares a direct vault deposit would mint from the provider's live " +
       "accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then " +
       "derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no " +
-      "idempotency key, and 501 when the provider cannot quote deposits.",
+      "idempotency key, and 501 when the provider cannot quote deposits. An anonymous request " +
+      "uses the deployment environment and no tenant state. An authenticated request retains " +
+      "its project environment, `earn:read` scope, and provider entitlement.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -327,12 +329,12 @@ function registerEarnExternalWalletPaths(
     summary: "Build an unsigned external-wallet deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
-      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. By " +
-      "default the owner is the fee payer and only required signer; pass `feePayer` to pay " +
-      "the network fee (and any first-deposit account rent) from your own wallet instead — " +
-      "the transaction then also requires that wallet's signature, added server-side before " +
-      "submit. The transaction expires with its " +
-      "blockhash, and nothing moves until the signed bytes are submitted.",
+      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. An " +
+      "anonymous build uses the owner as fee payer, writes no tenant row, and must be signed, " +
+      "broadcast, and tracked by the caller. An authenticated build retains its `earn:write` " +
+      "scope and provider entitlement, persists a submit-capable build, and may name a " +
+      "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
+      "with its blockhash, and nothing moves during the build.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -390,8 +392,9 @@ function registerEarnExternalWalletPaths(
       "accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` " +
       "minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency " +
       "key, and it takes the exit's own gates: a delisted strategy or a provider disabled for " +
-      "new deposits stays quotable. POST because the parameters are a body; 501 when the " +
-      "provider cannot quote exits.",
+      "new deposits stays quotable. An authenticated request identifies its tenant position; " +
+      "an anonymous request identifies the strategy and signing owner without reading tenant " +
+      "state. POST because the parameters are a body; 501 when the provider cannot quote exits.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -416,9 +419,12 @@ function registerEarnExternalWalletPaths(
     summary: "Build an unsigned external-wallet exit transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
     description:
-      "Builds one unsigned exit transaction for an external-wallet position. Takes no " +
-      "surfacing, entitlement, availability, or catalogue gate (ADR 0002 exit safety), so the " +
-      "exit works while the provider is disabled for new deposits.",
+      "Builds one unsigned external-wallet exit. An authenticated request identifies its " +
+      "tenant position, retains its `earn:write` scope, and persists a submit-capable build. " +
+      "An anonymous request identifies the strategy and signing owner, uses the owner as fee " +
+      "payer, and writes no tenant row. Both tiers retain ADR 0002 exit safety, so the exit " +
+      "works while the provider is disabled for new deposits. A strategy with a withdrawal " +
+      "slippage policy still requires `minAmountOut`.",
     security,
     request: {
       headers: projectScopeHeaders,

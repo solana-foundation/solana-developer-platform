@@ -1,19 +1,20 @@
 ---
 title: What is SDP?
 icon: BookOpen
-description: One API for tokenization, custody, payments, and compliance on Solana.
+description: One API for tokenization, custody, payments, embedded yield, and compliance on Solana.
 ---
 
 import { Steps, Step } from "fumadocs-ui/components/steps";
 import "../../src/styles/ramp-rotator.css";
 
-SDP gives organizations project-scoped access to tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Integrate against the API once; swap or add providers without changing your integration code.
+SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers a keyless strategy, quote, and unsigned external-wallet build tier for self-custodial integrations.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
 | **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Embedded Yield** | Discover curated strategies and build self-custodial deposit or withdrawal transactions, [with or without an API key](/docs/guides/embedded-yield) |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
