@@ -318,6 +318,33 @@ describe("external-wallet position reads", () => {
     expect(fetchMock).toHaveBeenCalledTimes(20);
   });
 
+  it("accepts a twentieth page that ends the feed without a twenty-first request", async () => {
+    // The boundary this pins: the last allowed page may still be the one that
+    // closes the feed. An off-by-one in the loop bound would either reject
+    // this final page or fire an unnecessary extra request.
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      const current = page;
+      page += 1;
+      return new Response(
+        JSON.stringify({
+          data: {
+            positions: [externalWalletPosition(`p${current}`)],
+            hasMore: current < 19,
+            nextCursor: current < 19 ? `cursor_${current}` : null,
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).resolves.toHaveLength(20);
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+  });
+
   it("fails loudly when a wallet cursor repeats", async () => {
     const fetchMock = vi.fn(
       async () =>
