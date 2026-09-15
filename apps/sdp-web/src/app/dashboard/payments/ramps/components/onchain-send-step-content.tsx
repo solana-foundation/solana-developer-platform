@@ -1,6 +1,6 @@
 "use client";
 
-import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
   CheckCircle2Icon,

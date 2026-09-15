@@ -1,6 +1,6 @@
 "use client";
 
-import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type {
   CounterpartyAccount,
   PaymentsDashboardWallet,

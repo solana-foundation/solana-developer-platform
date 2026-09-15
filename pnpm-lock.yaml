@@ -123,9 +123,6 @@ importers:
       '@sdp/ondo':
         specifier: workspace:*
         version: link:../../packages/sdp-ondo
-      '@sdp/payments':
-        specifier: workspace:*
-        version: link:../../packages/sdp-payments
       '@sdp/policy':
         specifier: workspace:*
         version: link:../../packages/sdp-policy

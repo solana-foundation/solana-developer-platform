@@ -65,7 +65,12 @@ async function resolveTokenContext(
 
   const mintAddress = assertValidAddress(token, "token");
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
-  const sourceTokenAccount = await resolveSourceTokenAccount(rpc, sourceAddress, mintAddress);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    sourceAddress,
+    mintAddress,
+    tokenProgram
+  );
 
   return {
     kind: "spl",

@@ -1,4 +1,4 @@
-import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { isCountryCode } from "@sdp/types/countries";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import type { RequirementField } from "@sdp/types/ramp-requirements";

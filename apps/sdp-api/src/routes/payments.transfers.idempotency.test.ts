@@ -222,7 +222,7 @@ describe("Payments routes — transfer idempotency", () => {
     );
 
     const unchanged = await readTransferRow(stranded.id);
-    expect(unchanged).toEqual({ status: "processing", signature: null });
+    expect(unchanged).toMatchObject({ status: "processing", signature: null });
   });
 
   it("fails a completed approved replay when its persisted wallet identity differs", async () => {

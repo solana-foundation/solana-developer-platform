@@ -24,7 +24,6 @@
     "@clerk/nextjs": "7.8.2",
     "@flags-sdk/vercel": "1.4.7",
     "@sdp/issuance": "workspace:*",
-    "@sdp/payments": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",

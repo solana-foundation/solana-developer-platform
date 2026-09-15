@@ -166,9 +166,10 @@ export async function resolveMintTokenProgram(
 export async function resolveSourceTokenAccount(
   rpc: ReturnType<typeof createRpc>,
   owner: Address,
-  mint: Address
+  mint: Address,
+  tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number }> {
-  const selected = await findSourceTokenAccount(rpc, owner, mint);
+  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
 
   if (!selected) {
     throw badRequest("Source wallet has no token account for this mint");
@@ -186,7 +187,7 @@ export async function resolveSourceTokenAccountOrAta(
   mint: Address,
   tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
-  const selected = await findSourceTokenAccount(rpc, owner, mint);
+  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
 
   if (selected) {
     return {
@@ -228,7 +229,8 @@ export async function buildSplTransferInstructions(
   const sourceTokenAccount = await resolveSourceTokenAccount(
     rpc,
     input.authority.address,
-    input.mint
+    input.mint,
+    tokenProgram
   );
   const transferAmount = parseDecimalAmount(input.amount, sourceTokenAccount.decimals);
   if (transferAmount <= 0n) {
@@ -266,10 +268,15 @@ export async function buildSplTransferInstructions(
 async function findSourceTokenAccount(
   rpc: ReturnType<typeof createRpc>,
   owner: Address,
-  mint: Address
+  mint: Address,
+  tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number; amount: bigint } | null> {
   const response = await rpc
-    .getTokenAccountsByOwner(owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" })
+    .getTokenAccountsByOwner(
+      owner,
+      { programId: tokenProgram },
+      { encoding: "jsonParsed", commitment: "confirmed" }
+    )
     .send();
   let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
 

@@ -70,10 +70,9 @@ export async function readErrorResponse(
 }
 
 function paymentsRepository() {
-  return createPostgresPaymentsRepository(
-    getDb(env),
-    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-  );
+  const db = getDb(env);
+  const scope = createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id });
+  return createPostgresPaymentsRepository(db, scope);
 }
 
 export async function findTransferRow(id: string): Promise<PaymentTransferRow | null> {
