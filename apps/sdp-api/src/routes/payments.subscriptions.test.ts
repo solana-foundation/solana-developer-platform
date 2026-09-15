@@ -26,6 +26,7 @@ import {
   TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const SUBSCRIPTION_HEADERS = {
   Authorization: "Bearer sk_test_payments_policy",
@@ -342,7 +343,7 @@ describe("Payments routes — subscriptions", () => {
     expect(preparePlanBody.data.subscriptionPlan.planPda).toBe(preparePlanBody.data.planPda);
     expectPreparedSubscriptionTransaction(preparePlanBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet1,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
 
     const activePlansRes = await app.request(

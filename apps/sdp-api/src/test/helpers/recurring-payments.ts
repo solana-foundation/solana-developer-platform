@@ -35,7 +35,7 @@ export const RECURRING_HEADERS = {
   "Content-Type": "application/json",
 };
 
-function testSignature(seed: number): Signature {
+export function testSignature(seed: number): Signature {
   return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 }
 
@@ -262,7 +262,7 @@ export async function seedRecurringCollectionJournal(
         options.amount,
         options.collectionDueAt,
         options.attemptedAt,
-        options.stage === "confirmed" ? "succeeded" : "processing",
+        options.stage === "confirmed" ? "confirmed" : "processing",
         transfer?.signature ?? null,
         JSON.stringify({
           source: "manual",

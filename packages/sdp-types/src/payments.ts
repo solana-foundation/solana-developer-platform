@@ -177,6 +177,11 @@ export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
   "finalized",
 ] as const satisfies readonly PaymentTransferStatus[];
 
+/** Reports whether a transfer already settled successfully, so later reconciliation must not regress it. */
+export function isSuccessfulPaymentTransferStatus(status: PaymentTransferStatus): boolean {
+  return SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((candidate) => candidate === status);
+}
+
 /** Whether each status ends a ramp transfer's lifecycle. Scoped to ramps — onchain sends terminate at `finalized`. */
 export const RAMP_TRANSFER_STATUS_TERMINAL = {
   pending: false,

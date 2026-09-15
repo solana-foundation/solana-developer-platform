@@ -13,11 +13,11 @@ import {
   FAILED_COLLECTION_ATTEMPT_STATUSES,
   hasRecoverableRecurringPaymentCollection,
   isCollectableRecurringPaymentStatus,
+  isSuccessfulPaymentTransferStatus,
   type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   recurringPaymentPolicyPayloadSchema,
-  SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
 } from "@sdp/types";
 import {
   AccountRole,
@@ -835,7 +835,9 @@ async function finalizeRecurringPaymentCollection(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       expectedStatus: expectedTransferStatus,
-      status: expectedTransferStatus === "finalized" ? "finalized" : "confirmed",
+      status: isSuccessfulPaymentTransferStatus(expectedTransferStatus)
+        ? expectedTransferStatus
+        : "confirmed",
       signature: input.proof.signature,
       error: null,
       updatedAt: finalizedAt,
@@ -910,7 +912,7 @@ async function finalizeRecurringPaymentCollection(input: {
       finalizedAttempt.signature !== input.proof.signature ||
       finalizedAttempt.id !== input.proof.attemptId ||
       finalizedAttempt.transfer_id !== input.proof.transferId ||
-      !SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((status) => status === finalizedTransfer.status) ||
+      !isSuccessfulPaymentTransferStatus(finalizedTransfer.status) ||
       finalizedTransfer.signature !== input.proof.signature ||
       finalizedTransfer.id !== input.proof.transferId
     ) {
