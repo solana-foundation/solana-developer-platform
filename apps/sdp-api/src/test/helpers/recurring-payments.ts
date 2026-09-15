@@ -16,15 +16,14 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerMock,
   DEVNET_USDC_MINT,
-  fullySignTestTransaction,
   mockRecurringActivationRpc,
   seedCounterparty,
   TEST_CUSTODY_WALLET_ID,
-  TEST_KORA_FEE_PAYER,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const recurringResponseSchema = successResponseSchema(paymentRecurringPaymentResponseSchema);
 const collectionResponseSchema = successResponseSchema(
@@ -61,7 +60,7 @@ export function installRecurringExecutionHooks() {
       .mockResolvedValueOnce(testSignature(2));
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(address(TEST_KORA_FEE_PAYER)),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,

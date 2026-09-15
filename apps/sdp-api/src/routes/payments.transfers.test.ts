@@ -31,7 +31,6 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  fullySignTestTransaction,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
@@ -41,7 +40,6 @@ import {
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
-  TEST_KORA_FEE_PAYER,
   TEST_ORG,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -49,6 +47,7 @@ import {
   TEST_WALLET_ID,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_payments_duplicate_test";
 
@@ -2366,10 +2365,10 @@ describe("Payments routes — transfers", () => {
         );
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+          signerAddress: TEST_MOCK_FEE_PAYER,
         }),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
@@ -2423,10 +2422,10 @@ describe("Payments routes — transfers", () => {
       const signAndSendMock = vi.fn();
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+          signerAddress: TEST_MOCK_FEE_PAYER,
         }),
         signAsFeePayer: signAsFeePayerMock,
         signAndSend: signAndSendMock,
@@ -2472,10 +2471,10 @@ describe("Payments routes — transfers", () => {
         );
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+          signerAddress: TEST_MOCK_FEE_PAYER,
         }),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
@@ -2579,10 +2578,10 @@ describe("Payments routes — transfers", () => {
         );
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+          signerAddress: TEST_MOCK_FEE_PAYER,
         }),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
@@ -2629,7 +2628,7 @@ describe("Payments routes — transfers", () => {
         getFeePayer: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+          signerAddress: TEST_MOCK_FEE_PAYER,
         }),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: vi.fn(),
@@ -2677,10 +2676,10 @@ describe("Payments routes — transfers", () => {
       );
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockResolvedValue({
           ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+          signerAddress: TEST_MOCK_FEE_PAYER,
         }),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: vi.fn(),
@@ -2948,7 +2947,7 @@ describe("Payments routes — transfers", () => {
       const signAndSendMock = vi.fn();
       createFeePaymentAdapterMock.mockReturnValue({
         providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi.fn().mockRejectedValue(new Error("Kora config timed out")),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
