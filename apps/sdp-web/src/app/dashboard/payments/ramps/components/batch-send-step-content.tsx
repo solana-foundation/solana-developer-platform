@@ -182,7 +182,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           searchable={false}
           disabled={!walletId || assetOptions.length === 0}
         />
-        <p hidden={!sourceWalletHint} className="text-sm text-warning sm:col-span-2">
+        {/* First grid column only, so the hint sits under the source picker it
+            describes rather than under the asset picker beside it. */}
+        <p hidden={!sourceWalletHint} className="text-sm text-warning">
           {sourceWalletHint}
         </p>
         <div className="flex flex-col gap-2 sm:col-span-2">
