@@ -1,6 +1,5 @@
 "use client";
 
-import { decimalScale } from "@sdp/solana/amount";
 import { useEffect, useRef, useState } from "react";
 
 /**
@@ -25,17 +24,20 @@ export function atomsToDecimalString(atoms: bigint, decimals: number): string {
 }
 
 /**
- * Inverse of `atomsToDecimalString` for a CANONICAL value at ≤ `decimals`
- * scale. Answers `null` for a value FINER than that scale: a quote with more
- * fractional digits than the mint has atoms is a malformed server response,
- * and `padEnd` would silently over-count its atoms ("1.234" at scale 2 reads
- * as 1234). Callers treat `null` as unusable — the same fail-closed posture as
- * an unavailable quote.
+ * Inverse of `atomsToDecimalString` for a value at ≤ `decimals` scale.
+ * Answers `null` for a value FINER than that scale: a quote with more
+ * SIGNIFICANT fractional digits than the mint has atoms is a malformed server
+ * response, and `padEnd` would silently over-count its atoms ("1.234" at scale
+ * 2 reads as 1234). A trailing-zero-PADDED quote ("1.200" at scale 2) is not
+ * finer precision — providers do not canonicalize — so the padding is stripped
+ * before the scale check and the value still parses. Callers treat `null` as
+ * unusable — the same fail-closed posture as an unavailable quote.
  */
 function decimalStringToAtoms(canonical: string, decimals: number): bigint | null {
-  if (decimalScale(canonical) > decimals) return null;
   const [whole, fraction = ""] = canonical.split(".");
-  return BigInt((whole || "0") + fraction.padEnd(decimals, "0"));
+  const significant = fraction.replace(/0+$/, "");
+  if (significant.length > decimals) return null;
+  return BigInt((whole || "0") + significant.padEnd(decimals, "0"));
 }
 
 /** Whole basis points a slippage tolerance may take; 10% is already an outlier. */
