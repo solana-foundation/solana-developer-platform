@@ -62,7 +62,7 @@ jobs:
 
   notify-start:
     needs: changes
-    if: needs.changes.outputs.api == 'true'
+    if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != '' && vars.STAGE_DEPLOY_SA != ''
     runs-on: ubuntu-latest
     timeout-minutes: 3
     continue-on-error: true
@@ -82,7 +82,7 @@ jobs:
       - name: Notify Slack — deploy started
         env:
           SERVICES: api
-          TARGETS: ${{ vars.CONTINUOUS_PROD_DEPLOY == 'true' && 'stage → prod' || 'stage' }}
+          TARGETS: ${{ (github.event_name == 'push' && vars.CONTINUOUS_PROD_DEPLOY == 'true' && !startsWith(github.event.head_commit.message, 'chore(main): release')) && 'stage → prod' || 'stage' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
@@ -137,7 +137,7 @@ jobs:
       - name: Notify Slack — deploy result
         env:
           SERVICES: api
-          TARGETS: ${{ vars.CONTINUOUS_PROD_DEPLOY == 'true' && 'stage → prod' || 'stage' }}
+          TARGETS: ${{ needs.deploy-api-prod.result != 'skipped' && 'stage → prod' || 'stage' }}
           OUTCOME: >-
             ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
                 (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
