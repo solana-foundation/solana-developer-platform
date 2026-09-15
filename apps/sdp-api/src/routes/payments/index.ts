@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireAdminApiKeyRole, requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -123,6 +123,7 @@ payments.get(
 payments.put(
   "/wallets/:walletId/policies",
   requirePermissions("wallets:write", "payments:write"),
+  requireAdminApiKeyRole(),
   validateBody(updateWalletPolicySchema),
   updateWalletPolicy
 );

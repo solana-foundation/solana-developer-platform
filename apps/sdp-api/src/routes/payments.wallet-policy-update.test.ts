@@ -5,6 +5,7 @@ import app from "@/index";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
+  seedCachedKey,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_PROJECT,
@@ -92,6 +93,34 @@ describe("Payments routes — wallet policy concurrent updates", () => {
       .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
       .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
       .run();
+  });
+
+  it("refuses policy authoring from a non-admin API key", async () => {
+    await seedRestrictivePolicy();
+    await seedCachedKey({
+      role: "api_developer",
+      permissions: ["wallets:read", "wallets:write", "payments:read", "payments:write"],
+    });
+
+    const res = await putPolicy({ defaultAction: "allow", rules: [] });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as WalletPolicyBody;
+    expect(body.error?.message).toContain("api_admin");
+    const policy = await getPolicy();
+    expect(policy.defaultAction).toBe("deny");
+    expect(policy.controlProfile?.revisionNumber).toBe(1);
+  });
+
+  it("keeps policy reads open to non-admin API keys", async () => {
+    await seedRestrictivePolicy();
+    await seedCachedKey({
+      role: "api_readonly",
+      permissions: ["wallets:read", "payments:read"],
+    });
+
+    const policy = await getPolicy();
+    expect(policy.defaultAction).toBe("deny");
   });
 
   it("applies the update when expectedRevisionId matches the active revision", async () => {
