@@ -294,11 +294,13 @@ export async function seedRecurringDatabaseTenant(options: {
   await db.batch([
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active') ON CONFLICT (id) DO NOTHING"
       )
       .bind(options.organizationId, options.organizationName, options.organizationSlug),
     db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .prepare(
+        "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active') ON CONFLICT (id) DO NOTHING"
+      )
       .bind(options.userId, options.userEmail),
   ]);
   await seedDefaultProjects(db, {
@@ -312,14 +314,9 @@ export async function seedRecurringDatabaseTenant(options: {
       .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status)
-         VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
+         VALUES (?, ?, ?, 'local', 'encrypted', NULL, 'active')`
       )
-      .bind(
-        options.custodyConfigId,
-        options.organizationId,
-        options.projectId,
-        options.custodyWalletId
-      ),
+      .bind(options.custodyConfigId, options.organizationId, options.projectId),
     db
       .prepare(
         `INSERT INTO custody_wallets
@@ -332,6 +329,9 @@ export async function seedRecurringDatabaseTenant(options: {
         options.providerWalletId,
         options.publicKey
       ),
+    db
+      .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = ?")
+      .bind(options.custodyWalletId, options.custodyConfigId),
   ]);
 }
 

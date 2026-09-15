@@ -1,5 +1,7 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
 import { describe, expect, it } from "vitest";
+import { getDb } from "@/db";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import app from "@/index";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { counterpartyResponseSchema } from "@/openapi/schemas/counterparties";
@@ -20,6 +22,8 @@ import {
   installPaymentsRouteTestHooks,
   mockTokenSupplyDecimalsOnce,
   seedCachedKey,
+  TEST_ORG,
+  TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 
@@ -450,6 +454,23 @@ describe("Payments routes — subscriptions", () => {
       TEST_SOLANA_ADDRESSES.wallet2,
       "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
     ]);
+
+    const authorizedAt = new Date().toISOString();
+    const authorizedSubscription = await createPostgresPaymentSubscriptionsRepository(
+      getDb(env)
+    ).updateSubscription({
+      subscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      authorizationSignature:
+        "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe",
+      status: "active",
+      currentPeriodStartAt: authorizedAt,
+      nextCollectionDueAt: authorizedAt,
+      expectedStatus: "pending_authorization",
+      updatedAt: authorizedAt,
+    });
+    expect(authorizedSubscription).not.toBeNull();
 
     const prepareCancelRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-cancel`,

@@ -16,7 +16,10 @@ interface MockState {
   journalAutomatedCollectionFailure: ReturnType<typeof vi.fn>;
   resumeRecurringPayment: ReturnType<typeof vi.fn>;
   findOperationalWalletById: ReturnType<typeof vi.fn>;
-  queryCalls: Array<{ query: string; bindings: Array<string | number> }>;
+  listStaleLifecyclePayments: ReturnType<typeof vi.fn>;
+  listStaleUpdatePayments: ReturnType<typeof vi.fn>;
+  listRecoverableCollectionPayments: ReturnType<typeof vi.fn>;
+  listDueCollectionPayments: ReturnType<typeof vi.fn>;
   rows: {
     due: PaymentRecurringPaymentRow[];
     lifecycle: PaymentRecurringPaymentRow[];
@@ -32,7 +35,10 @@ const mocks = vi.hoisted<MockState>(() => ({
   journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
   findOperationalWalletById: vi.fn(),
-  queryCalls: [],
+  listStaleLifecyclePayments: vi.fn(),
+  listStaleUpdatePayments: vi.fn(),
+  listRecoverableCollectionPayments: vi.fn(),
+  listDueCollectionPayments: vi.fn(),
   rows: {
     due: [],
     lifecycle: [],
@@ -42,24 +48,15 @@ const mocks = vi.hoisted<MockState>(() => ({
 }));
 
 vi.mock("@/db", () => ({
-  getDb: () => ({
-    prepare: (query: string) => ({
-      bind: (...bindings: Array<string | number>) => ({
-        all: () => {
-          mocks.queryCalls.push({ query, bindings });
-          if (query.includes("status IN ('activating', 'canceling', 'resuming')")) {
-            return Promise.resolve({ rows: mocks.rows.lifecycle });
-          }
-          if (query.includes("JOIN payment_subscription_collection_attempts")) {
-            return Promise.resolve({ rows: mocks.rows.staleCollection });
-          }
-          if (query.includes("status = 'updating'")) {
-            return Promise.resolve({ rows: mocks.rows.staleUpdate });
-          }
-          return Promise.resolve({ rows: mocks.rows.due });
-        },
-      }),
-    }),
+  getDb: () => ({}),
+}));
+
+vi.mock("@/db/repositories/payment-recurring-payments.repository.postgres", () => ({
+  createPostgresPaymentRecurringPaymentsRepository: () => ({
+    listStaleLifecyclePayments: mocks.listStaleLifecyclePayments,
+    listStaleUpdatePayments: mocks.listStaleUpdatePayments,
+    listRecoverableCollectionPayments: mocks.listRecoverableCollectionPayments,
+    listDueCollectionPayments: mocks.listDueCollectionPayments,
   }),
 }));
 
@@ -138,11 +135,16 @@ describe("collectDueRecurringPayments", () => {
     mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
     mocks.findOperationalWalletById.mockReset();
-    mocks.queryCalls.length = 0;
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
     mocks.rows.staleCollection = [];
     mocks.rows.staleUpdate = [];
+    mocks.listStaleLifecyclePayments.mockImplementation(async () => mocks.rows.lifecycle);
+    mocks.listStaleUpdatePayments.mockImplementation(async () => mocks.rows.staleUpdate);
+    mocks.listRecoverableCollectionPayments.mockImplementation(
+      async () => mocks.rows.staleCollection
+    );
+    mocks.listDueCollectionPayments.mockImplementation(async () => mocks.rows.due);
     mocks.findOperationalWalletById.mockResolvedValue({
       id: "cwlt_1",
       walletId: "wallet_1",
@@ -218,13 +220,11 @@ describe("collectDueRecurringPayments", () => {
   it("uses product batch-size and retry-after controls", async () => {
     await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
-    const dueQuery = mocks.queryCalls.find((call) =>
-      call.query.includes("failed_attempt.updated_at > ?")
-    );
-    if (!dueQuery) {
-      throw new Error("Due collection query was not executed");
-    }
-    expect(dueQuery.bindings).toEqual(["2026-07-01T12:30:00.000Z", "2026-07-01T12:00:00.000Z", 25]);
+    expect(mocks.listDueCollectionPayments).toHaveBeenCalledWith({
+      dueBefore: "2026-07-01T12:30:00.000Z",
+      retryBefore: "2026-07-01T12:00:00.000Z",
+      limit: 25,
+    });
   });
 
   it("treats collection conflicts as duplicate-prevention skips", async () => {
@@ -311,13 +311,10 @@ describe("collectDueRecurringPayments", () => {
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
     expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
-    const staleUpdateQuery = mocks.queryCalls.find((call) =>
-      call.query.includes("status = 'updating'")
-    );
-    if (!staleUpdateQuery) {
-      throw new Error("Stale update query was not executed");
-    }
-    expect(staleUpdateQuery.bindings).toEqual(["2026-07-01T12:15:00.000Z", 2]);
+    expect(mocks.listStaleUpdatePayments).toHaveBeenCalledWith({
+      staleBefore: "2026-07-01T12:15:00.000Z",
+      limit: 25,
+    });
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       {

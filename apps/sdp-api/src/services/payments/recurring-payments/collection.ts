@@ -3,6 +3,7 @@ import {
   nextRecurringPaymentCollectionDueAt,
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
+import type { ParsedInstruction } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -19,13 +20,12 @@ import {
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
 } from "@sdp/types";
 import {
+  AccountRole,
   type Address,
+  address,
   assertIsSignature,
   createNoopSigner,
-  decompileTransactionMessageFetchingLookupTables,
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
+  getBase58Encoder,
   type Instruction,
   isInstructionForProgram,
   isInstructionWithAccounts,
@@ -312,6 +312,32 @@ async function resolveDestinationTokenAccount(input: {
   return receiverAta;
 }
 
+/**
+ * Rebuilds a subscriptions-program instruction from the RPC's jsonParsed form so the SDK parser
+ * can name its accounts. jsonParsed carries account addresses but not signer/writable roles, so
+ * every account is given the read-only role; verification compares addresses and data only.
+ *
+ * @param parsed - One instruction from the confirmed transaction as returned by the RPC wrapper.
+ * @returns The Kit instruction, or null when the instruction is not a subscriptions-program call
+ *   with raw data.
+ */
+function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction | null {
+  if (
+    parsed.programId !== subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS ||
+    typeof parsed.data !== "string"
+  ) {
+    return null;
+  }
+  return {
+    programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+    accounts: parsed.accounts.map((account) => ({
+      address: address(account),
+      role: AccountRole.READONLY,
+    })),
+    data: getBase58Encoder().encode(parsed.data),
+  };
+}
+
 async function matchesRecurringTransferInstruction(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   instruction: Instruction;
@@ -353,11 +379,7 @@ async function matchesRecurringTransferInstruction(input: {
       trailingAccounts.length === transferHookAccounts.length &&
       transferHookAccounts.every((account, index) => {
         const trailingAccount = trailingAccounts[index];
-        return (
-          trailingAccount !== undefined &&
-          trailingAccount.address === account.address &&
-          trailingAccount.role === account.role
-        );
+        return trailingAccount !== undefined && trailingAccount.address === account.address;
       });
     return (
       parsed.data.transferData.amount === input.amountBaseUnits &&
@@ -467,32 +489,21 @@ async function verifyRecurringPaymentCollection(input: {
     resolveMintDecimals(rpc, mint),
   ]);
   const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, decimals);
-  const confirmedTransaction = await rpc
-    .getTransaction(input.signature, {
-      commitment: "confirmed",
-      encoding: "base64",
-      maxSupportedTransactionVersion: 0,
-    })
-    .send();
+  const confirmedTransaction = await solanaRpc.getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     throw solanaRpcError(
       "Recurring payment collection is confirmed but not yet indexed; retry shortly"
     );
   }
-  if (confirmedTransaction.meta?.err) {
+  if (confirmedTransaction.err !== null) {
     throw transactionFailed("Recurring payment collection failed on-chain");
   }
-  const decodedTransaction = getTransactionDecoder().decode(
-    getBase64Encoder().encode(confirmedTransaction.transaction[0])
-  );
-  const transactionMessage = await decompileTransactionMessageFetchingLookupTables(
-    getCompiledTransactionMessageDecoder().decode(decodedTransaction.messageBytes),
-    rpc
-  );
   const [eventAuthority] = await subscriptionsProgram.findEventAuthorityPda();
 
   let hasExpectedInstruction = false;
-  for (const instruction of transactionMessage.instructions) {
+  for (const parsedInstruction of confirmedTransaction.instructions) {
+    const instruction = subscriptionsInstructionFromRpc(parsedInstruction);
+    if (instruction === null) continue;
     if (
       await matchesRecurringTransferInstruction({
         rpc,
@@ -1643,7 +1654,10 @@ export async function collectRecurringPayment(input: {
     const transferId = transfer.id;
     const submitted = await getDb(input.env).transaction(async (tx) => {
       const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-      const txPaymentsRepo = createPostgresPaymentsRepository(tx);
+      const txPaymentsRepo = createPostgresPaymentsRepository(
+        tx,
+        createTenantScope({ organizationId: input.organizationId, projectId: input.projectId })
+      );
       const updatedAttempt = await txSubscriptionsRepo.updateCollectionAttempt({
         attemptId,
         organizationId: input.organizationId,
