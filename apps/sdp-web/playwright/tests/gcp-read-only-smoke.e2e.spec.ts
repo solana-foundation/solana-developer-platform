@@ -152,7 +152,9 @@ test.describe("GCP dev dashboard read-only smoke", () => {
         throw new Error("The exact test project needs a known transfer");
       // Either display field marks the row; the transfer only fails the smoke
       // when it would render neither.
-      const transferMarker = firstTransfer ? (firstTransfer.token ?? firstTransfer.amount) : null;
+      const transferMarker = firstTransfer
+        ? (firstTransfer.token ?? firstTransfer.amount ?? null)
+        : null;
       if (firstTransfer && !transferMarker)
         throw new Error("The known transfer needs a rendered token or amount");
       // Candidates without a resolvable balance are skipped, not fatal — only the
